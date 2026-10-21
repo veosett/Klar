@@ -186,7 +186,7 @@ flowchart TB
 | Compile-time safety pass (division, recursion, contracts, built-in domains, indexes) | ✅ |
 | AI tooling: `dev --json`, `fix`, `spec`, `explain`, stable error codes | ✅ |
 | Language server (`klar lsp`) and VS Code extension: diagnostics, hover, definition, references, rename, completion | ✅ 0.5 |
-| Self-hosted compiler | 🔜 0.6 |
+| Self-hosted compiler: `compiler/klarc.klar` builds itself (stage1 == stage2 == stage3, byte for byte) | ✅ bootstrap · 🚧 0.6 speed, Python retirement |
 | ARM64, macOS, package manager | 🔜 1.0 |
 
 ## Quick start
@@ -206,6 +206,14 @@ python -m klar spec                             # the language reference for a p
 python -m klar explain E0701
 ```
 
+The compiler written in Klar (`compiler/`, self-hosted) builds without Python once it has been bootstrapped:
+
+```sh
+python -m klar build compiler/klarc.klar -o klarc   # stage 1: the Python compiler builds klarc
+./klarc build compiler/klarc.klar -o klarc2         # stage 2: klarc builds itself (the same bytes)
+./klarc build examples/hello.klar --lib klar        # check + compile a program, no Python involved
+```
+
 `pip install -e .` installs a `klar` command. On Windows `klar.bat run examples\hello.klar` works from the
 repository root, on Linux `sh klar.sh ...`.
 
@@ -215,6 +223,7 @@ repository root, on Linux `sh klar.sh ...`.
 klar/            compiler front-end, safety pass, interpreter, Python back-end, CLI
 klar/native/     native compiler: lowering, KIR, optimizer, register allocator, x86-64, linker
 klar/rt/         runtime of native executables, written in Klar
+compiler/        the compiler written in Klar (self-hosted): klarc.klar + lexer … emit, link
 klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result, std.set, std.json, std.time)
 examples/        example programs (examples/mistakes.klar: typical AI mistakes)
 tests/           test-suite, differential tests native vs interpreter

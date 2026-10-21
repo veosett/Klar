@@ -11,3 +11,7 @@ bench/ai/results/*.tmp
 node_modules/
 .vscode-test/
 *.vsix
+
+# bootstrap stages of the self-hosted compiler
+/klarc
+/klarc[0-9]

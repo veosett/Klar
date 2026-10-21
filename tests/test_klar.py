@@ -735,14 +735,26 @@ fn main() uses io {
 
 class SelfHosting(unittest.TestCase):
     def test_klar_compiler_matches_python(self):
-        """compiler/*.klar (lexer, parser, checker) give exactly the tokens, trees and diagnostics of the Python
-        compiler (native builds)."""
+        """compiler/*.klar give exactly the tokens, trees, diagnostics, KIR and executables of the Python compiler
+        (native builds)."""
         sys.path.insert(0, os.path.join(ROOT, "tests"))
         import selfhost
         out = io.StringIO()
         old, sys.stdout = sys.stdout, out
         try:
             code = selfhost.main([])
+        finally:
+            sys.stdout = old
+        self.assertEqual(code, 0, out.getvalue()[-3000:])
+
+    def test_bootstrap(self):
+        """klarc built by the Python compiler builds itself; stage1 == stage2 == stage3 (Linux x86-64 only)."""
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import bootstrap
+        out = io.StringIO()
+        old, sys.stdout = sys.stdout, out
+        try:
+            code = bootstrap.main()
         finally:
             sys.stdout = old
         self.assertEqual(code, 0, out.getvalue()[-3000:])

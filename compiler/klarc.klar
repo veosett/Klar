@@ -1,0 +1,143 @@
+// klarc — the Klar compiler written in Klar (self-hosting, stage 5). It checks a program and builds a standalone
+// x86-64 executable for Linux (ELF) or Windows (PE) with no Python involved:
+//
+//     klarc build app.klar [-o app] [--target linux|windows] [--lib <dir of klar/>] [--time]
+//     klarc check app.klar [--lib <dir of klar/>]
+//
+// The library directory holds the runtime (`rt/`) and the standard library (`std/`); it defaults to $KLAR_LIB, then
+// `klar`. Bootstrap: `klar build compiler/klarc.klar` (the Python compiler) gives klarc1; klarc1 builds klarc2 from the
+// same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
+use checker.{Diag}
+use emit.{emit_program}
+use link.{write_elf, write_pe}
+use loader.{Ld, load_program, load_runtime}
+use lower.{lower_program}
+
+type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool }
+
+fn usage() -> Never uses io {
+  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows] [--lib <dir>] [--time]")
+  print("       klarc check <file.klar> [--lib <dir>]")
+  return exit(2)
+}
+
+fn parse_args(args: List[Str]) -> Options uses io {
+  var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "linux", lib: env_var("KLAR_LIB").unwrap_or(
+    "klar"), time: false }
+  var i = 1
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    let v = args.get_or(i + 1, "")
+    if a == "-o" {
+      o = o with { out: v }
+      i = i + 2
+    } else if a == "--target" {
+      o = o with { target: v }
+      i = i + 2
+    } else if a == "--lib" {
+      o = o with { lib: v }
+      i = i + 2
+    } else if a == "--time" {
+      o = o with { time: true }
+      i = i + 1
+    } else if o.file == "" and not a.starts_with("-") {
+      o = o with { file: a }
+      i = i + 1
+    } else {
+      return usage()
+    }
+  }
+  if (o.cmd != "build" and o.cmd != "check") or o.file == "" or (o.target != "linux" and o.target != "windows") {
+    return usage()
+  }
+  return o
+}
+
+fn show_diag(d: Diag) -> Str {
+  var s = "{d.severity}[{d.code}]: {d.message}\n  --> {d.file}:{d.span.line}:{d.span.col}"
+  match d.hint {
+    Some(h) => {
+      s = s + "\n  hint: {h}"
+    },
+    None => {},
+  }
+  return s
+}
+
+/// Prints the diagnostics of the program (the runtime's own lints stay quiet); true when one of them is an error.
+fn report(ld: Ld) -> Bool uses io {
+  var errors = 0
+  for d in ld.diags {
+    if d.file != "rt" and not d.file.starts_with("rt/") {
+      print(show_diag(d))
+    }
+    if d.severity == "error" {
+      errors = errors + 1
+    }
+  }
+  if errors > 0 {
+    print("{errors} error(s)")
+  }
+  return errors > 0
+}
+
+/// The output path: `-o`, else the source path without `.klar` (+ `.exe` for Windows).
+fn out_path(o: Options) -> Str {
+  if o.out != "" {
+    return o.out
+  }
+  var stem = o.file
+  if stem.ends_with(".klar") {
+    stem = stem.slice(0, stem.len() - 5)
+  }
+  if o.target == "windows" {
+    return stem + ".exe"
+  }
+  return stem
+}
+
+/// With --time: how long a phase took.
+fn lap(o: Options, phase: Str, start: Int) -> Int uses io, time {
+  let t = now_ms()
+  if o.time {
+    print("{phase}: {t - start} ms")
+  }
+  return t
+}
+
+fn main() uses io, fs, time {
+  let o = parse_args(cli_args())
+  let t0 = now_ms()
+  if not file_exists(o.file) {
+    print("klarc: cannot read {o.file}")
+    exit(1)
+  }
+  let ld = load_runtime(load_program(o.file, o.lib))
+  let t1 = lap(o: o, phase: "parse + check", start: t0)
+  if report(ld) {
+    exit(1)
+  }
+  if o.cmd == "check" {
+    print("ok: no problems found")
+    return
+  }
+  let w = lower_program(ld, o.file)
+  let t2 = lap(o: o, phase: "lower", start: t1)
+  let x = emit_program(w, o.target)
+  let t3 = lap(o: o, phase: "optimize + allocate + emit", start: t2)
+  var image = bytes_of([])
+  if o.target == "windows" {
+    image = write_pe(x)
+  } else {
+    image = write_elf(x)
+  }
+  let _ = lap(o: o, phase: "link", start: t3)
+  let path = out_path(o)
+  match write_bytes(path, image) {
+    Ok(_) => {},
+    Err(e) => {
+      print("klarc: {e}")
+      exit(1)
+    },
+  }
+}

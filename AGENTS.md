@@ -8,6 +8,7 @@ every back-end. Read `CONTRIBUTING.md` for the full rules; the essentials:
 python -m unittest discover -s tests        # front-end, 3 back-ends, tools, compile-time safety
 python tests/native_diff.py                 # native back-end == reference interpreter (26 files)
 python tests/selfhost.py                    # compiler/*.klar (the compiler in Klar) == the Python compiler
+python tests/bootstrap.py                   # klarc builds itself: stage1 == stage2 == stage3
 python -m klar fmt --check .                # Klar code in canonical form
 ruff check klar tests bench                 # lint
 ```
@@ -16,7 +17,7 @@ ruff check klar tests bench                 # lint
 - `klar/checker.py` types/effects · `klar/safety.py` compile-time safety (E07xx) · `klar/diagnostics.py` error catalog
 - `klar/interpreter.py` + `klar/builtins.py` reference semantics · `klar/codegen.py` Python back-end
 - `klar/native/` native compiler (`lower` → KIR → `opt` → `regalloc` → `emit`/`x64` → `link`) · `klar/rt/*.klar` runtime in Klar
-- `compiler/` the compiler being rewritten in Klar (self-hosting): lexer, parser, checker, loader, safety analysis, lowering, optimizer and register allocator done (checked by `tests/selfhost.py` against the Python compiler; cases in `tests/selfhost_cases.txt`) — the x86-64 emitter and linker next
+- `compiler/` the compiler being rewritten in Klar (self-hosting): lexer, parser, checker, loader, safety analysis, lowering, optimizer, register allocator, x86-64 emitter and ELF/PE linkers, all checked by `tests/selfhost.py` against the Python compiler (cases in `tests/selfhost_cases.txt`); `compiler/klarc.klar` is the command-line compiler, which builds itself (`tests/bootstrap.py`). Any change to `klar/native/` must be mirrored in `compiler/` (and vice versa)
 - `klar/tools/` developer tools (fmt, outline, doc, refs, rename, eval, coverage, view, new)
 - `klar/ai_reference.md` is what `klar spec` prints — keep it short and current
 

@@ -27,6 +27,15 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   folding, compare-and-branch fusion, dead code, inlining) and `compiler/regalloc.klar` (linear scan with GPR and XMM
   classes). `tests/selfhost.py` compares the KIR, the data image (byte for byte) and the register allocation of
   every program with a `main` — 23 programs, ~790 000 KIR instructions, the Klar compiler itself included.
+- Self-hosting, stage 4d: the x86-64 emitter and the linkers in Klar — `compiler/x64.klar` (the assembler),
+  `compiler/emit.klar` (KIR -> machine code: tagged-Int fast paths with out-of-line slow paths, XMM floats, x87,
+  division by constants, the Linux and Windows OS layers, the trace tables) and `compiler/link.klar` (ELF64 and
+  PE32+ writers). `tests/selfhost.py emit` checks that the executables built by the Klar backend are byte for byte
+  those of `klar build`, for Linux and Windows, for every program with a `main` (the Klar compiler included).
+- Self-hosting, stage 5 — bootstrap: `compiler/klarc.klar`, the command-line compiler written in Klar
+  (`klarc build app.klar [-o out] [--target linux|windows] [--lib dir] [--time]`, `klarc check app.klar`). Built by
+  the Python compiler it builds itself, and the result builds itself again: stage1 == stage2 == stage3, byte for
+  byte (`tests/bootstrap.py`, also in the unit tests on Linux).
 - `Float.to_bits()` and `float_from_bits(bits)`: the IEEE-754 bits of a Float as a signed 64-bit Int, and back
   (the Klar backend needs them for float constants).
 - The Klar loader loads the runtime (`klar/rt`, one module of several files); the Klar checker records what the
