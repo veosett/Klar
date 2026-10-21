@@ -8,7 +8,7 @@ import random
 import re
 import time
 
-from .errors import KlarRuntimeError
+from .errors import KlarExit, KlarRuntimeError
 from .values import (UNIT, KMap, NONE, Record, err, ok, show, some)
 
 GLOBALS = {}   # name -> (signature, impl)
@@ -122,6 +122,18 @@ def _file_exists(it, a, sp):
     return os.path.isfile(a[0])
 
 
+@glob("fn exit(code: Int) -> Never uses io")
+def _exit(it, a, sp):
+    raise KlarExit(max(0, min(255, a[0])), sp)
+
+
+@glob("fn env_var(name: Str) -> Option[Str] uses io")
+def _env_var(it, a, sp):
+    import os
+    v = os.environ.get(a[0])
+    return NONE if v is None else some(v)
+
+
 @glob("fn cli_args() -> List[Str] uses io")
 def _cli_args(it, a, sp):
     return tuple(it.cli_args)
@@ -171,6 +183,47 @@ def _(it, a, sp): return a[0] % 2 == 0
 
 @method("Int", "fn sign(self: Int) -> Int")
 def _(it, a, sp): return (a[0] > 0) - (a[0] < 0)
+
+
+MAX_SHIFT = 1 << 20
+
+
+@method("Int", "fn bit_and(self: Int, other: Int) -> Int")
+def _(it, a, sp): return a[0] & a[1]
+
+
+@method("Int", "fn bit_or(self: Int, other: Int) -> Int")
+def _(it, a, sp): return a[0] | a[1]
+
+
+@method("Int", "fn bit_xor(self: Int, other: Int) -> Int")
+def _(it, a, sp): return a[0] ^ a[1]
+
+
+@method("Int", "fn bit_not(self: Int) -> Int")
+def _(it, a, sp): return ~a[0]
+
+
+def _shift_amount(n, what, sp):
+    if n < 0 or n > MAX_SHIFT:
+        raise rt_error("R0009", f"Int.{what}: shift must be between 0 and {MAX_SHIFT}, got {n}", sp)
+    return n
+
+
+@method("Int", "fn shift_left(self: Int, bits: Int) -> Int")
+def _(it, a, sp): return a[0] << _shift_amount(a[1], "shift_left", sp)
+
+
+@method("Int", "fn shift_right(self: Int, bits: Int) -> Int")
+def _(it, a, sp): return a[0] >> _shift_amount(a[1], "shift_right", sp)
+
+
+@method("Int", "fn to_char(self: Int) -> Option[Str]")
+def _(it, a, sp):
+    c = a[0]
+    if 0 <= c <= 0x10FFFF and not 0xD800 <= c <= 0xDFFF:
+        return some(chr(c))
+    return NONE
 
 
 @method("Int", "fn pow(self: Int, exp: Int) -> Int")
@@ -318,6 +371,10 @@ def _(it, a, sp): return a[0][max(a[1], 0):max(a[2], 0)]
 
 @method("Str", "fn chars(self: Str) -> List[Str]")
 def _(it, a, sp): return tuple(a[0])
+
+
+@method("Str", "fn codes(self: Str) -> List[Int]")
+def _(it, a, sp): return tuple(ord(c) for c in a[0])
 
 
 @method("Str", "fn repeat(self: Str, times: Int) -> Str")

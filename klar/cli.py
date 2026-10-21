@@ -9,7 +9,7 @@ import sys
 
 from . import __version__
 from .diagnostics import Diagnostic, Span, explain
-from .errors import KlarRuntimeError
+from .errors import KlarExit, KlarRuntimeError
 from .interpreter import Interpreter, Profiler, run_with_big_stack
 from .loader import load_path
 from .codegen import CompiledProgram, Unsupported
@@ -185,8 +185,11 @@ def cmd_run(args):
     if args.verbose and not args.json:
         print(f"note: backend = {backend}", file=sys.stderr)
     _, err = runtime_guard(runner.run_main, interp)
+    exit_code = None
+    if isinstance(err, KlarExit):
+        exit_code, err = err.exit_code, None
     if args.json:
-        res = {"ok": err is None, "stage": "run", "backend": backend, "stdout": out.getvalue(), "stderr": errs.getvalue(),
+        res = {"ok": err is None, **({"exit_code": exit_code} if exit_code is not None else {}), "stage": "run", "backend": backend, "stdout": out.getvalue(), "stderr": errs.getvalue(),
                "diagnostics": [d.to_dict() for d in warnings]}
         if err:
             res["runtime_error"] = err.to_dict()
@@ -194,6 +197,9 @@ def cmd_run(args):
     elif err:
         sys.stdout.flush()
         print(err.to_diag().format(loaded.sources.get(err.span.file)), file=sys.stderr)
+    if exit_code is not None:
+        sys.stdout.flush()
+        return exit_code
     return 1 if err else 0
 
 
@@ -415,8 +421,11 @@ def cmd_dev(args):
         except Unsupported:
             runner = interp2
         _, run_err = runtime_guard(runner.run_main, interp2)
+        exit_code = None
+        if isinstance(run_err, KlarExit):
+            exit_code, run_err = run_err.exit_code, None
         text = out.getvalue()
-        report["run"] = {"ok": run_err is None,
+        report["run"] = {"ok": run_err is None, **({"exit_code": exit_code} if exit_code is not None else {}),
                          "stdout": text if len(text) <= args.max_output else text[:args.max_output] + "…(truncated)"}
         if errs.getvalue():
             report["run"]["stderr"] = errs.getvalue()[:args.max_output]

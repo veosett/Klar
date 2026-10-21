@@ -6,6 +6,9 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 ## [Unreleased]
 
 ### Added
+- Bit operations on Int (`bit_and`, `bit_or`, `bit_xor`, `bit_not`, `shift_left`, `shift_right`; two's complement,
+  arbitrary precision), `Str.codes` / `Int.to_char`, `exit(code)`, `env_var(name)`, and `std.set` (`Set[T]`).
+  The lexer points `& | ^ ~ << >>` at the methods. All back-ends agree (native on Linux and Windows).
 - Developer tools (`klar/tools/`, documented in `docs/TOOLS.md`):
   `klar fmt` (canonical layout, token-stream safety net, `--check`/`--diff`), `klar outline` (API of a file),
   `klar doc` (built-ins, std and project symbols with tested examples), `klar eval` (value : type of an expression),

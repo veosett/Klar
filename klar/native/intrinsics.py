@@ -55,6 +55,7 @@ SYS_SIGNATURES = [
     "fn os_argv(i: Word) -> Word",
     "fn os_cmdline() -> Word",
     "fn os_platform() -> Word",
+    "fn os_getenv(name: Word, buf: Word, cap: Word) -> Word",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

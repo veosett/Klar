@@ -32,3 +32,12 @@ class KlarRuntimeError(Exception):
         d["stack"] = frames  # innermost first
         d.pop("notes", None)
         return d
+
+
+class KlarExit(KlarRuntimeError):
+    """`exit(code)`: ends the program with an exit status. Not an error for `klar run`; inside a test it is one."""
+
+    def __init__(self, exit_code, span):
+        super().__init__("R0013", f"exit({exit_code}) called", span,
+                         hint="exit() ends the whole program; tests should check return values instead")
+        self.exit_code = exit_code

@@ -560,3 +560,152 @@ fn pow2(e: Int) -> Int {
 fn pow10(e: Int) -> Int {
   return pow_int(10, e)
 }
+
+// ---- bitwise operations (infinite two's complement, like the interpreter) ---------------------
+// two's complement of x in n limbs of 30 bits (sign-extended), in a fresh raw block
+fn tc_limbs(x: Word, n: Word) -> Word {
+  let b = to_big(x)
+  let out = alloc(n * 8)
+  let neg = peek(b + 16) < 0
+  var borrow: Word = 0
+  if neg {
+    borrow = 1
+  }
+  var i: Word = 0
+  while i < n {
+    var v: Word = 0
+    if i < nlimbs(b) {
+      v = limb(b, i)
+    }
+    if neg {
+      v = v - borrow
+      if v < 0 {
+        v = v + LIMB_BASE
+        borrow = 1
+      } else {
+        borrow = 0
+      }
+      v = w_xor(v, LIMB_MASK)
+    }
+    poke(out + i * 8, v)
+    i = i + 1
+  }
+  rc_dec(b)
+  return out
+}
+
+// Int from n two's complement limbs (consumes the block)
+fn from_tc(t: Word, n: Word) -> Word {
+  let neg = w_and(peek(t + (n - 1) * 8), 536870912) != 0
+  let r = big_alloc(n)
+  var carry: Word = 1
+  var i: Word = 0
+  while i < n {
+    var v = peek(t + i * 8)
+    if neg {
+      v = w_xor(v, LIMB_MASK) + carry
+      carry = w_shr(v, 30)
+      v = w_and(v, LIMB_MASK)
+    }
+    set_limb(r, i, v)
+    i = i + 1
+  }
+  if neg {
+    poke(r + 16, -1)
+  }
+  block_free(t)
+  return normalize(r)
+}
+
+// op: 0 = and, 1 = or, 2 = xor
+fn int_bitop(op: Word, x: Word, y: Word) -> Word {
+  var n: Word = 3
+  if w_and(x, 1) == 0 and nlimbs(x) + 1 > n {
+    n = nlimbs(x) + 1
+  }
+  if w_and(y, 1) == 0 and nlimbs(y) + 1 > n {
+    n = nlimbs(y) + 1
+  }
+  let a = tc_limbs(x, n)
+  let b = tc_limbs(y, n)
+  var i: Word = 0
+  while i < n {
+    let p = peek(a + i * 8)
+    let q = peek(b + i * 8)
+    if op == 0 {
+      poke(a + i * 8, w_and(p, q))
+    } else if op == 1 {
+      poke(a + i * 8, w_or(p, q))
+    } else {
+      poke(a + i * 8, w_xor(p, q))
+    }
+    i = i + 1
+  }
+  block_free(b)
+  return from_tc(a, n)
+}
+
+fn Int_bit_and(x: Word, y: Word) -> Int {
+  if w_and(w_and(x, y), 1) == 1 {
+    return unbits(w_and(x, y))
+  }
+  return unbits(int_bitop(0, x, y))
+}
+
+fn Int_bit_or(x: Word, y: Word) -> Int {
+  if w_and(w_and(x, y), 1) == 1 {
+    return unbits(w_or(x, y))
+  }
+  return unbits(int_bitop(1, x, y))
+}
+
+fn Int_bit_xor(x: Word, y: Word) -> Int {
+  if w_and(w_and(x, y), 1) == 1 {
+    return unbits(w_or(w_xor(x, y), 1))
+  }
+  return unbits(int_bitop(2, x, y))
+}
+
+fn Int_bit_not(x: Int) -> Int {
+  return 0 - x - 1
+}
+
+fn shift_amount(n: Int, what: Str, sp: Word) -> Int {
+  if n < 0 or n > 1048576 {
+    let b = sb_new()
+    sb_add_cstr(b, "Int.")
+    sb_add_cstr(b, what)
+    sb_add_cstr(b, ": shift must be between 0 and 1048576, got ")
+    int_show(b, bits(n))
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  return n
+}
+
+fn Int_shift_left(x: Int, n: Int, sp: Word) -> Int {
+  return x * pow2(shift_amount(n, "shift_left", sp))
+}
+
+fn Int_shift_right(x: Int, n: Int, sp: Word) -> Int {
+  let p = pow2(shift_amount(n, "shift_right", sp))
+  let q = x / p
+  if x < 0 and q * p != x {
+    return q - 1
+  }
+  return q
+}
+
+fn Int_to_char(x: Int, rtd: Word) -> Word {
+  if not is_small(x) {
+    return none()
+  }
+  let c = untag(x)
+  if c < 0 or c > 1114111 or (c >= 55296 and c <= 57343) {
+    return none()
+  }
+  let b = sb_new()
+  sb_add_cp(b, c)
+  let s = sb_finish(b)
+  poke(s + 24, 1)
+  return some_new(rtd, s)
+}

@@ -39,7 +39,7 @@ test "div works" { assert div(7, 2) == 3 }          // tests sit next to code
 ```
 ```klar
 use geometry.{Point, area}                          // first lines of a file; loads geometry.klar next to it
-use std.math.{gcd, mean}                            // standard modules: std.math std.text std.list std.result
+use std.math.{gcd, mean}                            // standard modules: std.math std.text std.list std.result std.set
 type Pair2[A, B] { left: A, right: B }              // generic record (prelude already has Pair/Entry/Indexed)
 enum Tree[T] { Leaf, Node(left: Tree[T], value: T, right: Tree[T]) }   // generic, recursive enum
 type UserId = Int                                   // alias (transparent)
@@ -72,6 +72,9 @@ assert x > 0, "message"
 - Literals: `1`, `1_000`, `2.5`, `true`, `"s"`, `()` (Unit), `[1, 2]`, `Map { "a": 1 }`, `Map {}`.
 - Arithmetic `+ - * / %` only on same types: Int with Int, Float with Float (`/` on Int truncates). `+` joins Str.
   No implicit conversions: `n.to_float()`, `f.round()`, `x.to_str()`.
+- No bit operators: `a.bit_and(b)`, `bit_or`, `bit_xor`, `a.bit_not()`, `a.shift_left(n)`, `a.shift_right(n)`
+  (two's complement on arbitrary-precision Int, shift_right floors). Characters: `s.codes()` → `List[Int]`,
+  `n.to_char()` → `Option[Str]`.
 - Comparison `== != < > <= >=` (no chaining). `==` is structural for all values.
 - Records: `Point { x: 1, y: 2 }`, field `p.x`, copy-with-changes `p with { x: 3 }`. Fields are never assigned.
 - Enum values: `Shape.Circle(radius: 1.0)`, `Shape.Empty` — always qualified.
@@ -117,7 +120,8 @@ collections: `let xs: List[Int] = []`.
 ## Effects
 A function without `uses` is pure. Calling something with an effect requires declaring it:
 `print`/`read_line`/`cli_args`/`dbg` → `io`, `now_ms`/`now_ns` → `time`, `random_int` → `rand`,
-`read_file`/`write_file`/`file_exists` → `fs` (they return `Result`, never crash). Contracts and constants must be
+`read_file`/`write_file`/`file_exists` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
+`exit(code)` (type `Never`, flushes output) → `io`. Contracts and constants must be
 pure. Tests may use only `io`.
 Lambdas inherit the effects of the enclosing function.
 

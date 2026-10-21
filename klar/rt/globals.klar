@@ -279,3 +279,48 @@ fn b_dbg(v: Word, td: Word, text: Word, sp: Word) {
   err_bytes(peek(b + 32), peek(b + 16))
   rc_dec(b)
 }
+
+fn b_exit(code: Int) -> Word {
+  var c: Word = 0
+  if is_small(code) {
+    c = untag(code)
+  } else if code > 0 {
+    c = 255
+  }
+  if c < 0 {
+    c = 0
+  }
+  if c > 255 {
+    c = 255
+  }
+  flush_out()
+  os_exit(c)
+  return 0
+}
+
+// environment variable: Linux walks envp (after argv on the initial stack), Windows asks kernel32
+fn b_env_var(name: Word, rtd: Word) -> Word {
+  let n = peek(name + 16)
+  if os_platform() == 0 {
+    var i = os_argc() + 1
+    var p = os_argv(i)
+    while p != 0 {
+      if bytes_eq(p, name + 32, n) and peek8(p + n) == 61 {
+        return some_new(rtd, str_from(p + n + 1, cstr_len(p + n + 1)))
+      }
+      i = i + 1
+      p = os_argv(i)
+    }
+    return none()
+  }
+  let cap: Word = 32768
+  let buf = alloc(cap)
+  let len = os_getenv(name + 32, buf, cap)
+  if len <= 0 or len >= cap {
+    block_free(buf)
+    return none()
+  }
+  let s = str_from(buf, len)
+  block_free(buf)
+  return some_new(rtd, s)
+}

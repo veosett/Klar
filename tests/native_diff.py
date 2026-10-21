@@ -32,6 +32,7 @@ def default_files():
     files += [os.path.join(ROOT, "klar", "std", f) for f in sorted(os.listdir(os.path.join(ROOT, "klar", "std")))]
     files.append(os.path.join(ROOT, "tests", "stdlib", "builtins_test.klar"))
     files.append(os.path.join(ROOT, "tests", "native", "edge_cases.klar"))
+    files.append(os.path.join(ROOT, "tests", "native", "bits_and_os.klar"))
     bench = os.path.join(ROOT, "bench", "programs")
     files += [os.path.join(bench, b, b + ".klar") for b in sorted(os.listdir(bench))]
     return files

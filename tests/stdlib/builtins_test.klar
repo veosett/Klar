@@ -278,3 +278,33 @@ property "Int division identity" (a: Int, b: Int) {
   }
   assert (a / b) * b + a % b == a
 }
+
+test "Int bit operations" {
+  assert 12.bit_and(10) == 8
+  assert 12.bit_or(10) == 14
+  assert 12.bit_xor(10) == 6
+  assert 0.bit_not() == -1
+  assert 3.shift_left(4) == 48
+  assert (-9).shift_right(2) == -3
+}
+
+test "character codes" {
+  assert "hé".codes() == [104, 233]
+  assert 233.to_char() == Some("é")
+  assert 1114112.to_char() == None
+}
+
+test "environment variables" {
+  assert env_var("KLAR_SURELY_NOT_SET_42") == None
+}
+
+property "shift_left is multiplication by a power of two" (x: Int, n: Int) {
+  let k = n.abs() % 70
+  assert x.shift_left(k) == x * 2.pow(k)
+  assert x.shift_left(k).shift_right(k) == x
+}
+
+property "xor twice restores the value" (a: Int, b: Int) {
+  assert a.bit_xor(b).bit_xor(b) == a
+  assert a.bit_and(b).bit_or(a) == a
+}

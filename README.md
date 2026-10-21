@@ -210,7 +210,7 @@ repository root, on Linux `sh klar.sh ...`.
 klar/            compiler front-end, safety pass, interpreter, Python back-end, CLI
 klar/native/     native compiler: lowering, KIR, optimizer, register allocator, x86-64, linker
 klar/rt/         runtime of native executables, written in Klar
-klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result)
+klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result, std.set)
 examples/        example programs (examples/mistakes.klar: typical AI mistakes)
 tests/           test-suite, differential tests native vs interpreter
 bench/           speed benchmark (8 languages); bench/ai: AI-ergonomics benchmark (7 languages)

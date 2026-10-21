@@ -561,3 +561,17 @@ fn Str_is_numeric(s: Word) -> Bool {
   }
   return true
 }
+
+fn Str_codes(s: Word, rtd: Word) -> Word {
+  let out = list_with_cap(rtd, str_nchars(s))
+  let n = peek(s + 16)
+  var i: Word = 0
+  var k: Word = 0
+  while i < n {
+    poke(peek(out + 32) + k * 8, w_or(w_shl(cp_at(s + 32 + i), 1), 1))
+    k = k + 1
+    i = i + cp_len(peek8(s + 32 + i))
+  }
+  poke(out + 16, k)
+  return out
+}

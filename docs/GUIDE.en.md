@@ -333,5 +333,9 @@ sequenceDiagram
 | a lambda | `xs.map(fn(x) => x * 2)` |
 | debug | `dbg(x)` prints the expression and its value |
 | a placeholder | `todo("write later")` |
+| bit operations | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (there are no `&`, `\|`, `<<` operators) |
+| character codes | `"hé".codes()` → `[104, 233]`, `65.to_char()` → `Some("A")` |
+| a set | `use std.set.{set_of}`, `set_of([1, 2]).has(1)` |
+| environment variable, exit code | `env_var("HOME")` → `Option[Str]`, `exit(1)` (effect `io`) |
 
 Details of every function: `klar doc <name>`; check behaviour: `klar eval '<expression>'`.

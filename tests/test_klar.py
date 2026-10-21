@@ -161,6 +161,15 @@ fn main() uses io {
 }""")
         self.assertEqual(out, "[0, 11, 22]\n")
 
+    def test_exit_code_on_every_backend(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "ex.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('fn main() uses io {\n  print("before")\n  exit(3)\n}\n')
+            for flag in (["--interp"], ["--py"], []):
+                code, out, err = cli("run", *flag, path)
+                self.assertEqual((code, out), (3, "before\n"), (flag, err))
+
     def test_lambdas_cannot_capture_vars(self):
         assign = "fn main() uses io {\n var counter = 0\n let bump = fn(n: Int) {\n counter = counter + n\n }\n bump(5)\n}"
         self.assertEqual(errors(assign), ["E0216"])

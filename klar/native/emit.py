@@ -14,11 +14,11 @@ from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11,
 MAX_DEPTH = 10000
 
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_open", "os_close",
-            "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform"]
+            "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
-               "SetConsoleOutputCP"]
+               "SetConsoleOutputCP", "GetEnvironmentVariableA"]
 
 
 def udiv_magic(d):
@@ -988,6 +988,9 @@ class Emitter:
         self.stub_begin("os_platform")
         a.mov_ri(RAX, 0)
         self.stub_end()
+        self.stub_begin("os_getenv")          # Linux reads envp directly (rt/globals.klar)
+        a.mov_ri(RAX, 0)
+        self.stub_end()
         self.test_index_stub()
         # entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
         a.label("_start")
@@ -1140,6 +1143,15 @@ class Emitter:
 
         win_begin("os_cmdline")
         call("GetCommandLineA")
+        win_end()
+
+        win_begin("os_getenv")
+        self.arg(RCX, 0)
+        self.arg(RDX, 1)
+        self.arg(R8, 2)
+        call("GetEnvironmentVariableA")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)       # DWORD result
         win_end()
         for name in ("os_argc", "os_argv"):
             self.stub_begin(name)
