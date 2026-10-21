@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+### Added
+- Language server `klar lsp` (LSP over stdio, no dependencies): diagnostics as you type with quick fixes (including
+  fixes in another module), hover with types/signatures/docs, go to definition across modules, references and
+  rename (locals stay inside their function), completion of names and of `.` members, signature help, document
+  symbols (traits and impls with their methods), formatting. `KLAR_LSP_LOG=<file>` logs the session.
+- The VS Code extension starts the server (`klar.pythonPath`, `klar.compilerPath` settings) and adds commands to
+  run, test and `klar view` the current file; an end-to-end test drives a real VS Code in CI.
+
 ## [0.4.0] — 2026-10-21
 
 ### Added

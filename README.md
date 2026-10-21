@@ -96,7 +96,7 @@ Built for an AI author **and** a human reviewer ([docs/TOOLS.md](docs/TOOLS.md))
 | `klar dev f.klar --json` | check + tests + run in one step | `klar view f.klar --run` | interactive HTML: overview → call graph → each function step by step |
 | `klar doc split` | signature + tested examples | `klar outline f.klar` | the API of a file in a few lines |
 | `klar eval '<expr>'` | value and type, no file needed | `klar coverage f.klar` | statements the tests never run |
-| `klar fix` / `klar fmt` | safe fixes, canonical layout | `editors/vscode` | highlighting, snippets, problem matcher |
+| `klar fix` / `klar fmt` | safe fixes, canonical layout | `klar lsp` + `editors/vscode` | errors as you type, hover, go to definition, rename, completion |
 | `klar refs` / `klar rename` | exact (no shadowing in Klar) | `klar new app` | project skeleton with tests and `AGENTS.md` |
 
 `klar view` turns any Klar program into a page a human can read — the big picture first, details on demand:
@@ -160,19 +160,20 @@ flowchart TB
         v01["0.1 — core language, types, effects,<br/>contracts, tests, JSON diagnostics"]
         v02["0.2 — modules, generics, doc &amp; property tests,<br/>dev / fix / profile, std library"]
         v03["0.3 — native x86-64 compiler + linker,<br/>runtime in Klar, compile-time safety,<br/>dev tools (fmt, view, refs…), benchmarks"]
-        v01 --> v02 --> v03
+        v04["0.4 — traits, pub, nested-pattern exhaustiveness,<br/>floats in XMM registers, std.json, std.time"]
+        v01 --> v02 --> v03 --> v04
     end
     subgraph now["🚧 In progress"]
-        v04["0.4 — ✅ traits &amp; bounded generics, ✅ pub, ✅ nested-pattern<br/>exhaustiveness, ✅ bit operations, Set, exit, env_var,<br/>✅ floats in XMM registers, ✅ std.json, std.time"]
+        v05["0.5 — ✅ language server (klar lsp) + VS Code,<br/>REPL, Bytes, faster calls, Windows CI"]
     end
     subgraph next["🔜 Planned"]
         direction TB
-        v05["0.5 — self-hosting: compiler rewritten in Klar, LSP"]
-        v06["0.6 — AI patch protocol (edits by AST node id),<br/>static contract checking"]
-        v10["1.0 — ARM64 / macOS, package manager,<br/>stable specification"]
-        v05 --> v06 --> v10
+        v06["0.6 — self-hosting: the compiler rewritten in Klar"]
+        v07["0.7 — generic impls, newtype, AI patch protocol,<br/>static contract checking"]
+        v10["1.0 — ARM64 / macOS, package manager, concurrency,<br/>stable specification"]
+        v06 --> v07 --> v10
     end
-    v03 --> v04 --> v05
+    v04 --> v05 --> v06
 ```
 
 | area | status |
@@ -184,7 +185,8 @@ flowchart TB
 | Native compiler for x86-64 Linux and Windows, own linker, runtime in Klar | ✅ |
 | Compile-time safety pass (division, recursion, contracts, built-in domains, indexes) | ✅ |
 | AI tooling: `dev --json`, `fix`, `spec`, `explain`, stable error codes | ✅ |
-| Self-hosted compiler | 🔜 0.5 |
+| Language server (`klar lsp`) and VS Code extension: diagnostics, hover, definition, references, rename, completion | ✅ 0.5 |
+| Self-hosted compiler | 🔜 0.6 |
 | ARM64, macOS, package manager | 🔜 1.0 |
 
 ## Quick start

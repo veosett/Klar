@@ -1,12 +1,27 @@
 # Klar for Visual Studio Code
 
-Syntax highlighting (including string interpolation and doc-tests), snippets (`fn`, `main`, `test`,
-`property`, `match`, `type`, `enum`) and a `$klar` problem matcher for tasks that run `klar check`.
+* **Language server** (`klar lsp`): errors and warnings as you type with quick fixes, hover (types, signatures,
+  docs), go to definition, find references, rename, completion (names and `.` members), signature help,
+  outline, formatting.
+* Syntax highlighting (string interpolation, doc-tests), snippets (`fn`, `main`, `test`, `property`, `match`,
+  `type`, `enum`, `trait`, `impl`).
+* Commands: **Klar: Run current file**, **Klar: Test current file**, **Klar: Show how the program works**
+  (`klar view`), **Klar: Restart language server**.
 
-Install from this folder: `code --install-extension <path>` after `npx @vscode/vsce package`, or copy the folder to
-`~/.vscode/extensions/klar-lang`. Example task (`.vscode/tasks.json`):
+## Install
 
-```json
-{ "version": "2.0.0", "tasks": [{ "label": "klar check", "type": "shell",
-  "command": "python -m klar check ${file}", "problemMatcher": "$klar", "group": "build" }] }
+```sh
+cd editors/vscode
+npm install
+npx @vscode/vsce package          # -> klar-lang-0.4.0.vsix
+code --install-extension klar-lang-0.4.0.vsix
 ```
+
+The extension runs `python3 -m klar lsp` (`python` on Windows). If Klar is not installed with pip, set
+**klar.compilerPath** to the folder of your Klar checkout (the one that contains `klar/`); a workspace that *is*
+a Klar checkout is detected automatically. **klar.pythonPath** selects the Python interpreter.
+
+## Test
+
+`npm run test:e2e` downloads VS Code, loads the extension, opens `test/fixture/main.klar` and checks the answers
+of the language server (on Linux without a display: `xvfb-run -a npm run test:e2e`).

@@ -6,3 +6,8 @@ build/
 *.map
 bench/ai/results/*.tmp
 .ruff_cache/
+
+# editor extension
+node_modules/
+.vscode-test/
+*.vsix

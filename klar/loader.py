@@ -57,6 +57,7 @@ class Loader:
         self.diags = []
         self.sources = {}
         self.prelude = None
+        self.overlay = {}        # absolute path -> text (unsaved editor buffers win over the disk)
 
     def error(self, code, msg, span, hint=None):
         self.diags.append(Diagnostic(code, "error", msg, span, hint))
@@ -83,6 +84,8 @@ class Loader:
             return None
         m = Module(name, path, display)
         m.is_sys = os.path.abspath(path).startswith(RT_DIR + os.sep)
+        if source is None and path in self.overlay:
+            source = self.overlay[path]
         if source is None:
             try:
                 with open(path, encoding="utf-8") as f:
@@ -230,9 +233,10 @@ def load_runtime(loader):
     loader.diags.extend(m.diags)
 
 
-def load_source(source, file="main.klar", root=None, with_runtime=False):
+def load_source(source, file="main.klar", root=None, with_runtime=False, overlay=None):
     root = os.path.abspath(root or os.getcwd())
     loader = Loader(root)
+    loader.overlay = {os.path.abspath(k): v for k, v in (overlay or {}).items()}
     loader.load_prelude()
     main = loader.load(os.path.join(root, file), os.path.splitext(file)[0], file, source=source)
     if with_runtime:

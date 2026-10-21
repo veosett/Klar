@@ -28,6 +28,23 @@ jobs:
           python -m klar run examples/features.klar
           python -m klar build examples/shapes.klar -o shapes-bin
 
+  vscode:
+    # the VS Code extension against a real VS Code: diagnostics, hover, definition, completion, references, quick fix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Extension end-to-end test
+        working-directory: editors/vscode
+        run: |
+          npm install --no-audit --no-fund
+          xvfb-run -a npm run test:e2e
+
   lint:
     runs-on: ubuntu-latest
     steps:

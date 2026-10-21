@@ -1,35 +1,121 @@
 {
   "name": "klar-lang",
   "displayName": "Klar",
-  "description": "Syntax highlighting, snippets and commands for the Klar programming language",
+  "description": "Klar language support: diagnostics with quick fixes, hover, go to definition, references, rename, completion, formatting (language server), highlighting and snippets",
   "version": "0.4.0",
   "publisher": "veosett",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/veosett/Klar" },
-  "engines": { "vscode": "^1.75.0" },
-  "categories": ["Programming Languages", "Snippets"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/veosett/Klar"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Formatters",
+    "Linters"
+  ],
   "contributes": {
-    "languages": [{
-      "id": "klar",
-      "aliases": ["Klar", "klar"],
-      "extensions": [".klar"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "klar",
-      "scopeName": "source.klar",
-      "path": "./syntaxes/klar.tmLanguage.json"
-    }],
-    "snippets": [{ "language": "klar", "path": "./snippets/klar.json" }],
-    "taskDefinitions": [],
-    "problemMatchers": [{
-      "name": "klar",
-      "owner": "klar",
-      "fileLocation": ["relative", "${fileDirname}"],
-      "pattern": [
-        { "regexp": "^(error|warning)\\[(\\w+)\\]: (.*)$", "severity": 1, "code": 2, "message": 3 },
-        { "regexp": "^\\s+--> (.+):(\\d+):(\\d+)$", "file": 1, "line": 2, "column": 3 }
-      ]
-    }]
+    "languages": [
+      {
+        "id": "klar",
+        "aliases": [
+          "Klar",
+          "klar"
+        ],
+        "extensions": [
+          ".klar"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "klar",
+        "scopeName": "source.klar",
+        "path": "./syntaxes/klar.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "klar",
+        "path": "./snippets/klar.json"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "klar",
+        "owner": "klar",
+        "fileLocation": [
+          "relative",
+          "${fileDirname}"
+        ],
+        "pattern": [
+          {
+            "regexp": "^(error|warning)\\[(\\w+)\\]: (.*)$",
+            "severity": 1,
+            "code": 2,
+            "message": 3
+          },
+          {
+            "regexp": "^\\s+--> (.+):(\\d+):(\\d+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Klar",
+      "properties": {
+        "klar.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Python used to run the Klar compiler (default: python3, or python on Windows)."
+        },
+        "klar.compilerPath": {
+          "type": "string",
+          "default": "",
+          "description": "Folder of a Klar checkout (the one containing `klar/`), when Klar is not installed with pip. A workspace that is a Klar checkout is used automatically."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "klar.restartServer",
+        "title": "Klar: Restart language server"
+      },
+      {
+        "command": "klar.run",
+        "title": "Klar: Run current file"
+      },
+      {
+        "command": "klar.test",
+        "title": "Klar: Test current file"
+      },
+      {
+        "command": "klar.view",
+        "title": "Klar: Show how the program works (klar view)"
+      }
+    ]
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:klar"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "scripts": {
+    "package": "vsce package",
+    "test:e2e": "node test/run.js"
+  },
+  "devDependencies": {
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.1"
   }
 }

@@ -1,0 +1,14 @@
+use geo.{Shape, Circle, unit, hidden}
+
+/// Sum of areas.
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+
+fn main() uses io {
+  let c = unit()
+  let words = "a b".split(" ")
+  print(total([c, Circle { r: 2.0 }]))
+  print(words.len())
+  let n: Int = "x"
+}

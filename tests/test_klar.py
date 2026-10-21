@@ -714,6 +714,90 @@ fn main() uses io {
             self.assertIn("default method of trait `Shape`", cli("doc", "label", "--in", path)[1])
 
 
+class LanguageServer(unittest.TestCase):
+    GEO = ("pub trait Shape {\n  fn area(self) -> Float\n}\n\npub type Circle { r: Float }\n\nimpl Shape for Circle {\n"
+           "  fn area(self) -> Float {\n    return 3.0 * self.r * self.r\n  }\n}\n\n"
+           "pub fn unit() -> Circle {\n  return Circle { r: 1.0 }\n}\n\nfn hidden() -> Int {\n  return 1\n}\n")
+    MAIN = ("use geo.{Shape, Circle, unit, hidden}\n\n/// Sum of areas.\nfn total[T: Shape](xs: List[T]) -> Float {\n"
+            "  return xs.map(fn(s) => s.area()).sum_float()\n}\n\nfn main() uses io {\n  let c = unit()\n"
+            "  let words = \"a b\".split(\" \")\n  print(total([c, Circle { r: 2.0 }]))\n  print(words.len())\n}\n")
+
+    def session(self, requests):
+        """Runs the server on framed messages; returns {id: result} and the notifications."""
+        from klar.tools.lsp import Server
+        data = b""
+        for m in requests:
+            body = json.dumps(dict(m, jsonrpc="2.0")).encode()
+            data += b"Content-Length: %d\r\n\r\n" % len(body) + body
+        out = io.BytesIO()
+        Server(io.BytesIO(data), out, io.StringIO()).serve()
+        raw, results, notes = out.getvalue(), {}, []
+        while raw:
+            head, _, rest = raw.partition(b"\r\n\r\n")
+            n = int(head.split(b":")[1])
+            msg, raw = json.loads(rest[:n]), rest[n:]
+            if "id" in msg:
+                results[msg["id"]] = msg.get("result", msg.get("error"))
+            else:
+                notes.append(msg)
+        return results, notes
+
+    def test_features(self):
+        from klar.tools.lsp import path_to_uri
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "geo.klar"), "w", encoding="utf-8") as f:
+                f.write(self.GEO)
+            uri = path_to_uri(os.path.join(d, "main.klar"))
+            doc = {"textDocument": {"uri": uri}}
+
+            def at(line, ch):
+                return dict(doc, position={"line": line, "character": ch})
+            res, notes = self.session([
+                {"id": 1, "method": "initialize", "params": {"capabilities": {}}},
+                {"method": "textDocument/didOpen", "params": {"textDocument": {"uri": uri, "text": self.MAIN}}},
+                {"id": 2, "method": "textDocument/hover", "params": at(10, 9)},
+                {"id": 3, "method": "textDocument/definition", "params": at(8, 11)},
+                {"id": 4, "method": "textDocument/references", "params": at(4, 28)},
+                {"id": 5, "method": "textDocument/rename", "params": dict(at(8, 6), newName="circle")},
+                {"id": 6, "method": "textDocument/documentSymbol", "params": doc},
+                {"id": 7, "method": "textDocument/completion", "params": at(11, 14)},
+                {"id": 8, "method": "textDocument/signatureHelp", "params": at(9, 27)},
+                {"id": 9, "method": "textDocument/formatting", "params": doc},
+                {"id": 10, "method": "shutdown"},
+                {"method": "exit"},
+            ])
+            self.assertIn("hoverProvider", res[1]["capabilities"])
+            diags = notes[0]["params"]["diagnostics"]
+            self.assertEqual([x["code"] for x in diags], ["E0606"])
+            self.assertEqual(diags[0]["data"]["edits"][0]["newText"], "pub ")      # fix lands in geo.klar
+            self.assertTrue(diags[0]["data"]["edits"][0]["uri"].endswith("geo.klar"))
+            self.assertIn("fn total[T: Shape]", res[2]["contents"]["value"])
+            self.assertIn("Sum of areas", res[2]["contents"]["value"])
+            self.assertTrue(res[3]["uri"].endswith("geo.klar"))
+            self.assertEqual(res[3]["range"]["start"]["line"], 12)               # `pub fn unit`
+            self.assertEqual(len(res[4]), 3)                                        # trait, impl, call
+            self.assertEqual([e["range"]["start"]["line"] for e in res[5]["changes"][uri]], [8, 10])
+            self.assertEqual([s["name"] for s in res[6]], ["total", "main"])
+            labels = [i["label"] for i in res[7]["items"]]
+            self.assertIn("len", labels)
+            self.assertIn("sep: Str", res[8]["signatures"][0]["label"])
+            self.assertEqual(res[9], [])                                            # already formatted
+
+    def test_bad_input_never_kills_the_server(self):
+        uri = "file:///tmp/klar_lsp_broken.klar"
+        res, notes = self.session([
+            {"method": "textDocument/didOpen", "params": {"textDocument": {"uri": uri, "text": "fn main( {"}}},
+            {"id": 1, "method": "textDocument/hover", "params": {"textDocument": {"uri": uri},
+                                                                  "position": {"line": 0, "character": 3}}},
+            {"id": 2, "method": "textDocument/unknownThing", "params": {}},
+            {"id": 3, "method": "textDocument/definition", "params": {"textDocument": {"uri": uri}}},
+        ])
+        self.assertEqual(notes[0]["params"]["diagnostics"][0]["code"], "E0003")
+        self.assertIsNone(res[1])
+        self.assertEqual(res[2]["code"], -32601)
+        self.assertIsNone(res[3])
+
+
 class Modules(unittest.TestCase):
     def write(self, d, name, text):
         path = os.path.join(d, *name.split("/"))
