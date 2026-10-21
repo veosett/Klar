@@ -1,8 +1,9 @@
 name: CI
 
+# Automatic runs are off: start the workflow by hand (Actions → CI → Run workflow).
+# To turn them back on, add `push:` and `pull_request:` under `on:`.
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
