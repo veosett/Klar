@@ -37,6 +37,7 @@ def default_files():
     files.append(os.path.join(ROOT, "tests", "native", "patterns.klar"))
     files.append(os.path.join(ROOT, "tests", "native", "floats.klar"))
     files.append(os.path.join(ROOT, "tests", "native", "bytes.klar"))
+    files.append(os.path.join(ROOT, "tests", "native", "consts.klar"))
     bench = os.path.join(ROOT, "bench", "programs")
     files += [os.path.join(bench, b, b + ".klar") for b in sorted(os.listdir(bench))]
     return files

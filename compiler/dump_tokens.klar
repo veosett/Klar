@@ -1,0 +1,72 @@
+// Prints the tokens of each file given on the command line as JSON lines (used by tests/selfhost.py
+// to compare the Klar lexer with klar/lexer.py).
+use lexer.{LexError, StrPart, TokKind, Token, tokenize}
+use std.json.{Json, json_object, json_text}
+
+fn kind_name(k: TokKind) -> Str {
+  return match k {
+    TokKind.IntLit => "INT",
+    TokKind.FloatLit => "FLOAT",
+    TokKind.StrLit => "STR",
+    TokKind.Ident => "IDENT",
+    TokKind.Keyword => "KW",
+    TokKind.Op => "OP",
+    TokKind.Newline => "NEWLINE",
+    TokKind.Doc => "DOC",
+    TokKind.Eof => "EOF",
+  }
+}
+
+fn value_json(t: Token) -> Json {
+  return match t.kind {
+    TokKind.IntLit => Json.Int(value: t.text.to_int().unwrap_or(0)),
+    TokKind.FloatLit => Json.Num(value: t.text.to_float().unwrap_or(0.0)),
+    TokKind.Eof => Json.Null,
+    _ => Json.Text(value: t.text),
+  }
+}
+
+fn part_json(p: StrPart) -> Json {
+  return match p {
+    StrPart.Text(v) => Json.Text(value: v),
+    StrPart.Expr(code, line, col) => Json.Arr(items: [Json.Text(value: "expr"), Json.Text(value: code),
+      Json.Int(value: line), Json.Int(value: col)]),
+  }
+}
+
+fn token_json(t: Token) -> Json {
+  var fields = [
+    Pair { first: "kind", second: Json.Text(value: kind_name(t.kind)) },
+    Pair { first: "value", second: value_json(t) },
+    Pair { first: "span", second: Json.Arr(items: [t.line, t.col, t.end_line, t.end_col].map(fn(n) => Json.Int(value: n))) },
+  ]
+  if t.kind == TokKind.StrLit {
+    fields = fields.push(Pair { first: "parts", second: Json.Arr(items: t.parts.map(part_json)) })
+  }
+  return json_object(fields)
+}
+
+fn error_json(e: LexError) -> Json {
+  return json_object([
+    Pair { first: "error", second: Json.Text(value: e.code) },
+    Pair { first: "message", second: Json.Text(value: e.message) },
+    Pair { first: "span", second: Json.Arr(items: [Json.Int(value: e.line), Json.Int(value: e.col)]) },
+  ])
+}
+
+fn main() uses io, fs {
+  for path in cli_args() {
+    print(json_text(json_object([Pair { first: "file", second: Json.Text(value: path) }])))
+    match read_file(path) {
+      Ok(src) => match tokenize(src) {
+        Ok(toks) => {
+          for t in toks {
+            print(json_text(token_json(t)))
+          }
+        },
+        Err(e) => print(json_text(error_json(e))),
+      },
+      Err(e) => print(json_text(json_object([Pair { first: "error", second: Json.Text(value: e) }]))),
+    }
+  }
+}

@@ -21,6 +21,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Native back-end == reference interpreter
         run: python tests/native_diff.py
+      - name: Self-hosting (Klar lexer == Python lexer)
+        run: python tests/selfhost.py
       - name: Example programs
         run: |
           python -m klar test examples/bank.klar

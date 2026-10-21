@@ -730,6 +730,20 @@ fn main() uses io {
             self.assertIn("default method of trait `Shape`", cli("doc", "label", "--in", path)[1])
 
 
+class SelfHosting(unittest.TestCase):
+    def test_klar_lexer_matches_python_lexer(self):
+        """compiler/lexer.klar produces exactly the tokens and errors of klar/lexer.py (native build)."""
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import selfhost
+        out = io.StringIO()
+        old, sys.stdout = sys.stdout, out
+        try:
+            code = selfhost.main()
+        finally:
+            sys.stdout = old
+        self.assertEqual(code, 0, out.getvalue()[-3000:])
+
+
 class LanguageServer(unittest.TestCase):
     GEO = ("pub trait Shape {\n  fn area(self) -> Float\n}\n\npub type Circle { r: Float }\n\nimpl Shape for Circle {\n"
            "  fn area(self) -> Float {\n    return 3.0 * self.r * self.r\n  }\n}\n\n"

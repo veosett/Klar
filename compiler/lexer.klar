@@ -1,0 +1,454 @@
+// The Klar lexer, written in Klar (self-hosting, stage 3). It must produce exactly the tokens of
+// klar/lexer.py — tests/selfhost.py compares both on every .klar file of the repository.
+//
+// The source is read as UTF-8 bytes; columns count characters (code points), like the Python lexer.
+
+/// What a token is.
+pub enum TokKind {
+  IntLit,
+  FloatLit,
+  StrLit,
+  Ident,
+  Keyword,
+  Op,
+  Newline,
+  Doc,
+  Eof,
+}
+
+/// A piece of a string literal: plain text, or the source of an interpolated `{expr}` and where it starts.
+pub enum StrPart {
+  Text(value: Str),
+  Expr(code: Str, line: Int, col: Int),
+}
+
+/// One token; `text` is the identifier, keyword, operator, digits (without `_`) or the string's value.
+pub type Token {
+  kind: TokKind,
+  text: Str,
+  line: Int,
+  col: Int,
+  end_line: Int,
+  end_col: Int,
+  parts: List[StrPart],
+}
+
+/// A lexical error, positioned like the Python lexer's.
+pub type LexError { code: Str, message: Str, hint: Str, line: Int, col: Int, width: Int }
+
+const KEYWORDS: List[Str] = [
+  "module", "use", "fn", "type", "enum", "let", "var", "return", "if", "else", "while", "for", "in", "break",
+  "continue", "match", "test", "assert", "requires", "ensures", "uses", "and", "or", "not", "true", "false",
+  "with", "const", "property", "trait", "impl", "pub",
+]
+
+const TWO_CHAR: List[Str] = ["->", "=>", "==", "!=", "<=", ">="]
+
+const ONE_CHAR: Str = "+-*/%<>=()[]\{\},:.?"
+
+const FOREIGN: Map[Str, Str] = Map {
+  "&&": "Klar uses the word `and`",
+  "||": "Klar uses the word `or`",
+  "++": "no increment operator: write `i = i + 1` (with `var i`)",
+  "--": "no decrement operator: write `i = i - 1`; comments start with `//`",
+  "+=": "no compound assignment: write `x = x + 1`",
+  "-=": "no compound assignment: write `x = x - 1`",
+  "*=": "no compound assignment: write `x = x * 2`",
+  "::": "use `.` for paths: `Color.Red`",
+  "!": "Klar uses the word `not`",
+  ";": "statements end at the end of a line; remove the `;`",
+  "'": "strings use double quotes: \"text\"",
+  "&": "use `and` for logic; bitwise AND is `x.bit_and(y)`",
+  "|": "use `or` for logic; bitwise OR is `x.bit_or(y)`; lambdas are written `fn(x) => x + 1`",
+  "^": "bitwise XOR is `x.bit_xor(y)`; powers are `x.pow(n)`",
+  "~": "bitwise NOT is `x.bit_not()`",
+  "<<": "shifts are methods: `x.shift_left(n)`",
+  ">>": "shifts are methods: `x.shift_right(n)`",
+  "#": "comments start with `//`",
+  "@": "Klar has no decorators/annotations",
+  "`": "strings use double quotes; interpolation is \"\{expr\}\"",
+}
+
+// ---- bytes and characters ----------------------------------------------------------------------------
+
+fn at(b: Bytes, i: Int) -> Int {
+  return b.get_or(i, -1)
+}
+
+/// Bytes in the UTF-8 sequence that starts with `first`.
+fn char_len(first: Int) -> Int {
+  if first < 128 {
+    return 1
+  }
+  if first >= 240 {
+    return 4
+  }
+  if first >= 224 {
+    return 3
+  }
+  if first >= 192 {
+    return 2
+  }
+  return 1
+}
+
+/// The code point at byte `i`.
+fn code_point(b: Bytes, i: Int) -> Int {
+  let c = at(b, i)
+  let n = char_len(c)
+  if n == 1 {
+    return c
+  }
+  var cp = c.bit_and(match n {
+    2 => 31,
+    3 => 15,
+    _ => 7,
+  })
+  for k in range(1, n) {
+    cp = cp * 64 + at(b, i + k).bit_and(63)
+  }
+  return cp
+}
+
+/// The character at byte `i`, as text.
+fn char_at(b: Bytes, i: Int) -> Str {
+  return b.slice(i, i + char_len(at(b, i))).decode().unwrap_or("?")
+}
+
+/// Characters (code points) in the bytes [a, z): the column distance.
+fn chars_between(b: Bytes, a: Int, z: Int) -> Int {
+  var n = 0
+  var i = a
+  while i < z {
+    i = i + char_len(at(b, i))
+    n = n + 1
+  }
+  return n
+}
+
+fn text(b: Bytes, a: Int, z: Int) -> Str {
+  return b.slice(a, z).decode().unwrap_or("")
+}
+
+fn is_digit(c: Int) -> Bool {
+  return c >= 48 and c <= 57
+}
+
+/// Letters as Python's `str.isalpha` sees them for ASCII and the common alphabets (Latin, Greek, Cyrillic,
+/// CJK, kana, Hangul).
+fn is_letter_cp(cp: Int) -> Bool {
+  if cp < 128 {
+    return (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122)
+  }
+  if cp == 170 or cp == 181 or cp == 186 {
+    return true
+  }
+  if cp >= 192 and cp <= 591 {
+    return cp != 215 and cp != 247
+  }
+  return (cp >= 880 and cp <= 1327 and cp != 894 and cp != 903) or (cp >= 12353 and cp <= 12538) or
+    (cp >= 19968 and cp <= 40959) or (cp >= 44032 and cp <= 55203)
+}
+
+fn is_letter(b: Bytes, i: Int) -> Bool {
+  return is_letter_cp(code_point(b, i))
+}
+
+fn is_ident_char(b: Bytes, i: Int) -> Bool {
+  let c = at(b, i)
+  return c == 95 or is_digit(c) or (c >= 0 and is_letter(b, i))
+}
+
+// ---- scanners: pure functions from a start byte to an end byte -------------------------------------------
+
+fn scan_ident(b: Bytes, start: Int) -> Int {
+  var i = start
+  while is_ident_char(b, i) {
+    i = i + char_len(at(b, i))
+  }
+  return i
+}
+
+fn line_end(b: Bytes, start: Int) -> Int {
+  var i = start
+  while i < b.len() and at(b, i) != 10 {
+    i = i + 1
+  }
+  return i
+}
+
+/// True if the next significant character after `start` is a `.` (a method chain continues the line).
+fn next_line_continues(b: Bytes, start: Int) -> Bool {
+  var i = start
+  while i < b.len() {
+    let c = at(b, i)
+    if c == 32 or c == 9 or c == 13 or c == 10 {
+      i = i + 1
+    } else if c == 47 and at(b, i + 1) == 47 {
+      i = line_end(b, i)
+    } else {
+      return c == 46 and at(b, i + 1) != 46
+    }
+  }
+  return false
+}
+
+fn lex_error(code: Str, message: Str, hint: Str, line: Int, col: Int) -> LexError {
+  return LexError { code: code, message: message, hint: hint, line: line, col: col, width: 1 }
+}
+
+/// A number token starting at `start`: Ok(end byte) — `float` tells whether it has a fractional part.
+type NumScan { end: Int, float: Bool }
+
+fn scan_number(b: Bytes, start: Int, line: Int, col: Int) -> Result[NumScan, LexError] {
+  var i = start
+  while is_digit(at(b, i)) or at(b, i) == 95 {
+    i = i + 1
+  }
+  var float = false
+  if at(b, i) == 46 and is_digit(at(b, i + 1)) {
+    float = true
+    i = i + 1
+    while is_digit(at(b, i)) or at(b, i) == 95 {
+      i = i + 1
+    }
+  }
+  if at(b, i) == 95 or (at(b, i) >= 0 and is_letter(b, i)) {
+    return Err(lex_error(code: "E0001", message: "invalid number literal `{text(b: b, a: start, z: i)}{char_at(b, i)}`",
+      hint: "numbers cannot be followed by letters (no suffixes like 10u or 1f)", line: line, col: col))
+  }
+  return Ok(NumScan { end: i, float: float })
+}
+
+/// A string literal: its parts, its value and the byte after the closing quote.
+type StrScan { end: Int, parts: List[StrPart], value: Str }
+
+fn escape_of(c: Int) -> Str {
+  return match c {
+    110 => "\n",
+    116 => "\t",
+    92 => "\\",
+    34 => "\"",
+    123 => "\{",
+    125 => "\}",
+    48 => 0.to_char().unwrap_or(""),
+    114 => "\r",
+    _ => "",
+  }
+}
+
+fn scan_string(b: Bytes, start: Int, line: Int, col: Int) -> Result[StrScan, LexError] {
+  var parts: List[StrPart] = []
+  var buf: List[Str] = []
+  var i = start + 1
+  var c_col = col + 1
+  while true {
+    let c = at(b, i)
+    if c == -1 or c == 10 {
+      return Err(lex_error(code: "E0002", message: "unterminated string",
+        hint: "close the string with `\"` on the same line; use `\\n` for line breaks", line: line, col: col))
+    }
+    if c == 34 {
+      if not buf.is_empty() {
+        parts = parts.push(StrPart.Text(value: buf.join("")))
+      }
+      let value = parts.map(fn(p) => match p {
+        StrPart.Text(v) => v,
+        StrPart.Expr(_, _, _) => "",
+      }).join("")
+      return Ok(StrScan { end: i + 1, parts: parts, value: value })
+    }
+    if c == 92 {
+      let e = at(b, i + 1)
+      if escape_of(e) == "" and e != 48 {
+        let shown = match e {
+          -1 => "",
+          _ => char_at(b, i + 1),
+        }
+        return Err(LexError { code: "E0004", message: "invalid escape `\\{shown}`",
+          hint: "valid escapes: \\n \\t \\\\ \\\" \\\{ \\\} \\0", line: line, col: c_col, width: 2 })
+      }
+      buf = buf.push(escape_of(e))
+      i = i + 2
+      c_col = c_col + 2
+    } else if c == 123 {
+      if not buf.is_empty() {
+        parts = parts.push(StrPart.Text(value: buf.join("")))
+        buf = []
+      }
+      let e_col = c_col + 1
+      var j = i + 1
+      var j_col = e_col
+      var depth = 1
+      while depth > 0 {
+        let d = at(b, j)
+        if d == -1 or d == 10 {
+          return Err(lex_error(code: "E0002", message: "unterminated interpolation `\{...\}` in string",
+            hint: "close it with `\}`, or write `\\\{` for a literal brace", line: line, col: e_col - 1))
+        }
+        if d == 123 {
+          depth = depth + 1
+        } else if d == 125 {
+          depth = depth - 1
+        } else if d == 34 {
+          return Err(lex_error(code: "E0003", message: "string literals are not allowed inside `\{...\}` interpolation",
+            hint: "compute the value into a variable first", line: line, col: j_col))
+        }
+        if depth > 0 {
+          j_col = j_col + 1
+          j = j + char_len(d)
+        }
+      }
+      let code = text(b: b, a: i + 1, z: j)
+      if code.trim().is_empty() {
+        return Err(lex_error(code: "E0003", message: "empty interpolation `\{\}`",
+          hint: "write `\\\{\\\}` for literal braces", line: line, col: e_col - 1))
+      }
+      parts = parts.push(StrPart.Expr(code: code, line: line, col: e_col))
+      c_col = j_col + 1
+      i = j + 1
+    } else {
+      let n = char_len(c)
+      buf = buf.push(text(b: b, a: i, z: i + n))
+      i = i + n
+      c_col = c_col + 1
+    }
+  }
+  return Err(lex_error(code: "E0002", message: "unterminated string", hint: "", line: line, col: col))
+}
+
+// ---- the main loop --------------------------------------------------------------------------------------
+
+fn token(kind: TokKind, value: Str, pos: List[Int]) -> Token {
+  return Token {
+    kind: kind,
+    text: value,
+    line: pos.get_or(0, 0),
+    col: pos.get_or(1, 0),
+    end_line: pos.get_or(2, 0),
+    end_col: pos.get_or(3, 0),
+    parts: [],
+  }
+}
+
+fn last_is_newline(toks: List[Token]) -> Bool {
+  return match toks.last() {
+    Some(t) => t.kind == TokKind.Newline,
+    None => true,
+  }
+}
+
+/// Tokens of `src`, ending with NEWLINE (when there is any token) and EOF; the first lexical error otherwise.
+/// >>> assert tokenize("let x = 1").map(fn(ts) => ts.len()) == Ok(6)
+pub fn tokenize(src: Str) -> Result[List[Token], LexError] {
+  let b = src.to_bytes()
+  let n = b.len()
+  var toks: List[Token] = []
+  var stack: List[Int] = []
+  var i = 0
+  var line = 1
+  var col = 1
+  while i < n {
+    let c = at(b, i)
+    if c == 32 or c == 9 or c == 13 {
+      i = i + 1
+      col = col + 1
+    } else if c == 10 {
+      let at_statement = match stack.last() {
+        None => true,
+        Some(open) => open == 123,
+      }
+      if at_statement and not last_is_newline(toks) and not next_line_continues(b, i + 1) {
+        toks = toks.push(token(kind: TokKind.Newline, value: "\n", pos: [line, col, line + 1, 1]))
+      }
+      i = i + 1
+      line = line + 1
+      col = 1
+    } else if c == 47 and at(b, i + 1) == 47 {
+      let end = line_end(b, i)
+      let end_col = col + chars_between(b: b, a: i, z: end)
+      if at(b, i + 2) == 47 and at(b, i + 3) != 47 and stack.is_empty() {
+        toks = toks.push(token(kind: TokKind.Doc, value: text(b: b, a: i + 3, z: end), pos: [line, col, line, end_col]))
+      }
+      i = end
+      col = end_col
+    } else if is_digit(c) {
+      let scan = scan_number(b: b, start: i, line: line, col: col)?
+      let digits = text(b: b, a: i, z: scan.end).replace("_", "")
+      let kind = match scan.float {
+        true => TokKind.FloatLit,
+        false => TokKind.IntLit,
+      }
+      let end_col = col + scan.end - i
+      toks = toks.push(token(kind: kind, value: digits, pos: [line, col, line, end_col]))
+      i = scan.end
+      col = end_col
+    } else if c == 34 {
+      let scan = scan_string(b: b, start: i, line: line, col: col)?
+      let end_col = col + chars_between(b: b, a: i, z: scan.end)
+      toks = toks.push(token(kind: TokKind.StrLit, value: scan.value, pos: [line, col, line, end_col])
+        with { parts: scan.parts })
+      i = scan.end
+      col = end_col
+    } else if c == 95 or is_letter(b, i) {
+      let end = scan_ident(b, i)
+      let word = text(b: b, a: i, z: end)
+      let kind = match KEYWORDS.contains(word) {
+        true => TokKind.Keyword,
+        false => TokKind.Ident,
+      }
+      let end_col = col + chars_between(b: b, a: i, z: end)
+      toks = toks.push(token(kind: kind, value: word, pos: [line, col, line, end_col]))
+      i = end
+      col = end_col
+    } else {
+      let one = char_at(b, i)
+      let two = one + text(b: b, a: i + one.to_bytes().len(), z: i + one.to_bytes().len() + 1)
+      if FOREIGN.has(two) and not TWO_CHAR.contains(two) {
+        let fix = FOREIGN.get(two).unwrap_or("")
+        return Err(LexError { code: "E0001", message: "`{two}` is not a Klar operator", hint: fix, line: line,
+          col: col, width: 2 })
+      }
+      if TWO_CHAR.contains(two) {
+        toks = toks.push(token(kind: TokKind.Op, value: two, pos: [line, col, line, col + 2]))
+        i = i + 2
+        col = col + 2
+      } else if c < 128 and ONE_CHAR.contains(one) {
+        if c == 40 or c == 91 or c == 123 {
+          stack = stack.push(c)
+        } else if (c == 41 or c == 93 or c == 125) and not stack.is_empty() {
+          stack = stack.remove_at(stack.len() - 1)
+        }
+        toks = toks.push(token(kind: TokKind.Op, value: one, pos: [line, col, line, col + 1]))
+        i = i + 1
+        col = col + 1
+      } else {
+        return Err(lex_error(code: "E0001", message: "unexpected character `{one}`",
+          hint: FOREIGN.get(one).unwrap_or(""), line: line, col: col))
+      }
+    }
+  }
+  if not last_is_newline(toks) {
+    toks = toks.push(token(kind: TokKind.Newline, value: "\n", pos: [line, col, line, col]))
+  }
+  return Ok(toks.push(token(kind: TokKind.Eof, value: "", pos: [line, col, line, col])))
+}
+
+test "a small program" {
+  let toks = tokenize("fn f(x: Int) -> Int \{\n  return x * 2 // twice\n\}\n").unwrap_or([])
+  assert toks.map(fn(t) => t.text) == ["fn", "f", "(", "x", ":", "Int", ")", "->", "Int", "\{", "\n", "return", "x", "*",
+    "2", "\n", "\}", "\n", ""]
+  assert toks.get(7).map(fn(t) => t.col) == Some(14)
+}
+
+test "strings and interpolation" {
+  let toks = tokenize("\"a\\n\{x + 1\}b\"").unwrap_or([])
+  let parts = toks.get(0).map(fn(t) => t.parts).unwrap_or([])
+  assert parts == [StrPart.Text(value: "a\n"), StrPart.Expr(code: "x + 1", line: 1, col: 6), StrPart.Text(value: "b")]
+}
+
+test "errors" {
+  assert tokenize("a && b").map(fn(ts) => ts.len()).is_err()
+  assert tokenize("\"open").is_err()
+  assert tokenize("12px").is_err()
+}

@@ -1,0 +1,28 @@
+// Constants of every kind, including collections (they are built before main, after the runtime's own
+// constants: an early bug initialised them first and corrupted the heap).
+
+const NAMES: List[Str] = ["ann", "bob"]
+const EMPTY: List[Int] = []
+const TABLE: Map[Str, Int] = Map { "one": 1, "two": 2 }
+const NESTED: List[List[Int]] = [[1], [], [2, 3]]
+const MAYBE: Option[Str] = Some("x")
+const TOTAL: Int = 40 + 2
+const RATIO: Float = 1.5 * 2.0
+const GREETING: Str = "hi " + "there"
+
+fn main() uses io {
+  print(NAMES)
+  print(EMPTY.len())
+  print(TABLE.get("two"))
+  print(NESTED.flatten())
+  print(MAYBE)
+  print(TOTAL)
+  print(RATIO)
+  print(GREETING)
+  print(NAMES.map(fn(n) => n.upper()).join(","))
+}
+
+test "constants" {
+  assert TABLE.keys() == ["one", "two"]
+  assert NESTED.get(2) == Some([2, 3])
+}

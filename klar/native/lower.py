@@ -1449,10 +1449,11 @@ def lower_program(loaded, image, tests=None):
             um.emit("label", no)
         um.emit("const", r, 0)
         um.emit("ret", r)
-    # constants initialiser (module order = dependency order)
+    # constants initialiser: the runtime's own constants first (heap layout offsets, kinds — plain literals),
+    # then the program's modules in dependency order (their values may allocate, which needs the runtime's)
     ic = Fn("__init_consts", 0)
     prog.fns.append(ic)
-    for m in list(loaded.modules) + list(getattr(loaded, "runtime", [])):
+    for m in list(getattr(loaded, "runtime", [])) + list(loaded.modules):
         for d in m.program.decls:
             if isinstance(d, N.ConstDecl):
                 fl = FnLowering(prog, m, {}, m.is_sys)

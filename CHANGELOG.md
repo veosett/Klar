@@ -5,6 +5,15 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+### Added
+- Self-hosting, stage 3a: `compiler/lexer.klar` — the lexer written in Klar. `tests/selfhost.py` checks that it
+  produces exactly the tokens (kinds, values, spans, string parts) and the errors of `klar/lexer.py` on every
+  `.klar` file of the repository and on error snippets (native and interpreter runs, in CI).
+
+### Fixed
+- Native: constants holding lists or maps corrupted the heap (they were built before the runtime's own constants
+  were initialised); the runtime's constants are now initialised first.
+
 ## [0.5.0] — 2026-10-21
 
 ### Added
