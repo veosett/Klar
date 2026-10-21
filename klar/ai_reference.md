@@ -72,6 +72,7 @@ assert x > 0, "message"
 ## Expressions
 - Literals: `1`, `1_000`, `2.5`, `true`, `"s"`, `()` (Unit), `[1, 2]`, `Map { "a": 1 }`, `Map {}`.
 - Arithmetic `+ - * / %` only on same types: Int with Int, Float with Float (`/` on Int truncates). `+` joins Str.
+- IEEE-754 bits of a Float: `x.to_bits()` (signed 64-bit Int), back with `float_from_bits(n)`.
   No implicit conversions: `n.to_float()`, `f.round()`, `x.to_str()`.
 - No bit operators: `a.bit_and(b)`, `bit_or`, `bit_xor`, `a.bit_not()`, `a.shift_left(n)`, `a.shift_right(n)`
   (two's complement on arbitrary-precision Int, shift_right floors). Characters: `s.codes()` → `List[Int]`,

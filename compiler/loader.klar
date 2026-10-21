@@ -6,6 +6,7 @@
 // loads `<lib>/std/json.klar` (`lib` is the directory of the Python package `klar/`, which holds the prelude, the
 // standard library and the runtime).
 use ast.{Decl, Program, Span}
+use builtin_sigs.{rt_files}
 use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, load_builtins, new_checker}
 use checker.{private_decl}
 use parser.{parse_program}
@@ -20,6 +21,8 @@ pub type Module {
   is_sys: Bool,
   checker: Option[Ck],
   exports: Map[Str, Export],
+  /// imported name -> (the module it comes from, "fn" | "const" | "type")
+  import_from: Map[Str, Pair[Str, Str]],
 }
 
 /// The loader state.
@@ -32,6 +35,12 @@ pub type Ld {
   stack: List[Str],
   diags: List[Diag],
   prelude: Option[Str],
+  /// the modules in dependency order (paths), prelude first, main last
+  order: List[Str],
+  /// source text by display name (for messages that quote the program)
+  sources: Map[Str, Str],
+  /// all runtime files as one module (`load_runtime`)
+  runtime: Option[Module],
 }
 
 /// The result of loading a module: the loader state and the path of the module (None: not loaded).
@@ -139,8 +148,24 @@ fn module_name_of(ld: Ld, path: Str) -> Str {
   }
 }
 
+fn export_kind(e: Export) -> Str {
+  return match e {
+    Export.FnE(_) => "fn",
+    Export.ConstE(_) => "const",
+    Export.TypeE(_) => "type",
+  }
+}
+
+fn prelude_module(ld: Ld) -> Option[Module] {
+  return match ld.prelude {
+    Some(pp) => ld.by_path.get(pp),
+    None => None,
+  }
+}
+
 fn failed_module(name: Str, path: Str, display: Str, is_sys: Bool) -> Module {
-  return Module { name: name, path: path, display: display, failed: true, is_sys: is_sys, checker: None, exports: Map {} }
+  return Module { name: name, path: path, display: display, failed: true, is_sys: is_sys, checker: None, exports: Map {},
+    import_from: Map {} }
 }
 
 /// Loads (and checks) the module at `path`, after the modules it imports.
@@ -176,6 +201,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
         is_sys: is_sys)) }, path: Some(path) }
     },
   }
+  ld = ld with { sources: ld.sources.set(display, source) }
   let prog = match parse_program(source) {
     Ok(p) => p,
     Err(e) => {
@@ -193,16 +219,13 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
   }
   var imports: Map[Str, Export] = Map {}
   var from_prelude: Map[Str, Bool] = Map {}
-  match ld.prelude {
-    Some(pp) => {
-      match ld.by_path.get(pp) {
-        Some(pm) => {
-          for entry in pm.exports.entries() {
-            imports = imports.set(entry.key, entry.value)
-            from_prelude = from_prelude.set(entry.key, true)
-          }
-        },
-        None => {},
+  var import_from: Map[Str, Pair[Str, Str]] = Map {}
+  match prelude_module(ld) {
+    Some(pm) => {
+      for entry in pm.exports.entries() {
+        imports = imports.set(entry.key, entry.value)
+        from_prelude = from_prelude.set(entry.key, true)
+        import_from = import_from.set(entry.key, Pair { first: pm.name, second: export_kind(entry.value) })
       }
     },
     None => {},
@@ -246,6 +269,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
                       } else {
                         imports = imports.set(item, ex)
                         from_prelude = from_prelude.remove(item)
+                        import_from = import_from.set(item, Pair { first: dep.name, second: export_kind(ex) })
                       }
                     },
                     None => {
@@ -288,12 +312,12 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
   let ck = check_module(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: display, mod_name: name, sys: is_sys,
     imports: imports))
   let m = Module { name: name, path: path, display: display, failed: false, is_sys: is_sys, checker: Some(ck),
-    exports: exports(ck) }
+    exports: exports(ck), import_from: import_from }
   var diags = ck.diags
   if not is_sys and not diags.any(fn(x) => x.severity == "error") {
     diags = diags.concat(analyze(ck))
   }
-  ld = ld with { uni: ck.uni, diags: ld.diags.concat(diags), by_path: ld.by_path.set(path, m) }
+  ld = ld with { uni: ck.uni, diags: ld.diags.concat(diags), by_path: ld.by_path.set(path, m), order: ld.order.push(path) }
   return Loaded { ld: ld, path: Some(path) }
 }
 
@@ -301,7 +325,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
 pub fn load_program(path: Str, lib: Str) -> Ld uses fs {
   let root = dirname(path)
   var ld = Ld { root: root, lib: lib, b: load_builtins(), uni: empty_universe(), by_path: Map {}, stack: [], diags: [],
-    prelude: None }
+    prelude: None, order: [], sources: Map {}, runtime: None }
   let prelude_path = lib + "/prelude.klar"
   ld = load(ld0: ld, path: prelude_path, name: "prelude", display: "prelude.klar", importer: None).ld
   ld = ld with { prelude: Some(prelude_path) }
@@ -311,4 +335,70 @@ pub fn load_program(path: Str, lib: Str) -> Ld uses fs {
     false => file,
   }
   return load(ld0: ld, path: path, name: name, display: file, importer: None).ld
+}
+
+/// Loads all runtime files (system Klar) as ONE module `klar_rt`, so they can call each other freely.
+pub fn load_runtime(ld0: Ld) -> Ld uses fs {
+  var ld = ld0
+  var decls: List[Decl] = []
+  var files: List[Str] = []
+  var first: Option[Program] = None
+  var failed = false
+  for fname in rt_files() {
+    let display = "rt/" + fname
+    let read = read_file(rt_dir(ld) + "/" + fname)
+    match read {
+      Err(e) => {
+        ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "cannot read module `rt`: {e}", span: zero_span(),
+          hint: None))
+        failed = true
+      },
+      Ok(_) => {},
+    }
+    let src = read.unwrap_or("")
+    ld = ld with { sources: ld.sources.set(display, src) }
+    match parse_program(src) {
+      Ok(prog) => {
+        if first == None {
+          first = Some(prog)
+        }
+        for d in prog.decls {
+          decls = decls.push(d)
+          files = files.push(display)
+        }
+      },
+      Err(e) => {
+        let sp = Span { line: e.line, col: e.col, end_line: e.line, end_col: e.col }
+        ld = add_error(ld: ld, file: display, d: diag(code: e.code, msg: e.message, span: sp, hint: e.hint))
+        failed = true
+      },
+    }
+  }
+  let base = Module { name: "klar_rt", path: rt_dir(ld) + "/<all>", display: "rt", failed: true, is_sys: true, checker: None,
+    exports: Map {}, import_from: Map {} }
+  let head = match first {
+    Some(p) => p,
+    None => {
+      return ld with { runtime: Some(base) }
+    },
+  }
+  if failed {
+    return ld with { runtime: Some(base) }
+  }
+  let prog = Program { span: head.span, module_name: Some("klar_rt"), decls: decls }
+  var imports: Map[Str, Export] = Map {}
+  var import_from: Map[Str, Pair[Str, Str]] = Map {}
+  match prelude_module(ld) {
+    Some(pm) => {
+      for entry in pm.exports.entries() {
+        imports = imports.set(entry.key, entry.value)
+        import_from = import_from.set(entry.key, Pair { first: pm.name, second: export_kind(entry.value) })
+      }
+    },
+    None => {},
+  }
+  let ck = check_module(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: "rt", mod_name: "klar_rt", sys: true,
+    imports: imports) with { decl_files: files })
+  let m = base with { failed: false, checker: Some(ck), import_from: import_from }
+  return ld with { uni: ck.uni, diags: ld.diags.concat(ck.diags), runtime: Some(m) }
 }

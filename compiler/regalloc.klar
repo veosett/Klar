@@ -1,0 +1,509 @@
+// Linear-scan register allocation for KIR functions, written in Klar (self-hosting, stage 4c). Mirrors
+// klar/native/regalloc.py: liveness per basic block, one interval per vreg, intervals assigned in start order to
+// callee-saved RBX, R12-R14, caller-saved RSI, RDI, R8-R10 (across calls only when cheaper than memory, saved by the
+// emitter around those calls), and floats to XMM2-XMM15 when they cross no real call.
+use lower.{Ins, KFn, KV}
+use opt.{NO_CALL, TERMINATORS, branch_targets, defs, used_regs}
+
+const RBX: Int = 3
+const RSI: Int = 6
+const RDI: Int = 7
+const CALLEE_SAVED: List[Int] = [3, 12, 13, 14]
+const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
+/// XMM2..XMM15, taken from the end (XMM2 first)
+const XMM_REGS: List[Int] = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2]
+const FP_DEF: List[Str] = ["fbin", "i2f", "fun"]
+const XMM_SAFE: List[Str] = ["iop", "iopi", "icmp", "icmpi", "ibr", "ibri", "ineg", "release", "enter"]
+const FP_USE: List[Str] = ["fbin", "fcmp", "fbr", "f2i", "fun"]
+
+/// The registers of a function: vreg -> register, the callee-saved registers used, vreg -> XMM register, and the
+/// caller-saved registers to save around each call-like instruction.
+pub type Alloc { loc: Map[Int, Int], used: List[Int], xloc: Map[Int, Int], call_saves: Map[Int, List[Int]] }
+
+fn opc(ins: Ins) -> Str {
+  return match ins.get(0) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+}
+
+fn str_at(ins: Ins, k: Int) -> Str {
+  return match ins.get(k) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+}
+
+fn int_at(ins: Ins, k: Int) -> Int {
+  return match ins.get(k) {
+    Some(KV.I(v)) => v,
+    _ => -1,
+  }
+}
+
+fn is_cold_call(ins: Ins) -> Bool {
+  return opc(ins) == "call" and str_at(ins, 2).starts_with("cold:")
+}
+
+fn pow8(d: Int) -> Int {
+  return 8.pow(d.min(6))
+}
+
+/// The vregs worth keeping in XMM registers: defined or used by float instructions, and used by float
+/// instructions at least as much (by loop-weighted count) as by anything else.
+fn float_candidates(f: KFn, depth: List[Int]) -> List[Int] {
+  var fp_w: Map[Int, Int] = Map {}
+  var other_w: Map[Int, Int] = Map {}
+  var fp_def: List[Int] = []
+  var i = 0
+  for ins in f.code {
+    let o = opc(ins)
+    let w = pow8(depth.get_or(i, 0))
+    if FP_DEF.contains(o) {
+      fp_def = fp_def.concat(defs(ins))
+    }
+    for u in used_regs(ins) {
+      if FP_USE.contains(o) {
+        fp_w = fp_w.set(u, fp_w.get(u).unwrap_or(0) + w)
+      } else if o != "mov" {
+        other_w = other_w.set(u, other_w.get(u).unwrap_or(0) + w)
+      }
+    }
+    i = i + 1
+  }
+  var out: List[Int] = []
+  for v in fp_w.keys().concat(fp_def).unique() {
+    if v >= f.nparams {
+      let fw = fp_w.get(v).unwrap_or(0)
+      if fw >= other_w.get(v).unwrap_or(0) and (fp_def.contains(v) or fw > 0) {
+        out = out.push(v)
+      }
+    }
+  }
+  // copies between float values stay in the class (loop-carried `var`s are joined by `mov`)
+  var changed = true
+  while changed {
+    changed = false
+    for ins in f.code {
+      if opc(ins) == "mov" {
+        let dst = int_at(ins, 1)
+        if out.contains(int_at(ins, 2)) and not out.contains(dst) and dst >= f.nparams {
+          if other_w.get(dst).unwrap_or(0) <= fp_w.get(dst).unwrap_or(0) {
+            out = out.push(dst)
+            changed = true
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+/// Half-open [start, end) ranges of the basic blocks.
+fn blocks_of(code: List[Ins]) -> List[Pair[Int, Int]] {
+  var starts: Map[Int, Bool] = Map {}
+  starts = starts.set(0, true)
+  var i = 0
+  for ins in code {
+    if opc(ins) == "label" {
+      starts = starts.set(i, true)
+    } else if TERMINATORS.contains(opc(ins)) and i + 1 < code.len() {
+      starts = starts.set(i + 1, true)
+    }
+    i = i + 1
+  }
+  let order = starts.keys().filter(fn(s) => s < code.len()).sort()
+  var out: List[Pair[Int, Int]] = []
+  var k = 0
+  for s in order {
+    out = out.push(Pair { first: s, second: order.get_or(k + 1, code.len()) })
+    k = k + 1
+  }
+  return out
+}
+
+/// Live intervals: first and last position of each vreg (the parameters start at -1), the loop-weighted use
+/// counts, and the loop depth of each instruction.
+type Intervals { lo: Map[Int, Int], hi: Map[Int, Int], weight: Map[Int, Int], depth: List[Int] }
+
+fn ext(iv: Intervals, v: Int, p: Int) -> Intervals {
+  var lo = iv.lo
+  var hi = iv.hi
+  match lo.get(v) {
+    Some(x) => {
+      if p < x {
+        lo = lo.set(v, p)
+      }
+    },
+    None => {
+      lo = lo.set(v, p)
+    },
+  }
+  match hi.get(v) {
+    Some(x) => {
+      if p > x {
+        hi = hi.set(v, p)
+      }
+    },
+    None => {
+      hi = hi.set(v, p)
+    },
+  }
+  return iv with { lo: lo, hi: hi }
+}
+
+fn set_union(a: List[Int], b: List[Int]) -> List[Int] {
+  return a.concat(b.filter(fn(x) => not a.contains(x)))
+}
+
+fn same_set(a: List[Int], b: List[Int]) -> Bool {
+  return a.len() == b.len() and a.all(fn(x) => b.contains(x))
+}
+
+fn intervals(f: KFn) -> Intervals {
+  let code = f.code
+  let blocks = blocks_of(code)
+  let nb = blocks.len()
+  var label_block: Map[Str, Int] = Map {}
+  var b = 0
+  for bl in blocks {
+    let first = code.get_or(bl.first, [])
+    if opc(first) == "label" {
+      label_block = label_block.set(str_at(first, 1), b)
+    }
+    b = b + 1
+  }
+  var succ: List[List[Int]] = []
+  var gen: List[List[Int]] = []
+  var kill: List[List[Int]] = []
+  b = 0
+  for bl in blocks {
+    let last = match bl.second > bl.first {
+      true => code.get_or(bl.second - 1, []),
+      false => [KV.S(s: "label"), KV.Nil],
+    }
+    if TERMINATORS.contains(opc(last)) {
+      var ss: List[Int] = []
+      for t in branch_targets(last) {
+        match label_block.get(t) {
+          Some(x) => {
+            ss = ss.push(x)
+          },
+          None => {},
+        }
+      }
+      succ = succ.push(ss)
+    } else {
+      succ = succ.push(match b + 1 < nb {
+        true => [b + 1],
+        false => [],
+      })
+    }
+    var g: List[Int] = []
+    var k: List[Int] = []
+    for ins in code.slice(bl.first, bl.second) {
+      for u in used_regs(ins) {
+        if not k.contains(u) and not g.contains(u) {
+          g = g.push(u)
+        }
+      }
+      k = set_union(k, defs(ins))
+    }
+    gen = gen.push(g)
+    kill = kill.push(k)
+    b = b + 1
+  }
+  var live_in: List[List[Int]] = []
+  var live_out: List[List[Int]] = []
+  b = 0
+  while b < nb {
+    live_in = live_in.push([])
+    live_out = live_out.push([])
+    b = b + 1
+  }
+  var changed = true
+  while changed {
+    changed = false
+    b = nb - 1
+    while b >= 0 {
+      var out: List[Int] = []
+      for t in succ.get_or(b, []) {
+        out = set_union(out, live_in.get_or(t, []))
+      }
+      let kb = kill.get_or(b, [])
+      let inn = set_union(gen.get_or(b, []), out.filter(fn(x) => not kb.contains(x)))
+      if not same_set(out, live_out.get_or(b, [])) or not same_set(inn, live_in.get_or(b, [])) {
+        live_out = live_out.set(b, out)
+        live_in = live_in.set(b, inn)
+        changed = true
+      }
+      b = b - 1
+    }
+  }
+  // loop depth: every backward branch covers a loop
+  var depth: List[Int] = []
+  var i = 0
+  while i <= code.len() {
+    depth = depth.push(0)
+    i = i + 1
+  }
+  var pos: Map[Str, Int] = Map {}
+  i = 0
+  for ins in code {
+    if opc(ins) == "label" {
+      pos = pos.set(str_at(ins, 1), i)
+    }
+    i = i + 1
+  }
+  var j = 0
+  for ins in code {
+    for t in branch_targets(ins) {
+      match pos.get(t) {
+        Some(p) => {
+          if p <= j {
+            var x = p
+            while x <= j {
+              depth = depth.set(x, depth.get_or(x, 0) + 1)
+              x = x + 1
+            }
+          }
+        },
+        None => {},
+      }
+    }
+    j = j + 1
+  }
+  var weight: Map[Int, Int] = Map {}
+  i = 0
+  for ins in code {
+    let w = pow8(depth.get_or(i, 0))
+    for v in used_regs(ins).concat(defs(ins)) {
+      weight = weight.set(v, weight.get(v).unwrap_or(0) + w)
+    }
+    i = i + 1
+  }
+  var iv = Intervals { lo: Map {}, hi: Map {}, weight: weight, depth: depth }
+  var p = 0
+  while p < f.nparams {
+    iv = ext(iv: iv, v: p, p: -1)
+    p = p + 1
+  }
+  b = 0
+  for bl in blocks {
+    for v in live_in.get_or(b, []).sort() {
+      iv = ext(iv: iv, v: v, p: bl.first)
+    }
+    for v in live_out.get_or(b, []).sort() {
+      iv = ext(iv: iv, v: v, p: bl.second - 1)
+    }
+    var x = bl.first
+    while x < bl.second {
+      let ins = code.get_or(x, [])
+      for u in used_regs(ins) {
+        iv = ext(iv: iv, v: u, p: x)
+      }
+      for d in defs(ins) {
+        iv = ext(iv: iv, v: d, p: x)
+      }
+      x = x + 1
+    }
+    b = b + 1
+  }
+  return iv
+}
+
+/// The first index of a sorted list whose value is greater than `x` (Python's bisect_right).
+fn bisect_right(xs: List[Int], x: Int) -> Int {
+  var lo = 0
+  var hi = xs.len()
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    if x < xs.get_or(mid, 0) {
+      hi = mid
+    } else {
+      lo = mid + 1
+    }
+  }
+  return lo
+}
+
+/// A call strictly inside the interval of v.
+fn crosses(calls: List[Int], iv: Intervals, v: Int) -> Bool {
+  let k = bisect_right(calls, iv.lo.get(v).unwrap_or(0))
+  return k < calls.len() and calls.get_or(k, 0) < iv.hi.get(v).unwrap_or(0)
+}
+
+fn cost(iv: Intervals, u: Int) -> Float {
+  let span = iv.hi.get(u).unwrap_or(0) - iv.lo.get(u).unwrap_or(0) + 1
+  return iv.weight.get(u).unwrap_or(0).to_float() / span.to_float()
+}
+
+/// Sorts vregs by the start, then the end of their intervals (then the vreg itself).
+fn by_interval(iv: Intervals, vs: List[Int]) -> List[Int] {
+  return vs.sort_by(fn(v) => Triple { a: iv.lo.get(v).unwrap_or(0), b: iv.hi.get(v).unwrap_or(0), c: v }.key())
+}
+
+/// A sort key from three Ints of a bounded range (positions and vregs of one function).
+type Triple { a: Int, b: Int, c: Int }
+
+fn key(t: Triple) -> Int {
+  let n = 1000000000
+  return ((t.a + 1) * n + t.b + 1) * n + t.c
+}
+
+/// The interval of the list with the lowest cost (the first one on ties).
+fn cheapest(iv: Intervals, xs: List[Pair[Int, Int]]) -> Pair[Int, Int] {
+  var best = xs.get_or(0, Pair { first: 0, second: 0 })
+  for x in xs {
+    if cost(iv, x.second) < cost(iv, best.second) {
+      best = x
+    }
+  }
+  return best
+}
+
+fn allocate_xmm(f: KFn, iv: Intervals, real_calls: List[Int]) -> Map[Int, Int] {
+  let cands = float_candidates(f, iv.depth).filter(fn(v) => iv.lo.has(v) and not crosses(calls: real_calls, iv: iv, v: v))
+  var free = XMM_REGS
+  var active: List[Pair[Int, Int]] = []
+  var xloc: Map[Int, Int] = Map {}
+  for v in by_interval(iv, cands) {
+    let start = iv.lo.get(v).unwrap_or(0)
+    var still: List[Pair[Int, Int]] = []
+    for a in active {
+      if a.first < start {
+        free = free.push(xloc.get(a.second).unwrap_or(0))
+      } else {
+        still = still.push(a)
+      }
+    }
+    active = still
+    var take = true
+    if free.is_empty() {
+      let w = cheapest(iv, active)
+      if cost(iv, w.second) >= cost(iv, v) {
+        take = false
+      } else {
+        free = free.push(xloc.get(w.second).unwrap_or(0))
+        xloc = xloc.remove(w.second)
+        active = remove_first(active, w)
+      }
+    }
+    if take {
+      xloc = xloc.set(v, free.last().unwrap_or(0))
+      free = free.take(free.len() - 1)
+      active = active.push(Pair { first: iv.hi.get(v).unwrap_or(0), second: v })
+    }
+  }
+  return xloc
+}
+
+fn remove_first(xs: List[Pair[Int, Int]], x: Pair[Int, Int]) -> List[Pair[Int, Int]] {
+  return match xs.index_of(x) {
+    Some(k) => xs.remove_at(k),
+    None => xs,
+  }
+}
+
+pub fn allocate(f: KFn) -> Alloc {
+  let iv = intervals(f)
+  var calls: List[Int] = []
+  var real_calls: List[Int] = []
+  var i = 0
+  for ins in f.code {
+    let o = opc(ins)
+    if not NO_CALL.contains(o) {
+      calls = calls.push(i)
+      if not XMM_SAFE.contains(o) and not is_cold_call(ins) {
+        real_calls = real_calls.push(i)
+      }
+    }
+    i = i + 1
+  }
+  let xloc = allocate_xmm(f: f, iv: iv, real_calls: real_calls)
+  let order = by_interval(iv, iv.lo.keys().filter(fn(v) => not xloc.has(v)))
+  var free_callee = CALLEE_SAVED
+  var free_caller = CALLER_SAVED
+  var active: List[Pair[Int, Int]] = []
+  var loc: Map[Int, Int] = Map {}
+  for v in order {
+    let start = iv.lo.get(v).unwrap_or(0)
+    var still: List[Pair[Int, Int]] = []
+    for a in active {
+      if a.first < start {
+        let rg = loc.get(a.second).unwrap_or(0)
+        if CALLEE_SAVED.contains(rg) {
+          free_callee = free_callee.push(rg)
+        } else {
+          free_caller = free_caller.push(rg)
+        }
+      } else {
+        still = still.push(a)
+      }
+    }
+    active = still
+    let need_callee = crosses(calls: calls, iv: iv, v: v)
+    var rg = -1
+    if not need_callee and not free_caller.is_empty() {
+      rg = free_caller.last().unwrap_or(-1)
+      free_caller = free_caller.take(free_caller.len() - 1)
+    } else if not free_callee.is_empty() {
+      rg = free_callee.last().unwrap_or(-1)
+      free_callee = free_callee.take(free_callee.len() - 1)
+    } else if not free_caller.is_empty() and save_cost(f: f, iv: iv, calls: calls, v: v) < iv.weight.get(v).unwrap_or(0)
+      .to_float() {
+        // caller-saved register, saved and restored around the calls it lives across: cheaper than memory
+        rg = free_caller.last().unwrap_or(-1)
+        free_caller = free_caller.take(free_caller.len() - 1)
+      }
+    var placed = rg >= 0
+    if not placed {
+      // spill the (compatible) interval with the lowest weight per instruction covered
+      let snap = loc
+      let cands = active.filter(fn(a) => not need_callee or CALLEE_SAVED.contains(snap.get(a.second).unwrap_or(-1)))
+      if not cands.is_empty() {
+        let w = cheapest(iv, cands)
+        if cost(iv, w.second) < cost(iv, v) {
+          rg = loc.get(w.second).unwrap_or(-1)
+          loc = loc.remove(w.second)
+          active = remove_first(active, w)
+          placed = true
+        }
+      }
+    }
+    if placed {
+      loc = loc.set(v, rg)
+      active = active.push(Pair { first: iv.hi.get(v).unwrap_or(0), second: v })
+    }
+  }
+  let used = loc.values().filter(fn(x) => CALLEE_SAVED.contains(x)).unique().sort()
+  // caller-saved registers that must survive each call-like instruction
+  var call_saves: Map[Int, List[Int]] = Map {}
+  for e in loc.entries() {
+    if CALLER_SAVED.contains(e.value) and crosses(calls: calls, iv: iv, v: e.key) {
+      let a = bisect_right(calls, iv.lo.get(e.key).unwrap_or(0))
+      let b = bisect_right(calls, iv.hi.get(e.key).unwrap_or(0) - 1)
+      for c in calls.slice(a, b) {
+        let cur = call_saves.get(c).unwrap_or([])
+        if not cur.contains(e.value) {
+          call_saves = call_saves.set(c, cur.push(e.value))
+        }
+      }
+    }
+  }
+  return Alloc { loc: loc, used: used, xloc: xloc, call_saves: call_saves }
+}
+
+fn save_cost(f: KFn, iv: Intervals, calls: List[Int], v: Int) -> Float {
+  let a = bisect_right(calls, iv.lo.get(v).unwrap_or(0))
+  let b = bisect_right(calls, iv.hi.get(v).unwrap_or(0) - 1)
+  var total = 0.0
+  for c in calls.slice(a, b) {
+    let div = match is_cold_call(f.code.get_or(c, [])) {
+      true => 64.0,
+      false => 1.0,
+    }
+    total = total + (2 * pow8(iv.depth.get_or(c, 0))).to_float() / div
+  }
+  return total
+}

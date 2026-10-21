@@ -1,0 +1,81 @@
+// Lowers each program given on the command line (the first argument is the directory of `klar/`) and prints its
+// KIR and data image as one JSON line (used by tests/selfhost.py to compare with klar/native/lower.py).
+use loader.{load_program, load_runtime}
+use lower.{KFn, KV, Lw, lower_program}
+use opt.{inline_calls, optimize}
+use regalloc.{Alloc, allocate}
+use std.json.{Json, json_object, json_text}
+
+fn kv_json(k: KV) -> Json {
+  return match k {
+    KV.I(v) => Json.Int(value: v),
+    KV.S(s) => Json.Text(value: s),
+    KV.L(regs) => Json.Arr(items: regs.map(fn(x) => Json.Int(value: x))),
+    KV.Nil => Json.Null,
+  }
+}
+
+fn fn_json(f: KFn) -> Json {
+  return Json.Arr(items: [
+    Json.Text(value: f.name),
+    Json.Text(value: f.klar_name),
+    Json.Int(value: f.nparams),
+    Json.Int(value: f.nregs),
+    Json.Arr(items: f.code.map(fn(ins) => Json.Arr(items: ins.map(kv_json)))),
+  ])
+}
+
+fn int_map(m: Map[Str, Int]) -> Json {
+  return json_object(m.entries().map(fn(e) => Pair { first: e.key, second: Json.Int(value: e.value) }))
+}
+
+fn int_key_map(m: Map[Int, Int]) -> Json {
+  return json_object(m.entries().map(fn(e) => Pair { first: e.key.to_str(), second: Json.Int(value: e.value) }))
+}
+
+/// A function after inlining and optimization, with its register allocation.
+fn optimized_json(f: KFn, a: Alloc) -> Json {
+  return Json.Arr(items: [
+    Json.Text(value: f.name),
+    Json.Int(value: f.nregs),
+    Json.Int(value: f.labels),
+    Json.Arr(items: f.code.map(fn(ins) => Json.Arr(items: ins.map(kv_json)))),
+    int_key_map(a.loc),
+    Json.Arr(items: a.used.map(fn(x) => Json.Int(value: x))),
+    int_key_map(a.xloc),
+    json_object(a.call_saves.entries().map(fn(e) => Pair { first: e.key.to_str(), second: Json.Arr(items: e.value.sort()
+        .map(fn(x) => Json.Int(value: x))) })),
+  ])
+}
+
+pub fn program_json(w: Lw) -> Json {
+  var optimized: List[Json] = []
+  for f in inline_calls(w.fns) {
+    let o = optimize(f)
+    optimized = optimized.push(optimized_json(o, allocate(o)))
+  }
+  return json_object([
+    Pair { first: "fns", second: Json.Arr(items: w.fns.map(fn_json)) },
+    Pair { first: "data", second: Json.Text(value: w.img.data.hex()) },
+    Pair { first: "syms", second: int_map(w.img.syms) },
+    Pair { first: "abs", second: Json.Arr(items: w.img.abs.map(fn(a) => Json.Arr(items: [Json.Int(value: a.off),
+      Json.Text(value: a.sym), Json.Int(value: a.add)]))) },
+    Pair { first: "bss", second: int_map(w.img.bss) },
+    Pair { first: "bss_size", second: Json.Int(value: w.img.bss_size) },
+    Pair { first: "optimized", second: Json.Arr(items: optimized) },
+  ])
+}
+
+fn main() uses io, fs {
+  let args = cli_args()
+  let lib = args.get_or(0, "klar")
+  for path in args.drop(1) {
+    print(json_text(json_object([Pair { first: "file", second: Json.Text(value: path) }])))
+    let ld = load_runtime(load_program(path, lib))
+    if ld.diags.any(fn(d) => d.severity == "error") {
+      print(json_text(json_object([Pair { first: "error", second: Json.Text(value: "the program has errors") }])))
+    } else {
+      print(json_text(program_json(lower_program(ld, path))))
+    }
+  }
+}

@@ -615,3 +615,28 @@ fn is_space_byte(c: Word) -> Bool {
 fn is_digit_byte(c: Word) -> Bool {
   return c >= 48 and c <= 57
 }
+
+// IEEE-754 bits as a signed 64-bit Int (`Float.to_bits`) and back (`float_from_bits`)
+fn Float_to_bits(f: Float) -> Int {
+  let w = fbits(f)
+  let hi = tag(w_sar(w, 32))
+  let lo = tag(w_and(w, 4294967295))
+  return hi * 4294967296 + lo
+}
+
+fn b_float_from_bits(n: Int, sp: Word) -> Float {
+  if n < 0 - pow2(63) or n >= pow2(64) {
+    let b = sb_new()
+    sb_add_cstr(b, "float_from_bits: ")
+    int_show(b, bits(n))
+    sb_add_cstr(b, " is not a 64-bit pattern")
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  var x = n
+  if x < 0 {
+    x = x + pow2(64)
+  }
+  let hi = untag(x / 4294967296)
+  let lo = untag(x % 4294967296)
+  return ffrom(w_or(w_shl(hi, 32), lo))
+}

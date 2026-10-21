@@ -168,7 +168,7 @@ def allocate_xmm(fn, lo, hi, weight, crosses):
     free = list(XMM_REGS)
     active = []
     xloc = {}
-    for v in sorted(cands, key=lambda v: (lo[v], hi[v])):
+    for v in sorted(cands, key=lambda v: (lo[v], hi[v], v)):   # (ties by vreg: no dependence on set order)
         still = []
         for end, w in active:
             if end < lo[v]:
@@ -211,7 +211,7 @@ def allocate(fn):
     def save_cost(v):
         a, b = bisect_right(calls, lo[v]), bisect_right(calls, hi[v] - 1)
         return sum(2 * 8 ** min(fn.depth[i], 6) / (64 if is_cold_call(fn.code[i]) else 1) for i in calls[a:b])
-    order = sorted((v for v in lo if v not in xloc), key=lambda v: (lo[v], hi[v]))
+    order = sorted((v for v in lo if v not in xloc), key=lambda v: (lo[v], hi[v], v))
     free_callee = list(CALLEE_SAVED)
     free_caller = list(CALLER_SAVED)
     active = []                    # (hi, v)

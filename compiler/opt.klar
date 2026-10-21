@@ -1,0 +1,883 @@
+// The KIR optimizer, written in Klar (self-hosting, stage 4c). Mirrors klar/native/opt.py pass for pass:
+//   0. coalescing of `X t, ...; mov v, t` into `X v, ...`;
+//   1. block-local forward folding (constants into immediates, `x + c` into displacements, copy propagation,
+//      no-op retain/release of small Ints);
+//   2. compare-and-branch fusion;
+//   3. dead-code elimination (unused pure instructions, unreachable blocks);
+// and the inlining of small frame-less functions (runtime accessors) into their callers.
+use lower.{Ins, KFn, KV}
+
+// ---- instructions -------------------------------------------------------------------------------------------
+
+fn opc(ins: Ins) -> Str {
+  return match ins.get(0) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+}
+
+fn int_at(ins: Ins, k: Int) -> Int {
+  return match ins.get(k) {
+    Some(KV.I(v)) => v,
+    _ => -1,
+  }
+}
+
+fn str_at(ins: Ins, k: Int) -> Str {
+  return match ins.get(k) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+}
+
+fn list_at(ins: Ins, k: Int) -> List[Int] {
+  return match ins.get(k) {
+    Some(KV.L(xs)) => xs,
+    _ => [],
+  }
+}
+
+fn is_nil(ins: Ins, k: Int) -> Bool {
+  return match ins.get(k) {
+    Some(KV.Nil) => true,
+    None => true,
+    _ => false,
+  }
+}
+
+fn op(s: Str) -> KV {
+  return KV.S(s: s)
+}
+
+fn r(v: Int) -> KV {
+  return KV.I(v: v)
+}
+
+/// The instruction with field `k` replaced.
+fn put(ins: Ins, k: Int, v: KV) -> Ins {
+  return ins.set(k, v)
+}
+
+const PURE: List[Str] = ["const", "fp", "mov", "addr", "bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "i2f", "f2i", "fun",
+  "fpow", "load", "load8", "load32"]
+
+/// Instructions that never call out of line (so caller-saved registers survive them).
+pub const NO_CALL: List[Str] = ["const", "fp", "mov", "addr", "bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "i2f",
+  "f2i", "fun", "fpow", "load", "load8", "load32", "store", "store8", "store32", "retain", "label", "jmp", "br", "brc", "brci",
+  "brti", "fbr", "ret", "leave", "site"]
+
+pub const TERMINATORS: List[Str] = ["jmp", "br", "ret", "brc", "brci", "brti", "ibr", "ibri", "fbr"]
+
+const COMMUTATIVE: List[Str] = ["add", "and", "or", "xor", "mul"]
+
+const BINI_OPS: List[Str] = ["add", "sub", "and", "or", "xor", "shl", "shr", "sar", "mul"]
+
+fn swap_cc(cc: Str) -> Str {
+  return match cc {
+    "lt" => "gt",
+    "gt" => "lt",
+    "le" => "ge",
+    "ge" => "le",
+    "ult" => "ugt",
+    "ugt" => "ult",
+    "ule" => "uge",
+    "uge" => "ule",
+    _ => cc,
+  }
+}
+
+fn fits(v: Int) -> Bool {
+  return v >= -2147483648 and v < 2147483648
+}
+
+const MASK64: Int = 18446744073709551615
+
+/// The 64-bit two's-complement value of an Int (as a signed number).
+fn wrap(v: Int) -> Int {
+  let u = v.bit_and(MASK64)
+  if u >= 9223372036854775808 {
+    return u - 18446744073709551616
+  }
+  return u
+}
+
+/// The vregs an instruction defines.
+pub fn defs(ins: Ins) -> List[Int] {
+  let o = opc(ins)
+  if ["const", "fp", "mov", "addr", "i2f", "f2i", "ineg", "fpow", "load", "load8", "load32"].contains(o) {
+    return [int_at(ins, 1)]
+  }
+  if ["bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "fun", "iop", "iopi", "icmp", "icmpi"].contains(o) {
+    return [int_at(ins, 2)]
+  }
+  if o == "call" or o == "callind" {
+    return match is_nil(ins, 1) {
+      true => [],
+      false => [int_at(ins, 1)],
+    }
+  }
+  return []
+}
+
+/// The vregs an instruction uses.
+pub fn used_regs(ins: Ins) -> List[Int] {
+  let o = opc(ins)
+  if ["mov", "i2f", "f2i", "ineg"].contains(o) {
+    return [int_at(ins, 2)]
+  }
+  if ["bin", "cmp", "fbin", "fcmp", "iop", "icmp"].contains(o) {
+    return [int_at(ins, 3), int_at(ins, 4)]
+  }
+  if ["bini", "bink", "cmpi", "fun", "iopi", "icmpi"].contains(o) {
+    return [int_at(ins, 3)]
+  }
+  if o == "fpow" {
+    return [int_at(ins, 2), int_at(ins, 3)]
+  }
+  if ["load", "load8", "load32"].contains(o) {
+    return [int_at(ins, 2)]
+  }
+  if ["store", "store8", "store32"].contains(o) {
+    return [int_at(ins, 1), int_at(ins, 3)]
+  }
+  if o == "call" {
+    return list_at(ins, 3)
+  }
+  if o == "callind" {
+    return [int_at(ins, 2)].concat(list_at(ins, 3))
+  }
+  if o == "retain" or o == "release" {
+    return [int_at(ins, 2)]
+  }
+  if o == "br" {
+    return [int_at(ins, 1)]
+  }
+  if o == "brc" or o == "ibr" or o == "fbr" {
+    return [int_at(ins, 2), int_at(ins, 3)]
+  }
+  if o == "brci" or o == "brti" or o == "ibri" {
+    return [int_at(ins, 2)]
+  }
+  if o == "ret" {
+    return match is_nil(ins, 1) {
+      true => [],
+      false => [int_at(ins, 1)],
+    }
+  }
+  return []
+}
+
+fn mapped(m: Map[Int, Int], v: Int) -> Int {
+  return m.get(v).unwrap_or(v)
+}
+
+fn ren(m: Map[Int, Int], ins: Ins, k: Int) -> Ins {
+  return put(ins: ins, k: k, v: r(mapped(m, int_at(ins, k))))
+}
+
+/// The instruction with every used vreg v replaced by m[v] (when m has it).
+fn map_uses(ins: Ins, m: Map[Int, Int]) -> Ins {
+  let o = opc(ins)
+  if ["mov", "i2f", "f2i", "ineg"].contains(o) {
+    return ren(m: m, ins: ins, k: 2)
+  }
+  if ["bin", "cmp", "fbin", "fcmp", "iop", "icmp"].contains(o) {
+    return ren(m: m, ins: ren(m: m, ins: ins, k: 3), k: 4)
+  }
+  if ["bini", "bink", "cmpi", "fun", "iopi", "icmpi"].contains(o) {
+    return ren(m: m, ins: ins, k: 3)
+  }
+  if o == "fpow" {
+    return ren(m: m, ins: ren(m: m, ins: ins, k: 2), k: 3)
+  }
+  if ["load", "load8", "load32"].contains(o) {
+    return ren(m: m, ins: ins, k: 2)
+  }
+  if ["store", "store8", "store32"].contains(o) {
+    return ren(m: m, ins: ren(m: m, ins: ins, k: 1), k: 3)
+  }
+  if o == "call" {
+    return put(ins: ins, k: 3, v: KV.L(regs: list_at(ins, 3).map(fn(v) => mapped(m, v))))
+  }
+  if o == "callind" {
+    return put(ins: ren(m: m, ins: ins, k: 2), k: 3, v: KV.L(regs: list_at(ins, 3).map(fn(v) => mapped(m, v))))
+  }
+  if o == "retain" or o == "release" {
+    return ren(m: m, ins: ins, k: 2)
+  }
+  if o == "br" {
+    return ren(m: m, ins: ins, k: 1)
+  }
+  if o == "brc" or o == "ibr" or o == "fbr" {
+    return ren(m: m, ins: ren(m: m, ins: ins, k: 2), k: 3)
+  }
+  if o == "brci" or o == "brti" or o == "ibri" {
+    return ren(m: m, ins: ins, k: 2)
+  }
+  if o == "ret" and not is_nil(ins, 1) {
+    return ren(m: m, ins: ins, k: 1)
+  }
+  return ins
+}
+
+pub fn branch_targets(ins: Ins) -> List[Str] {
+  let o = opc(ins)
+  if o == "jmp" {
+    return [str_at(ins, 1)]
+  }
+  if o == "br" {
+    return [str_at(ins, 2), str_at(ins, 3)]
+  }
+  if ["brc", "brci", "brti", "ibr", "ibri", "fbr"].contains(o) {
+    return [str_at(ins, 4), str_at(ins, 5)]
+  }
+  return []
+}
+
+// ---- pass 1: block-local folding --------------------------------------------------------------------------------
+
+/// What is known about a vreg: a constant, another vreg plus a constant, a copy of another vreg, or a small Int.
+enum Known {
+  K(imm: Int),
+  AddC(x: Int, c: Int),
+  Copy(src: Int),
+  Small,
+}
+
+fn const_of(known: Map[Int, Known], v: Int) -> Option[Int] {
+  return match known.get(v) {
+    Some(Known.K(imm)) => Some(imm),
+    _ => None,
+  }
+}
+
+fn is_small(known: Map[Int, Known], v: Int) -> Bool {
+  return match known.get(v) {
+    Some(Known.Small) => true,
+    Some(Known.K(imm)) => imm.bit_and(1) == 1,
+    _ => false,
+  }
+}
+
+fn kill(known: Map[Int, Known], d: Int) -> Map[Int, Known] {
+  return known.remove(d).filter(fn(_, k) => match k {
+    Known.AddC(x, _) => x != d,
+    Known.Copy(s) => s != d,
+    _ => true,
+  })
+}
+
+fn copies(known: Map[Int, Known]) -> Map[Int, Int] {
+  var m: Map[Int, Int] = Map {}
+  for e in known.entries() {
+    match e.value {
+      Known.Copy(s) => {
+        m = m.set(e.key, s)
+      },
+      _ => {},
+    }
+  }
+  return m
+}
+
+fn odd(v: Int) -> Bool {
+  return v.bit_and(1) == 1
+}
+
+fn fold(code: List[Ins]) -> List[Ins] {
+  var out: List[Ins] = []
+  var known: Map[Int, Known] = Map {}
+  for ins0 in code {
+    if opc(ins0) == "label" {
+      known = Map {}
+      out = out.push(ins0)
+      continue
+    }
+    var ins = map_uses(ins0, copies(known))
+    let o = opc(ins)
+    var skip = false
+    if o == "mov" {
+      match const_of(known, int_at(ins, 2)) {
+        Some(c) => {
+          ins = [op("const"), r(int_at(ins, 1)), r(c)]
+        },
+        None => {
+          if int_at(ins, 1) == int_at(ins, 2) {
+            skip = true
+          }
+        },
+      }
+    } else if o == "bin" {
+      let bop = str_at(ins, 1)
+      let d = int_at(ins, 2)
+      let x = int_at(ins, 3)
+      let y = int_at(ins, 4)
+      let cx = const_of(known, x)
+      let cy = const_of(known, y)
+      if cx != None and cy != None and BINI_OPS.contains(bop) {
+        ins = [op("const"), r(d), r(fold_bin(o: bop, a: cx.unwrap_or(0), b: cy.unwrap_or(0)))]
+      } else if cy != None and BINI_OPS.contains(bop) and fits(cy.unwrap_or(0)) {
+        ins = [op("bini"), op(bop), r(d), r(x), r(cy.unwrap_or(0))]
+      } else if cy != None and ["udiv", "urem", "sdiv", "srem"].contains(bop) and cy.unwrap_or(0) > 0 and cy.unwrap_or(0) <
+        9223372036854775808 {
+        ins = [op("bink"), op(bop), r(d), r(x), r(cy.unwrap_or(0))]
+      } else if cx != None and COMMUTATIVE.contains(bop) and fits(cx.unwrap_or(0)) {
+        ins = [op("bini"), op(bop), r(d), r(y), r(cx.unwrap_or(0))]
+      }
+    } else if o == "cmp" {
+      let cc = str_at(ins, 1)
+      let d = int_at(ins, 2)
+      let x = int_at(ins, 3)
+      let y = int_at(ins, 4)
+      let cx = const_of(known, x)
+      let cy = const_of(known, y)
+      if cx != None and cy != None {
+        ins = [op("const"), r(d), r(bool_int(compare_ints(cc: cc, a: cx.unwrap_or(0), b: cy.unwrap_or(0))))]
+      } else if cy != None and fits(cy.unwrap_or(0)) {
+        ins = [op("cmpi"), op(cc), r(d), r(x), r(cy.unwrap_or(0))]
+      } else if cx != None and fits(cx.unwrap_or(0)) {
+        ins = [op("cmpi"), op(swap_cc(cc)), r(d), r(y), r(cx.unwrap_or(0))]
+      }
+    } else if o == "load" or o == "load8" or o == "load32" {
+      match known.get(int_at(ins, 2)) {
+        Some(Known.AddC(x, c)) => {
+          if fits(int_at(ins, 3) + c) {
+            ins = [op(o), r(int_at(ins, 1)), r(x), r(int_at(ins, 3) + c)]
+          }
+        },
+        _ => {},
+      }
+    } else if o == "store" or o == "store8" or o == "store32" {
+      match known.get(int_at(ins, 1)) {
+        Some(Known.AddC(x, c)) => {
+          if fits(int_at(ins, 2) + c) {
+            ins = [op(o), r(x), r(int_at(ins, 2) + c), r(int_at(ins, 3))]
+          }
+        },
+        _ => {},
+      }
+    } else if o == "iop" {
+      let iop = str_at(ins, 1)
+      let d = int_at(ins, 2)
+      let x = int_at(ins, 3)
+      let y = int_at(ins, 4)
+      let span = ins.get_or(5, KV.Nil)
+      let cy = const_of(known, y)
+      let cx = const_of(known, x)
+      let cyv = cy.unwrap_or(0)
+      let cxv = cx.unwrap_or(0)
+      if cy != None and odd(cyv) and fits(cyv) and not ((iop == "div" or iop == "mod") and cyv == 1) {
+        ins = [op("iopi"), op(iop), r(d), r(x), r(cyv), span]
+      } else if cx != None and odd(cxv) and fits(cxv) and (iop == "add" or iop == "mul") {
+        ins = [op("iopi"), op(iop), r(d), r(y), r(cxv), span]
+      }
+    } else if o == "fcmp" {
+      let cx = const_of(known, int_at(ins, 3))
+      let cy = const_of(known, int_at(ins, 4))
+      if cx != None and cy != None {
+        let fx = float_from_bits(cx.unwrap_or(0))
+        let fy = float_from_bits(cy.unwrap_or(0))
+        ins = [op("const"), r(int_at(ins, 2)), r(bool_int(compare_floats(cc: str_at(ins, 1), a: fx, b: fy)))]
+      }
+    } else if o == "br" {
+      match const_of(known, int_at(ins, 1)) {
+        Some(c) => {
+          ins = match c != 0 {
+            true => [op("jmp"), ins.get_or(2, KV.Nil)],
+            false => [op("jmp"), ins.get_or(3, KV.Nil)],
+          }
+        },
+        None => {},
+      }
+    } else if o == "icmp" {
+      let cc = str_at(ins, 1)
+      let d = int_at(ins, 2)
+      let x = int_at(ins, 3)
+      let y = int_at(ins, 4)
+      let cx = const_of(known, x)
+      let cy = const_of(known, y)
+      let cxv = cx.unwrap_or(0)
+      let cyv = cy.unwrap_or(0)
+      if cx != None and cy != None and odd(cxv) and odd(cyv) {
+        ins = [op("const"), r(d), r(bool_int(compare_ints(cc: cc, a: cxv, b: cyv)))]
+      } else if cy != None and odd(cyv) and fits(cyv) {
+        ins = [op("icmpi"), op(cc), r(d), r(x), r(cyv)]
+      } else if cx != None and odd(cxv) and fits(cxv) {
+        ins = [op("icmpi"), op(swap_cc(cc)), r(d), r(y), r(cxv)]
+      }
+    } else if (o == "retain" or o == "release") and str_at(ins, 1) == "int" and is_small(known, int_at(ins, 2)) {
+      skip = true
+    }
+    if not skip {
+      // record what this instruction defines
+      for d in defs(ins) {
+        known = kill(known, d)
+      }
+      let o2 = opc(ins)
+      if o2 == "const" {
+        known = known.set(int_at(ins, 1), Known.K(imm: int_at(ins, 2)))
+      } else if o2 == "bini" and (str_at(ins, 1) == "add" or str_at(ins, 1) == "sub") and int_at(ins, 3) != int_at(ins, 2) {
+        let c = match str_at(ins, 1) == "add" {
+          true => int_at(ins, 4),
+          false => 0 - int_at(ins, 4),
+        }
+        known = known.set(int_at(ins, 2), Known.AddC(x: int_at(ins, 3), c: c))
+      } else if o2 == "mov" and int_at(ins, 1) != int_at(ins, 2) {
+        known = known.set(int_at(ins, 1), Known.Copy(src: int_at(ins, 2)))
+      } else if o2 == "iopi" and str_at(ins, 1) == "mod" {
+        known = known.set(int_at(ins, 2), Known.Small)
+      }
+      out = out.push(ins)
+      if TERMINATORS.contains(o2) {
+        known = Map {}
+      }
+    }
+  }
+  return out
+}
+
+fn bool_int(b: Bool) -> Int {
+  return match b {
+    true => 1,
+    false => 0,
+  }
+}
+
+fn compare_ints(cc: Str, a: Int, b: Int) -> Bool {
+  var x = a
+  var y = b
+  var c = cc
+  if cc.starts_with("u") {
+    x = a.bit_and(MASK64)
+    y = b.bit_and(MASK64)
+    c = cc.slice(1, cc.len())
+  }
+  return match c {
+    "eq" => x == y,
+    "ne" => x != y,
+    "lt" => x < y,
+    "le" => x <= y,
+    "gt" => x > y,
+    _ => x >= y,
+  }
+}
+
+fn compare_floats(cc: Str, a: Float, b: Float) -> Bool {
+  return match cc {
+    "eq" => a == b,
+    "ne" => a != b,
+    "lt" => a < b,
+    "le" => a <= b,
+    "gt" => a > b,
+    _ => a >= b,
+  }
+}
+
+fn fold_bin(o: Str, a: Int, b: Int) -> Int {
+  return match o {
+    "add" => wrap(a + b),
+    "sub" => wrap(a - b),
+    "mul" => wrap(a * b),
+    "and" => wrap(a.bit_and(b)),
+    "or" => wrap(a.bit_or(b)),
+    "xor" => wrap(a.bit_xor(b)),
+    "shl" => wrap(a.shift_left(b.bit_and(63))),
+    "shr" => wrap(a.bit_and(MASK64).shift_right(b.bit_and(63))),
+    "sar" => wrap(a.shift_right(b.bit_and(63))),
+    _ => fail("fold_bin: {o}"),
+  }
+}
+
+// ---- pass 2: compare + branch fusion ------------------------------------------------------------------------------
+
+fn use_counts(code: List[Ins]) -> Map[Int, Int] {
+  var n: Map[Int, Int] = Map {}
+  for ins in code {
+    for u in used_regs(ins) {
+      n = n.set(u, n.get(u).unwrap_or(0) + 1)
+    }
+  }
+  return n
+}
+
+fn fused_kind(o: Str) -> Str {
+  return match o {
+    "cmp" => "brc",
+    "cmpi" => "brci",
+    "icmp" => "ibr",
+    "icmpi" => "ibri",
+    _ => "fbr",
+  }
+}
+
+/// A fresh label of a function (Python: `fn.label(hint)`).
+fn fn_label(f: KFn, hint: Str) -> Pair[KFn, Str] {
+  let n = f.labels + 1
+  return Pair { first: f with { labels: n }, second: ".{f.name}.{hint}{n}" }
+}
+
+fn fuse(f0: KFn, code: List[Ins]) -> Pair[KFn, List[Ins]] {
+  var f = f0
+  let n = use_counts(code)
+  var out: List[Ins] = []
+  var tail: List[Ins] = []
+  var i = 0
+  while i < code.len() {
+    let ins = code.get_or(i, [])
+    let o = opc(ins)
+    let nxt = code.get_or(i + 1, [])
+    if o == "bini" and str_at(ins, 1) == "and" and int_at(ins, 4) > 0 and int_at(ins, 4) < 256 and
+      n.get(int_at(ins, 2)).unwrap_or(0) == 1 and i + 1 < code.len() and opc(nxt) == "br" and int_at(nxt, 1) ==
+      int_at(ins, 2) {
+      out = out.push([op("brti"), op("ne"), r(int_at(ins, 3)), r(int_at(ins, 4)), nxt.get_or(2, KV.Nil), nxt.get_or(3,
+        KV.Nil)])
+      i = i + 2
+      continue
+    }
+    if ["cmp", "cmpi", "icmp", "icmpi", "fcmp"].contains(o) and n.get(int_at(ins, 2)).unwrap_or(0) == 1 and
+      not (o == "fcmp" and (str_at(ins, 1) == "eq" or str_at(ins, 1) == "ne")) {
+      let d = int_at(ins, 2)
+      let operands = used_regs(ins)
+      var j = i + 1
+      var mid: List[Ins] = []
+      var releases: List[Ins] = []
+      var good = true
+      var scanning = true
+      while scanning and j < code.len() {
+        let m = code.get_or(j, [])
+        if opc(m) == "br" {
+          scanning = false
+        } else {
+          if opc(m) == "release" {
+            releases = releases.push(m)
+          } else if PURE.contains(opc(m)) and not used_regs(m).contains(d) and not defs(m).any(fn(x) => operands.contains(x) or
+              x == d) {
+              mid = mid.push(m)
+            } else {
+              good = false
+              scanning = false
+            }
+          if scanning {
+            j = j + 1
+          }
+        }
+      }
+      let brk = code.get_or(j, [])
+      if good and j < code.len() and int_at(brk, 1) == d {
+        let lt = brk.get_or(2, KV.Nil)
+        let lf = brk.get_or(3, KV.Nil)
+        let kind = fused_kind(o)
+        out = out.concat(mid)
+        if not releases.is_empty() {
+          let a = fn_label(f, "rt")
+          let b = fn_label(a.first, "rf")
+          f = b.first
+          out = out.push([op(kind), ins.get_or(1, KV.Nil), ins.get_or(3, KV.Nil), ins.get_or(4, KV.Nil), op(a.second),
+            op(b.second)])
+          out = out.push([op("label"), op(a.second)]).concat(releases).push([op("jmp"), lt])
+          tail = tail.push([op("label"), op(b.second)]).concat(releases).push([op("jmp"), lf])
+        } else {
+          out = out.push([op(kind), ins.get_or(1, KV.Nil), ins.get_or(3, KV.Nil), ins.get_or(4, KV.Nil), lt, lf])
+        }
+        i = j + 1
+        continue
+      }
+    }
+    out = out.push(ins)
+    i = i + 1
+  }
+  return Pair { first: f, second: out.concat(tail) }
+}
+
+// ---- pass 3: dead code --------------------------------------------------------------------------------------------
+
+/// Drops basic blocks that cannot be reached from the function entry.
+fn unreachable(code: List[Ins]) -> List[Ins] {
+  var starts = [0]
+  var i = 1
+  while i < code.len() {
+    if opc(code.get_or(i, [])) == "label" or TERMINATORS.contains(opc(code.get_or(i - 1, []))) {
+      starts = starts.push(i)
+    }
+    i = i + 1
+  }
+  starts = starts.unique().sort()
+  var ranges: List[Pair[Int, Int]] = []
+  var k = 0
+  for s in starts {
+    ranges = ranges.push(Pair { first: s, second: starts.get_or(k + 1, code.len()) })
+    k = k + 1
+  }
+  var at_label: Map[Str, Int] = Map {}
+  k = 0
+  for rg in ranges {
+    let first = code.get_or(rg.first, [])
+    if rg.first < code.len() and opc(first) == "label" {
+      at_label = at_label.set(str_at(first, 1), k)
+    }
+    k = k + 1
+  }
+  var seen: Map[Int, Bool] = Map {}
+  var work = [0]
+  while not work.is_empty() {
+    let b = work.last().unwrap_or(0)
+    work = work.take(work.len() - 1)
+    if not seen.has(b) and b < ranges.len() {
+      seen = seen.set(b, true)
+      let rg = ranges.get_or(b, Pair { first: 0, second: 0 })
+      let last = match rg.second > rg.first {
+        true => Some(code.get_or(rg.second - 1, [])),
+        false => None,
+      }
+      match last {
+        None => {
+          work = work.push(b + 1)
+        },
+        Some(l) => {
+          if not TERMINATORS.contains(opc(l)) {
+            work = work.push(b + 1)
+          }
+          for t in branch_targets(l) {
+            match at_label.get(t) {
+              Some(x) => {
+                work = work.push(x)
+              },
+              None => {},
+            }
+          }
+        },
+      }
+    }
+  }
+  var out: List[Ins] = []
+  k = 0
+  for rg in ranges {
+    if seen.has(k) {
+      out = out.concat(code.slice(rg.first, rg.second))
+    }
+    k = k + 1
+  }
+  return out
+}
+
+fn dce(code0: List[Ins]) -> List[Ins] {
+  var code = code0
+  while true {
+    let n = use_counts(code)
+    let kept = code.filter(fn(ins) => not (PURE.contains(opc(ins)) and defs(ins).all(fn(d) => n.get(d).unwrap_or(0) == 0)))
+    let out = match kept.is_empty() {
+      true => kept,
+      false => unreachable(kept),
+    }
+    if out.len() == code.len() {
+      return out
+    }
+    code = out
+  }
+  return code
+}
+
+// ---- pass 0: coalescing -------------------------------------------------------------------------------------------
+
+const COALESCE: List[Str] = ["const", "addr", "bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "i2f", "f2i", "fun", "fpow",
+  "load", "load8", "load32", "iop", "iopi", "icmp", "icmpi", "ineg", "call", "callind"]
+
+fn set_def(ins: Ins, v: Int) -> Ins {
+  let o = opc(ins)
+  if ["const", "addr", "i2f", "f2i", "ineg", "fpow", "load", "load8", "load32", "call", "callind"].contains(o) {
+    return put(ins: ins, k: 1, v: r(v))
+  }
+  return put(ins: ins, k: 2, v: r(v))
+}
+
+fn coalesce(code: List[Ins]) -> List[Ins] {
+  let n = use_counts(code)
+  var out: List[Ins] = []
+  var i = 0
+  while i < code.len() {
+    let ins = code.get_or(i, [])
+    let nxt = code.get(i + 1)
+    var merged = false
+    match nxt {
+      Some(m) => {
+        if opc(m) == "mov" and COALESCE.contains(opc(ins)) {
+          let ds = defs(ins)
+          if not ds.is_empty() and ds.get_or(0, -1) == int_at(m, 2) and n.get(int_at(m, 2)).unwrap_or(0) == 1 and
+            int_at(m, 1) != int_at(m, 2) {
+            out = out.push(set_def(ins, int_at(m, 1)))
+            i = i + 2
+            merged = true
+          }
+        }
+      },
+      None => {},
+    }
+    if not merged {
+      out = out.push(ins)
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/// All the passes, in order.
+pub fn optimize(f: KFn) -> KFn {
+  let code = dce(fold(coalesce(f.code)))
+  let fz = fuse(f, code)
+  return fz.first with { code: dce(fz.second) }
+}
+
+// ---- inlining of small runtime helpers ----------------------------------------------------------------------------
+
+const INLINE_MAX: Int = 24
+
+fn inlinable(f: KFn) -> Bool {
+  if f.code.len() > INLINE_MAX or f.code.is_empty() {
+    return false
+  }
+  for ins in f.code {
+    let o = opc(ins)
+    if o == "enter" or o == "leave" or o == "site" {
+      return false
+    }
+    if o == "call" and str_at(ins, 2) == f.name {
+      return false
+    }
+  }
+  return true
+}
+
+fn inline_target(ins: Ins, small: Map[Str, Int], f: KFn, fns: List[KFn]) -> Option[KFn] {
+  if opc(ins) != "call" {
+    return None
+  }
+  let target = str_at(ins, 2)
+  if target == f.name {
+    return None
+  }
+  return match small.get(target) {
+    Some(k) => {
+      let callee = fns.get_or(k, f)
+      return match list_at(ins, 3).len() == callee.nparams {
+        true => Some(callee),
+        false => None,
+      }
+    },
+    None => None,
+  }
+}
+
+/// Replaces calls of small frame-less functions (runtime accessors like list_at) by their bodies; the callee's vregs
+/// and labels are renamed into the caller.
+pub fn inline_calls(fns0: List[KFn]) -> List[KFn] {
+  var fns = fns0
+  var round = 0
+  while round < 2 {
+    var small: Map[Str, Int] = Map {}
+    var k = 0
+    for f in fns {
+      if inlinable(f) {
+        small = small.set(f.name, k)
+      }
+      k = k + 1
+    }
+    var changed = false
+    var fi = 0
+    while fi < fns.len() {
+      var f = fns.get_or(fi, fns.get_or(0, KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [], labels: 0 }))
+      let snap = fns
+      let small_now = small
+      let fcur = f
+      if f.code.any(fn(ins) => inline_target(ins: ins, small: small_now, f: fcur, fns: snap) != None) {
+        var out: List[Ins] = []
+        for ins in f.code {
+          match inline_target(ins: ins, small: small, f: f, fns: fns) {
+            None => {
+              out = out.push(ins)
+            },
+            Some(callee) => {
+              changed = true
+              let base = f.nregs
+              f = f with { nregs: f.nregs + callee.nregs, labels: f.labels + 1 }
+              let tag = "{f.name}.in{f.labels}."
+              let end = "." + tag + "end"
+              var i = 0
+              for a in list_at(ins, 3) {
+                out = out.push([op("mov"), r(base + i), r(a)])
+                i = i + 1
+              }
+              let body = callee.code
+              var kk = 0
+              for c in body {
+                if opc(c) == "ret" {
+                  if not is_nil(ins, 1) and not is_nil(c, 1) {
+                    out = out.push([op("mov"), r(int_at(ins, 1)), r(base + int_at(c, 1))])
+                  }
+                  if kk != body.len() - 1 {
+                    out = out.push([op("jmp"), op(end)])
+                  }
+                } else {
+                  var x = rename(ins: c, base: base, tag: tag)
+                  if opc(x) == "call" and not small.has(str_at(x, 2)) and not str_at(x, 2).starts_with("cold:") {
+                    // a call inside an inlined runtime accessor is its slow path (bignum, growth, ...)
+                    x = put(ins: x, k: 2, v: op("cold:" + str_at(x, 2)))
+                  }
+                  out = out.push(x)
+                }
+                kk = kk + 1
+              }
+              out = out.push([op("label"), op(end)])
+            },
+          }
+        }
+        fns = fns.set(fi, f with { code: out })
+      }
+      fi = fi + 1
+    }
+    if not changed {
+      return fns
+    }
+    round = round + 1
+  }
+  return fns
+}
+
+fn lab(tag: Str, name: Str) -> Str {
+  var n = name
+  while n.starts_with(".") {
+    n = n.slice(1, n.len())
+  }
+  return "." + tag + n
+}
+
+fn shift_regs(base: Int, ins: Ins) -> Map[Int, Int] {
+  var m: Map[Int, Int] = Map {}
+  for u in used_regs(ins) {
+    m = m.set(u, base + u)
+  }
+  return m
+}
+
+fn rename(ins: Ins, base: Int, tag: Str) -> Ins {
+  let o = opc(ins)
+  if o == "label" or o == "jmp" {
+    return [op(o), op(lab(tag: tag, name: str_at(ins, 1)))]
+  }
+  var x = map_uses(ins, shift_regs(base, ins))
+  // rename the defined register(s)
+  if ["const", "fp", "mov", "addr", "i2f", "f2i", "ineg", "fpow", "load", "load8", "load32"].contains(o) {
+    x = put(ins: x, k: 1, v: r(base + int_at(x, 1)))
+  } else if ["bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "fun", "iop", "iopi", "icmp", "icmpi"].contains(o) {
+    x = put(ins: x, k: 2, v: r(base + int_at(x, 2)))
+  } else if o == "call" or o == "callind" {
+    if not is_nil(x, 1) {
+      x = put(ins: x, k: 1, v: r(base + int_at(x, 1)))
+    }
+  }
+  if o == "br" {
+    x = put(ins: put(ins: x, k: 2, v: op(lab(tag: tag, name: str_at(x, 2)))), k: 3, v: op(lab(tag: tag, name: str_at(x, 3))))
+  } else if ["brc", "brci", "brti", "ibr", "ibri", "fbr"].contains(o) {
+    x = put(ins: put(ins: x, k: 4, v: op(lab(tag: tag, name: str_at(x, 4)))), k: 5, v: op(lab(tag: tag, name: str_at(x, 5))))
+  }
+  return x
+}

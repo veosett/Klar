@@ -50,10 +50,15 @@ fn param_json(p: Param) -> Json {
     value: opt_type(p.ty))])
 }
 
+/// A Float by its IEEE-754 bits (so that -0.0 and 0.0 differ).
+fn float_json(x: Float) -> Json {
+  return Json.Arr(items: [Json.Text(value: "float"), Json.Int(value: x.to_bits())])
+}
+
 fn lit_json(v: LitValue) -> Json {
   return match v {
     LitValue.IntV(n) => Json.Int(value: n),
-    LitValue.FloatV(x) => Json.Num(value: x),
+    LitValue.FloatV(x) => float_json(x),
     LitValue.StrV(s) => Json.Text(value: s),
     LitValue.BoolV(b) => Json.Bool(value: b),
   }
@@ -100,7 +105,7 @@ fn exprs(es: List[Expr]) -> Json {
 fn expr_json(e: Expr) -> Json {
   return match e {
     Expr.IntLit(s, v) => node(kind: "IntLit", span: s, fields: [field(name: "value", value: Json.Int(value: v))]),
-    Expr.FloatLit(s, v) => node(kind: "FloatLit", span: s, fields: [field(name: "value", value: Json.Num(value: v))]),
+    Expr.FloatLit(s, v) => node(kind: "FloatLit", span: s, fields: [field(name: "value", value: float_json(v))]),
     Expr.StrLit(s, parts) => node(kind: "StrLit", span: s, fields: [field(name: "parts",
       value: Json.Arr(items: parts.map(fn(p) => match p {
         StrPiece.Text(v) => Json.Text(value: v),

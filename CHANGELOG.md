@@ -22,11 +22,24 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - Self-hosting, stage 4b: the safety analysis in Klar (`compiler/safety.klar`: E0701–E0705, E0215 — sign analysis,
   facts from conditions, `var` summaries, contracts, unconditional recursion). The Klar checker now records the static
   type of every expression and how each method call was resolved, and `tests/selfhost.py` compares those too.
+- Self-hosting, stage 4c: the native backend's middle in Klar — `compiler/lower.klar` (typed AST -> KIR with
+  monomorphization, reference counting, closures, contracts, the data image), `compiler/opt.klar` (coalescing,
+  folding, compare-and-branch fusion, dead code, inlining) and `compiler/regalloc.klar` (linear scan with GPR and XMM
+  classes). `tests/selfhost.py` compares the KIR, the data image (byte for byte) and the register allocation of
+  every program with a `main` — 23 programs, ~790 000 KIR instructions, the Klar compiler itself included.
+- `Float.to_bits()` and `float_from_bits(bits)`: the IEEE-754 bits of a Float as a signed 64-bit Int, and back
+  (the Klar backend needs them for float constants).
+- The Klar loader loads the runtime (`klar/rt`, one module of several files); the Klar checker records what the
+  backend needs (the type arguments of every call, the element type of every `for`).
 - The Klar parser reports the same hints as the Python one, and the parser comparison now covers every `*_span`.
 
 ### Fixed
 - Native: constants holding lists or maps corrupted the heap (they were built before the runtime's own constants
   were initialised); the runtime's constants are now initialised first.
+- Klar parser: `-0.0` was folded to `0.0`; the parser comparison now compares Floats by their bits.
+- Register allocation no longer depends on the iteration order of Python sets when two intervals are equal (ties
+  are broken by the vreg number): builds are deterministic regardless of the Python implementation.
+- Instance names of generic functions use a stable FNV-1a hash of the type instead of Python's `hash`.
 - Checker: a constant declared twice crashed the checker; it is now reported once (E0101) and skipped.
 - Checker: E0216 (a lambda capturing a `var`) could be lost for a second lambda, depending on Python object ids;
   it is now reported once per variable and lambda.

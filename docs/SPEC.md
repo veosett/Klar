@@ -95,7 +95,7 @@ pattern     = "_" | ident | int | float | string | "true" | "false" | "-" int
 | Тип | Значения | Примечания |
 |---|---|---|
 | `Int` | целые произвольной точности | `/` усекает к нулю, `%` — знак делимого; деление на 0 → R0001 |
-| `Float` | IEEE-754 double | деление на 0.0 → R0001 |
+| `Float` | IEEE-754 double | деление на 0.0 → R0001; биты: `x.to_bits()` (Int), `float_from_bits(n)` |
 | `Bool` | `true`, `false` | |
 | `Str` | строки Unicode | неизменяемые |
 | `Bytes` | `bytes_of([1, 255])`, `s.to_bytes()` | неизменяемые байты 0..255; `push`/`set` в цикле `b = b.push(x)` пишут на месте; `read_bytes`/`write_bytes` |

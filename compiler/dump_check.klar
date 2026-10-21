@@ -23,10 +23,15 @@ fn diag_json(d: Diag) -> Json {
 fn annotations(ck: Ck) -> Json {
   let types = ck.types.entries().map(fn(e) => Pair { first: e.key, second: Json.Text(value: show(Map {}, e.value)) })
   let resolved = ck.resolutions.entries().map(fn(e) => Pair { first: e.key, second: Json.Text(value: e.value.kind + " " +
-      e.value.name) })
+      e.value.owner + " " + e.value.name) })
+  let calls = ck.calls.entries().map(fn(e) => Pair { first: e.key, second: Json.Text(value: e.value.sig.name + " " +
+      e.value.inst.entries().map(fn(i) => i.key + "=" + show(Map {}, i.value)).join(",")) })
+  let elems = ck.elem_types.entries().map(fn(e) => Pair { first: e.key, second: Json.Text(value: show(Map {}, e.value)) })
   return json_object([
     Pair { first: "types", second: json_object(types) },
     Pair { first: "resolved", second: json_object(resolved) },
+    Pair { first: "calls", second: json_object(calls) },
+    Pair { first: "elems", second: json_object(elems) },
   ])
 }
 

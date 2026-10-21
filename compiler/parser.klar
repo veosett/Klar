@@ -379,7 +379,7 @@ fn parse_unary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
     let sp = merge(start, expr_span(operand.value))
     let folded = match operand.value {
       Expr.IntLit(_, v) => Expr.IntLit(span: sp, value: 0 - v),
-      Expr.FloatLit(_, v) => Expr.FloatLit(span: sp, value: 0.0 - v),
+      Expr.FloatLit(_, v) => Expr.FloatLit(span: sp, value: -v),
       other => Expr.Unary(span: sp, op: "-", operand: other),
     }
     return Ok(Got { value: folded, pos: operand.pos })
@@ -679,7 +679,7 @@ fn parse_pattern(p: Ps, i: Int) -> Result[Got[Pattern], ParseError] {
     let num = tk(p, j)
     let value = match num.kind {
       TokKind.IntLit => LitValue.IntV(value: 0 - num.text.to_int().unwrap_or(0)),
-      _ => LitValue.FloatV(value: 0.0 - num.text.to_float().unwrap_or(0.0)),
+      _ => LitValue.FloatV(value: -num.text.to_float().unwrap_or(0.0)),
     }
     let k = next(p, j)
     return Ok(Got { value: Pattern.Lit(span: span_from(p: p, start: start, i: k), value: value), pos: k })

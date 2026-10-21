@@ -5,6 +5,7 @@ type checker, the docs (`klar spec`) and the runtime share one source of truth.
 """
 import math
 import random
+import struct
 import re
 import time
 
@@ -290,6 +291,10 @@ def _(it, a, sp):
     return f"{a[0]:.{a[1]}f}"
 
 
+@method("Float", "fn to_bits(self: Float) -> Int")
+def _(it, a, sp): return struct.unpack("<q", struct.pack("<d", a[0]))[0]
+
+
 @method("Float", "fn sin(self: Float) -> Float")
 def _(it, a, sp): return math.sin(a[0])
 
@@ -382,6 +387,14 @@ def _byte(b, what, sp):
     if not 0 <= b <= 255:
         raise rt_error("R0009", f"{what}: {b} is not a byte (0..255)", sp)
     return b
+
+
+@glob("fn float_from_bits(bits: Int) -> Float")
+def _float_from_bits(it, a, sp):
+    n = a[0]
+    if not -(1 << 63) <= n < (1 << 64):
+        raise rt_error("R0009", f"float_from_bits: {n} is not a 64-bit pattern", sp)
+    return struct.unpack("<d", struct.pack("<Q", n & ((1 << 64) - 1)))[0]
 
 
 @glob("fn bytes_of(xs: List[Int]) -> Bytes")

@@ -41,6 +41,13 @@ test "Int arithmetic semantics" {
   assert 10_000 * 10_000 == 100000000
 }
 
+test "Float bits" {
+  assert 1.0.to_bits() == 4607182418800017408
+  assert (-0.0).to_bits() == -9223372036854775808
+  assert float_from_bits(4614253070214989087) == 3.14
+  assert float_from_bits((0.1).to_bits()) == 0.1
+}
+
 test "Float methods" {
   assert 3.9.to_int() == 3
   assert (-3.9).to_int() == -3

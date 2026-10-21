@@ -93,6 +93,11 @@ fn main() uses io {
   print(-(2.5) * 4.0)
   let v = scale(Vec { x: 3.0, y: 4.0 }, 2.0)
   print(length(v))
+  // IEEE-754 bits, both directions (the 64-bit pattern as a signed Int)
+  for x in [0.0, -0.0, 1.5, -2.5, 0.1, 1.0 / 3.0] {
+    print("{x.to_bits()} {float_from_bits(x.to_bits()) == x}")
+  }
+  print(float_from_bits(18442240474082181120))
 }
 
 test "floats" {

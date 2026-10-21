@@ -294,7 +294,7 @@ fn has_break(n: Nd) -> Bool {
 // ---- helpers --------------------------------------------------------------------------------------------
 
 fn type_of(sf: Sf, e: Expr) -> Option[Type] {
-  return sf.ck.types.get(span_key(expr_span(e)))
+  return sf.ck.types.get(span_key(sf.ck.file, expr_span(e)))
 }
 
 /// The name of the static type (`Int`, `List`, ...), if it is a constructed type.
@@ -306,7 +306,7 @@ fn tname(t: Option[Type]) -> Option[Str] {
 }
 
 fn resolution(sf: Sf, span: Span) -> Option[Resolution] {
-  return sf.ck.resolutions.get(span_key(span))
+  return sf.ck.resolutions.get(span_key(sf.ck.file, span))
 }
 
 fn is_builtin_call(sf: Sf, span: Span) -> Bool {
@@ -515,7 +515,7 @@ fn const_value(sf: Sf, e: Expr, env: Map[Str, CVal]) -> Option[CVal] {
         false => None,
       },
       Some(CVal.F(v)) => match op == "-" {
-        true => Some(CVal.F(value: 0.0 - v)),
+        true => Some(CVal.F(value: -v)),
         false => None,
       },
       Some(CVal.B(v)) => match op == "not" {

@@ -110,7 +110,7 @@
 | **flat_map, unique, partition, group_by, chunks, min/max(_by)** | Rust, Kotlin, Python itertools | ✅ **`0.2`** |
 | **Map.entries / map_values / update / filter / merge** | Kotlin, Rust | ✅ **`0.2`** |
 | **Str: lines, pad_left/right, trim_start/end, count, reverse** | все | ✅ **`0.2`** |
-| **Float: pow, fixed(digits), sin/cos/ln/exp** | все | ✅ **`0.2`** |
+| **Float: pow, fixed(digits), sin/cos/ln/exp** | все | ✅ **`0.2`**; биты IEEE-754 `to_bits` / `float_from_bits` (Unreleased) |
 | Индексация `xs[i]` с падением | везде | ❌ → `get(i) -> Option` `0.1` |
 | Set | Python, Rust, Java | `план` |
 | JSON | Python, JS, Go | `план` (с эффектом `fs`/`net` для ввода-вывода) |
@@ -176,7 +176,7 @@
 | Рантайм на самом языке | Go, Zig | путь к self-hosting | ✅ `klar/rt/*.klar` **`0.3`** |
 | Оптимизатор | все компиляторы | — | ✅ инлайнинг, свёртка констант, слияние сравнения и перехода, деление на константу через умножение, регистровый аллокатор **`0.3`** |
 | Одинаковое поведение бэкендов | — | ИИ не должен думать о бэкенде | ✅ дифференциальные тесты native == интерпретатор (Linux и Windows) **`0.3`** |
-| Self-hosting | Go, Rust, Zig | язык развивается на себе | 🔄 лексер, парсер и checker на Klar совпадают с эталоном (`compiler/`, этапы в ARCHITECTURE.md) |
+| Self-hosting | Go, Rust, Zig | язык развивается на себе | 🔄 лексер, парсер, checker, анализ безопасности, lowering, оптимизатор и аллокатор на Klar совпадают с эталоном (`compiler/`, этапы в ARCHITECTURE.md); осталась генерация x86-64 и линкер |
 
 ---
 

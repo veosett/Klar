@@ -63,6 +63,14 @@ def rck(t):
     return "obj"
 
 
+def fnv1a(text):
+    """32-bit FNV-1a of the UTF-8 text: a stable short name for a type (unlike `hash`, the same in every run)."""
+    h = 2166136261
+    for b in text.encode("utf-8"):
+        h = ((h ^ b) * 16777619) & 0xFFFFFFFF
+    return h
+
+
 def tag_int(n):
     return (n << 1) | 1
 
@@ -250,7 +258,7 @@ class Program:
         key = (module.name, decl.name, tuple(show(t) for t in type_args))
         if key in self.instances:
             return self.instances[key]
-        suffix = "" if not type_args else "_" + "_".join(str(abs(hash(show(t))) % 100000) for t in type_args)
+        suffix = "" if not type_args else "_" + "_".join(str(fnv1a(show(t)) % 100000) for t in type_args)
         name = f"k_{module.name.replace('.', '_')}__{decl.name}{suffix}"
         while any(name == v for v in self.instances.values()):
             name += "_"

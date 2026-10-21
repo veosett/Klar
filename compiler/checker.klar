@@ -37,7 +37,11 @@ pub type Sig {
 
 /// How a method call `x.m(...)` was resolved: "builtin", "ufcs" (a function or impl method `name`), "trait",
 /// "variant", "to_str" or "field_fn".
-pub type Resolution { kind: Str, name: Str, sig: Option[Sig] }
+pub type Resolution { kind: Str, owner: Str, name: Str, sig: Option[Sig] }
+
+/// A call of a function with a signature (`f(x)`, `x.m()`, a variant, a function used as a value) and the types
+/// its type parameters were instantiated with.
+pub type CallInfo { sig: Sig, inst: Map[Str, Type] }
 
 pub type RecordInfo { name: Str, tparams: List[Str], mod_name: Str, fields: Map[Str, Type] }
 
@@ -133,31 +137,58 @@ pub type Ck {
   types: Map[Str, Type],
   /// how each method call was resolved (by the span of the call)
   resolutions: Map[Str, Resolution],
+  /// the signature and type arguments of each call (by its span), raw and settled like the types
+  raw_calls: Map[Str, CallInfo],
+  calls: Map[Str, CallInfo],
+  /// the element type of each `for` loop (by the span of the loop)
+  raw_elems: Map[Str, Type],
+  elem_types: Map[Str, Type],
+  /// the file of each declaration (a module made of several files: the runtime), and of the one being checked
+  decl_files: List[Str],
+  cur_file: Str,
 }
 
-/// The key of an expression in the tables of the checker: its position.
-pub fn span_key(sp: Span) -> Str {
-  return "{sp.line}:{sp.col}:{sp.end_line}:{sp.end_col}"
+/// The key of an expression in the tables of the checker: its file and position.
+pub fn span_key(file: Str, sp: Span) -> Str {
+  return "{file}:{sp.line}:{sp.col}:{sp.end_line}:{sp.end_col}"
+}
+
+fn key_of(c: Ck, sp: Span) -> Str {
+  return span_key(c.cur_file, sp)
 }
 
 fn record_type(c: Ck, e: Expr, t: Type) -> Ck {
-  return c with { raw_types: c.raw_types.set(span_key(expr_span(e)), t) }
+  return c with { raw_types: c.raw_types.set(key_of(c, expr_span(e)), t) }
 }
 
-fn resolve_as(c: Ck, span: Span, kind: Str, name: Str, sig: Option[Sig]) -> Ck {
-  return c with { resolutions: c.resolutions.set(span_key(span), Resolution { kind: kind, name: name, sig: sig }) }
+fn resolve_as(c: Ck, span: Span, kind: Str, of: Str, name: Str, sig: Option[Sig]) -> Ck {
+  return c with { resolutions: c.resolutions.set(key_of(c, span), Resolution { kind: kind, owner: of, name: name,
+    sig: sig }) }
+}
+
+fn record_call(c: Ck, span: Span, sig: Sig, inst: Map[Str, Type]) -> Ck {
+  return c with { raw_calls: c.raw_calls.set(key_of(c, span), CallInfo { sig: sig, inst: inst }) }
 }
 
 /// Moves the recorded types out of the current substitution (before it is dropped).
 fn settle_types(c: Ck) -> Ck {
-  if c.raw_types.is_empty() {
+  if c.raw_types.is_empty() and c.raw_calls.is_empty() and c.raw_elems.is_empty() {
     return c
   }
   var types = c.types
   for entry in c.raw_types.entries() {
     types = types.set(entry.key, resolved(c.s, entry.value))
   }
-  return c with { types: types, raw_types: Map {} }
+  var calls = c.calls
+  for entry in c.raw_calls.entries() {
+    let snap = c.s
+    calls = calls.set(entry.key, entry.value with { inst: entry.value.inst.map_values(fn(t) => resolved(snap, t)) })
+  }
+  var elems = c.elem_types
+  for entry in c.raw_elems.entries() {
+    elems = elems.set(entry.key, resolved(c.s, entry.value))
+  }
+  return c with { types: types, raw_types: Map {}, calls: calls, raw_calls: Map {}, elem_types: elems, raw_elems: Map {} }
 }
 
 /// A result together with the updated checker state.
@@ -459,18 +490,24 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       raw_types: Map {},
       types: Map {},
       resolutions: Map {},
+      raw_calls: Map {},
+      calls: Map {},
+      raw_elems: Map {},
+      elem_types: Map {},
+      decl_files: [],
+      cur_file: file,
     }
   }
 
 fn error(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str]) -> Ck {
   return c with {
-    diags: c.diags.push(Diag { code: code, severity: "error", message: msg, file: c.file, span: span, hint: hint }),
+    diags: c.diags.push(Diag { code: code, severity: "error", message: msg, file: c.cur_file, span: span, hint: hint }),
   }
 }
 
 fn warn(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str]) -> Ck {
   return c with {
-    diags: c.diags.push(Diag { code: code, severity: "warning", message: msg, file: c.file, span: span, hint: hint }),
+    diags: c.diags.push(Diag { code: code, severity: "warning", message: msg, file: c.cur_file, span: span, hint: hint }),
   }
 }
 
@@ -2008,7 +2045,7 @@ fn stmt(ck: Ck, st: Stmt) -> Ck {
       c = block(set_loop(c, 1), body)
       return set_loop(c, -1)
     },
-    Stmt.For(_, var_name, var_span, iter, body) => {
+    Stmt.For(for_span, var_name, var_span, iter, body) => {
       let r = expr(ck: c, e: iter, exp: None)
       c = r.c
       let it = pr(c, r.v)
@@ -2028,6 +2065,7 @@ fn stmt(ck: Ck, st: Stmt) -> Ck {
         }
         c = error(c: c, code: "E0202", msg: "cannot iterate over `{sh(c, it)}`", span: expr_span(iter), hint: Some(hint))
       }
+      c = c with { raw_elems: c.raw_elems.set(key_of(c, for_span), elem) }
       c = push_scope(c)
       c = declare(ck: c, name: var_name, t: elem, mutable: false, span: var_span, kind: "for", kw: None)
       c = set_loop(block(set_loop(c, 1), body), -1)
@@ -2377,7 +2415,7 @@ fn variants_list(c: Ck, enum_name: Str) -> List[Str] {
 fn instantiate(ck: Ck, sig: Sig, span: Span) -> Res[Type] {
   var c = check_effects(ck: ck, sig: sig, span: span)
   let m = fresh_map(c, sig.tparams)
-  let done = note_bounds(c: m.c, sig: sig, mapping: m.v, span: span)
+  let done = record_call(c: note_bounds(c: m.c, sig: sig, mapping: m.v, span: span), span: span, sig: sig, inst: m.v)
   return ok(done, Type.Fun(params: sig.params.map(fn(p) => sub(c: done, t: p.second, m: m.v)), ret: sub(c: done, t: sig.ret,
     m: m.v)))
 }
@@ -2646,7 +2684,7 @@ fn call_sig(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Type
     var c = ck
     let fm = fresh_map(c, sig.tparams)
     let mapping = fm.v
-    c = note_bounds(c: fm.c, sig: sig, mapping: mapping, span: span)
+    c = record_call(c: note_bounds(c: fm.c, sig: sig, mapping: mapping, span: span), span: span, sig: sig, inst: mapping)
     var params = sig.params.map(fn(p) => Pair { first: p.first, second: subst(s: fm.c.s, t: p.second, mapping: mapping) })
     let ret = sub(c: c, t: sig.ret, m: mapping)
     match self_type {
@@ -2975,7 +3013,7 @@ fn e_method_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
               self_type: None,
               fdecl: None,
             }
-            c = resolve_as(c: c, span: span, kind: "variant", name: m, sig: Some(vsig))
+            c = resolve_as(c: c, span: span, kind: "variant", of: tn, name: m, sig: Some(vsig))
             return call_sig(ck: c, sig: vsig, args: args, span: span, expected: exp, self_type: None, display: vsig.name)
           },
         }
@@ -3013,7 +3051,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
     return ok(args_any(c, args), Type.Any)
   }
   if m == "to_str" and args.is_empty() {
-    return ok(resolve_as(c: c, span: span, kind: "to_str", name: m, sig: None), con("Str"))
+    return ok(resolve_as(c: c, span: span, kind: "to_str", of: "", name: m, sig: None), con("Str"))
   }
   let h = hd(c, rt)
   match h {
@@ -3024,7 +3062,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
             Some(fty) => {
               let ft = sub(c: c, t: fty, m: args_map(c: c, tparams: info.tparams, t: rt))
               if is_fn_type(pr(c, ft)) {
-                c = resolve_as(c: c, span: span, kind: "field_fn", name: m, sig: None)
+                c = resolve_as(c: c, span: span, kind: "field_fn", of: "", name: m, sig: None)
                 return call_fn_type(ck: c, ft: ft, args: args, span: span)
               }
             },
@@ -3044,7 +3082,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
   let builtins = builtin_methods_of(c, h)
   match builtins.get(m) {
     Some(bsig) => {
-      c = resolve_as(c: c, span: span, kind: "builtin", name: m, sig: Some(bsig))
+      c = resolve_as(c: c, span: span, kind: "builtin", of: or_empty(h), name: m, sig: Some(bsig))
       return call_sig(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
     },
     None => {},
@@ -3064,7 +3102,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
           let tsig = c.uni.traits.get(tr).map(fn(i) => i.methods.get(m)).unwrap_or(None)
           match tsig {
             Some(s) => {
-              c = resolve_as(c: c, span: span, kind: "trait", name: m, sig: Some(s))
+              c = resolve_as(c: c, span: span, kind: "trait", of: tr, name: m, sig: Some(s))
               return call_sig(ck: c, sig: s, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
             },
             None => {},
@@ -3086,7 +3124,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
     Some(entry) => {
       if c.visible.has(entry.first) {
         c = c with { ufcs: c.ufcs.push(Pair { first: entry.second.name, second: c.cur_decl }) }
-        c = resolve_as(c: c, span: span, kind: "ufcs", name: entry.second.name, sig: Some(entry.second))
+        c = resolve_as(c: c, span: span, kind: "ufcs", of: entry.second.mod_name, name: entry.second.name, sig: Some(entry.second))
         return call_sig(ck: c, sig: entry.second, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
       }
     },
@@ -3102,7 +3140,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
         c = u.c
         if u.v {
           c = c with { ufcs: c.ufcs.push(Pair { first: usig.name, second: c.cur_decl }) }
-          c = resolve_as(c: c, span: span, kind: "ufcs", name: usig.name, sig: Some(usig))
+          c = resolve_as(c: c, span: span, kind: "ufcs", of: usig.mod_name, name: usig.name, sig: Some(usig))
           return call_sig(ck: c, sig: usig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
         }
       }
@@ -4164,14 +4202,19 @@ fn unused_private_functions(ck: Ck) -> Ck {
   return c
 }
 
-/// Checks the mod_name: the diagnostics, sorted by position.
+/// Starts checking declaration `idx` (its file, for diagnostics and the annotation tables).
+fn at_decl(c: Ck, idx: Int) -> Ck {
+  return c with { cur_decl: idx, cur_file: c.decl_files.get(idx).unwrap_or(c.file) }
+}
+
+/// Checks the module: the diagnostics, sorted by position.
 pub fn check_module(ck: Ck) -> Ck {
   var c = collect(ck)
   var idx = 0
   for d in c.decls {
     match d {
       Decl.Const(_, name, _, _, value, _, _) => {
-        c = check_pending(check_const(ck: c with { bounds: Map {}, cur_decl: idx }, idx: idx, name: name, value: value))
+        c = check_pending(check_const(ck: at_decl(c, idx) with { bounds: Map {} }, idx: idx, name: name, value: value))
       },
       _ => {},
     }
@@ -4179,7 +4222,7 @@ pub fn check_module(ck: Ck) -> Ck {
   }
   idx = 0
   for d in c.decls {
-    c = c with { cur_decl: idx }
+    c = at_decl(c, idx)
     match d {
       Decl.Fn(f) => {
         c = check_pending(check_fn(ck: c, f: f, idx: idx))
@@ -4208,7 +4251,7 @@ pub fn check_module(ck: Ck) -> Ck {
       None => {},
     }
   }
-  c = unused_private_functions(settle_types(c))
+  c = unused_private_functions(settle_types(c) with { cur_file: c.file })
   return c
 }
 
