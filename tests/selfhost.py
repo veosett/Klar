@@ -9,10 +9,12 @@ the Python implementation, on every .klar file of the repository and on error sn
   diagnostics, and the same annotations (the type of every expression, the resolution and type arguments of every
   call) on every repository file and on the programs of tests/selfhost_cases.txt;
 * stage 4c, the backend middle (compiler/lower.klar, opt.klar, regalloc.klar): the same KIR, data image and register
-  allocation for every program with a `main`.
+  allocation for every program with a `main`;
+* stage 4d, the x86-64 emitter and the linkers (compiler/x64.klar, emit.klar, link.klar): byte-identical ELF and PE
+  executables for every program with a `main`.
 
     python tests/selfhost.py                   # native builds of compiler/dump_*.klar (fast)
-    python tests/selfhost.py lexer parser      # only some stages (lexer, parser, checker, lowering)
+    python tests/selfhost.py lexer parser      # only some stages (lexer, parser, checker, lowering, emit)
     python tests/selfhost.py --interp checker  # run the Klar code in the reference interpreter (slow)
     python tests/selfhost.py --update          # regenerate compiler/builtin_sigs.klar
 """
@@ -509,6 +511,45 @@ def check_lowering(interp):
     return bad
 
 
+def check_emit(interp):
+    """Executables built by the Klar backend (compiler/dump_exe.klar) == executables built by `klar build`."""
+    from klar.native.build import build
+    from klar.native.lower import NativeUnsupported
+    files = lowering_files()
+    bad = n_bytes = 0
+    with tempfile.TemporaryDirectory() as d:
+        want = {}
+        for k, path in enumerate(files):
+            try:
+                for target, ext in (("linux", "elf"), ("windows", "exe")):
+                    build(path, out=os.path.join(d, f"py{k}.{ext}"), target=target)
+                want[path] = k
+            except (NativeUnsupported, SystemExit):
+                pass
+        files = [p for p in files if p in want]
+        out = run_driver("dump_exe.klar", [os.path.join(ROOT, "klar"), d] + files, interp)
+        got = dict(line.split("\t") for line in out.splitlines())
+        for path in files:
+            for ext in ("elf", "exe"):
+                with open(os.path.join(d, f"py{want[path]}.{ext}"), "rb") as f:
+                    w = f.read()
+                n_bytes += len(w)
+                h = None
+                if path in got and got[path] != "error":
+                    with open(os.path.join(d, f"{got[path]}.{ext}"), "rb") as f:
+                        h = f.read()
+                if h != w:
+                    bad += 1
+                    if h is None:
+                        print(f"DIFF {short(path)}.{ext}: klar built nothing")
+                    else:
+                        k = next((i for i, (x, y) in enumerate(zip(w, h)) if x != y), min(len(w), len(h)))
+                        print(f"DIFF {short(path)}.{ext}: first difference at byte {k:#x} (python {len(w)} bytes, "
+                              f"klar {len(h)} bytes)")
+    print(f"emit: {2 * len(files) - bad}/{2 * len(files)} executables identical ({n_bytes} bytes)")
+    return bad
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     interp = "--interp" in argv
@@ -524,6 +565,8 @@ def main(argv=None):
             bad += check_parser(parse_files, interp)
         if not only or "lowering" in only:
             bad += check_lowering(interp)
+        if not only or "emit" in only:
+            bad += check_emit(interp)
         if not only or "checker" in only:
             bad += check_checker(files + write_cases(d), interp)
     return 1 if bad else 0

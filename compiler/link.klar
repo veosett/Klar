@@ -1,0 +1,315 @@
+// Writes standalone executables, in Klar (self-hosting, stage 4d): ELF64 (Linux, no libc) and PE32+ (Windows,
+// imports only kernel32.dll). Mirrors klar/native/link.py byte for byte.
+//
+// Input: the machine code with rel32 fixups to data symbols / import slots, the data image with absolute 64-bit
+// pointer relocations, and zero-initialised bss.
+use emit.{Exe}
+use lower.{Reloc}
+use x64.{Fix}
+
+fn align(v: Int, a: Int) -> Int {
+  if a == 0 {
+    return v
+  }
+  return (v + a - 1) / a * a
+}
+
+/// Absolute addresses of the program's symbols once the sections are placed.
+type Layout { code_base: Int, data_base: Int, bss_base: Int, imports: Map[Str, Int] }
+
+fn addr(x: Exe, l: Layout, name: Str) -> Int {
+  match l.imports.get(name) {
+    Some(v) => {
+      return v
+    },
+    None => {},
+  }
+  match x.img.bss.get(name) {
+    Some(v) => {
+      return l.bss_base + v
+    },
+    None => {},
+  }
+  match x.img.syms.get(name) {
+    Some(v) => {
+      return l.data_base + v
+    },
+    None => {},
+  }
+  return match x.labels.get(name) {
+    Some(v) => l.code_base + v,
+    None => fail("link: unresolved symbol {name}"),
+  }
+}
+
+/// Byte k (little-endian) of v, which must fit in 64 bits (negative values in two's complement).
+fn byte_of(v: Int, k: Int) -> Int {
+  var u = v
+  if u < 0 {
+    u = u + 18446744073709551616
+  }
+  return u.shift_right(8 * k).bit_and(255)
+}
+
+/// The code with its fixups patched.
+fn patched_code(x: Exe, l: Layout) -> Bytes {
+  var code = x.code
+  for fx in x.fixups {
+    let rel = addr(x: x, l: l, name: fx.target) + fx.add - (l.code_base + fx.pos + 4)
+    var k = 0
+    while k < 4 {
+      code = code.set(fx.pos + k, byte_of(rel, k))
+      k = k + 1
+    }
+  }
+  return code
+}
+
+/// The data with its absolute relocations patched.
+fn patched_data(x: Exe, l: Layout) -> Bytes {
+  var data = x.img.data
+  for r in x.img.abs {
+    let v = addr(x: x, l: l, name: r.sym) + r.add
+    var k = 0
+    while k < 8 {
+      data = data.set(r.off + k, byte_of(v, k))
+      k = k + 1
+    }
+  }
+  return data
+}
+
+fn le(b: Bytes, v: Int, n: Int) -> Bytes {
+  return b.push_le(v, n)
+}
+
+fn zeros(b: Bytes, n: Int) -> Bytes {
+  var out = b
+  var i = 0
+  while i < n {
+    out = out.push(0)
+    i = i + 1
+  }
+  return out
+}
+
+fn text(b: Bytes, s: Str) -> Bytes {
+  var out = b
+  for c in s.to_bytes().to_list() {
+    out = out.push(c)
+  }
+  return out
+}
+
+// ---- ELF ------------------------------------------------------------------------------------------------------
+
+pub fn write_elf(x: Exe) -> Bytes {
+  let base = 4194304
+  let page = 4096
+  let text_off = page
+  let text_vaddr = base + text_off
+  let data_off = align(text_off + x.code.len(), page)
+  let data_vaddr = base + data_off
+  let bss_vaddr = data_vaddr + align(x.img.data.len(), 16)
+  let l = Layout { code_base: text_vaddr, data_base: data_vaddr, bss_base: bss_vaddr, imports: Map {} }
+  let code = patched_code(x, l)
+  let data = patched_data(x, l)
+  var h = text(bytes_of([127]), "ELF")
+  h = bytes_of(h.to_list().concat([2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
+  h = le(b: h, v: 2, n: 2)
+  h = le(b: h, v: 62, n: 2)
+  h = le(b: h, v: 1, n: 4)
+  h = le(b: h, v: addr(x: x, l: l, name: x.entry), n: 8)
+  h = le(b: h, v: 64, n: 8)
+  h = le(b: h, v: 0, n: 8)
+  h = le(b: h, v: 0, n: 4)
+  for v in [64, 56, 2, 64, 0, 0] {
+    h = le(b: h, v: v, n: 2)
+  }
+  let memsz_data = align(x.img.data.len(), 16) + x.img.bss_size
+  // program headers: text (R+X) and data (R+W)
+  h = le(b: le(b: h, v: 1, n: 4), v: 5, n: 4)
+  for v in [0, base, base, text_off + code.len(), text_off + code.len(), page] {
+    h = le(b: h, v: v, n: 8)
+  }
+  h = le(b: le(b: h, v: 1, n: 4), v: 6, n: 4)
+  for v in [data_off, data_vaddr, data_vaddr, data.len(), memsz_data.max(1), page] {
+    h = le(b: h, v: v, n: 8)
+  }
+  var out = h
+  while out.len() < text_off {
+    out = out.push(0)
+  }
+  let nc = code.len()
+  var i = 0
+  while i < nc {
+    out = out.push(code.get_or(i, 0))
+    i = i + 1
+  }
+  while out.len() < data_off {
+    out = out.push(0)
+  }
+  let nd = data.len()
+  i = 0
+  while i < nd {
+    out = out.push(data.get_or(i, 0))
+    i = i + 1
+  }
+  return out
+}
+
+// ---- PE32+ ----------------------------------------------------------------------------------------------------
+
+fn section(b: Bytes, name: Str, nums: List[Int]) -> Bytes {
+  var out = text(b, name)
+  out = zeros(out, 8 - name.len())
+  var k = 0
+  for v in nums {
+    var size = 4
+    if k == 6 or k == 7 {
+      size = 2
+    }
+    out = le(b: out, v: v, n: size)
+    k = k + 1
+  }
+  return out
+}
+
+pub fn write_pe(x: Exe) -> Bytes {
+  let image_base = 5368709120
+  let salign = 4096
+  let falign = 512
+  let headers_size = 1024
+  let text_rva = salign
+  let text_raw = headers_size
+  let text_vsize = x.code.len()
+  let data_rva = align(text_rva + text_vsize, salign)
+  let data_raw = align(text_raw + x.code.len(), falign)
+  let data_fsize = align(x.img.data.len(), 16)
+  let data_vsize = data_fsize + x.img.bss_size
+  let idata_rva = align(data_rva + data_vsize.max(1), salign)
+  let idata_raw = align(data_raw + data_fsize.max(1), falign)
+  // ---- the import section for kernel32.dll
+  let n = x.imports.len()
+  let desc_size = 40
+  let ilt_off = desc_size
+  let iat_off = ilt_off + 8 * (n + 1)
+  let hint_off = iat_off + 8 * (n + 1)
+  var hints = bytes_of([])
+  var hint_rvas: List[Int] = []
+  for nm in x.imports {
+    hint_rvas = hint_rvas.push(idata_rva + hint_off + hints.len())
+    hints = hints.push(0)
+    hints = hints.push(0)
+    for c in nm.to_bytes().to_list() {
+      hints = hints.push(c)
+    }
+    hints = hints.push(0)
+    if hints.len() % 2 == 1 {
+      hints = hints.push(0)
+    }
+  }
+  let dll_off = hint_off + hints.len()
+  var idata = bytes_of([])
+  for v in [idata_rva + ilt_off, 0, 0, idata_rva + dll_off, idata_rva + iat_off] {
+    idata = idata.push_le(v, 4)
+  }
+  idata = zeros(idata, 20)
+  for _table in [0, 1] {
+    for r in hint_rvas {
+      idata = idata.push_le(r, 8)
+    }
+    idata = idata.push_le(0, 8)
+  }
+  idata = text(idata.concat(hints), "KERNEL32.dll")
+  idata = idata.push(0)
+  var imports: Map[Str, Int] = Map {}
+  var i = 0
+  for nm in x.imports {
+    imports = imports.set("__imp_" + nm, image_base + idata_rva + iat_off + 8 * i)
+    i = i + 1
+  }
+  let l = Layout { code_base: image_base + text_rva, data_base: image_base + data_rva, bss_base: image_base + data_rva +
+      data_fsize, imports: imports }
+  let code = patched_code(x, l)
+  let data = patched_data(x, l)
+  let idata_vsize = idata.len()
+  let size_of_image = align(idata_rva + idata_vsize, salign)
+  // ---- headers
+  var h = text(bytes_of([]), "MZ")
+  h = zeros(h, 58)
+  h = le(b: h, v: 128, n: 4)
+  h = zeros(h, 64)
+  h = text(h, "PE")
+  h = zeros(h, 2)
+  h = le(b: le(b: h, v: 34404, n: 2), v: 3, n: 2)
+  h = le(b: le(b: le(b: h, v: 0, n: 4), v: 0, n: 4), v: 0, n: 4)
+  h = le(b: le(b: h, v: 240, n: 2), v: 35, n: 2)
+  let entry_rva = addr(x: x, l: l, name: x.entry) - image_base
+  h = le(b: le(b: le(b: h, v: 523, n: 2), v: 14, n: 1), v: 0, n: 1)
+  for v in [align(code.len(), falign), align(data_fsize, falign) + align(idata_vsize, falign), 0, entry_rva, text_rva] {
+    h = le(b: h, v: v, n: 4)
+  }
+  h = le(b: le(b: le(b: h, v: image_base, n: 8), v: salign, n: 4), v: falign, n: 4)
+  for v in [6, 0, 0, 0, 6, 0] {
+    h = le(b: h, v: v, n: 2)
+  }
+  for v in [0, size_of_image, headers_size, 0] {
+    h = le(b: h, v: v, n: 4)
+  }
+  h = le(b: le(b: h, v: 3, n: 2), v: 33024, n: 2)
+  for v in [536870912, 4096, 1048576, 4096] {
+    h = le(b: h, v: v, n: 8)
+  }
+  h = le(b: le(b: h, v: 0, n: 4), v: 16, n: 4)
+  var d = 0
+  while d < 16 {
+    var rva = 0
+    var size = 0
+    if d == 1 {
+      rva = idata_rva
+      size = desc_size
+    } else if d == 12 {
+      rva = idata_rva + iat_off
+      size = 8 * (n + 1)
+    }
+    h = le(b: le(b: h, v: rva, n: 4), v: size, n: 4)
+    d = d + 1
+  }
+  h = section(b: h, name: ".text", nums: [text_vsize.max(1), text_rva, align(code.len(), falign), text_raw, 0, 0, 0, 0, 1610612768])
+  h = section(b: h, name: ".data", nums: [data_vsize.max(1), data_rva, align(data_fsize, falign), data_raw, 0, 0, 0, 0, 3221225536])
+  h = section(b: h, name: ".idata", nums: [idata_vsize, idata_rva, align(idata_vsize, falign), idata_raw, 0, 0, 0, 0, 3221225536])
+  var out = h
+  while out.len() < headers_size {
+    out = out.push(0)
+  }
+  let nc = code.len()
+  i = 0
+  while i < nc {
+    out = out.push(code.get_or(i, 0))
+    i = i + 1
+  }
+  while out.len() < data_raw {
+    out = out.push(0)
+  }
+  let nd = data.len()
+  i = 0
+  while i < nd {
+    out = out.push(data.get_or(i, 0))
+    i = i + 1
+  }
+  while out.len() < idata_raw {
+    out = out.push(0)
+  }
+  let ni = idata.len()
+  i = 0
+  while i < ni {
+    out = out.push(idata.get_or(i, 0))
+    i = i + 1
+  }
+  let total = align(out.len(), falign)
+  while out.len() < total {
+    out = out.push(0)
+  }
+  return out
+}

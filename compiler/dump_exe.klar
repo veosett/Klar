@@ -1,0 +1,33 @@
+// Builds each program given on the command line for Linux and Windows with the backend written in Klar and writes
+// the executables `<out>/<k>.elf` and `<out>/<k>.exe` (used by tests/selfhost.py to compare them byte for byte with
+// `klar build`). Arguments: the directory of `klar/`, the output directory, then the programs.
+use emit.{emit_program}
+use link.{write_elf, write_pe}
+use loader.{load_program, load_runtime}
+use lower.{lower_program}
+
+fn save(path: Str, data: Bytes) uses fs {
+  match write_bytes(path, data) {
+    Ok(_) => {},
+    Err(e) => fail(e),
+  }
+}
+
+fn main() uses io, fs {
+  let args = cli_args()
+  let lib = args.get_or(0, "klar")
+  let out = args.get_or(1, ".")
+  var k = 0
+  for path in args.drop(2) {
+    let ld = load_runtime(load_program(path, lib))
+    if ld.diags.any(fn(d) => d.severity == "error") {
+      print("{path}\terror")
+    } else {
+      let w = lower_program(ld, path)
+      save("{out}/{k}.elf", write_elf(emit_program(w, "linux")))
+      save("{out}/{k}.exe", write_pe(emit_program(w, "windows")))
+      print("{path}\t{k}")
+    }
+    k = k + 1
+  }
+}

@@ -1,0 +1,1777 @@
+// KIR -> x86-64 machine code, plus the per-OS layer (Linux syscalls / Windows kernel32), written in Klar
+// (self-hosting, stage 4d). Mirrors klar/native/emit.py instruction for instruction: tests/selfhost.py compares the
+// finished executables byte for byte.
+//
+// Calling convention (Klar internal): the caller reserves an argument area of 8*n bytes (rounded up to 16) at
+// [rsp], stores argument i at [rsp+8*i] and calls; the callee reads it at [rbp+16+8*i]. The result is returned in
+// rax. RBX and R12-R14 are callee-saved; R15 counts the nesting depth of Klar calls (R0006 above 10000).
+//
+// The code of each KIR instruction, out-of-line block and OS stub is assembled as a small chunk (x64.klar) and
+// appended to the program's code in `emit_program`, where the code bytes, labels and fixups are local variables
+// that grow in place. Out-of-line paths ("cold" code) are data (`Cold`), emitted after the function body.
+use lower.{Img, Ins, KFn, KV, Lw, Reloc, add_bss, add_data, rt_names}
+use opt.{defs, inline_calls, optimize, used_regs}
+use regalloc.{Alloc, allocate}
+use x64.{AL, Asm, Fix, R10, R11, R15, R8, R9, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Site, XMM0, XMM1, alu_ri}
+use x64.{alu_rr, call, call_r, call_rip, cqo, cvtsi2sd, cvttsd2si, div, fld_m, fresh, fstp_m, idiv, imul1, imul_rr}
+use x64.{imul_rri, jcc, jmp, label, lea, lea_rip, load, load32, load8, load_rip, mov_ri, mov_rr, movapd, movq_rx}
+use x64.{movq_xr, movsd_load, movsd_store, mul, neg, new_asm, new_label, pop, push, ret, setcc, shift_cl, shift_i}
+use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_rr, ucomisd, ud2, x87}
+
+const MAX_DEPTH: Int = 10000
+
+const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
+  "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv"]
+
+pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
+  "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
+  "GetCommandLineA", "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime"]
+
+/// Instructions that know where floats live in XMM registers.
+const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun"]
+
+const TWO64: Int = 18446744073709551616
+
+// ---- magic numbers for division by constants ------------------------------------------------------------------
+
+fn bit_length(x: Int) -> Int {
+  var n = 0
+  var v = x
+  while v > 0 {
+    v = v / 2
+    n = n + 1
+  }
+  return n
+}
+
+fn pow2(k: Int) -> Int {
+  return 1.shift_left(k)
+}
+
+fn ceil_div(x: Int, d: Int) -> Int {
+  if d == 0 {
+    return fail("emit: division by zero")
+  }
+  return (x + d - 1) / d
+}
+
+type MS { m: Int, s: Int }
+
+/// (m, l) with x // d == (t + ((x - t) >> 1)) >> (l - 1), t = mulhi(m, x), for all 64-bit x (d >= 3).
+fn udiv_magic(d: Int) -> MS {
+  let l = bit_length(d - 1)
+  if d == 0 {
+    return fail("emit: division by zero")
+  }
+  return MS { m: pow2(64 + l) / d - TWO64 + 1, s: l }
+}
+
+/// (m, s) with x // d == mulhi(m, x) >> s for all 64-bit x, when such an m < 2^64 exists.
+fn udiv_magic_simple(d: Int) -> Option[MS] {
+  var s = 0
+  while s < 64 {
+    let m = ceil_div(pow2(64 + s), d)
+    if m >= TWO64 {
+      return None
+    }
+    if m * d - pow2(64 + s) <= pow2(s) {
+      return Some(MS { m: m, s: s })
+    }
+    s = s + 1
+  }
+  return None
+}
+
+/// Hacker's Delight signed magic number for 64-bit division by d >= 3 (not a power of two).
+fn sdiv_magic64(d: Int) -> MS {
+  let two63 = pow2(63)
+  if d == 0 {
+    return fail("emit: division by zero")
+  }
+  let anc = two63 - 1 - two63 % d
+  if anc == 0 {
+    return fail("emit: division by zero")
+  }
+  var p = 63
+  var q1 = two63 / anc
+  var r1 = two63 - q1 * anc
+  var q2 = two63 / d
+  var r2 = two63 - q2 * d
+  var going = true
+  while going {
+    p = p + 1
+    q1 = 2 * q1
+    r1 = 2 * r1
+    if r1 >= anc {
+      q1 = q1 + 1
+      r1 = r1 - anc
+    }
+    q2 = 2 * q2
+    r2 = 2 * r2
+    if r2 >= d {
+      q2 = q2 + 1
+      r2 = r2 - d
+    }
+    let delta = d - r2
+    going = q1 < delta or (q1 == delta and r1 == 0)
+  }
+  var m = (q2 + 1) % TWO64
+  if m >= two63 {
+    m = m - TWO64
+  }
+  return MS { m: m, s: p - 64 }
+}
+
+/// (m, s): floor(a*m / 2^(64+s)) == floor(a / d) for |a| <= 2^62, d >= 3 not a power of two.
+fn sdiv_magic(d: Int) -> MS {
+  let p = 62 + bit_length(d - 1)
+  return MS { m: ceil_div(pow2(p), d), s: p - 64 }
+}
+
+fn align16(n: Int) -> Int {
+  return (n + 15) / 16 * 16
+}
+
+fn is_pow2(c: Int) -> Bool {
+  return c > 0 and c.bit_and(c - 1) == 0
+}
+
+// ---- KIR fields ---------------------------------------------------------------------------------------------
+
+fn iat(ins: Ins, k: Int) -> Int {
+  return match ins.get(k) {
+    Some(KV.I(v)) => v,
+    _ => fail("emit: field {k} of a KIR instruction is not a number"),
+  }
+}
+
+fn sat(ins: Ins, k: Int) -> Str {
+  return match ins.get(k) {
+    Some(KV.S(s)) => s,
+    _ => fail("emit: field {k} of a KIR instruction is not a name"),
+  }
+}
+
+/// A name field that may be missing (None in Python): "".
+fn sat_or(ins: Ins, k: Int) -> Str {
+  return match ins.get(k) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+}
+
+fn has_reg(ins: Ins, k: Int) -> Bool {
+  return match ins.get(k) {
+    Some(KV.I(_)) => true,
+    _ => false,
+  }
+}
+
+fn lat(ins: Ins, k: Int) -> List[Int] {
+  return match ins.get(k) {
+    Some(KV.L(regs)) => regs,
+    _ => fail("emit: field {k} of a KIR instruction is not a list"),
+  }
+}
+
+// ---- emitter state --------------------------------------------------------------------------------------------
+
+/// How the slow path of an Int comparison or operation gets its second operand into RCX.
+enum YL {
+  Reg(v: Int),
+  Imm(t: Int),
+}
+
+/// What an out-of-line Int comparison does with the flags of `cmp rax, 0`.
+enum Then {
+  SetTo(cc: Str, d: Int, done: Str),
+  Far(cc: Str, lt: Str, lf: Str),
+}
+
+/// Out-of-line code, emitted after the function body.
+enum Cold {
+  ISlow(lab: Str, opn: Str, d: Int, x: Int, y: YL, done: Str),
+  DivZero(lab: Str, span: Str),
+  NegSlow(lab: Str, d: Int, x: Int, done: Str),
+  CSlow(lab: Str, x: Int, y: YL, then: Then),
+  Free(lab: Str, v: Int, skip: Str),
+  Depth(lab: Str),
+}
+
+/// A cold block and the registers live across the call it makes (empty: those of the function's last instruction).
+type ColdItem { c: Cold, saves: List[Int] }
+
+/// The function being emitted. `a` is the chunk under construction; everything else is fixed for the function
+/// except `site`, `saves`, `next` and `cold`.
+type Em {
+  a: Asm,
+  rt: Map[Str, Str],
+  nparams: Int,
+  loc: Map[Int, Int],
+  xloc: Map[Int, Int],
+  saved: List[Int],
+  save_off: List[Int],
+  scratch_off: Int,
+  xmm_used: List[Int],
+  xsave_off: List[Int],
+  csave_off: Map[Int, Int],
+  slot_needed: Map[Int, Bool],
+  user: Bool,
+  site: Str,
+  saves: List[Int],
+  next: Str,
+  cold: List[ColdItem],
+}
+
+/// A register together with the code that put the value there.
+type AR { a: Asm, r: Int }
+
+/// A memory operand together with the code that put the value there.
+type AM { a: Asm, base: Int, disp: Int }
+
+fn with_a(e: Em, a: Asm) -> Em {
+  return e with { a: a }
+}
+
+fn add_cold(e: Em, a: Asm, c: Cold) -> Em {
+  return e with { a: a, cold: e.cold.push(ColdItem { c: c, saves: e.saves }) }
+}
+
+fn label_of(e: Em, hint: Str) -> AL {
+  return new_label(e.a, hint)
+}
+
+// ---- locations ------------------------------------------------------------------------------------------------
+// A vreg lives either in a machine register (e.loc) or in its stack slot.
+
+fn slot(e: Em, v: Int) -> Int {
+  if v < e.nparams {
+    return 16 + 8 * v
+  }
+  return -8 * (v - e.nparams + 1)
+}
+
+fn ld(a: Asm, e: Em, reg: Int, v: Int) -> Asm {
+  return match e.loc.get(v) {
+    Some(r) => mov_rr(a: a, dst: reg, src: r),
+    None => load(a: a, dst: reg, base: RBP, disp: slot(e, v)),
+  }
+}
+
+fn st(a: Asm, e: Em, v: Int, reg: Int) -> Asm {
+  return match e.loc.get(v) {
+    Some(r) => mov_rr(a: a, dst: r, src: reg),
+    None => store(a: a, base: RBP, disp: slot(e, v), src: reg),
+  }
+}
+
+/// A register holding v (its own register, or `scratch` after loading).
+fn src(a: Asm, e: Em, v: Int, scratch: Int) -> AR {
+  return match e.loc.get(v) {
+    Some(r) => AR { a: a, r: r },
+    None => AR { a: load(a: a, dst: scratch, base: RBP, disp: slot(e, v)), r: scratch },
+  }
+}
+
+/// The register to compute v into; finish with fin().
+fn dst(e: Em, v: Int, scratch: Int) -> Int {
+  return e.loc.get(v).unwrap_or(scratch)
+}
+
+fn fin(a: Asm, e: Em, v: Int, reg: Int) -> Asm {
+  if e.loc.has(v) {
+    return a
+  }
+  return store(a: a, base: RBP, disp: slot(e, v), src: reg)
+}
+
+/// v in memory — a scratch slot when v lives in a register.
+fn mem(a: Asm, e: Em, v: Int, which: Int) -> AM {
+  return match e.loc.get(v) {
+    None => AM { a: a, base: RBP, disp: slot(e, v) },
+    Some(r) => {
+      let off = e.scratch_off - 8 * which
+      return AM { a: store(a: a, base: RBP, disp: off, src: r), base: RBP, disp: off }
+    },
+  }
+}
+
+// ---- calls ----------------------------------------------------------------------------------------------------
+
+fn save_live(a0: Asm, e: Em) -> Asm {
+  var a = a0
+  for r in e.saves {
+    a = store(a: a, base: RBP, disp: e.csave_off.get(r).unwrap_or(0), src: r)
+  }
+  return a
+}
+
+fn restore_live(a0: Asm, e: Em) -> Asm {
+  var a = a0
+  for r in e.saves {
+    a = load(a: a, dst: r, base: RBP, disp: e.csave_off.get(r).unwrap_or(0))
+  }
+  return a
+}
+
+/// Remembers the return address of a call inside a Klar function and its source span: error traces walk the RBP
+/// chain and map return addresses back to call sites (no run-time cost).
+fn note_site(a: Asm, e: Em) -> Asm {
+  if not e.user {
+    return a
+  }
+  let l = new_label(a, "ra")
+  return site(a: label(l.a, l.l), ra: l.l, span: e.site)
+}
+
+fn xmm_store_all(a0: Asm, e: Em) -> Asm {
+  var a = a0
+  var k = 0
+  for x in e.xmm_used {
+    a = movsd_store(a: a, base: RBP, disp: e.xsave_off.get(k).unwrap_or(0), x: x)
+    k = k + 1
+  }
+  return a
+}
+
+fn xmm_load_all(a0: Asm, e: Em) -> Asm {
+  var a = a0
+  var k = 0
+  for x in e.xmm_used {
+    a = movsd_load(a: a, x: x, base: RBP, disp: e.xsave_off.get(k).unwrap_or(0))
+    k = k + 1
+  }
+  return a
+}
+
+/// A call with the arguments in vregs; `ind` >= 0 calls the function pointer held in that vreg.
+fn emit_call(e: Em, target: Str, args: List[Int], ind: Int) -> Asm {
+  var a = save_live(e.a, e)
+  let area = align16(8 * args.len())
+  if area > 0 {
+    a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
+  }
+  var i = 0
+  for v in args {
+    let s = src(a: a, e: e, v: v, scratch: RAX)
+    a = store(a: s.a, base: RSP, disp: 8 * i, src: s.r)
+    i = i + 1
+  }
+  if ind >= 0 {
+    a = call_r(ld(a: a, e: e, reg: R11, v: ind), R11)
+  } else {
+    a = call(a, target)
+  }
+  a = note_site(a, e)
+  if area > 0 {
+    a = alu_ri(a: a, op: "add", dst: RSP, imm: area)
+  }
+  return restore_live(a, e)
+}
+
+fn rt_target(e: Em, name: Str) -> Str {
+  return match e.rt.get(name) {
+    Some(t) => t,
+    None => fail("emit: no runtime helper {name}"),
+  }
+}
+
+/// Calls a runtime helper with values already in machine registers. These calls sit on out-of-line paths, so they
+/// also save and restore the XMM registers holding floats.
+fn call_rt(a0: Asm, e: Em, name: Str, regs: List[Int]) -> Asm {
+  var a = save_live(xmm_store_all(a0, e), e)
+  let area = align16(8 * regs.len())
+  if area > 0 {
+    a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
+  }
+  var i = 0
+  for r in regs {
+    a = store(a: a, base: RSP, disp: 8 * i, src: r)
+    i = i + 1
+  }
+  a = note_site(call(a, rt_target(e, name)), e)
+  if area > 0 {
+    a = alu_ri(a: a, op: "add", dst: RSP, imm: area)
+  }
+  return xmm_load_all(restore_live(a, e), e)
+}
+
+// ---- branches -------------------------------------------------------------------------------------------------
+
+fn neg_cc(cc: Str) -> Str {
+  return match cc {
+    "e" => "ne",
+    "ne" => "e",
+    "l" => "ge",
+    "ge" => "l",
+    "le" => "g",
+    "g" => "le",
+    "b" => "ae",
+    "ae" => "b",
+    "be" => "a",
+    "a" => "be",
+    _ => fail("emit: no negation of {cc}"),
+  }
+}
+
+/// Flags are set; jump to lt if cc holds, else to lf (falling through when possible).
+fn branch(a: Asm, e: Em, cc: Str, tg: Pair[Str, Str]) -> Asm {
+  let lt = tg.first
+  let lf = tg.second
+  if e.next == lf {
+    return jcc(a: a, cc: cc, target: lt)
+  }
+  if e.next == lt {
+    return jcc(a: a, cc: neg_cc(cc), target: lf)
+  }
+  return jmp(jcc(a: a, cc: cc, target: lt), lf)
+}
+
+fn targets(ins: Ins, k: Int) -> Pair[Str, Str] {
+  return Pair { first: sat(ins, k), second: sat(ins, k + 1) }
+}
+
+fn ccs(cc: Str) -> Str {
+  return match cc {
+    "eq" => "e",
+    "ne" => "ne",
+    "lt" => "l",
+    "le" => "le",
+    "gt" => "g",
+    "ge" => "ge",
+    "ult" => "b",
+    "ule" => "be",
+    "ugt" => "a",
+    "uge" => "ae",
+    _ => fail("emit: unknown comparison {cc}"),
+  }
+}
+
+// ---- floats in XMM registers ----------------------------------------------------------------------------------
+// A value in e.xloc lives in an XMM register. Its stack slot is kept current too (written through) whenever some
+// instruction reads it the generic way, so every other instruction stays correct.
+
+fn xmm_slot_needed(f: KFn, xloc: Map[Int, Int]) -> Map[Int, Bool] {
+  var need: Map[Int, Bool] = Map {}
+  if xloc.is_empty() {
+    return need
+  }
+  for ins in f.code {
+    let o = sat(ins, 0)
+    let skip = ["fbin", "fcmp", "fbr", "f2i", "mov"].contains(o) or (o == "fun" and sat(ins, 1) == "sqrt")
+    if not skip {
+      for u in used_regs(ins) {
+        if xloc.has(u) {
+          need = need.set(u, true)
+        }
+      }
+    }
+  }
+  return need
+}
+
+/// An XMM register holding the float v.
+fn xsrc(a: Asm, e: Em, v: Int, scratch: Int) -> AR {
+  match e.xloc.get(v) {
+    Some(x) => {
+      return AR { a: a, r: x }
+    },
+    None => {},
+  }
+  return match e.loc.get(v) {
+    None => AR { a: movsd_load(a: a, x: scratch, base: RBP, disp: slot(e, v)), r: scratch },
+    Some(r) => AR { a: movq_xr(a: a, x: scratch, r: r), r: scratch },
+  }
+}
+
+/// Stores the float result held in XMM register x into d.
+fn xfin(a: Asm, e: Em, d: Int, x: Int) -> Asm {
+  match e.xloc.get(d) {
+    Some(xd) => {
+      let a1 = movapd(a: a, dst: xd, src: x)
+      if e.slot_needed.has(d) {
+        return movsd_store(a: a1, base: RBP, disp: slot(e, d), x: xd)
+      }
+      return a1
+    },
+    None => {},
+  }
+  return match e.loc.get(d) {
+    None => movsd_store(a: a, base: RBP, disp: slot(e, d), x: x),
+    Some(r) => movq_rx(a: a, r: r, x: x),
+  }
+}
+
+/// The XMM register to compute d in (its own one, unless an operand still needs it).
+fn xtarget(e: Em, d: Int, avoid: List[Int]) -> Int {
+  return match e.xloc.get(d) {
+    Some(xd) => match avoid.contains(xd) {
+      true => XMM0,
+      false => xd,
+    },
+    None => XMM0,
+  }
+}
+
+// ---- instructions ---------------------------------------------------------------------------------------------
+
+fn i_const(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let imm = iat(ins, 2)
+  match e.xloc.get(d) {
+    Some(xd) => {
+      var a = movq_xr(a: mov_ri(a: e.a, dst: RAX, imm: imm), x: xd, r: RAX)
+      if e.slot_needed.has(d) {
+        a = store(a: a, base: RBP, disp: slot(e, d), src: RAX)
+      }
+      return with_a(e, a)
+    },
+    None => {},
+  }
+  let r = dst(e: e, v: d, scratch: RAX)
+  return with_a(e, fin(a: mov_ri(a: e.a, dst: r, imm: imm), e: e, v: d, reg: r))
+}
+
+fn i_mov(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let s = iat(ins, 2)
+  if d == s {
+    return e
+  }
+  if e.xloc.has(d) or e.xloc.has(s) {
+    if e.xloc.has(d) {
+      let xs = xsrc(a: e.a, e: e, v: s, scratch: XMM0)
+      return with_a(e, xfin(a: xs.a, e: e, d: d, x: xs.r))
+    }
+    let xs = e.xloc.get(s).unwrap_or(0)
+    return match e.loc.get(d) {
+      Some(rd) => with_a(e, movq_rx(a: e.a, r: rd, x: xs)),
+      None => with_a(e, movsd_store(a: e.a, base: RBP, disp: slot(e, d), x: xs)),
+    }
+  }
+  return match e.loc.get(d) {
+    Some(rd) => with_a(e, ld(a: e.a, e: e, reg: rd, v: s)),
+    None => {
+      let sv = src(a: e.a, e: e, v: s, scratch: RAX)
+      return with_a(e, st(a: sv.a, e: e, v: d, reg: sv.r))
+    },
+  }
+}
+
+fn i_addr(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let r = dst(e: e, v: d, scratch: RAX)
+  return with_a(e, fin(a: lea_rip(a: e.a, dst: r, target: sat(ins, 2)), e: e, v: d, reg: r))
+}
+
+fn i_bin(e: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let y = iat(ins, 4)
+  if ["add", "sub", "and", "or", "xor", "mul"].contains(opn) {
+    var r = dst(e: e, v: d, scratch: RAX)
+    if e.loc.get(y) == Some(r) and d != x {
+      r = RAX          // d shares y's register: compute in scratch
+    }
+    let sy = src(a: e.a, e: e, v: y, scratch: RCX)
+    var a = sy.a
+    var ry = sy.r
+    if r == ry {       // d == y == x? (all one vreg) -> scratch copy
+      a = mov_rr(a: a, dst: RCX, src: ry)
+      ry = RCX
+    }
+    a = ld(a: a, e: e, reg: r, v: x)
+    if opn == "mul" {
+      a = imul_rr(a: a, dst: r, src: ry)
+    } else {
+      a = alu_rr(a: a, op: opn, dst: r, src: ry)
+    }
+    return with_a(e, st(a: a, e: e, v: d, reg: r))
+  }
+  var a = ld(a: ld(a: e.a, e: e, reg: RAX, v: x), e: e, reg: RCX, v: y)
+  if opn == "sdiv" or opn == "srem" {
+    a = idiv(cqo(a), RCX)
+    if opn == "srem" {
+      a = mov_rr(a: a, dst: RAX, src: RDX)
+    }
+  } else if opn == "udiv" or opn == "urem" {
+    a = div(alu_rr(a: a, op: "xor", dst: RDX, src: RDX), RCX)
+    if opn == "urem" {
+      a = mov_rr(a: a, dst: RAX, src: RDX)
+    }
+  } else if opn == "shl" or opn == "shr" or opn == "sar" {
+    a = shift_cl(a: a, kind: opn, r: RAX)
+  } else if opn == "umulhi" {
+    a = mov_rr(a: mul(a, RCX), dst: RAX, src: RDX)
+  } else {
+    return fail("emit: bin {opn}")
+  }
+  return with_a(e, st(a: a, e: e, v: d, reg: RAX))
+}
+
+fn i_bini(e: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let imm = iat(ins, 4)
+  let r = dst(e: e, v: d, scratch: RAX)
+  var a = ld(a: e.a, e: e, reg: r, v: iat(ins, 3))
+  if opn == "shl" or opn == "shr" or opn == "sar" {
+    a = shift_i(a: a, kind: opn, r: r, n: imm)
+  } else if opn == "mul" {
+    a = imul_rri(a: a, dst: r, src: r, imm: imm)
+  } else {
+    a = alu_ri(a: a, op: opn, dst: r, imm: imm)
+  }
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+/// Division / remainder by a positive constant: multiply by the rounded reciprocal.
+fn i_bink(e: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let c = iat(ins, 4)
+  var a = ld(a: e.a, e: e, reg: RCX, v: iat(ins, 3))
+  if opn == "sdiv" or opn == "srem" {
+    if is_pow2(c) {
+      let k = bit_length(c) - 1
+      a = mov_rr(a: a, dst: RAX, src: RCX)
+      if k > 0 {
+        a = shift_i(a: a, kind: "sar", r: RAX, n: 63)
+        a = shift_i(a: a, kind: "shr", r: RAX, n: 64 - k)
+        a = alu_rr(a: a, op: "add", dst: RAX, src: RCX)
+        a = shift_i(a: a, kind: "sar", r: RAX, n: k)       // q = trunc(x / 2^k)
+      }
+    } else {
+      let ms = sdiv_magic64(c)
+      a = imul1(mov_ri(a: a, dst: RAX, imm: ms.m), RCX)     // rdx:rax = m * x (signed)
+      if ms.m < 0 {
+        a = alu_rr(a: a, op: "add", dst: RDX, src: RCX)
+      }
+      if ms.s != 0 {
+        a = shift_i(a: a, kind: "sar", r: RDX, n: ms.s)
+      }
+      a = mov_rr(a: a, dst: RAX, src: RDX)
+      a = shift_i(a: a, kind: "shr", r: RAX, n: 63)
+      a = alu_rr(a: a, op: "add", dst: RAX, src: RDX)       // q
+    }
+    if opn == "sdiv" {
+      return with_a(e, st(a: a, e: e, v: d, reg: RAX))
+    }
+    a = imul_rr(a: mov_ri(a: a, dst: RDX, imm: c), dst: RAX, src: RDX)
+    a = alu_rr(a: a, op: "sub", dst: RCX, src: RAX)
+    return with_a(e, st(a: a, e: e, v: d, reg: RCX))
+  }
+  if is_pow2(c) {
+    let k = bit_length(c) - 1
+    if opn == "udiv" {
+      a = shift_i(a: a, kind: "shr", r: RCX, n: k)
+    } else {
+      a = alu_rr(a: mov_ri(a: a, dst: RAX, imm: c - 1), op: "and", dst: RCX, src: RAX)
+    }
+    return with_a(e, st(a: a, e: e, v: d, reg: RCX))
+  }
+  match udiv_magic_simple(c) {
+    Some(ms) => {
+      a = mov_rr(a: mul(mov_ri(a: a, dst: RAX, imm: ms.m), RCX), dst: RAX, src: RDX)
+      if ms.s != 0 {
+        a = shift_i(a: a, kind: "shr", r: RAX, n: ms.s)     // q
+      }
+    },
+    None => {
+      let ml = udiv_magic(c)
+      a = mul(mov_ri(a: a, dst: RAX, imm: ml.m), RCX)        // rdx = t = mulhi(m, x)
+      a = mov_rr(a: a, dst: RAX, src: RCX)
+      a = alu_rr(a: a, op: "sub", dst: RAX, src: RDX)
+      a = shift_i(a: a, kind: "shr", r: RAX, n: 1)
+      a = alu_rr(a: a, op: "add", dst: RAX, src: RDX)
+      a = shift_i(a: a, kind: "shr", r: RAX, n: ml.s - 1)  // q
+    },
+  }
+  if opn == "udiv" {
+    return with_a(e, st(a: a, e: e, v: d, reg: RAX))
+  }
+  a = imul_rr(a: mov_ri(a: a, dst: RDX, imm: c), dst: RAX, src: RDX)
+  a = alu_rr(a: a, op: "sub", dst: RCX, src: RAX)
+  return with_a(e, st(a: a, e: e, v: d, reg: RCX))
+}
+
+fn i_cmp(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 2)
+  let sx = src(a: e.a, e: e, v: iat(ins, 3), scratch: RAX)
+  let sy = src(a: sx.a, e: e, v: iat(ins, 4), scratch: RCX)
+  let r = dst(e: e, v: d, scratch: RAX)
+  let a = setcc(a: alu_rr(a: sy.a, op: "cmp", dst: sx.r, src: sy.r), cc: ccs(sat(ins, 1)), r: r)
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_cmpi(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 2)
+  let sx = src(a: e.a, e: e, v: iat(ins, 3), scratch: RAX)
+  let r = dst(e: e, v: d, scratch: RAX)
+  let a = setcc(a: alu_ri(a: sx.a, op: "cmp", dst: sx.r, imm: iat(ins, 4)), cc: ccs(sat(ins, 1)), r: r)
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_brc(e: Em, ins: Ins) -> Em {
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: RAX)
+  let sy = src(a: sx.a, e: e, v: iat(ins, 3), scratch: RCX)
+  let a = alu_rr(a: sy.a, op: "cmp", dst: sx.r, src: sy.r)
+  return with_a(e, branch(a: a, e: e, cc: ccs(sat(ins, 1)), tg: targets(ins, 4)))
+}
+
+fn i_brci(e: Em, ins: Ins) -> Em {
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: RAX)
+  let a = alu_ri(a: sx.a, op: "cmp", dst: sx.r, imm: iat(ins, 3))
+  return with_a(e, branch(a: a, e: e, cc: ccs(sat(ins, 1)), tg: targets(ins, 4)))
+}
+
+fn i_brti(e: Em, ins: Ins) -> Em {
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: RAX)
+  let a = test_ri8(a: sx.a, reg: sx.r, imm: iat(ins, 3))
+  return with_a(e, branch(a: a, e: e, cc: "ne", tg: targets(ins, 4)))
+}
+
+type X2 { a: Asm, x: Int, y: Int }
+
+fn fload2(a: Asm, e: Em, x: Int, y: Int) -> X2 {
+  let xa = xsrc(a: a, e: e, v: x, scratch: XMM0)
+  let xb = xsrc(a: xa.a, e: e, v: y, scratch: XMM1)
+  return X2 { a: xb.a, x: xa.r, y: xb.r }
+}
+
+fn i_fbin(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 2)
+  let p = fload2(a: e.a, e: e, x: iat(ins, 3), y: iat(ins, 4))
+  let t = xtarget(e: e, d: d, avoid: [p.y])
+  let a = sse(a: movapd(a: p.a, dst: t, src: p.x), op: sat(ins, 1), dst: t, src: p.y)
+  return with_a(e, xfin(a: a, e: e, d: d, x: t))
+}
+
+/// ucomisd for an ordered comparison and the condition to test afterwards.
+fn fcompare(a: Asm, cc: Str, p: X2) -> AL {
+  return match cc {
+    "lt" => AL { a: ucomisd(a: a, x: p.y, y: p.x), l: "a" },
+    "le" => AL { a: ucomisd(a: a, x: p.y, y: p.x), l: "ae" },
+    "gt" => AL { a: ucomisd(a: a, x: p.x, y: p.y), l: "a" },
+    "ge" => AL { a: ucomisd(a: a, x: p.x, y: p.y), l: "ae" },
+    _ => fail("emit: float comparison {cc}"),
+  }
+}
+
+fn i_fcmp(e: Em, ins: Ins) -> Em {
+  let cc = sat(ins, 1)
+  let p = fload2(a: e.a, e: e, x: iat(ins, 3), y: iat(ins, 4))
+  var a = p.a
+  if ["lt", "le", "gt", "ge"].contains(cc) {
+    let fc = fcompare(a: a, cc: cc, p: p)
+    a = setcc(a: fc.a, cc: fc.l, r: RAX)
+  } else {
+    a = ucomisd(a: a, x: p.x, y: p.y)
+    a = setcc(a: a, cc: "e", r: RAX)
+    a = setcc(a: a, cc: "np", r: RCX)
+    a = alu_rr(a: a, op: "and", dst: RAX, src: RCX)
+    if cc == "ne" {
+      a = alu_ri(a: a, op: "xor", dst: RAX, imm: 1)
+    }
+  }
+  return with_a(e, st(a: a, e: e, v: iat(ins, 2), reg: RAX))
+}
+
+fn i_fbr(e: Em, ins: Ins) -> Em {
+  let p = fload2(a: e.a, e: e, x: iat(ins, 2), y: iat(ins, 3))
+  let fc = fcompare(a: p.a, cc: sat(ins, 1), p: p)
+  return with_a(e, branch(a: fc.a, e: e, cc: fc.l, tg: targets(ins, 4)))
+}
+
+fn i_i2f(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let t = xtarget(e: e, d: d, avoid: [])
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: RAX)
+  return with_a(e, xfin(a: cvtsi2sd(a: sx.a, x: t, r: sx.r), e: e, d: d, x: t))
+}
+
+fn i_f2i(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let xa = xsrc(a: e.a, e: e, v: iat(ins, 2), scratch: XMM0)
+  let r = dst(e: e, v: d, scratch: RAX)
+  return with_a(e, fin(a: cvttsd2si(a: xa.a, r: r, x: xa.r), e: e, v: d, reg: r))
+}
+
+fn fstp_to(a: Asm, e: Em, d: Int) -> Asm {
+  return match e.loc.get(d) {
+    None => {
+      let a1 = fstp_m(a: a, base: RBP, disp: slot(e, d))
+      return match e.xloc.get(d) {
+        Some(xd) => movsd_load(a: a1, x: xd, base: RBP, disp: slot(e, d)),
+        None => a1,
+      }
+    },
+    Some(r) => load(a: fstp_m(a: a, base: RBP, disp: e.scratch_off), dst: r, base: RBP, disp: e.scratch_off),
+  }
+}
+
+fn x87s(a0: Asm, names: List[Str]) -> Asm {
+  var a = a0
+  for n in names {
+    a = x87(a, n)
+  }
+  return a
+}
+
+fn i_fun(e: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  if opn == "sqrt" {
+    let xs = xsrc(a: e.a, e: e, v: x, scratch: XMM1)
+    let t = xtarget(e: e, d: d, avoid: [])
+    return with_a(e, xfin(a: sse(a: xs.a, op: "sqrt", dst: t, src: xs.r), e: e, d: d, x: t))
+  }
+  let m = mem(a: e.a, e: e, v: x, which: 0)
+  var a = fld_m(a: m.a, base: m.base, disp: m.disp)
+  if opn == "sin" {
+    a = x87(a, "fsin")
+  } else if opn == "cos" {
+    a = x87(a, "fcos")
+  } else if opn == "ln" {             // ln(x) = ln2 * log2(x)
+    a = x87s(a, ["fldln2", "fxch", "fyl2x"])
+  } else if opn == "exp" {            // e^x = 2^f * 2^n with y = x*log2(e), n = round(y), f = y - n
+    a = x87s(a, ["fldl2e", "fmulp", "fld0", "frndint", "fxch", "fsub01", "f2xm1", "fld1", "faddp", "fscale", "fstp1"])
+  }
+  return with_a(e, fstp_to(a: a, e: e, d: d))
+}
+
+/// x^y = 2^(y*log2 x) for x > 0, computed in x87 extended precision.
+fn i_fpow(e: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let my = mem(a: e.a, e: e, v: iat(ins, 3), which: 0)
+  let a1 = fld_m(a: my.a, base: my.base, disp: my.disp)
+  let mx = mem(a: a1, e: e, v: iat(ins, 2), which: 1)
+  let a2 = fld_m(a: mx.a, base: mx.base, disp: mx.disp)
+  let a3 = x87s(a2, ["fyl2x", "fld0", "frndint", "fxch", "fsub01", "f2xm1", "fld1", "faddp", "fscale", "fstp1"])
+  return with_a(e, fstp_to(a: a3, e: e, d: d))
+}
+
+// ---- tagged Int fast paths ------------------------------------------------------------------------------------
+// Fast paths stay inline; the bignum / error paths are emitted out of line ("cold").
+
+fn div_check(e: Em, span: Str, divisor: Int) -> Em {
+  let bad = label_of(e, "dz")
+  let a = jcc(a: alu_ri(a: bad.a, op: "cmp", dst: divisor, imm: 1), cc: "e", target: bad.l)   // tagged zero == 1
+  return add_cold(e: e, a: a, c: Cold.DivZero(lab: bad.l, span: span))
+}
+
+fn i_iop(e0: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let y = iat(ins, 4)
+  let done = label_of(e0, "idone")
+  let slow = new_label(done.a, "islow")
+  var e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Reg(v: y), done: done.l))
+  e = with_a(e, ld(a: ld(a: e.a, e: e, reg: RAX, v: x), e: e, reg: RCX, v: y))
+  if opn == "div" or opn == "mod" {
+    e = div_check(e: e, span: sat_or(ins, 5), divisor: RCX)
+  }
+  var a = mov_rr(a: e.a, dst: RDX, src: RAX)
+  a = alu_rr(a: a, op: "and", dst: RDX, src: RCX)
+  a = jcc(a: test_ri8(a: a, reg: RDX, imm: 1), cc: "e", target: slow.l)
+  if opn == "add" or opn == "sub" {
+    a = alu_ri(a: a, op: "sub", dst: RCX, imm: 1)
+    a = jcc(a: alu_rr(a: a, op: opn, dst: RAX, src: RCX), cc: "o", target: slow.l)
+  } else if opn == "mul" {
+    a = shift_i(a: a, kind: "sar", r: RAX, n: 1)
+    a = alu_ri(a: a, op: "sub", dst: RCX, imm: 1)
+    a = jcc(a: imul_rr(a: a, dst: RAX, src: RCX), cc: "o", target: slow.l)
+    a = alu_ri(a: a, op: "add", dst: RAX, imm: 1)
+  } else if opn == "div" or opn == "mod" {
+    a = shift_i(a: a, kind: "sar", r: RAX, n: 1)
+    a = shift_i(a: a, kind: "sar", r: RCX, n: 1)
+    a = idiv(cqo(a), RCX)
+    if opn == "mod" {
+      a = mov_rr(a: a, dst: RAX, src: RDX)
+    }
+    a = jcc(a: alu_rr(a: a, op: "add", dst: RAX, src: RAX), cc: "o", target: slow.l)
+    a = alu_ri(a: a, op: "add", dst: RAX, imm: 1)
+  }
+  return with_a(e, label(st(a: a, e: e, v: d, reg: RAX), done.l))
+}
+
+/// Tagged Int op with the constant small Int t (already tagged: 2c+1).
+fn i_iopi(e0: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let t = iat(ins, 4)
+  let done = label_of(e0, "idone")
+  let slow = new_label(done.a, "islow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Imm(t: t), done: done.l))
+  let sx = src(a: e.a, e: e, v: x, scratch: RAX)
+  let rx = sx.r
+  var a = jcc(a: test_ri8(a: sx.a, reg: rx, imm: 1), cc: "e", target: slow.l)
+  let r = dst(e: e, v: d, scratch: RAX)
+  if r != RAX and (opn == "add" or opn == "sub") and d != x {
+    a = alu_ri(a: mov_rr(a: a, dst: r, src: rx), op: opn, dst: r, imm: t - 1)
+    a = jcc(a: a, cc: "o", target: slow.l)     // the slow path recomputes from x, which is untouched
+    return with_a(e, label(a, done.l))
+  }
+  a = mov_rr(a: a, dst: RAX, src: rx)
+  let c = t.shift_right(1)
+  if opn == "add" or opn == "sub" {
+    a = jcc(a: alu_ri(a: a, op: opn, dst: RAX, imm: t - 1), cc: "o", target: slow.l)
+  } else if opn == "mul" {
+    a = shift_i(a: a, kind: "sar", r: RAX, n: 1)
+    a = jcc(a: imul_rri(a: a, dst: RAX, src: RAX, imm: t - 1), cc: "o", target: slow.l)
+    a = alu_ri(a: a, op: "add", dst: RAX, imm: 1)
+  } else if (opn == "div" or opn == "mod") and c.abs() >= 2 {
+    a = const_divmod(a0: a, opn: opn, c: c)
+  } else if opn == "div" or opn == "mod" {
+    a = shift_i(a: a, kind: "sar", r: RAX, n: 1)
+    a = idiv(cqo(mov_ri(a: a, dst: RCX, imm: c)), RCX)
+    if opn == "mod" {
+      a = mov_rr(a: a, dst: RAX, src: RDX)
+    }
+    a = jcc(a: alu_rr(a: a, op: "add", dst: RAX, src: RAX), cc: "o", target: slow.l)
+    a = alu_ri(a: a, op: "add", dst: RAX, imm: 1)
+  }
+  return with_a(e, label(st(a: a, e: e, v: d, reg: RAX), done.l))
+}
+
+/// rax = tagged small Int -> tagged (rax / c) or (rax % c), truncating; |c| >= 2. Uses a reciprocal multiply (exact
+/// for |a| <= 2^62, the small-Int range): no idiv.
+fn const_divmod(a0: Asm, opn: Str, c: Int) -> Asm {
+  var a = mov_rr(a: a0, dst: RCX, src: RAX)
+  a = shift_i(a: a, kind: "sar", r: RCX, n: 1)          // rcx = a
+  let ac = c.abs()
+  if is_pow2(ac) {
+    let k = bit_length(ac) - 1
+    a = mov_rr(a: a, dst: RAX, src: RCX)
+    a = shift_i(a: a, kind: "sar", r: RAX, n: 63)
+    a = shift_i(a: a, kind: "shr", r: RAX, n: 64 - k)
+    a = alu_rr(a: a, op: "add", dst: RAX, src: RCX)
+    a = shift_i(a: a, kind: "sar", r: RAX, n: k)         // q = trunc(a / 2^k)
+  } else {
+    let ms = sdiv_magic(ac)
+    a = imul1(mov_ri(a: a, dst: RAX, imm: ms.m), RCX)      // rdx:rax = a * m
+    if ms.s != 0 {
+      a = shift_i(a: a, kind: "sar", r: RDX, n: ms.s)
+    }
+    a = mov_rr(a: a, dst: RAX, src: RCX)
+    a = shift_i(a: a, kind: "shr", r: RAX, n: 63)
+    a = alu_rr(a: a, op: "add", dst: RAX, src: RDX)        // q = floor(a*m / 2^p) + (a < 0)
+  }
+  if c < 0 {
+    a = neg(a, RAX)
+  }
+  if opn == "mod" {
+    a = imul_rri(a: a, dst: RAX, src: RAX, imm: c)
+    a = alu_rr(a: a, op: "sub", dst: RCX, src: RAX)
+    a = mov_rr(a: a, dst: RAX, src: RCX)
+  }
+  return alu_ri(a: alu_rr(a: a, op: "add", dst: RAX, src: RAX), op: "add", dst: RAX, imm: 1)
+}
+
+fn i_ineg(e0: Em, ins: Ins) -> Em {
+  let d = iat(ins, 1)
+  let x = iat(ins, 2)
+  let done = label_of(e0, "ndone")
+  let slow = new_label(done.a, "nslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.NegSlow(lab: slow.l, d: d, x: x, done: done.l))
+  var a = ld(a: e.a, e: e, reg: RCX, v: x)
+  a = jcc(a: test_ri8(a: a, reg: RCX, imm: 1), cc: "e", target: slow.l)
+  a = alu_rr(a: mov_ri(a: a, dst: RAX, imm: 2), op: "sub", dst: RAX, src: RCX)
+  a = jcc(a: a, cc: "o", target: slow.l)
+  return with_a(e, label(st(a: a, e: e, v: d, reg: RAX), done.l))
+}
+
+type Both { a: Asm, x: Int, y: Int }
+
+fn both_small(a: Asm, e: Em, xy: Pair[Int, Int], slow: Str) -> Both {
+  let sx = src(a: a, e: e, v: xy.first, scratch: RAX)
+  let sy = src(a: sx.a, e: e, v: xy.second, scratch: RCX)
+  var a1 = mov_rr(a: sy.a, dst: RDX, src: sx.r)
+  a1 = alu_rr(a: a1, op: "and", dst: RDX, src: sy.r)
+  a1 = jcc(a: test_ri8(a: a1, reg: RDX, imm: 1), cc: "e", target: slow)
+  return Both { a: a1, x: sx.r, y: sy.r }
+}
+
+fn i_icmp(e0: Em, ins: Ins) -> Em {
+  let c = ccs(sat(ins, 1))
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let y = iat(ins, 4)
+  let done = label_of(e0, "cdone")
+  let slow = new_label(done.a, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Reg(v: y), then: Then.SetTo(cc: c, d: d,
+    done: done.l)))
+  let bs = both_small(a: e.a, e: e, xy: Pair { first: x, second: y }, slow: slow.l)
+  let r = dst(e: e, v: d, scratch: RAX)
+  let a = setcc(a: alu_rr(a: bs.a, op: "cmp", dst: bs.x, src: bs.y), cc: c, r: r)
+  return with_a(e, label(fin(a: a, e: e, v: d, reg: r), done.l))
+}
+
+fn i_icmpi(e0: Em, ins: Ins) -> Em {
+  let c = ccs(sat(ins, 1))
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let t = iat(ins, 4)
+  let done = label_of(e0, "cdone")
+  let slow = new_label(done.a, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Imm(t: t), then: Then.SetTo(cc: c, d: d,
+    done: done.l)))
+  let sx = src(a: e.a, e: e, v: x, scratch: RAX)
+  var a = jcc(a: test_ri8(a: sx.a, reg: sx.r, imm: 1), cc: "e", target: slow.l)
+  let r = dst(e: e, v: d, scratch: RAX)
+  a = setcc(a: alu_ri(a: a, op: "cmp", dst: sx.r, imm: t), cc: c, r: r)
+  return with_a(e, label(fin(a: a, e: e, v: d, reg: r), done.l))
+}
+
+fn i_ibr(e0: Em, ins: Ins) -> Em {
+  let c = ccs(sat(ins, 1))
+  let x = iat(ins, 2)
+  let y = iat(ins, 3)
+  let tg = targets(ins, 4)
+  let slow = label_of(e0, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Reg(v: y), then: Then.Far(cc: c, lt: tg.first,
+    lf: tg.second)))
+  let bs = both_small(a: e.a, e: e, xy: Pair { first: x, second: y }, slow: slow.l)
+  return with_a(e, branch(a: alu_rr(a: bs.a, op: "cmp", dst: bs.x, src: bs.y), e: e, cc: c, tg: tg))
+}
+
+fn i_ibri(e0: Em, ins: Ins) -> Em {
+  let c = ccs(sat(ins, 1))
+  let x = iat(ins, 2)
+  let t = iat(ins, 3)
+  let tg = targets(ins, 4)
+  let slow = label_of(e0, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Imm(t: t), then: Then.Far(cc: c, lt: tg.first,
+    lf: tg.second)))
+  let sx = src(a: e.a, e: e, v: x, scratch: RAX)
+  let a = jcc(a: test_ri8(a: sx.a, reg: sx.r, imm: 1), cc: "e", target: slow.l)
+  return with_a(e, branch(a: alu_ri(a: a, op: "cmp", dst: sx.r, imm: t), e: e, cc: c, tg: tg))
+}
+
+// ---- memory ---------------------------------------------------------------------------------------------------
+
+fn i_load(e: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 0)
+  let d = iat(ins, 1)
+  let off = iat(ins, 3)
+  let sb = src(a: e.a, e: e, v: iat(ins, 2), scratch: RCX)
+  let r = dst(e: e, v: d, scratch: RAX)
+  var a = sb.a
+  if opn == "load" {
+    a = load(a: a, dst: r, base: sb.r, disp: off)
+  } else if opn == "load8" {
+    a = load8(a: a, dst: r, base: sb.r, disp: off)
+  } else {
+    a = load32(a: a, dst: r, base: sb.r, disp: off)
+  }
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_store(e: Em, ins: Ins) -> Em {
+  let opn = sat(ins, 0)
+  let off = iat(ins, 2)
+  let sb = src(a: e.a, e: e, v: iat(ins, 1), scratch: RCX)
+  let sv = src(a: sb.a, e: e, v: iat(ins, 3), scratch: RAX)
+  if opn == "store" {
+    return with_a(e, store(a: sv.a, base: sb.r, disp: off, src: sv.r))
+  }
+  if opn == "store8" {
+    return with_a(e, store8(a: sv.a, base: sb.r, disp: off, src: sv.r))
+  }
+  return with_a(e, store32(a: sv.a, base: sb.r, disp: off, src: sv.r))
+}
+
+// ---- reference counting ---------------------------------------------------------------------------------------
+
+fn i_retain(e: Em, ins: Ins) -> Em {
+  let skip = label_of(e, "rs")
+  let sv = src(a: skip.a, e: e, v: iat(ins, 2), scratch: RAX)
+  let r = sv.r
+  var a = sv.a
+  if sat(ins, 1) == "int" {
+    a = jcc(a: test_ri8(a: a, reg: r, imm: 1), cc: "ne", target: skip.l)
+  }
+  a = load(a: a, dst: RCX, base: r, disp: 0)
+  a = jcc(a: test_rr(a: a, x: RCX, y: RCX), cc: "s", target: skip.l)
+  a = alu_ri(a: a, op: "add", dst: RCX, imm: 1)
+  a = store(a: a, base: r, disp: 0, src: RCX)
+  return with_a(e, label(a, skip.l))
+}
+
+fn i_release(e: Em, ins: Ins) -> Em {
+  let v = iat(ins, 2)
+  let skip = label_of(e, "rl")
+  let free = new_label(skip.a, "rf")
+  let sv = src(a: free.a, e: e, v: v, scratch: RAX)
+  let r = sv.r
+  var a = sv.a
+  if sat(ins, 1) == "int" {
+    a = jcc(a: test_ri8(a: a, reg: r, imm: 1), cc: "ne", target: skip.l)
+  }
+  a = load(a: a, dst: RCX, base: r, disp: 0)
+  a = jcc(a: test_rr(a: a, x: RCX, y: RCX), cc: "s", target: skip.l)
+  a = alu_ri(a: a, op: "sub", dst: RCX, imm: 1)
+  a = store(a: a, base: r, disp: 0, src: RCX)
+  a = label(jcc(a: a, cc: "e", target: free.l), skip.l)
+  return add_cold(e: e, a: a, c: Cold.Free(lab: free.l, v: v, skip: skip.l))
+}
+
+// ---- calls & control ------------------------------------------------------------------------------------------
+
+fn i_call(e: Em, ins: Ins) -> Em {
+  var target = sat(ins, 2)
+  let cold = target.starts_with("cold:")
+  var e1 = e
+  if cold {
+    // slow path of an inlined runtime accessor: floats may live in XMM registers across it
+    target = target.slice(5, target.len())
+    e1 = with_a(e, xmm_store_all(e.a, e))
+  }
+  if OS_FUNCS.contains(target) {
+    target = "__" + target
+  }
+  var a = emit_call(e: e1, target: target, args: lat(ins, 3), ind: -1)
+  if cold {
+    a = xmm_load_all(a, e)
+  }
+  if has_reg(ins, 1) {
+    a = st(a: a, e: e, v: iat(ins, 1), reg: RAX)
+  }
+  return with_a(e, a)
+}
+
+fn i_callind(e: Em, ins: Ins) -> Em {
+  var a = emit_call(e: e, target: "", args: lat(ins, 3), ind: iat(ins, 2))
+  if has_reg(ins, 1) {
+    a = st(a: a, e: e, v: iat(ins, 1), reg: RAX)
+  }
+  return with_a(e, a)
+}
+
+fn i_jmp(e: Em, ins: Ins) -> Em {
+  let name = sat(ins, 1)
+  if e.next == name {
+    return e
+  }
+  return with_a(e, jmp(e.a, name))
+}
+
+fn i_br(e: Em, ins: Ins) -> Em {
+  let sc = src(a: e.a, e: e, v: iat(ins, 1), scratch: RAX)
+  let a = test_rr(a: sc.a, x: sc.r, y: sc.r)
+  return with_a(e, branch(a: a, e: e, cc: "ne", tg: targets(ins, 2)))
+}
+
+fn i_ret(e: Em, ins: Ins) -> Em {
+  var a = e.a
+  if has_reg(ins, 1) {
+    a = ld(a: a, e: e, reg: RAX, v: iat(ins, 1))
+  }
+  var k = 0
+  for r in e.saved {
+    a = load(a: a, dst: r, base: RBP, disp: e.save_off.get(k).unwrap_or(0))
+    k = k + 1
+  }
+  return with_a(e, ret(pop(mov_rr(a: a, dst: RSP, src: RBP), RBP)))
+}
+
+// Call-stack bookkeeping: only a depth counter (for the 10 000-call limit). The frames of an error trace are
+// reconstructed from the RBP chain + the tables written by `trace_tables`.
+fn i_enter(e: Em) -> Em {
+  let over = label_of(e, "dep")
+  var a = alu_ri(a: over.a, op: "add", dst: R15, imm: 1)       // R15: call depth (reserved register)
+  a = alu_ri(a: a, op: "cmp", dst: R15, imm: MAX_DEPTH)
+  a = jcc(a: a, cc: "g", target: over.l)
+  return add_cold(e: e, a: a, c: Cold.Depth(lab: over.l))
+}
+
+fn instruction(e: Em, ins: Ins) -> Em {
+  let o = sat(ins, 0)
+  return match o {
+    "const" => i_const(e, ins),
+    "mov" => i_mov(e, ins),
+    "addr" => i_addr(e, ins),
+    "bin" => i_bin(e, ins),
+    "bini" => i_bini(e, ins),
+    "bink" => i_bink(e, ins),
+    "cmp" => i_cmp(e, ins),
+    "cmpi" => i_cmpi(e, ins),
+    "brc" => i_brc(e, ins),
+    "brci" => i_brci(e, ins),
+    "brti" => i_brti(e, ins),
+    "fbin" => i_fbin(e, ins),
+    "fcmp" => i_fcmp(e, ins),
+    "fbr" => i_fbr(e, ins),
+    "i2f" => i_i2f(e, ins),
+    "f2i" => i_f2i(e, ins),
+    "fun" => i_fun(e, ins),
+    "fpow" => i_fpow(e, ins),
+    "iop" => i_iop(e, ins),
+    "iopi" => i_iopi(e, ins),
+    "ineg" => i_ineg(e, ins),
+    "icmp" => i_icmp(e, ins),
+    "icmpi" => i_icmpi(e, ins),
+    "ibr" => i_ibr(e, ins),
+    "ibri" => i_ibri(e, ins),
+    "load" => i_load(e, ins),
+    "load8" => i_load(e, ins),
+    "load32" => i_load(e, ins),
+    "store" => i_store(e, ins),
+    "store8" => i_store(e, ins),
+    "store32" => i_store(e, ins),
+    "retain" => i_retain(e, ins),
+    "release" => i_release(e, ins),
+    "call" => i_call(e, ins),
+    "callind" => i_callind(e, ins),
+    "label" => with_a(e, label(e.a, sat(ins, 1))),
+    "jmp" => i_jmp(e, ins),
+    "br" => i_br(e, ins),
+    "ret" => i_ret(e, ins),
+    "enter" => i_enter(e),
+    "leave" => with_a(e, alu_ri(a: e.a, op: "sub", dst: R15, imm: 1)),
+    "site" => e with { site: sat_or(ins, 1) },
+    "fp" => with_a(e, st(a: e.a, e: e, v: iat(ins, 1), reg: RBP)),
+    _ => fail("emit: unknown KIR instruction {o}"),
+  }
+}
+
+/// Loads RCX for the slow path of an Int operation.
+fn load_y(a: Asm, e: Em, y: YL) -> Asm {
+  return match y {
+    YL.Reg(v) => ld(a: a, e: e, reg: RCX, v: v),
+    YL.Imm(t) => mov_ri(a: a, dst: RCX, imm: t),
+  }
+}
+
+fn emit_cold(e: Em, c: Cold) -> Asm {
+  return match c {
+    Cold.ISlow(lab, opn, d, x, y, done) => {
+      let a = load_y(a: ld(a: label(e.a, lab), e: e, reg: RAX, v: x), e: e, y: y)
+      let a2 = call_rt(a0: a, e: e, name: "int_" + opn, regs: [RAX, RCX])
+      return jmp(st(a: a2, e: e, v: d, reg: RAX), done)
+    },
+    Cold.DivZero(lab, span) => {
+      var a = label(e.a, lab)
+      if span != "" {
+        a = lea_rip(a: a, dst: RAX, target: span)
+      } else {
+        a = mov_ri(a: a, dst: RAX, imm: 0)
+      }
+      return ud2(call_rt(a0: a, e: e, name: "div_zero", regs: [RAX]))
+    },
+    Cold.NegSlow(lab, d, x, done) => {
+      let a = call_rt(a0: ld(a: label(e.a, lab), e: e, reg: RCX, v: x), e: e, name: "int_neg", regs: [RCX])
+      return jmp(st(a: a, e: e, v: d, reg: RAX), done)
+    },
+    Cold.CSlow(lab, x, y, then) => {
+      let a = load_y(a: ld(a: label(e.a, lab), e: e, reg: RAX, v: x), e: e, y: y)
+      let a2 = alu_ri(a: call_rt(a0: a, e: e, name: "int_cmp", regs: [RAX, RCX]), op: "cmp", dst: RAX, imm: 0)
+      return match then {
+        Then.SetTo(cc, d, done) => jmp(st(a: setcc(a: a2, cc: cc, r: RAX), e: e, v: d, reg: RAX), done),
+        Then.Far(cc, lt, lf) => jmp(jcc(a: a2, cc: cc, target: lt), lf),
+      }
+    },
+    Cold.Free(lab, v, skip) => {
+      let a = call_rt(a0: ld(a: label(e.a, lab), e: e, reg: RAX, v: v), e: e, name: "free", regs: [RAX])
+      return jmp(a, skip)
+    },
+    Cold.Depth(lab) => ud2(call_rt(a0: label(e.a, lab), e: e, name: "stack_overflow", regs: [])),
+  }
+}
+
+// ---- functions ------------------------------------------------------------------------------------------------
+
+/// The chunks of one function (or of the OS layer), the label counter after them, and for a Klar function with a
+/// frame its trace-table row (start label, end label, name symbol).
+type Part { chunks: List[Asm], n: Int, row: List[Str] }
+
+fn sorted_saves(al: Alloc, k: Int) -> List[Int] {
+  return al.call_saves.get(k).unwrap_or([]).sort()
+}
+
+fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
+  let f = optimize(f0)
+  let al = allocate(f)
+  var enter: Option[Str] = None
+  for ins in f.code {
+    if enter == None and sat(ins, 0) == "enter" {
+      enter = Some(sat_or(ins, 1))
+    }
+  }
+  let user = enter != None
+  let base = 8 * f.nregs.max(f.nparams) - 8 * f.nparams
+  var save_off: List[Int] = []
+  var k = 0
+  for _r in al.used {
+    save_off = save_off.push(0 - (base + 8 * (k + 1)))
+    k = k + 1
+  }
+  let scratch_off = 0 - (base + 8 * (al.used.len() + 1))
+  var xmm_used: List[Int] = []
+  for x in al.xloc.values().sort() {
+    if not xmm_used.contains(x) {
+      xmm_used = xmm_used.push(x)
+    }
+  }
+  var xsave_off: List[Int] = []
+  k = 0
+  for _x in xmm_used {
+    xsave_off = xsave_off.push(scratch_off - 16 - 8 * k)
+    k = k + 1
+  }
+  var csave: List[Int] = []
+  for regs in al.call_saves.values() {
+    for r in regs {
+      if not csave.contains(r) {
+        csave = csave.push(r)
+      }
+    }
+  }
+  csave = csave.sort()
+  let first = scratch_off - 16 - 8 * xmm_used.len()
+  var csave_off: Map[Int, Int] = Map {}
+  k = 0
+  for r in csave {
+    csave_off = csave_off.set(r, first - 8 * k)
+    k = k + 1
+  }
+  let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len()))
+  var a = mov_rr(a: push(label(new_asm(n), f.name), RBP), dst: RBP, src: RSP)
+  a = alu_ri(a: a, op: "sub", dst: RSP, imm: frame)
+  k = 0
+  for r in al.used {
+    a = store(a: a, base: RBP, disp: save_off.get(k).unwrap_or(0), src: r)
+    k = k + 1
+  }
+  var e = Em {
+    a: a,
+    rt: rt,
+    nparams: f.nparams,
+    loc: al.loc,
+    xloc: al.xloc,
+    saved: al.used,
+    save_off: save_off,
+    scratch_off: scratch_off,
+    xmm_used: xmm_used,
+    xsave_off: xsave_off,
+    csave_off: csave_off,
+    slot_needed: xmm_slot_needed(f, al.xloc),
+    user: user,
+    site: "",
+    saves: [],
+    next: "",
+    cold: [],
+  }
+  var p = 0
+  while p < f.nparams {
+    match e.loc.get(p) {
+      Some(r) => {
+        e = with_a(e, load(a: e.a, dst: r, base: RBP, disp: slot(e, p)))
+      },
+      None => {},
+    }
+    p = p + 1
+  }
+  var chunks: List[Asm] = []
+  let code = f.code
+  var i = 0
+  for ins in code {
+    var nxt = ""
+    match code.get(i + 1) {
+      Some(nx) => {
+        if sat(nx, 0) == "label" {
+          nxt = sat(nx, 1)
+        }
+      },
+      None => {},
+    }
+    e = instruction(e with { next: nxt, saves: sorted_saves(al, i) }, ins)
+    if not e.xloc.is_empty() and not XMM_AWARE.contains(sat(ins, 0)) {
+      // an instruction that knows nothing about XMM wrote the value to its slot: refresh the register
+      for dv in defs(ins) {
+        match e.xloc.get(dv) {
+          Some(xd) => {
+            e = with_a(e, movsd_load(a: e.a, x: xd, base: RBP, disp: slot(e, dv)))
+          },
+          None => {},
+        }
+      }
+    }
+    chunks = chunks.push(e.a)
+    e = with_a(e, fresh(e.a))
+    i = i + 1
+  }
+  // safety net: a function body always ends with an explicit ret
+  e = with_a(e with { next: "" }, ud2(e.a))
+  for item in e.cold {
+    var es = e
+    if not item.saves.is_empty() {
+      es = e with { saves: item.saves }
+    }
+    chunks = chunks.push(e.a)
+    e = with_a(e, emit_cold(es with { a: fresh(e.a) }, item.c))
+  }
+  var a2 = ud2(e.a)
+  var row: List[Str] = []
+  if user {
+    let end = ".fnend." + f.name
+    a2 = label(a2, end)
+    row = [f.name, end, enter.unwrap_or("")]
+  }
+  chunks = chunks.push(a2)
+  return Part { chunks: chunks, n: a2.n, row: row }
+}
+
+// ---- OS layer -------------------------------------------------------------------------------------------------
+
+fn arg(a: Asm, reg: Int, i: Int) -> Asm {
+  return load(a: a, dst: reg, base: RBP, disp: 16 + 8 * i)
+}
+
+fn stub_begin(a: Asm, name: Str) -> Asm {
+  return mov_rr(a: push(label(a, "__" + name), RBP), dst: RBP, src: RSP)
+}
+
+fn stub_end(a: Asm) -> Asm {
+  return ret(pop(mov_rr(a: a, dst: RSP, src: RBP), RBP))
+}
+
+/// mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0) in rax.
+fn mmap(a0: Asm, size_from_arg: Bool, size: Int) -> Asm {
+  var a = mov_ri(a: a0, dst: RDI, imm: 0)
+  if size_from_arg {
+    a = arg(a: a, reg: RSI, i: 0)
+  } else {
+    a = mov_ri(a: a, dst: RSI, imm: size)
+  }
+  a = mov_ri(a: a, dst: RDX, imm: 3)
+  a = mov_ri(a: a, dst: R10, imm: 16418)
+  a = mov_ri(a: a, dst: R8, imm: -1)
+  a = mov_ri(a: a, dst: R9, imm: 0)
+  a = mov_ri(a: a, dst: RAX, imm: 9)
+  return syscall(a)
+}
+
+fn sys_stub(a0: Asm, name: Str, nr: Int, nargs: Int) -> Asm {
+  var a = stub_begin(a0, name)
+  let regs = [RDI, RSI, RDX, R10, R8, R9]
+  var i = 0
+  while i < nargs {
+    a = arg(a: a, reg: regs.get(i).unwrap_or(RDI), i: i)
+    i = i + 1
+  }
+  return stub_end(syscall(mov_ri(a: a, dst: RAX, imm: nr)))
+}
+
+fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
+  var a = sys_stub(a0: a0, name: "os_write", nr: 1, nargs: 3)
+  a = sys_stub(a0: a, name: "os_read", nr: 0, nargs: 3)
+  a = sys_stub(a0: a, name: "os_close", nr: 3, nargs: 1)
+  a = arg(a: stub_begin(a, "os_exit"), reg: RDI, i: 0)
+  a = ud2(syscall(mov_ri(a: a, dst: RAX, imm: 231)))
+  a = stub_end(mmap(a0: stub_begin(a, "os_alloc"), size_from_arg: true, size: 0))
+  for clock in [Pair { first: "os_time_ns", second: 1 }, Pair { first: "os_wall_ns", second: 0 }] {
+    a = alu_ri(a: stub_begin(a, clock.first), op: "sub", dst: RSP, imm: 16)
+    a = mov_ri(a: a, dst: RDI, imm: clock.second)
+    a = mov_rr(a: a, dst: RSI, src: RSP)
+    a = syscall(mov_ri(a: a, dst: RAX, imm: 228))
+    a = load(a: a, dst: RAX, base: RSP, disp: 0)
+    a = mov_ri(a: a, dst: RCX, imm: 1000000000)
+    a = imul_rr(a: a, dst: RAX, src: RCX)
+    a = load(a: a, dst: RCX, base: RSP, disp: 8)
+    a = stub_end(alu_rr(a: a, op: "add", dst: RAX, src: RCX))
+  }
+  a = arg(a: arg(a: stub_begin(a, "os_open"), reg: RDI, i: 0), reg: RSI, i: 1)
+  let skip = new_label(a, "om")
+  a = jcc(a: test_rr(a: skip.a, x: RSI, y: RSI), cc: "e", target: skip.l)
+  a = label(mov_ri(a: a, dst: RSI, imm: 577), skip.l)     // O_WRONLY | O_CREAT | O_TRUNC
+  a = mov_ri(a: a, dst: RDX, imm: 420)
+  a = stub_end(syscall(mov_ri(a: a, dst: RAX, imm: 2)))
+  a = alu_ri(a: stub_begin(a, "os_file_exists"), op: "sub", dst: RSP, imm: 160)
+  a = mov_rr(a: arg(a: a, reg: RDI, i: 0), dst: RSI, src: RSP)
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 4))          // stat
+  let no = new_label(a, "fe")
+  a = jcc(a: test_rr(a: no.a, x: RAX, y: RAX), cc: "ne", target: no.l)
+  a = load32(a: a, dst: RAX, base: RSP, disp: 24)      // st_mode
+  a = alu_ri(a: a, op: "and", dst: RAX, imm: 61440)
+  a = alu_ri(a: a, op: "cmp", dst: RAX, imm: 32768)
+  a = stub_end(setcc(a: a, cc: "e", r: RAX))
+  a = stub_end(mov_ri(a: label(a, no.l), dst: RAX, imm: 0))
+  a = load_rip(a: stub_begin(a, "os_argc"), dst: RAX, target: "g_argp")
+  a = stub_end(load(a: a, dst: RAX, base: RAX, disp: 0))
+  a = arg(a: load_rip(a: stub_begin(a, "os_argv"), dst: RCX, target: "g_argp"), reg: RAX, i: 0)
+  a = shift_i(a: a, kind: "shl", r: RAX, n: 3)
+  a = alu_rr(a: a, op: "add", dst: RCX, src: RAX)
+  a = stub_end(load(a: a, dst: RAX, base: RCX, disp: 8))
+  for name in ["os_cmdline", "os_platform", "os_getenv"] {      // Linux reads envp directly (rt/globals.klar)
+    a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: 0))
+  }
+  a = test_index_stub(a, "linux")
+  // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
+  a = store_rip(a: label(a, "_start"), target: "g_argp", src: RSP)
+  a = mmap(a0: a, size_from_arg: false, size: 536870912)
+  a = mov_ri(a: a, dst: RCX, imm: 536870848)
+  a = alu_rr(a: a, op: "add", dst: RAX, src: RCX)
+  a = mov_rr(a: mov_rr(a: a, dst: RSP, src: RAX), dst: RBP, src: RSP)
+  a = mov_ri(a: a, dst: R15, imm: 0)                     // call depth
+  a = mov_rr(a: call(a, main_entry), dst: RDI, src: RAX)
+  return syscall(mov_ri(a: a, dst: RAX, imm: 231))
+}
+
+fn win_begin(a: Asm, name: Str, extra: Int) -> Asm {
+  let a1 = push(stub_begin(a, name), RBX)                // RBX is callee-saved in Klar code: [rbp-8]
+  return alu_ri(a: alu_ri(a: a1, op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 64 + extra)
+}
+
+fn win_end(a: Asm) -> Asm {
+  return stub_end(load(a: a, dst: RBX, base: RBP, disp: -8))
+}
+
+fn win_call(a: Asm, func: Str) -> Asm {
+  return call_rip(a, "__imp_" + func)
+}
+
+/// rcx := handle for fd (0/1/2 -> std handles).
+fn handle_from_fd(a0: Asm, reg_fd: Int, std_codes: List[Pair[Int, Int]]) -> Asm {
+  let done = new_label(a0, "h")
+  var a = done.a
+  for fc in std_codes {
+    let nxt = new_label(a, "hn")
+    a = jcc(a: alu_ri(a: nxt.a, op: "cmp", dst: reg_fd, imm: fc.first), cc: "ne", target: nxt.l)
+    a = win_call(mov_ri(a: a, dst: RCX, imm: fc.second), "GetStdHandle")
+    a = jmp(mov_rr(a: a, dst: RCX, src: RAX), done.l)
+    a = label(a, nxt.l)
+  }
+  return label(mov_rr(a: a, dst: RCX, src: reg_fd), done.l)
+}
+
+/// WriteFile / ReadFile (handle, buffer, count, &done, NULL) -> bytes done.
+fn win_rw(a0: Asm, name: Str, std_codes: List[Pair[Int, Int]], func: Str) -> Asm {
+  var a = arg(a: win_begin(a: a0, name: name, extra: 0), reg: RBX, i: 0)
+  a = handle_from_fd(a0: a, reg_fd: RBX, std_codes: std_codes)
+  a = arg(a: arg(a: a, reg: RDX, i: 1), reg: R8, i: 2)
+  a = lea(a: a, dst: R9, base: RSP, disp: 48)
+  a = mov_ri(a: a, dst: RAX, imm: 0)
+  a = store(a: a, base: RSP, disp: 48, src: RAX)
+  a = store(a: a, base: RSP, disp: 32, src: RAX)
+  return win_end(load(a: win_call(a, func), dst: RAX, base: RSP, disp: 48))
+}
+
+fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
+  var a = win_rw(a0: a0, name: "os_write", std_codes: [Pair { first: 1, second: -11 }, Pair { first: 2, second: -12 }],
+    func: "WriteFile")
+  a = win_rw(a0: a, name: "os_read", std_codes: [Pair { first: 0, second: -10 }], func: "ReadFile")
+  a = win_end(win_call(arg(a: win_begin(a: a, name: "os_close", extra: 0), reg: RCX, i: 0), "CloseHandle"))
+  a = ud2(win_call(arg(a: win_begin(a: a, name: "os_exit", extra: 0), reg: RCX, i: 0), "ExitProcess"))
+  a = arg(a: mov_ri(a: win_begin(a: a, name: "os_alloc", extra: 0), dst: RCX, imm: 0), reg: RDX, i: 0)
+  a = mov_ri(a: mov_ri(a: a, dst: R8, imm: 12288), dst: R9, imm: 4)
+  a = win_end(win_call(a, "VirtualAlloc"))
+  a = lea(a: win_begin(a: a, name: "os_time_ns", extra: 0), dst: RCX, base: RSP, disp: 48)
+  a = lea(a: win_call(a, "QueryPerformanceCounter"), dst: RCX, base: RSP, disp: 56)
+  a = load(a: win_call(a, "QueryPerformanceFrequency"), dst: RAX, base: RSP, disp: 48)
+  a = mul(mov_ri(a: a, dst: RCX, imm: 1000000000), RCX)
+  a = win_end(div(load(a: a, dst: RCX, base: RSP, disp: 56), RCX))
+  a = lea(a: win_begin(a: a, name: "os_wall_ns", extra: 0), dst: RCX, base: RSP, disp: 48)   // 100 ns since 1601
+  a = load(a: win_call(a, "GetSystemTimeAsFileTime"), dst: RAX, base: RSP, disp: 48)
+  a = alu_rr(a: mov_ri(a: a, dst: RCX, imm: 116444736000000000), op: "sub", dst: RAX, src: RCX)
+  a = win_end(imul_rr(a: mov_ri(a: a, dst: RCX, imm: 100), dst: RAX, src: RCX))
+  a = arg(a: arg(a: win_begin(a: a, name: "os_open", extra: 16), reg: RCX, i: 0), reg: RBX, i: 1)
+  let wr = new_label(a, "ow")
+  let done = new_label(wr.a, "od")
+  a = jcc(a: test_rr(a: done.a, x: RBX, y: RBX), cc: "ne", target: wr.l)
+  a = mov_ri(a: mov_ri(a: a, dst: RDX, imm: 2147483648), dst: RAX, imm: 3)     // OPEN_EXISTING
+  a = label(jmp(a, done.l), wr.l)
+  a = mov_ri(a: mov_ri(a: a, dst: RDX, imm: 1073741824), dst: RAX, imm: 2)     // CREATE_ALWAYS
+  a = store(a: label(a, done.l), base: RSP, disp: 32, src: RAX)
+  a = mov_ri(a: mov_ri(a: a, dst: R8, imm: 1), dst: R9, imm: 0)
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 128), base: RSP, disp: 40, src: RAX)
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 0), base: RSP, disp: 48, src: RAX)
+  a = win_end(win_call(a, "CreateFileA"))
+  a = win_call(arg(a: win_begin(a: a, name: "os_file_exists", extra: 0), reg: RCX, i: 0), "GetFileAttributesA")
+  let no = new_label(a, "fx")
+  a = mov_ri(a: no.a, dst: RCX, imm: 4294967295)       // the DWORD result lives in eax: zero-extend, test for -1
+  a = alu_rr(a: alu_rr(a: a, op: "and", dst: RAX, src: RCX), op: "cmp", dst: RAX, src: RCX)
+  a = jcc(a: a, cc: "e", target: no.l)
+  a = alu_ri(a: alu_ri(a: a, op: "and", dst: RAX, imm: 16), op: "cmp", dst: RAX, imm: 0)
+  a = win_end(setcc(a: a, cc: "e", r: RAX))
+  a = win_end(mov_ri(a: label(a, no.l), dst: RAX, imm: 0))
+  a = win_end(win_call(win_begin(a: a, name: "os_cmdline", extra: 0), "GetCommandLineA"))
+  a = arg(a: arg(a: arg(a: win_begin(a: a, name: "os_getenv", extra: 0), reg: RCX, i: 0), reg: RDX, i: 1), reg: R8,
+    i: 2)
+  a = mov_ri(a: win_call(a, "GetEnvironmentVariableA"), dst: RCX, imm: 4294967295)
+  a = win_end(alu_rr(a: a, op: "and", dst: RAX, src: RCX))      // DWORD result
+  for name in ["os_argc", "os_argv"] {
+    a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: 0))
+  }
+  a = stub_end(mov_ri(a: stub_begin(a, "os_platform"), dst: RAX, imm: 1))
+  a = test_index_stub(a, "windows")
+  a = alu_ri(a: alu_ri(a: label(a, "_start"), op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
+  a = win_call(mov_ri(a: a, dst: RCX, imm: 65001), "SetConsoleOutputCP")
+  a = mov_ri(a: a, dst: RAX, imm: 0)                     // [rbp] = 0, [rbp+8] = 0: end of the frame chain
+  a = store(a: store(a: a, base: RSP, disp: 0, src: RAX), base: RSP, disp: 8, src: RAX)
+  a = mov_ri(a: mov_rr(a: a, dst: RBP, src: RSP), dst: R15, imm: 0)   // call depth
+  a = mov_rr(a: call(a, main_entry), dst: RCX, src: RAX)
+  a = alu_ri(a: alu_ri(a: a, op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
+  return win_call(a, "ExitProcess")
+}
+
+/// test_index_arg(): decimal value of the last command-line word (test executables).
+fn test_index_stub(a0: Asm, target: Str) -> Asm {
+  var a = mov_rr(a: push(label(a0, "test_index_arg"), RBP), dst: RBP, src: RSP)
+  if target == "linux" {
+    a = load(a: load_rip(a: a, dst: RCX, target: "g_argp"), dst: RAX, base: RCX, disp: 0)    // argc
+    a = alu_rr(a: shift_i(a: a, kind: "shl", r: RAX, n: 3), op: "add", dst: RCX, src: RAX)
+    a = load(a: a, dst: RSI, base: RCX, disp: 0)                                           // argv[argc-1]
+  } else {
+    a = alu_ri(a: alu_ri(a: a, op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
+    a = mov_rr(a: call_rip(a, "__imp_GetCommandLineA"), dst: RSI, src: RAX)
+    // move to the last space-separated word
+    let scan = new_label(a, "s")
+    let end = new_label(scan.a, "e")
+    let nosp = new_label(end.a, "ns")
+    a = label(mov_rr(a: nosp.a, dst: RDX, src: RSI), scan.l)
+    a = load8(a: a, dst: RCX, base: RSI, disp: 0)
+    a = jcc(a: test_rr(a: a, x: RCX, y: RCX), cc: "e", target: end.l)
+    a = jcc(a: alu_ri(a: a, op: "cmp", dst: RCX, imm: 32), cc: "ne", target: nosp.l)
+    a = alu_ri(a: mov_rr(a: a, dst: RDX, src: RSI), op: "add", dst: RDX, imm: 1)
+    a = alu_ri(a: label(a, nosp.l), op: "add", dst: RSI, imm: 1)
+    a = label(jmp(a, scan.l), end.l)
+    a = mov_rr(a: a, dst: RSI, src: RDX)
+  }
+  a = mov_ri(a: a, dst: RAX, imm: 0)
+  let loop = new_label(a, "d")
+  let done = new_label(loop.a, "dd")
+  a = load8(a: label(done.a, loop.l), dst: RCX, base: RSI, disp: 0)
+  a = jcc(a: alu_ri(a: a, op: "sub", dst: RCX, imm: 48), cc: "l", target: done.l)
+  a = jcc(a: alu_ri(a: a, op: "cmp", dst: RCX, imm: 9), cc: "g", target: done.l)
+  a = imul_rr(a: mov_ri(a: a, dst: RDX, imm: 10), dst: RAX, src: RDX)
+  a = alu_ri(a: alu_rr(a: a, op: "add", dst: RAX, src: RCX), op: "add", dst: RSI, imm: 1)
+  a = label(jmp(a, loop.l), done.l)
+  return ret(pop(mov_rr(a: a, dst: RSP, src: RBP), RBP))
+}
+
+// ---- the program ----------------------------------------------------------------------------------------------
+
+/// Machine code with its labels and unresolved fixups (to data, bss and import slots), plus the data image.
+pub type Exe { code: Bytes, labels: Map[Str, Int], fixups: List[Fix], img: Img, imports: List[Str], entry: Str }
+
+fn os_part(target: Str, rt: Map[Str, Str]) -> Part {
+  let main_entry = rt.get("main_entry").unwrap_or("main_entry")
+  var a = new_asm(0)
+  if target == "linux" {
+    a = linux_layer(a, main_entry)
+  } else {
+    a = windows_layer(a, main_entry)
+  }
+  return Part { chunks: [a], n: a.n, row: [] }
+}
+
+/// A table [n][row...]*n of 8-byte words: symbols become absolute addresses, "" is 0.
+fn trace_table(img: Img, name: Str, rows: List[List[Str]]) -> Img {
+  var payload = bytes_of([]).push_le(rows.len(), 8)
+  var rel: List[Pair[Int, Str]] = []
+  for row in rows {
+    for item in row {
+      if item != "" {
+        rel = rel.push(Pair { first: payload.len(), second: item })
+      }
+      payload = payload.push_le(0, 8)
+    }
+  }
+  let out = add_data(img: img, name: name, payload: payload)
+  let base = out.syms.get(name).unwrap_or(0)
+  var abs = out.abs
+  for r in rel {
+    abs = abs.push(Reloc { off: base + r.first, sym: r.second, add: 0 })
+  }
+  return out with { abs: abs }
+}
+
+/// Writes the signed 32-bit value v little-endian at pos.
+fn le32(v: Int, k: Int) -> Int {
+  var u = v
+  if u < 0 {
+    u = u + 4294967296
+  }
+  return u.shift_right(8 * k).bit_and(255)
+}
+
+/// Lowers nothing itself: emits the machine code for the lowered program `w` ("linux" or "windows").
+pub fn emit_program(w: Lw, target: Str) -> Exe {
+  let rt = rt_names(w)
+  var img = add_bss(img: w.img, name: "g_depth", size: 8)
+  img = add_bss(img: img, name: "g_frames", size: 16 * (MAX_DEPTH + 2))
+  img = add_bss(img: img, name: "g_argp", size: 8)
+  img = add_bss(img: img, name: "g_scratch", size: 256)
+  let fns = inline_calls(w.fns)
+  var code = bytes_of([])
+  var labels: Map[Str, Int] = Map {}
+  var fixups: List[Fix] = []
+  var sites: List[List[Str]] = []
+  var fn_rows: List[List[Str]] = []
+  var n = 0
+  var i = -1
+  while i < fns.len() {
+    var part = Part { chunks: [], n: n, row: [] }
+    if i < 0 {
+      part = os_part(target, rt)
+    } else {
+      part = function_part(f0: fns.get(i).unwrap_or(KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [],
+        labels: 0 }), rt: rt, n: n)
+    }
+    n = part.n
+    if not part.row.is_empty() {
+      fn_rows = fn_rows.push(part.row)
+    }
+    for ch in part.chunks {
+      let base = code.len()
+      let bytes = ch.code
+      let m = bytes.len()
+      var j = 0
+      while j < m {
+        code = code.push(bytes.get_or(j, 0))
+        j = j + 1
+      }
+      for l in ch.labels {
+        if labels.has(l.name) {
+          return fail("emit: duplicate label {l.name}")
+        }
+        labels = labels.set(l.name, base + l.pos)
+      }
+      for fx in ch.fixups {
+        fixups = fixups.push(Fix { pos: base + fx.pos, target: fx.target, add: fx.add })
+      }
+      for s in ch.sites {
+        sites = sites.push([s.label, s.span])
+      }
+    }
+    i = i + 1
+  }
+  img = trace_table(img: img, name: "g_fn_table", rows: fn_rows)
+  img = trace_table(img: img, name: "g_site_table", rows: sites)
+  // resolve the fixups to local labels; the rest target data, bss and import slots
+  var rest: List[Fix] = []
+  for fx in fixups {
+    match labels.get(fx.target) {
+      Some(at) => {
+        let rel = at + fx.add - (fx.pos + 4)
+        code = code.set(fx.pos, le32(rel, 0))
+        code = code.set(fx.pos + 1, le32(rel, 1))
+        code = code.set(fx.pos + 2, le32(rel, 2))
+        code = code.set(fx.pos + 3, le32(rel, 3))
+      },
+      None => {
+        rest = rest.push(fx)
+      },
+    }
+  }
+  var imports: List[Str] = []
+  if target == "windows" {
+    imports = WIN_IMPORTS
+  }
+  return Exe { code: code, labels: labels, fixups: rest, img: img, imports: imports, entry: "_start" }
+}

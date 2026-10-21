@@ -199,7 +199,7 @@ pub fn fnv1a(text: Str) -> Int {
 
 // ---- data ---------------------------------------------------------------------------------------------------
 
-fn add_data(img: Img, name: Str, payload: Bytes) -> Img {
+pub fn add_data(img: Img, name: Str, payload: Bytes) -> Img {
   var data = img.data
   while data.len() % 8 != 0 {
     data = data.push(0)
@@ -207,7 +207,7 @@ fn add_data(img: Img, name: Str, payload: Bytes) -> Img {
   return img with { syms: img.syms.set(name, data.len()), data: data.concat(payload) }
 }
 
-fn add_bss(img: Img, name: Str, size: Int) -> Img {
+pub fn add_bss(img: Img, name: Str, size: Int) -> Img {
   let base = (img.bss_size + 15) / 16 * 16
   return img with { bss: img.bss.set(name, base), bss_size: base + size }
 }
@@ -2618,6 +2618,15 @@ fn alias_sym(w: Lw, name: Str, sym: Str) -> Lw {
 
 const RT_HELPERS: List[Str] = ["free", "int_add", "int_sub", "int_mul", "int_div", "int_mod", "int_neg", "int_cmp", "div_zero",
   "stack_overflow", "main_entry"]
+
+/// Runtime helper name -> its KIR function (the out-of-line paths of the machine code call these).
+pub fn rt_names(w: Lw) -> Map[Str, Str] {
+  var out: Map[Str, Str] = Map {}
+  for helper in RT_HELPERS {
+    out = out.set(helper, rt_fn(w, helper).v)
+  }
+  return out
+}
 
 /// Lowers a whole program (loaded with its runtime) to KIR functions and the data image.
 pub fn lower_program(ld: Ld, main_path: Str) -> Lw {

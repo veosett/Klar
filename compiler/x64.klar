@@ -1,0 +1,475 @@
+// A small x86-64 assembler written in Klar (self-hosting, stage 4d). Mirrors klar/native/x64.py encoder for
+// encoder: tests/selfhost.py compares the finished executables byte for byte.
+//
+// The assembler works on a *chunk*: the code of one KIR instruction, one out-of-line block or one OS stub. Labels,
+// rel32 fixups and call sites are recorded relative to the chunk; emit.klar appends the chunks to the program's
+// code (a local variable that grows in place) and rebases them. Only RIP-relative and register-relative addressing
+// is used, so the same machine code works for both ELF (Linux) and PE (Windows) executables.
+
+pub const RAX: Int = 0
+pub const RCX: Int = 1
+pub const RDX: Int = 2
+pub const RBX: Int = 3
+pub const RSP: Int = 4
+pub const RBP: Int = 5
+pub const RSI: Int = 6
+pub const RDI: Int = 7
+pub const R8: Int = 8
+pub const R9: Int = 9
+pub const R10: Int = 10
+pub const R11: Int = 11
+pub const R12: Int = 12
+pub const R15: Int = 15
+pub const XMM0: Int = 0
+pub const XMM1: Int = 1
+
+/// A rel32 field at `pos` that must hold `target + add - (pos + 4)`.
+pub type Fix { pos: Int, target: Str, add: Int }
+
+pub type Lab { name: Str, pos: Int }
+
+/// A call inside a Klar function: its return-address label and source span symbol ("" when unknown).
+pub type Site { label: Str, span: Str }
+
+/// The chunk being assembled; `n` numbers the generated labels of the whole program.
+pub type Asm { code: Bytes, labels: List[Lab], fixups: List[Fix], sites: List[Site], n: Int }
+
+/// A new label name together with the assembler that made it.
+pub type AL { a: Asm, l: Str }
+
+pub fn new_asm(n: Int) -> Asm {
+  return Asm { code: bytes_of([]), labels: [], fixups: [], sites: [], n: n }
+}
+
+/// The same assembler with an empty chunk (the label counter carries on).
+pub fn fresh(a: Asm) -> Asm {
+  return new_asm(a.n)
+}
+
+fn cc_code(cc: Str) -> Int {
+  return match cc {
+    "o" => 0,
+    "no" => 1,
+    "b" => 2,
+    "ae" => 3,
+    "e" => 4,
+    "ne" => 5,
+    "be" => 6,
+    "a" => 7,
+    "s" => 8,
+    "ns" => 9,
+    "p" => 10,
+    "np" => 11,
+    "l" => 12,
+    "ge" => 13,
+    "le" => 14,
+    "g" => 15,
+    _ => fail("x64: unknown condition {cc}"),
+  }
+}
+
+fn alu_opcode(op: Str) -> Int {
+  return match op {
+    "add" => 1,
+    "or" => 9,
+    "and" => 33,
+    "sub" => 41,
+    "xor" => 49,
+    "cmp" => 57,
+    _ => fail("x64: unknown ALU operation {op}"),
+  }
+}
+
+fn alu_ext(op: Str) -> Int {
+  return match op {
+    "add" => 0,
+    "or" => 1,
+    "and" => 4,
+    "sub" => 5,
+    "xor" => 6,
+    "cmp" => 7,
+    _ => fail("x64: unknown ALU operation {op}"),
+  }
+}
+
+fn shift_ext(kind: Str) -> Int {
+  return match kind {
+    "shl" => 4,
+    "shr" => 5,
+    "sar" => 7,
+    _ => fail("x64: unknown shift {kind}"),
+  }
+}
+
+// ---- labels ---------------------------------------------------------------------------------------------------
+
+pub fn new_label(a: Asm, hint: Str) -> AL {
+  let n = a.n + 1
+  return AL { a: a with { n: n }, l: ".{hint}{n}" }
+}
+
+pub fn label(a: Asm, name: Str) -> Asm {
+  return a with { labels: a.labels.push(Lab { name: name, pos: a.code.len() }) }
+}
+
+pub fn here(a: Asm) -> Int {
+  return a.code.len()
+}
+
+fn b(a: Asm, x: Int) -> Asm {
+  return a with { code: a.code.push(x) }
+}
+
+fn bs(a: Asm, xs: List[Int]) -> Asm {
+  var c = a.code
+  for x in xs {
+    c = c.push(x)
+  }
+  return a with { code: c }
+}
+
+fn d32(a: Asm, v: Int) -> Asm {
+  return a with { code: a.code.push_le(v, 4) }
+}
+
+fn d64(a: Asm, v: Int) -> Asm {
+  return a with { code: a.code.push_le(v, 8) }
+}
+
+fn imm8(a: Asm, v: Int) -> Asm {
+  return b(a, v.bit_and(255))
+}
+
+fn rel32(a: Asm, target: Str, add: Int) -> Asm {
+  let f = Fix { pos: a.code.len(), target: target, add: add }
+  return d32(a with { fixups: a.fixups.push(f) }, 0)
+}
+
+/// Records the call site that ends here (a return address inside a Klar function).
+pub fn site(a: Asm, ra: Str, span: Str) -> Asm {
+  return a with { sites: a.sites.push(Site { label: ra, span: span }) }
+}
+
+// ---- encoding helpers -----------------------------------------------------------------------------------------
+
+fn rex(a: Asm, w: Int, r: Int, base: Int, force: Bool) -> Asm {
+  let v = 64 + w * 8 + r / 8 * 4 + base / 8
+  if v != 64 or force {
+    return b(a, v)
+  }
+  return a
+}
+
+/// [base + disp8/disp32] addressing (base may be RSP/R12 -> SIB).
+fn modrm_mem(a: Asm, reg: Int, base: Int, disp: Int) -> Asm {
+  let short = disp >= -128 and disp < 128
+  var m = 128
+  if short {
+    m = 64
+  }
+  var out = b(a, m + reg % 8 * 8 + base % 8)
+  if base % 8 == RSP {
+    out = b(out, 36)
+  }
+  if short {
+    return imm8(out, disp)
+  }
+  return d32(out, disp)
+}
+
+fn modrm_rr(a: Asm, reg: Int, rm: Int) -> Asm {
+  return b(a, 192 + reg % 8 * 8 + rm % 8)
+}
+
+fn modrm_rip(a: Asm, reg: Int, target: Str, add: Int) -> Asm {
+  return rel32(a: b(a, 5 + reg % 8 * 8), target: target, add: add)
+}
+
+// ---- moves ----------------------------------------------------------------------------------------------------
+
+pub fn mov_rr(a: Asm, dst: Int, src: Int) -> Asm {
+  if dst == src {
+    return a
+  }
+  return modrm_rr(a: b(rex(a: a, w: 1, r: src, base: dst, force: false), 137), reg: src, rm: dst)
+}
+
+pub fn mov_ri(a: Asm, dst: Int, imm: Int) -> Asm {
+  if imm >= -2147483648 and imm < 2147483648 {
+    let a1 = b(rex(a: a, w: 1, r: 0, base: dst, force: false), 199)
+    return d32(modrm_rr(a: a1, reg: 0, rm: dst), imm)
+  }
+  var v = imm
+  if v >= 9223372036854775808 {
+    v = v - 18446744073709551616
+  }
+  return d64(b(rex(a: a, w: 1, r: 0, base: dst, force: false), 184 + dst % 8), v)
+}
+
+/// mov dst, qword [base+disp]
+pub fn load(a: Asm, dst: Int, base: Int, disp: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 1, r: dst, base: base, force: false), 139), reg: dst, base: base, disp: disp)
+}
+
+/// mov qword [base+disp], src
+pub fn store(a: Asm, base: Int, disp: Int, src: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 1, r: src, base: base, force: false), 137), reg: src, base: base, disp: disp)
+}
+
+/// movzx dst, byte [base+disp]
+pub fn load8(a: Asm, dst: Int, base: Int, disp: Int) -> Asm {
+  let a1 = bs(rex(a: a, w: 1, r: dst, base: base, force: false), [15, 182])
+  return modrm_mem(a: a1, reg: dst, base: base, disp: disp)
+}
+
+/// mov byte [base+disp], src8
+pub fn store8(a: Asm, base: Int, disp: Int, src: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 0, r: src, base: base, force: src >= 4), 136), reg: src, base: base, disp: disp)
+}
+
+/// mov dst32, dword [base+disp] (zero-extends)
+pub fn load32(a: Asm, dst: Int, base: Int, disp: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 0, r: dst, base: base, force: false), 139), reg: dst, base: base, disp: disp)
+}
+
+pub fn store32(a: Asm, base: Int, disp: Int, src: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 0, r: src, base: base, force: false), 137), reg: src, base: base, disp: disp)
+}
+
+pub fn lea(a: Asm, dst: Int, base: Int, disp: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 1, r: dst, base: base, force: false), 141), reg: dst, base: base, disp: disp)
+}
+
+pub fn lea_rip(a: Asm, dst: Int, target: Str) -> Asm {
+  return modrm_rip(a: b(rex(a: a, w: 1, r: dst, base: 0, force: false), 141), reg: dst, target: target, add: 0)
+}
+
+/// mov dst, qword [rip+target]
+pub fn load_rip(a: Asm, dst: Int, target: Str) -> Asm {
+  return modrm_rip(a: b(rex(a: a, w: 1, r: dst, base: 0, force: false), 139), reg: dst, target: target, add: 0)
+}
+
+pub fn store_rip(a: Asm, target: Str, src: Int) -> Asm {
+  return modrm_rip(a: b(rex(a: a, w: 1, r: src, base: 0, force: false), 137), reg: src, target: target, add: 0)
+}
+
+// ---- arithmetic -----------------------------------------------------------------------------------------------
+
+pub fn alu_rr(a: Asm, op: Str, dst: Int, src: Int) -> Asm {
+  return modrm_rr(a: b(rex(a: a, w: 1, r: src, base: dst, force: false), alu_opcode(op)), reg: src, rm: dst)
+}
+
+pub fn alu_ri(a: Asm, op: Str, dst: Int, imm: Int) -> Asm {
+  let a1 = rex(a: a, w: 1, r: 0, base: dst, force: false)
+  if imm >= -128 and imm < 128 {
+    return imm8(modrm_rr(a: b(a1, 131), reg: alu_ext(op), rm: dst), imm)
+  }
+  return d32(modrm_rr(a: b(a1, 129), reg: alu_ext(op), rm: dst), imm)
+}
+
+pub fn test_rr(a: Asm, x: Int, y: Int) -> Asm {
+  return modrm_rr(a: b(rex(a: a, w: 1, r: y, base: x, force: false), 133), reg: y, rm: x)
+}
+
+/// test reg8, imm8 (low byte)
+pub fn test_ri8(a: Asm, reg: Int, imm: Int) -> Asm {
+  return imm8(modrm_rr(a: b(rex(a: a, w: 0, r: 0, base: reg, force: reg >= 4), 246), reg: 0, rm: reg), imm)
+}
+
+pub fn imul_rr(a: Asm, dst: Int, src: Int) -> Asm {
+  return modrm_rr(a: bs(rex(a: a, w: 1, r: dst, base: src, force: false), [15, 175]), reg: dst, rm: src)
+}
+
+/// dst = src * imm32
+pub fn imul_rri(a: Asm, dst: Int, src: Int, imm: Int) -> Asm {
+  let a1 = rex(a: a, w: 1, r: dst, base: src, force: false)
+  if imm >= -128 and imm < 128 {
+    return imm8(modrm_rr(a: b(a1, 107), reg: dst, rm: src), imm)
+  }
+  return d32(modrm_rr(a: b(a1, 105), reg: dst, rm: src), imm)
+}
+
+pub fn cqo(a: Asm) -> Asm {
+  return bs(a, [72, 153])
+}
+
+fn group3(a: Asm, ext: Int, r: Int) -> Asm {
+  return modrm_rr(a: b(rex(a: a, w: 1, r: 0, base: r, force: false), 247), reg: ext, rm: r)
+}
+
+pub fn idiv(a: Asm, src: Int) -> Asm {
+  return group3(a: a, ext: 7, r: src)
+}
+
+/// unsigned rdx:rax / src
+pub fn div(a: Asm, src: Int) -> Asm {
+  return group3(a: a, ext: 6, r: src)
+}
+
+/// signed rdx:rax = rax * src
+pub fn imul1(a: Asm, src: Int) -> Asm {
+  return group3(a: a, ext: 5, r: src)
+}
+
+/// unsigned rdx:rax = rax * src
+pub fn mul(a: Asm, src: Int) -> Asm {
+  return group3(a: a, ext: 4, r: src)
+}
+
+pub fn neg(a: Asm, r: Int) -> Asm {
+  return group3(a: a, ext: 3, r: r)
+}
+
+pub fn shift_cl(a: Asm, kind: Str, r: Int) -> Asm {
+  return modrm_rr(a: b(rex(a: a, w: 1, r: 0, base: r, force: false), 211), reg: shift_ext(kind), rm: r)
+}
+
+pub fn shift_i(a: Asm, kind: Str, r: Int, n: Int) -> Asm {
+  let a1 = modrm_rr(a: b(rex(a: a, w: 1, r: 0, base: r, force: false), 193), reg: shift_ext(kind), rm: r)
+  return b(a1, n.bit_and(63))
+}
+
+/// setcc r8 ; movzx r64, r8
+pub fn setcc(a: Asm, cc: Str, r: Int) -> Asm {
+  let a1 = modrm_rr(a: bs(rex(a: a, w: 0, r: 0, base: r, force: r >= 4), [15, 144 + cc_code(cc)]), reg: 0, rm: r)
+  return modrm_rr(a: bs(rex(a: a1, w: 1, r: r, base: r, force: false), [15, 182]), reg: r, rm: r)
+}
+
+// ---- control flow ---------------------------------------------------------------------------------------------
+
+pub fn jmp(a: Asm, target: Str) -> Asm {
+  return rel32(a: b(a, 233), target: target, add: 0)
+}
+
+pub fn jcc(a: Asm, cc: Str, target: Str) -> Asm {
+  return rel32(a: bs(a, [15, 128 + cc_code(cc)]), target: target, add: 0)
+}
+
+pub fn call(a: Asm, target: Str) -> Asm {
+  return rel32(a: b(a, 232), target: target, add: 0)
+}
+
+pub fn call_r(a: Asm, r: Int) -> Asm {
+  return modrm_rr(a: b(rex(a: a, w: 0, r: 0, base: r, force: false), 255), reg: 2, rm: r)
+}
+
+/// call qword [rip+target] (PE import slots)
+pub fn call_rip(a: Asm, target: Str) -> Asm {
+  return modrm_rip(a: b(a, 255), reg: 2, target: target, add: 0)
+}
+
+pub fn ret(a: Asm) -> Asm {
+  return b(a, 195)
+}
+
+pub fn push(a: Asm, r: Int) -> Asm {
+  return b(rex(a: a, w: 0, r: 0, base: r, force: false), 80 + r % 8)
+}
+
+pub fn pop(a: Asm, r: Int) -> Asm {
+  return b(rex(a: a, w: 0, r: 0, base: r, force: false), 88 + r % 8)
+}
+
+pub fn syscall(a: Asm) -> Asm {
+  return bs(a, [15, 5])
+}
+
+pub fn ud2(a: Asm) -> Asm {
+  return bs(a, [15, 11])
+}
+
+// ---- SSE2 scalar double ---------------------------------------------------------------------------------------
+
+/// movq xmm, r64
+pub fn movq_xr(a: Asm, x: Int, r: Int) -> Asm {
+  return modrm_rr(a: bs(rex(a: b(a, 102), w: 1, r: x, base: r, force: false), [15, 110]), reg: x, rm: r)
+}
+
+/// movq r64, xmm
+pub fn movq_rx(a: Asm, r: Int, x: Int) -> Asm {
+  return modrm_rr(a: bs(rex(a: b(a, 102), w: 1, r: x, base: r, force: false), [15, 126]), reg: x, rm: r)
+}
+
+fn sse_opcode(op: Str) -> Int {
+  return match op {
+    "add" => 88,
+    "mul" => 89,
+    "sub" => 92,
+    "div" => 94,
+    "sqrt" => 81,
+    _ => fail("x64: unknown SSE operation {op}"),
+  }
+}
+
+pub fn sse(a: Asm, op: Str, dst: Int, src: Int) -> Asm {
+  let a1 = bs(rex(a: b(a, 242), w: 0, r: dst, base: src, force: false), [15, sse_opcode(op)])
+  return modrm_rr(a: a1, reg: dst, rm: src)
+}
+
+/// movsd xmm, [base + disp]
+pub fn movsd_load(a: Asm, x: Int, base: Int, disp: Int) -> Asm {
+  let a1 = bs(rex(a: b(a, 242), w: 0, r: x, base: base, force: false), [15, 16])
+  return modrm_mem(a: a1, reg: x, base: base, disp: disp)
+}
+
+/// movsd [base + disp], xmm
+pub fn movsd_store(a: Asm, base: Int, disp: Int, x: Int) -> Asm {
+  let a1 = bs(rex(a: b(a, 242), w: 0, r: x, base: base, force: false), [15, 17])
+  return modrm_mem(a: a1, reg: x, base: base, disp: disp)
+}
+
+/// movapd xmm, xmm (a register rename, no latency)
+pub fn movapd(a: Asm, dst: Int, src: Int) -> Asm {
+  if dst == src {
+    return a
+  }
+  return modrm_rr(a: bs(rex(a: b(a, 102), w: 0, r: dst, base: src, force: false), [15, 40]), reg: dst, rm: src)
+}
+
+pub fn ucomisd(a: Asm, x: Int, y: Int) -> Asm {
+  return modrm_rr(a: bs(rex(a: b(a, 102), w: 0, r: x, base: y, force: false), [15, 46]), reg: x, rm: y)
+}
+
+pub fn cvtsi2sd(a: Asm, x: Int, r: Int) -> Asm {
+  return modrm_rr(a: bs(rex(a: b(a, 242), w: 1, r: x, base: r, force: false), [15, 42]), reg: x, rm: r)
+}
+
+pub fn cvttsd2si(a: Asm, r: Int, x: Int) -> Asm {
+  return modrm_rr(a: bs(rex(a: b(a, 242), w: 1, r: r, base: x, force: false), [15, 44]), reg: r, rm: x)
+}
+
+// ---- x87 (sin, cos, ln, exp, pow) -----------------------------------------------------------------------------
+
+pub fn fld_m(a: Asm, base: Int, disp: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 0, r: 0, base: base, force: false), 221), reg: 0, base: base, disp: disp)
+}
+
+pub fn fstp_m(a: Asm, base: Int, disp: Int) -> Asm {
+  return modrm_mem(a: b(rex(a: a, w: 0, r: 0, base: base, force: false), 221), reg: 3, base: base, disp: disp)
+}
+
+pub fn x87(a: Asm, name: Str) -> Asm {
+  let ops = match name {
+    "fsin" => [217, 254],
+    "fcos" => [217, 255],
+    "fldln2" => [217, 237],
+    "fyl2x" => [217, 241],
+    "fldl2e" => [217, 234],
+    "f2xm1" => [217, 240],
+    "fscale" => [217, 253],
+    "frndint" => [217, 252],
+    "fld1" => [217, 232],
+    "fxch" => [217, 201],
+    "fmulp" => [222, 201],
+    "fsubp" => [222, 233],
+    "faddp" => [222, 193],
+    "fstp1" => [221, 217],
+    "fld0" => [217, 192],
+    "fprem" => [217, 248],
+    "fldpi" => [217, 235],
+    "fsubrp" => [222, 225],
+    "fsub01" => [216, 225],
+    _ => fail("x64: unknown x87 instruction {name}"),
+  }
+  return bs(a, ops)
+}
