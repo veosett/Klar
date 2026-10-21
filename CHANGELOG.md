@@ -5,6 +5,8 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-21
+
 ### Added
 - `std.json`: `Json` enum (exact `Int` numbers, ordered objects), `parse_json` with line/column errors,
   `json_text`, `json_pretty`, `field` / `item` / `lookup("a.0.b")`, `as_*` accessors and builders.

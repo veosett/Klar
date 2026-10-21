@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.3.0-informational)
+![Version](https://img.shields.io/badge/version-0.4.0-informational)
 
 [English](README.md) · [**Руководство в картинках**](docs/GUIDE.md) · [Инструменты](docs/TOOLS.md) ·
 [Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·

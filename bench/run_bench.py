@@ -23,6 +23,9 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+from klar import __version__ as _v  # noqa: E402
+KLAR_VERSION = ".".join(_v.split(".")[:2])
 PROGRAMS = os.path.join(HERE, "programs")
 EXE = ".exe" if os.name == "nt" else ""
 
@@ -43,11 +46,11 @@ def detect():
     pyv = platform.python_implementation() + " " + platform.python_version()
     langs["klar"] = {"ext": "klar", "build": lambda src, exe: [py, "-m", "klar", "build", "-q", src, "-o", exe],
                      "run": lambda src, exe: [exe],
-                     "version": "Klar 0.3, native compiler (own x86-64 codegen + linker, no libc)"}
+                     "version": f"Klar {KLAR_VERSION}, native compiler (own x86-64 codegen + linker, no libc)"}
     langs["klar-py"] = {"ext": "klar", "run": lambda src, exe: [py, "-m", "klar", "run", "-q", "--py", src],
-                        "version": f"Klar 0.3, Python-bytecode backend (on {pyv})"}
+                        "version": f"Klar {KLAR_VERSION}, Python-bytecode backend (on {pyv})"}
     langs["klar-interp"] = {"ext": "klar", "run": lambda src, exe: [py, "-m", "klar", "run", "-q", "--interp", src],
-                            "version": f"Klar 0.3, tree-walking interpreter (on {pyv})"}
+                            "version": f"Klar {KLAR_VERSION}, tree-walking interpreter (on {pyv})"}
     langs["python"] = {"ext": "py", "run": lambda src, exe: [py, src],
                        "version": platform.python_implementation() + " " + platform.python_version()}
     if shutil.which("node"):

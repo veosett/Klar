@@ -24,9 +24,9 @@ Wall-clock time including process start-up (ms):
 
 Versions:
 
-- **klar**: Klar 0.3, native compiler (own x86-64 codegen + linker, no libc)
-- **klar-py**: Klar 0.3, Python-bytecode backend (on CPython 3.13.16)
-- **klar-interp**: Klar 0.3, tree-walking interpreter (on CPython 3.13.16)
+- **klar**: Klar 0.4, native compiler (own x86-64 codegen + linker, no libc)
+- **klar-py**: Klar 0.4, Python-bytecode backend (on CPython 3.13.16)
+- **klar-interp**: Klar 0.4, tree-walking interpreter (on CPython 3.13.16)
 - **python**: CPython 3.13.16
 - **javascript**: Node.js v22.22.0
 - **c**: gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 -O2
