@@ -188,7 +188,9 @@ def format_source(src):
 
 def token_stream(src):
     toks = Lexer(src, "fmt").run()
-    return [(t.kind, t.value if t.kind != "STR" else repr(t.parts)) for t in toks if t.kind != "NEWLINE"]
+    # interpolated code is compared without its position: moving a line moves the code inside its strings
+    return [(t.kind, t.value if t.kind != "STR" else repr([p if isinstance(p, str) else p[1] for p in t.parts]))
+            for t in toks if t.kind != "NEWLINE"]
 
 
 class FormatError(Exception):

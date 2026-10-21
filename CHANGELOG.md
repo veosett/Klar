@@ -9,10 +9,17 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - Self-hosting, stage 3a: `compiler/lexer.klar` — the lexer written in Klar. `tests/selfhost.py` checks that it
   produces exactly the tokens (kinds, values, spans, string parts) and the errors of `klar/lexer.py` on every
   `.klar` file of the repository and on error snippets (native and interpreter runs, in CI).
+- Self-hosting, stage 3b: `compiler/ast.klar` (the syntax tree as Klar enums and records) and
+  `compiler/parser.klar` — the recursive-descent parser written in Klar, with doc-tests, string interpolation,
+  traits and impls. `tests/selfhost.py` compares its tree (every node and span, via `compiler/dump_ast.klar`) and
+  its syntax errors with `klar/parser.py` on every repository file and on 100 error snippets; the parser also
+  parses its own source.
 
 ### Fixed
 - Native: constants holding lists or maps corrupted the heap (they were built before the runtime's own constants
   were initialised); the runtime's constants are now initialised first.
+- `klar fmt` refused files where a re-indented line contained an interpolated string (the check compared the
+  positions of the interpolated code, which legitimately move).
 
 ## [0.5.0] — 2026-10-21
 

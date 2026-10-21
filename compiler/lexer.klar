@@ -341,13 +341,18 @@ fn last_is_newline(toks: List[Token]) -> Bool {
 /// Tokens of `src`, ending with NEWLINE (when there is any token) and EOF; the first lexical error otherwise.
 /// >>> assert tokenize("let x = 1").map(fn(ts) => ts.len()) == Ok(6)
 pub fn tokenize(src: Str) -> Result[List[Token], LexError] {
+  return tokenize_at(src: src, first_line: 1, first_col: 1)
+}
+
+/// Tokens of a piece of source that starts at the given line and column of a file (doc-tests, interpolations).
+pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Token], LexError] {
   let b = src.to_bytes()
   let n = b.len()
   var toks: List[Token] = []
   var stack: List[Int] = []
   var i = 0
-  var line = 1
-  var col = 1
+  var line = first_line
+  var col = first_col
   while i < n {
     let c = at(b, i)
     if c == 32 or c == 9 or c == 13 {

@@ -495,6 +495,9 @@ class DeveloperTools(unittest.TestCase):
         messy = "fn  add( a:Int,b :Int )->Int{\nreturn a+b\n}\nfn main()uses io{\nprint(add(1,-2))\n}\n"
         self.assertEqual(format_checked(messy), "fn add(a: Int, b: Int) -> Int {\n  return a + b\n}\n\n"
                                                 "fn main() uses io {\n  print(add(1, -2))\n}\n")
+        # re-indenting a line moves the code inside its interpolated strings: still the same program
+        shifted = "fn main() uses io {\nprint(\"{1 + 2}\")\n}\n"
+        self.assertEqual(format_checked(shifted), "fn main() uses io {\n  print(\"{1 + 2}\")\n}\n")
 
     def test_eval(self):
         from klar.tools.runtools import evaluate
@@ -731,8 +734,9 @@ fn main() uses io {
 
 
 class SelfHosting(unittest.TestCase):
-    def test_klar_lexer_matches_python_lexer(self):
-        """compiler/lexer.klar produces exactly the tokens and errors of klar/lexer.py (native build)."""
+    def test_klar_lexer_and_parser_match_python(self):
+        """compiler/lexer.klar and parser.klar give exactly the tokens, trees and errors of klar/lexer.py and
+        klar/parser.py (native builds)."""
         sys.path.insert(0, os.path.join(ROOT, "tests"))
         import selfhost
         out = io.StringIO()

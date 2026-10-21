@@ -16,7 +16,7 @@ ruff check klar tests bench                 # lint
 - `klar/checker.py` types/effects · `klar/safety.py` compile-time safety (E07xx) · `klar/diagnostics.py` error catalog
 - `klar/interpreter.py` + `klar/builtins.py` reference semantics · `klar/codegen.py` Python back-end
 - `klar/native/` native compiler (`lower` → KIR → `opt` → `regalloc` → `emit`/`x64` → `link`) · `klar/rt/*.klar` runtime in Klar
-- `compiler/` the compiler being rewritten in Klar (self-hosting): `lexer.klar` done, parser next
+- `compiler/` the compiler being rewritten in Klar (self-hosting): `lexer.klar`, `ast.klar`, `parser.klar` done (checked by `tests/selfhost.py`), checker next
 - `klar/tools/` developer tools (fmt, outline, doc, refs, rename, eval, coverage, view, new)
 - `klar/ai_reference.md` is what `klar spec` prints — keep it short and current
 

@@ -1,0 +1,175 @@
+// The Klar syntax tree, written in Klar (self-hosting). It mirrors klar/nodes.py node for node, so that
+// compiler/parser.klar can be checked against klar/parser.py (tests/selfhost.py compares the JSON forms).
+
+/// A source range: first line/column and the position just after the end (1-based, like the Python spans).
+pub type Span { line: Int, col: Int, end_line: Int, end_col: Int }
+
+pub fn merge(a: Span, b: Span) -> Span {
+  return Span { line: a.line, col: a.col, end_line: b.end_line, end_col: b.end_col }
+}
+
+pub enum TypeExpr {
+  Named(span: Span, name: Str, args: List[TypeExpr]),
+  FnType(span: Span, params: List[TypeExpr], ret: TypeExpr),
+}
+
+pub type Param { span: Span, name: Str, ty: Option[TypeExpr] }
+
+/// A literal in a pattern (Int, Float, Str or Bool), with the same value kinds as the Python parser.
+pub enum LitValue {
+  IntV(value: Int),
+  FloatV(value: Float),
+  StrV(value: Str),
+  BoolV(value: Bool),
+}
+
+pub enum Pattern {
+  Wild(span: Span),
+  Bind(span: Span, name: Str),
+  Lit(span: Span, value: LitValue),
+  /// `Some(p)` / `None` / `Ok(p)` / `Err(p)` have no enum name; `Shape.Circle(r)` has one.
+  Variant(span: Span, enum_name: Option[Str], variant: Str, args: List[Pattern]),
+}
+
+pub type Arg { span: Span, name: Option[Str], value: Expr }
+
+pub type FieldInit { span: Span, name: Str, value: Expr }
+
+pub type MapEntry { span: Span, key: Expr, value: Expr }
+
+/// A piece of a string literal: text, or an interpolated expression.
+pub enum StrPiece {
+  Text(value: Str),
+  Code(expr: Expr),
+}
+
+/// The body of a match arm or a lambda: one expression or a block.
+pub enum Body {
+  ExprBody(expr: Expr),
+  BlockBody(block: Block),
+}
+
+pub type MatchArm { span: Span, pattern: Pattern, guard: Option[Expr], body: Body }
+
+pub enum Expr {
+  IntLit(span: Span, value: Int),
+  FloatLit(span: Span, value: Float),
+  StrLit(span: Span, parts: List[StrPiece]),
+  BoolLit(span: Span, value: Bool),
+  UnitLit(span: Span),
+  ListLit(span: Span, items: List[Expr]),
+  MapLit(span: Span, entries: List[MapEntry]),
+  Name(span: Span, name: Str),
+  Unary(span: Span, op: Str, operand: Expr),
+  Binary(span: Span, op: Str, left: Expr, right: Expr),
+  Call(span: Span, callee: Expr, args: List[Arg]),
+  MethodCall(span: Span, obj: Expr, method: Str, method_span: Span, args: List[Arg]),
+  FieldAccess(span: Span, obj: Expr, name: Str, name_span: Span),
+  Try(span: Span, expr: Expr),
+  RecordLit(span: Span, type_name: Str, fields: List[FieldInit]),
+  WithExpr(span: Span, base: Expr, fields: List[FieldInit]),
+  Match(span: Span, subject: Expr, arms: List[MatchArm]),
+  Lambda(span: Span, params: List[Param], ret: Option[TypeExpr], body: Body),
+}
+
+pub type Block { span: Span, stmts: List[Stmt] }
+
+/// What follows `else`: nothing, a block, or another `if` (kept as a statement).
+pub enum Else {
+  NoElse,
+  ElseBlock(block: Block),
+  ElseIf(stmt: Stmt),
+}
+
+pub enum Stmt {
+  Let(span: Span, name: Str, name_span: Span, ty: Option[TypeExpr], value: Expr, mutable: Bool),
+  Assign(span: Span, name: Str, value: Expr),
+  Return(span: Span, value: Option[Expr]),
+  If(span: Span, cond: Expr, then: Block, else_: Else),
+  While(span: Span, cond: Expr, body: Block),
+  For(span: Span, var_name: Str, var_span: Span, iter: Expr, body: Block),
+  Break(span: Span),
+  Continue(span: Span),
+  Assert(span: Span, cond: Expr, message: Option[Expr]),
+  ExprStmt(span: Span, expr: Expr),
+}
+
+pub type FieldDecl { span: Span, name: Str, ty: TypeExpr }
+
+pub type VariantDecl { span: Span, name: Str, fields: List[FieldDecl] }
+
+pub type FnDecl {
+  span: Span,
+  name: Str,
+  name_span: Span,
+  type_params: List[Str],
+  params: List[Param],
+  ret: Option[TypeExpr],
+  effects: List[Str],
+  pre: List[Expr],
+  post: List[Expr],
+  body: Option[Block],
+  doc: Option[Str],
+  bounds: List[Pair[Str, List[Pair[Str, Span]]]],
+  // trait/impl methods: "impl" or "default", the implementing type or the trait; their `name` is qualified
+  // (`Circle.area`, `Shape.label`) and `method_name` is the plain name, as in the Python parser
+  owner_kind: Option[Str],
+  owner: Option[Str],
+  trait_name: Option[Str],
+  method_name: Option[Str],
+  public: Bool,
+}
+
+pub enum Decl {
+  Fn(decl: FnDecl),
+  TypeD(span: Span, name: Str, type_params: List[Str], fields: List[FieldDecl], doc: Option[Str], public: Bool),
+  Alias(span: Span, name: Str, type_params: List[Str], target: TypeExpr, doc: Option[Str], public: Bool),
+  Const(span: Span, name: Str, ty: TypeExpr, value: Expr, doc: Option[Str], public: Bool),
+  Use(span: Span, path: List[Str], items: List[Str], item_spans: List[Span]),
+  Property(span: Span, name: Str, params: List[Param], body: Block),
+  EnumD(span: Span, name: Str, type_params: List[Str], variants: List[VariantDecl], doc: Option[Str], public: Bool),
+  Test(span: Span, name: Str, body: Block),
+  Trait(span: Span, name: Str, methods: List[FnDecl], defaults: List[Str], doc: Option[Str], public: Bool),
+  Impl(span: Span, trait_name: Str, target: TypeExpr, methods: List[Str], method_spans: List[Span], public: Bool),
+}
+
+pub type Program { span: Span, module_name: Option[Str], decls: List[Decl] }
+
+pub fn expr_span(e: Expr) -> Span {
+  return match e {
+    Expr.IntLit(s, _) => s,
+    Expr.FloatLit(s, _) => s,
+    Expr.StrLit(s, _) => s,
+    Expr.BoolLit(s, _) => s,
+    Expr.UnitLit(s) => s,
+    Expr.ListLit(s, _) => s,
+    Expr.MapLit(s, _) => s,
+    Expr.Name(s, _) => s,
+    Expr.Unary(s, _, _) => s,
+    Expr.Binary(s, _, _, _) => s,
+    Expr.Call(s, _, _) => s,
+    Expr.MethodCall(s, _, _, _, _) => s,
+    Expr.FieldAccess(s, _, _, _) => s,
+    Expr.Try(s, _) => s,
+    Expr.RecordLit(s, _, _) => s,
+    Expr.WithExpr(s, _, _) => s,
+    Expr.Match(s, _, _) => s,
+    Expr.Lambda(s, _, _, _) => s,
+  }
+}
+
+pub fn pattern_span(p: Pattern) -> Span {
+  return match p {
+    Pattern.Wild(s) => s,
+    Pattern.Bind(s, _) => s,
+    Pattern.Lit(s, _) => s,
+    Pattern.Variant(s, _, _, _) => s,
+  }
+}
+
+pub fn body_span(b: Body) -> Span {
+  return match b {
+    Body.ExprBody(e) => expr_span(e),
+    Body.BlockBody(blk) => blk.span,
+  }
+}

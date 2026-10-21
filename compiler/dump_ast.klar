@@ -1,0 +1,276 @@
+// Prints the syntax tree of each file given on the command line as one JSON line, in the form of
+// klar/nodes.py `to_json` (used by tests/selfhost.py to compare the Klar parser with klar/parser.py).
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldDecl, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Param}
+use ast.{Pattern, Program, Span, Stmt, StrPiece, TypeExpr, VariantDecl}
+use parser.{ParseError, parse_program}
+use std.json.{Json, json_object, json_strings, json_text}
+
+fn span_json(s: Span) -> Json {
+  return Json.Arr(items: [s.line, s.col, s.end_line, s.end_col].map(fn(n) => Json.Int(value: n)))
+}
+
+fn text(s: Str) -> Json {
+  return Json.Text(value: s)
+}
+
+fn opt_text(s: Option[Str]) -> Json {
+  return match s {
+    Some(v) => Json.Text(value: v),
+    None => Json.Null,
+  }
+}
+
+fn field(name: Str, value: Json) -> Pair[Str, Json] {
+  return Pair { first: name, second: value }
+}
+
+/// `{"node": kind, "span": [...], fields...}`
+fn node(kind: Str, span: Span, fields: List[Pair[Str, Json]]) -> Json {
+  return json_object([field(name: "node", value: text(kind)), field(name: "span", value: span_json(span))].concat(fields))
+}
+
+fn type_json(t: TypeExpr) -> Json {
+  return match t {
+    TypeExpr.Named(s, name, args) => node(kind: "TypeName", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "args", value: Json.Arr(items: args.map(type_json)))]),
+    TypeExpr.FnType(s, ps, ret) => node(kind: "FnTypeExpr", span: s, fields: [field(name: "params",
+      value: Json.Arr(items: ps.map(type_json))), field(name: "ret", value: type_json(ret))]),
+  }
+}
+
+fn opt_type(t: Option[TypeExpr]) -> Json {
+  return match t {
+    Some(v) => type_json(v),
+    None => Json.Null,
+  }
+}
+
+fn param_json(p: Param) -> Json {
+  return node(kind: "Param", span: p.span, fields: [field(name: "name", value: text(p.name)), field(name: "type",
+    value: opt_type(p.ty))])
+}
+
+fn lit_json(v: LitValue) -> Json {
+  return match v {
+    LitValue.IntV(n) => Json.Int(value: n),
+    LitValue.FloatV(x) => Json.Num(value: x),
+    LitValue.StrV(s) => Json.Text(value: s),
+    LitValue.BoolV(b) => Json.Bool(value: b),
+  }
+}
+
+fn pattern_json(p: Pattern) -> Json {
+  return match p {
+    Pattern.Wild(s) => node(kind: "PWild", span: s, fields: []),
+    Pattern.Bind(s, name) => node(kind: "PBind", span: s, fields: [field(name: "name", value: text(name))]),
+    Pattern.Lit(s, v) => node(kind: "PLit", span: s, fields: [field(name: "value", value: lit_json(v))]),
+    Pattern.Variant(s, e, v, args) => node(kind: "PVariant", span: s, fields: [field(name: "enum", value: opt_text(e)),
+      field(name: "variant", value: text(v)), field(name: "args", value: Json.Arr(items: args.map(pattern_json)))]),
+  }
+}
+
+fn args_json(args: List[Arg]) -> Json {
+  return Json.Arr(items: args.map(fn(a) => node(kind: "Arg", span: a.span, fields: [field(name: "name",
+    value: opt_text(a.name)), field(name: "value", value: expr_json(a.value))])))
+}
+
+fn inits_json(fs: List[FieldInit]) -> Json {
+  return Json.Arr(items: fs.map(fn(f) => node(kind: "FieldInit", span: f.span, fields: [field(name: "name",
+    value: text(f.name)), field(name: "value", value: expr_json(f.value))])))
+}
+
+fn body_json(b: Body) -> Json {
+  return match b {
+    Body.ExprBody(e) => expr_json(e),
+    Body.BlockBody(blk) => block_json(blk),
+  }
+}
+
+fn opt_expr(e: Option[Expr]) -> Json {
+  return match e {
+    Some(v) => expr_json(v),
+    None => Json.Null,
+  }
+}
+
+fn exprs(es: List[Expr]) -> Json {
+  return Json.Arr(items: es.map(expr_json))
+}
+
+fn expr_json(e: Expr) -> Json {
+  return match e {
+    Expr.IntLit(s, v) => node(kind: "IntLit", span: s, fields: [field(name: "value", value: Json.Int(value: v))]),
+    Expr.FloatLit(s, v) => node(kind: "FloatLit", span: s, fields: [field(name: "value", value: Json.Num(value: v))]),
+    Expr.StrLit(s, parts) => node(kind: "StrLit", span: s, fields: [field(name: "parts",
+      value: Json.Arr(items: parts.map(fn(p) => match p {
+        StrPiece.Text(v) => Json.Text(value: v),
+        StrPiece.Code(x) => expr_json(x),
+    })))]),
+    Expr.BoolLit(s, v) => node(kind: "BoolLit", span: s, fields: [field(name: "value", value: Json.Bool(value: v))]),
+    Expr.UnitLit(s) => node(kind: "UnitLit", span: s, fields: []),
+    Expr.ListLit(s, items) => node(kind: "ListLit", span: s, fields: [field(name: "items", value: exprs(items))]),
+    Expr.MapLit(s, entries) => node(kind: "MapLit", span: s, fields: [field(name: "entries",
+      value: Json.Arr(items: entries.map(fn(m) => node(kind: "MapEntry", span: m.span, fields: [field(name: "key",
+        value: expr_json(m.key)), field(name: "value", value: expr_json(m.value))]))))]),
+    Expr.Name(s, n) => node(kind: "Name", span: s, fields: [field(name: "name", value: text(n))]),
+    Expr.Unary(s, op, x) => node(kind: "Unary", span: s, fields: [field(name: "op", value: text(op)), field(name: "operand",
+      value: expr_json(x))]),
+    Expr.Binary(s, op, l, r) => node(kind: "Binary", span: s, fields: [field(name: "op", value: text(op)), field(name: "left",
+      value: expr_json(l)), field(name: "right", value: expr_json(r))]),
+    Expr.Call(s, c, args) => node(kind: "Call", span: s, fields: [field(name: "callee", value: expr_json(c)), field(name: "args",
+      value: args_json(args))]),
+    Expr.MethodCall(s, o, m, _, args) => node(kind: "MethodCall", span: s, fields: [field(name: "obj", value: expr_json(o)),
+      field(name: "method", value: text(m)), field(name: "args", value: args_json(args))]),
+    Expr.FieldAccess(s, o, n, _) => node(kind: "FieldAccess", span: s, fields: [field(name: "obj", value: expr_json(o)),
+      field(name: "name", value: text(n))]),
+    Expr.Try(s, x) => node(kind: "Try", span: s, fields: [field(name: "expr", value: expr_json(x))]),
+    Expr.RecordLit(s, t, fs) => node(kind: "RecordLit", span: s, fields: [field(name: "type_name", value: text(t)),
+      field(name: "fields", value: inits_json(fs))]),
+    Expr.WithExpr(s, b, fs) => node(kind: "WithExpr", span: s, fields: [field(name: "base", value: expr_json(b)),
+      field(name: "fields", value: inits_json(fs))]),
+    Expr.Match(s, subj, arms) => node(kind: "Match", span: s, fields: [field(name: "subject", value: expr_json(subj)),
+      field(name: "arms", value: Json.Arr(items: arms.map(arm_json)))]),
+    Expr.Lambda(s, ps, ret, b) => node(kind: "Lambda", span: s, fields: [field(name: "params",
+      value: Json.Arr(items: ps.map(param_json))), field(name: "ret", value: opt_type(ret)), field(name: "body",
+        value: body_json(b))]),
+  }
+}
+
+fn arm_json(a: MatchArm) -> Json {
+  return node(kind: "MatchArm", span: a.span, fields: [field(name: "pattern", value: pattern_json(a.pattern)),
+    field(name: "guard", value: opt_expr(a.guard)), field(name: "body", value: body_json(a.body))])
+}
+
+fn block_json(b: Block) -> Json {
+  return node(kind: "Block", span: b.span, fields: [field(name: "stmts", value: Json.Arr(items: b.stmts.map(stmt_json)))])
+}
+
+fn else_json(e: Else) -> Json {
+  return match e {
+    Else.NoElse => Json.Null,
+    Else.ElseBlock(b) => block_json(b),
+    Else.ElseIf(s) => stmt_json(s),
+  }
+}
+
+fn stmt_json(s: Stmt) -> Json {
+  return match s {
+    Stmt.Let(sp, name, _, ty, value, mutable) => node(kind: "Let", span: sp, fields: [field(name: "name", value: text(name)),
+      field(name: "type", value: opt_type(ty)), field(name: "value", value: expr_json(value)), field(name: "mutable",
+        value: Json.Bool(value: mutable))]),
+    Stmt.Assign(sp, name, value) => node(kind: "Assign", span: sp, fields: [field(name: "name", value: text(name)),
+      field(name: "value", value: expr_json(value))]),
+    Stmt.Return(sp, value) => node(kind: "Return", span: sp, fields: [field(name: "value", value: opt_expr(value))]),
+    Stmt.If(sp, cond, then, else_) => node(kind: "If", span: sp, fields: [field(name: "cond", value: expr_json(cond)),
+      field(name: "then", value: block_json(then)), field(name: "else_", value: else_json(else_))]),
+    Stmt.While(sp, cond, body) => node(kind: "While", span: sp, fields: [field(name: "cond", value: expr_json(cond)),
+      field(name: "body", value: block_json(body))]),
+    Stmt.For(sp, v, _, it, body) => node(kind: "For", span: sp, fields: [field(name: "var", value: text(v)), field(name: "iter",
+      value: expr_json(it)), field(name: "body", value: block_json(body))]),
+    Stmt.Break(sp) => node(kind: "Break", span: sp, fields: []),
+    Stmt.Continue(sp) => node(kind: "Continue", span: sp, fields: []),
+    Stmt.Assert(sp, cond, msg) => node(kind: "Assert", span: sp, fields: [field(name: "cond", value: expr_json(cond)),
+      field(name: "message", value: opt_expr(msg))]),
+    Stmt.ExprStmt(sp, x) => node(kind: "ExprStmt", span: sp, fields: [field(name: "expr", value: expr_json(x))]),
+  }
+}
+
+fn field_decls(fs: List[FieldDecl]) -> Json {
+  return Json.Arr(items: fs.map(fn(f) => node(kind: "FieldDecl", span: f.span, fields: [field(name: "name",
+    value: text(f.name)), field(name: "type", value: type_json(f.ty))])))
+}
+
+fn bounds_json(bs: List[Pair[Str, List[Pair[Str, Span]]]]) -> Json {
+  return json_object(bs.map(fn(b) => field(name: b.first, value: Json.Arr(items: b.second.map(fn(t) => Json.Arr(items: [
+    text(t.first),
+    span_json(t.second),
+  ]))))))
+}
+
+fn opt_block(b: Option[Block]) -> Json {
+  return match b {
+    Some(v) => block_json(v),
+    None => Json.Null,
+  }
+}
+
+fn fn_json(f: FnDecl) -> Json {
+  return node(kind: "FnDecl", span: f.span, fields: [
+    field(name: "name", value: text(f.name)),
+    field(name: "type_params", value: json_strings(f.type_params)),
+    field(name: "params", value: Json.Arr(items: f.params.map(param_json))),
+    field(name: "ret", value: opt_type(f.ret)),
+    field(name: "effects", value: json_strings(f.effects)),
+    field(name: "requires", value: exprs(f.pre)),
+    field(name: "ensures", value: exprs(f.post)),
+    field(name: "body", value: opt_block(f.body)),
+    field(name: "doc", value: opt_text(f.doc)),
+    field(name: "public", value: Json.Bool(value: f.public)),
+    field(name: "bounds", value: bounds_json(f.bounds)),
+    field(name: "owner_kind", value: opt_text(f.owner_kind)),
+    field(name: "owner", value: opt_text(f.owner)),
+    field(name: "trait", value: opt_text(f.trait_name)),
+    field(name: "method", value: opt_text(f.method_name)),
+  ])
+}
+
+fn decl_json(d: Decl) -> Json {
+  return match d {
+    Decl.Fn(f) => fn_json(f),
+    Decl.TypeD(s, name, tps, fs, doc, public) => node(kind: "TypeDecl", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "type_params", value: json_strings(tps)), field(name: "fields", value: field_decls(fs)), field(name: "doc",
+        value: opt_text(doc)), field(name: "public", value: Json.Bool(value: public))]),
+    Decl.Alias(s, name, tps, target, doc, public) => node(kind: "AliasDecl", span: s, fields: [field(name: "name",
+      value: text(name)), field(name: "type_params", value: json_strings(tps)), field(name: "target",
+        value: type_json(target)), field(name: "doc", value: opt_text(doc)), field(name: "public",
+          value: Json.Bool(value: public))]),
+    Decl.Const(s, name, ty, value, doc, public) => node(kind: "ConstDecl", span: s, fields: [field(name: "name",
+      value: text(name)), field(name: "type", value: type_json(ty)), field(name: "value", value: expr_json(value)),
+      field(name: "doc", value: opt_text(doc)), field(name: "public", value: Json.Bool(value: public))]),
+    Decl.Use(s, path, items, spans) => node(kind: "UseDecl", span: s, fields: [field(name: "path", value: json_strings(path)),
+      field(name: "items", value: json_strings(items)), field(name: "item_spans",
+        value: Json.Arr(items: spans.map(span_json)))]),
+    Decl.Property(s, name, ps, body) => node(kind: "PropertyDecl", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "params", value: Json.Arr(items: ps.map(param_json))), field(name: "body", value: block_json(body))]),
+    Decl.EnumD(s, name, tps, vs, doc, public) => node(kind: "EnumDecl", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "type_params", value: json_strings(tps)), field(name: "variants",
+        value: Json.Arr(items: vs.map(fn(v) => node(kind: "VariantDecl", span: v.span, fields: [field(name: "name",
+          value: text(v.name)), field(name: "fields", value: field_decls(v.fields))])))), field(name: "doc",
+            value: opt_text(doc)), field(name: "public", value: Json.Bool(value: public))]),
+    Decl.Test(s, name, body) => node(kind: "TestDecl", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "body", value: block_json(body))]),
+    Decl.Trait(s, name, ms, defaults, doc, public) => node(kind: "TraitDecl", span: s, fields: [field(name: "name",
+      value: text(name)), field(name: "methods", value: Json.Arr(items: ms.map(fn_json))), field(name: "defaults",
+        value: json_strings(defaults)), field(name: "doc", value: opt_text(doc)), field(name: "public",
+          value: Json.Bool(value: public))]),
+    Decl.Impl(s, tr, target, ms, spans, _) => node(kind: "ImplDecl", span: s, fields: [field(name: "trait", value: text(tr)),
+      field(name: "target", value: type_json(target)), field(name: "methods", value: json_strings(ms)),
+      field(name: "method_spans", value: Json.Arr(items: spans.map(span_json)))]),
+  }
+}
+
+fn program_json(p: Program) -> Json {
+  return node(kind: "Program", span: p.span, fields: [field(name: "module", value: opt_text(p.module_name)),
+    field(name: "decls", value: Json.Arr(items: p.decls.map(decl_json)))])
+}
+
+fn error_json(e: ParseError) -> Json {
+  return json_object([
+    field(name: "error", value: text(e.code)),
+    field(name: "message", value: text(e.message)),
+    field(name: "span", value: Json.Arr(items: [Json.Int(value: e.line), Json.Int(value: e.col)])),
+  ])
+}
+
+fn main() uses io, fs {
+  for path in cli_args() {
+    print(json_text(json_object([field(name: "file", value: text(path))])))
+    match read_file(path) {
+      Ok(src) => match parse_program(src) {
+        Ok(prog) => print(json_text(program_json(prog))),
+        Err(e) => print(json_text(error_json(e))),
+      },
+      Err(e) => print(json_text(json_object([field(name: "error", value: text(e))]))),
+    }
+  }
+}

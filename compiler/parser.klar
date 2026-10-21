@@ -1,0 +1,1441 @@
+// The Klar parser, written in Klar (self-hosting, stage 3b): a recursive-descent parser that builds the tree
+// of compiler/ast.klar. It mirrors klar/parser.py rule for rule — tests/selfhost.py checks that both give the
+// same tree (and the same syntax errors) for every .klar file of the repository.
+//
+// The parser state is immutable: every rule takes the position of its first token and returns the node with
+// the position after it (`Got`), or the first syntax error.
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldDecl, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Param}
+use ast.{Pattern, Program, Span, Stmt, StrPiece, TypeExpr, VariantDecl, body_span, expr_span, merge, pattern_span}
+use lexer.{LexError, StrPart, TokKind, Token, tokenize_at}
+
+/// A syntax error, positioned like the Python parser's (the token where it was found).
+pub type ParseError { code: Str, message: Str, line: Int, col: Int }
+
+/// A parsed node and the position of the next token.
+type Got[T] { value: T, pos: Int }
+
+type Ps { toks: List[Token], no_struct: Bool }
+
+// ---- tokens --------------------------------------------------------------------------------------------
+
+fn tk(p: Ps, i: Int) -> Token {
+  return match p.toks.get(i) {
+    Some(t) => t,
+    None => match p.toks.last() {
+      Some(t) => t,
+      None => Token { kind: TokKind.Eof, text: "", line: 1, col: 1, end_line: 1, end_col: 1, parts: [] },
+    },
+  }
+}
+
+fn span_of(t: Token) -> Span {
+  return Span { line: t.line, col: t.col, end_line: t.end_line, end_col: t.end_col }
+}
+
+/// The span from `start` to the end of the token before `i` (Python's `span_from`).
+fn span_from(p: Ps, start: Span, i: Int) -> Span {
+  return merge(start, span_of(tk(p, i - 1)))
+}
+
+/// Position after the token at `i` (EOF never advances).
+fn next(p: Ps, i: Int) -> Int {
+  return match tk(p, i).kind == TokKind.Eof {
+    true => i,
+    false => i + 1,
+  }
+}
+
+fn is_op(t: Token, v: Str) -> Bool {
+  return t.kind == TokKind.Op and t.text == v
+}
+
+fn is_kw(t: Token, v: Str) -> Bool {
+  return t.kind == TokKind.Keyword and t.text == v
+}
+
+fn is_kind(t: Token, k: TokKind) -> Bool {
+  return t.kind == k
+}
+
+fn number_text(t: Token) -> Str {
+  return match t.kind {
+    TokKind.IntLit => t.text.to_int().unwrap_or(0).to_str(),
+    _ => t.text.to_float().unwrap_or(0.0).to_str(),
+  }
+}
+
+fn describe(t: Token) -> Str {
+  return match t.kind {
+    TokKind.Newline => "end of line",
+    TokKind.Eof => "end of file",
+    TokKind.StrLit => "a string",
+    TokKind.IntLit => "`" + number_text(t) + "`",
+    TokKind.FloatLit => "`" + number_text(t) + "`",
+    _ => "`" + t.text + "`",
+  }
+}
+
+fn error_at(t: Token, code: Str, message: Str) -> ParseError {
+  return ParseError { code: code, message: message, line: t.line, col: t.col }
+}
+
+fn bad[T](t: Token, message: Str) -> Result[T, ParseError] {
+  return Err(error_at(t: t, code: "E0003", message: message))
+}
+
+fn from_lex(e: LexError) -> ParseError {
+  return ParseError { code: e.code, message: e.message, line: e.line, col: e.col }
+}
+
+fn expect_op(p: Ps, i: Int, v: Str, ctx: Str) -> Result[Int, ParseError] {
+  if is_op(tk(p, i), v) {
+    return Ok(next(p, i))
+  }
+  return bad(tk(p, i), "expected `{v}`{ctx}, found {describe(tk(p, i))}")
+}
+
+fn expect_ident(p: Ps, i: Int, what: Str) -> Result[Got[Token], ParseError] {
+  let t = tk(p, i)
+  if t.kind == TokKind.Ident {
+    return Ok(Got { value: t, pos: next(p, i) })
+  }
+  return bad(tk(p, i), "expected {what}, found {describe(t)}")
+}
+
+fn skip_nl(p: Ps, start: Int) -> Int {
+  var i = start
+  while is_kind(tk(p, i), TokKind.Newline) or is_kind(tk(p, i), TokKind.Doc) {
+    i = next(p, i)
+  }
+  return i
+}
+
+fn end_of_statement(p: Ps, i: Int) -> Result[Int, ParseError] {
+  if is_kind(tk(p, i), TokKind.Newline) {
+    return Ok(skip_nl(p, i))
+  }
+  if is_op(tk(p, i), "\}") or is_kind(tk(p, i), TokKind.Eof) {
+    return Ok(i)
+  }
+  return bad(tk(p, i), "expected end of line after statement, found {describe(tk(p, i))}")
+}
+
+fn is_upper_start(s: Str) -> Bool {
+  let c = s.slice(0, 1)
+  return c != "" and c.upper() == c and c.lower() != c
+}
+
+// ---- types ----------------------------------------------------------------------------------------------
+
+fn parse_type(p: Ps, i: Int) -> Result[Got[TypeExpr], ParseError] {
+  let start = span_of(tk(p, i))
+  if is_kw(tk(p, i), "fn") {
+    var j = expect_op(p: p, i: next(p, i), v: "(", ctx: " in function type")?
+    var ps: List[TypeExpr] = []
+    while not is_op(tk(p, j), ")") {
+      let t = parse_type(p, j)?
+      ps = ps.push(t.value)
+      j = t.pos
+      if not is_op(tk(p, j), ",") {
+        break
+      }
+      j = next(p, j)
+    }
+    j = expect_op(p: p, i: j, v: ")", ctx: "")?
+    j = expect_op(p: p, i: j, v: "->", ctx: " in function type")?
+    let ret = parse_type(p, j)?
+    return Ok(Got { value: TypeExpr.FnType(span: span_from(p: p, start: start, i: ret.pos), params: ps, ret: ret.value),
+      pos: ret.pos })
+  }
+  if is_op(tk(p, i), "(") {
+    return bad(tk(p, i), "tuples are not supported in Klar 0.1")
+  }
+  let name = expect_ident(p: p, i: i, what: "a type")?
+  var j = name.pos
+  var args: List[TypeExpr] = []
+  if is_op(tk(p, j), "[") {
+    j = next(p, j)
+    while not is_op(tk(p, j), "]") {
+      let t = parse_type(p, j)?
+      args = args.push(t.value)
+      j = t.pos
+      if not is_op(tk(p, j), ",") {
+        break
+      }
+      j = next(p, j)
+    }
+    j = expect_op(p: p, i: j, v: "]", ctx: "")?
+  } else if is_op(tk(p, j), "<") {
+    return bad(tk(p, j), "type arguments use square brackets")
+  }
+  return Ok(Got { value: TypeExpr.Named(span: span_from(p: p, start: start, i: j), name: name.value.text, args: args),
+    pos: j })
+}
+
+/// `[T, U: Shape + Show]`: names and bounds (bounds only when allowed).
+type TypeParams { names: List[Str], bounds: List[Pair[Str, List[Pair[Str, Span]]]] }
+
+fn parse_type_params(p: Ps, i: Int, allow_bounds: Bool) -> Result[Got[TypeParams], ParseError] {
+  var names: List[Str] = []
+  var bounds: List[Pair[Str, List[Pair[Str, Span]]]] = []
+  var j = i
+  if is_op(tk(p, j), "[") {
+    j = next(p, j)
+    while not is_op(tk(p, j), "]") {
+      let tp = expect_ident(p: p, i: j, what: "type parameter")?
+      names = names.push(tp.value.text)
+      j = tp.pos
+      if is_op(tk(p, j), ":") {
+        if not allow_bounds {
+          return bad(tk(p, j), "trait bounds are only allowed on functions")
+        }
+        j = next(p, j)
+        var these: List[Pair[Str, Span]] = []
+        while true {
+          let tr = expect_ident(p: p, i: j, what: "trait name")?
+          these = these.push(Pair { first: tr.value.text, second: span_of(tr.value) })
+          j = tr.pos
+          if not is_op(tk(p, j), "+") {
+            break
+          }
+          j = next(p, j)
+        }
+        bounds = bounds.filter(fn(b) => b.first != tp.value.text).push(Pair { first: tp.value.text, second: these })
+      }
+      if not is_op(tk(p, j), ",") {
+        break
+      }
+      j = next(p, j)
+    }
+    j = expect_op(p: p, i: j, v: "]", ctx: "")?
+  } else if is_op(tk(p, j), "<") {
+    return bad(tk(p, j), "type parameters use square brackets")
+  }
+  return Ok(Got { value: TypeParams { names: names, bounds: bounds }, pos: j })
+}
+
+fn self_type(t: Token) -> TypeExpr {
+  return TypeExpr.Named(span: span_of(t), name: "Self", args: [])
+}
+
+fn parse_params(p: Ps, i: Int, require_types: Bool, is_method: Bool) -> Result[Got[List[Param]], ParseError] {
+  var params: List[Param] = []
+  var j = i
+  while not is_op(tk(p, j), ")") {
+    let name = expect_ident(p: p, i: j, what: "parameter name")?
+    let tok = name.value
+    j = name.pos
+    if tok.text == "self" and is_method and params.is_empty() {
+      if is_op(tk(p, j), ":") {
+        return bad(tk(p, j), "`self` has no type annotation: its type is the implementing type")
+      }
+      params = params.push(Param { span: span_of(tok), name: "self", ty: Some(self_type(tok)) })
+      if not is_op(tk(p, j), ",") {
+        break
+      }
+      j = next(p, j)
+      continue
+    }
+    if tok.text == "self" and not is_op(tk(p, j), ":") {
+      return bad(tok, "an untyped `self` is only allowed as the first parameter of a `trait` or `impl` method")
+    }
+    var ty: Option[TypeExpr] = None
+    if is_op(tk(p, j), ":") {
+      let t = parse_type(p, next(p, j))?
+      ty = Some(t.value)
+      j = t.pos
+    } else if require_types {
+      return bad(tok, "parameter `{tok.text}` needs a type")
+    }
+    params = params.push(Param { span: span_from(p: p, start: span_of(tok), i: j), name: tok.text, ty: ty })
+    if not is_op(tk(p, j), ",") {
+      break
+    }
+    j = next(p, j)
+  }
+  return Ok(Got { value: params, pos: j })
+}
+
+// ---- expressions ------------------------------------------------------------------------------------------
+
+fn parse_expr(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  return parse_or(p, i)
+}
+
+/// An expression where `Name { ... }` is not a record literal (`if`, `while`, `for`, `match` subjects).
+fn parse_expr_ns(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  return parse_expr(p with { no_struct: true }, i)
+}
+
+fn binary(op: Str, left: Expr, right: Expr) -> Expr {
+  return Expr.Binary(span: merge(expr_span(left), expr_span(right)), op: op, left: left, right: right)
+}
+
+fn parse_or(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  var left = parse_and(p, i)?
+  while is_kw(tk(p, left.pos), "or") {
+    let right = parse_and(p, skip_nl(p, next(p, left.pos)))?
+    left = Got { value: binary(op: "or", left: left.value, right: right.value), pos: right.pos }
+  }
+  return Ok(left)
+}
+
+fn parse_and(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  var left = parse_not(p, i)?
+  while is_kw(tk(p, left.pos), "and") {
+    let right = parse_not(p, skip_nl(p, next(p, left.pos)))?
+    left = Got { value: binary(op: "and", left: left.value, right: right.value), pos: right.pos }
+  }
+  return Ok(left)
+}
+
+fn parse_not(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  if is_kw(tk(p, i), "not") {
+    let operand = parse_not(p, next(p, i))?
+    let sp = merge(span_of(tk(p, i)), expr_span(operand.value))
+    return Ok(Got { value: Expr.Unary(span: sp, op: "not", operand: operand.value), pos: operand.pos })
+  }
+  return parse_cmp(p, i)
+}
+
+fn is_cmp(t: Token) -> Bool {
+  return t.kind == TokKind.Op and ["==", "!=", "<", ">", "<=", ">="].contains(t.text)
+}
+
+fn parse_cmp(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  let left = parse_add(p, i)?
+  let t = tk(p, left.pos)
+  if is_cmp(t) {
+    let right = parse_add(p, skip_nl(p, next(p, left.pos)))?
+    if is_cmp(tk(p, right.pos)) {
+      return bad(tk(p, right.pos), "comparisons cannot be chained")
+    }
+    return Ok(Got { value: binary(op: t.text, left: left.value, right: right.value), pos: right.pos })
+  }
+  return Ok(left)
+}
+
+fn parse_add(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  var left = parse_mul(p, i)?
+  while is_op(tk(p, left.pos), "+") or is_op(tk(p, left.pos), "-") {
+    let op = tk(p, left.pos).text
+    let right = parse_mul(p, skip_nl(p, next(p, left.pos)))?
+    left = Got { value: binary(op: op, left: left.value, right: right.value), pos: right.pos }
+  }
+  return Ok(left)
+}
+
+fn parse_mul(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  var left = parse_unary(p, i)?
+  while is_op(tk(p, left.pos), "*") or is_op(tk(p, left.pos), "/") or is_op(tk(p, left.pos), "%") {
+    let op = tk(p, left.pos).text
+    let right = parse_unary(p, skip_nl(p, next(p, left.pos)))?
+    left = Got { value: binary(op: op, left: left.value, right: right.value), pos: right.pos }
+  }
+  return Ok(left)
+}
+
+fn parse_unary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  if is_op(tk(p, i), "-") {
+    let lit = tk(p, i + 1)
+    let after = tk(p, i + 2)
+    if (lit.kind == TokKind.IntLit or lit.kind == TokKind.FloatLit) and after.kind == TokKind.Op and
+      (after.text == "." or after.text == "?") {
+      let shown = number_text(lit)
+      return bad(tk(p, i), "`-{shown}.method()` is ambiguous: the method runs before the minus")
+    }
+    let start = span_of(tk(p, i))
+    let operand = parse_unary(p, next(p, i))?
+    let sp = merge(start, expr_span(operand.value))
+    let folded = match operand.value {
+      Expr.IntLit(_, v) => Expr.IntLit(span: sp, value: 0 - v),
+      Expr.FloatLit(_, v) => Expr.FloatLit(span: sp, value: 0.0 - v),
+      other => Expr.Unary(span: sp, op: "-", operand: other),
+    }
+    return Ok(Got { value: folded, pos: operand.pos })
+  }
+  let prim = parse_primary(p, i)?
+  return parse_postfix(p: p, start: prim.value, i: prim.pos)
+}
+
+fn parse_args(p: Ps, i: Int) -> Result[Got[List[Arg]], ParseError] {
+  let q = p with { no_struct: false }
+  var j = expect_op(p: q, i: i, v: "(", ctx: "")?
+  var args: List[Arg] = []
+  while not is_op(tk(q, j), ")") {
+    let start = span_of(tk(q, j))
+    var name: Option[Str] = None
+    if is_kind(tk(q, j), TokKind.Ident) and is_op(tk(q, j + 1), ":") {
+      name = Some(tk(q, j).text)
+      j = j + 2
+    } else if is_kind(tk(q, j), TokKind.Ident) and is_op(tk(q, j + 1), "=") {
+      return bad(tk(q, j), "named arguments use `:`")
+    }
+    let value = parse_expr(q, j)?
+    j = value.pos
+    args = args.push(Arg { span: span_from(p: q, start: start, i: j), name: name, value: value.value })
+    if not is_op(tk(q, j), ",") {
+      break
+    }
+    j = next(q, j)
+  }
+  j = expect_op(p: q, i: j, v: ")", ctx: " to close the argument list")?
+  return Ok(Got { value: args, pos: j })
+}
+
+fn parse_postfix(p: Ps, start: Expr, i: Int) -> Result[Got[Expr], ParseError] {
+  var e = start
+  var j = i
+  while true {
+    let sp = expr_span(e)
+    if is_op(tk(p, j), "(") {
+      let args = parse_args(p, j)?
+      e = Expr.Call(span: span_from(p: p, start: sp, i: args.pos), callee: e, args: args.value)
+      j = args.pos
+    } else if is_op(tk(p, j), ".") {
+      j = next(p, j)
+      if is_kind(tk(p, j), TokKind.IntLit) {
+        return bad(tk(p, j), "tuple indexing is not supported")
+      }
+      let name = expect_ident(p: p, i: j, what: "field or method name after `.`")?
+      j = name.pos
+      if is_op(tk(p, j), "(") {
+        let args = parse_args(p, j)?
+        e = Expr.MethodCall(span: span_from(p: p, start: sp, i: args.pos), obj: e, method: name.value.text,
+          method_span: span_of(name.value), args: args.value)
+        j = args.pos
+      } else {
+        e = Expr.FieldAccess(span: span_from(p: p, start: sp, i: j), obj: e, name: name.value.text,
+          name_span: span_of(name.value))
+      }
+    } else if is_op(tk(p, j), "?") {
+      j = next(p, j)
+      e = Expr.Try(span: span_from(p: p, start: sp, i: j), expr: e)
+    } else if is_kw(tk(p, j), "with") {
+      let fields = parse_field_inits(p, next(p, j))?
+      j = fields.pos
+      e = Expr.WithExpr(span: span_from(p: p, start: sp, i: j), base: e, fields: fields.value)
+    } else if is_op(tk(p, j), "[") {
+      return bad(tk(p, j), "indexing with `[]` is not supported")
+    } else {
+      return Ok(Got { value: e, pos: j })
+    }
+  }
+  return Ok(Got { value: e, pos: j })
+}
+
+fn parse_field_inits(p: Ps, i: Int) -> Result[Got[List[FieldInit]], ParseError] {
+  let q = p with { no_struct: false }
+  var j = expect_op(p: q, i: i, v: "\{", ctx: "")?
+  var fields: List[FieldInit] = []
+  j = skip_nl(q, j)
+  while not is_op(tk(q, j), "\}") {
+    let name = expect_ident(p: q, i: j, what: "field name")?
+    j = name.pos
+    if not is_op(tk(q, j), ":") {
+      return bad(tk(q, j), "expected `:` after field `{name.value.text}`")
+    }
+    let value = parse_expr(q, next(q, j))?
+    j = value.pos
+    fields = fields.push(FieldInit { span: span_from(p: q, start: span_of(name.value), i: j), name: name.value.text,
+      value: value.value })
+    if is_op(tk(q, j), ",") {
+      j = next(q, j)
+    }
+    j = skip_nl(q, j)
+  }
+  j = expect_op(p: q, i: j, v: "\}", ctx: "")?
+  return Ok(Got { value: fields, pos: j })
+}
+
+fn parse_primary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  let t = tk(p, i)
+  let start = span_of(t)
+  let j = next(p, i)
+  if t.kind == TokKind.IntLit {
+    return Ok(Got { value: Expr.IntLit(span: start, value: t.text.to_int().unwrap_or(0)), pos: j })
+  }
+  if t.kind == TokKind.FloatLit {
+    return Ok(Got { value: Expr.FloatLit(span: start, value: t.text.to_float().unwrap_or(0.0)), pos: j })
+  }
+  if t.kind == TokKind.StrLit {
+    let node = string_node(t)?
+    return Ok(Got { value: node, pos: j })
+  }
+  if t.kind == TokKind.Keyword {
+    if t.text == "true" or t.text == "false" {
+      return Ok(Got { value: Expr.BoolLit(span: start, value: t.text == "true"), pos: j })
+    }
+    if t.text == "match" {
+      return parse_match(p, i)
+    }
+    if t.text == "fn" {
+      return parse_lambda(p, i)
+    }
+    if t.text == "if" {
+      return bad(tk(p, i), "`if` is a statement, not an expression")
+    }
+  }
+  if t.kind == TokKind.Op and t.text == "(" {
+    if is_op(tk(p, j), ")") {
+      return Ok(Got { value: Expr.UnitLit(span: span_from(p: p, start: start, i: j + 1)), pos: j + 1 })
+    }
+    let e = parse_expr(p with { no_struct: false }, j)?
+    if is_op(tk(p, e.pos), ",") {
+      return bad(tk(p, e.pos), "tuples are not supported in Klar 0.1")
+    }
+    let k = expect_op(p: p, i: e.pos, v: ")", ctx: "")?
+    return Ok(Got { value: e.value, pos: k })
+  }
+  if t.kind == TokKind.Op and t.text == "[" {
+    let q = p with { no_struct: false }
+    var k = skip_nl(q, j)
+    var items: List[Expr] = []
+    while not is_op(tk(q, k), "]") {
+      let item = parse_expr(q, k)?
+      items = items.push(item.value)
+      k = skip_nl(q, item.pos)
+      if not is_op(tk(q, k), ",") {
+        break
+      }
+      k = skip_nl(q, next(q, k))
+    }
+    k = expect_op(p: q, i: k, v: "]", ctx: " to close the list")?
+    return Ok(Got { value: Expr.ListLit(span: span_from(p: p, start: start, i: k), items: items), pos: k })
+  }
+  if t.kind == TokKind.Ident {
+    if is_upper_start(t.text) and is_op(tk(p, j), "\{") and not p.no_struct {
+      if t.text == "Map" {
+        return parse_map_lit(p, i)
+      }
+      let fields = parse_field_inits(p, j)?
+      return Ok(Got { value: Expr.RecordLit(span: span_from(p: p, start: start, i: fields.pos), type_name: t.text,
+        fields: fields.value), pos: fields.pos })
+    }
+    if t.text == "null" or t.text == "nil" or t.text == "undefined" {
+      return Err(error_at(t: t, code: "E0201", message: "Klar has no `{t.text}`"))
+    }
+    return Ok(Got { value: Expr.Name(span: start, name: t.text), pos: j })
+  }
+  return bad(tk(p, i), "expected an expression, found {describe(t)}")
+}
+
+fn string_node(t: Token) -> Result[Expr, ParseError] {
+  var parts: List[StrPiece] = []
+  for part in t.parts {
+    match part {
+      StrPart.Text(v) => {
+        parts = parts.push(StrPiece.Text(value: v))
+      },
+      StrPart.Expr(code, line, col) => {
+        let toks = match tokenize_at(src: code, first_line: line, first_col: col) {
+          Ok(ts) => ts,
+          Err(e) => {
+            return Err(from_lex(e))
+          },
+        }
+        let q = Ps { toks: toks, no_struct: false }
+        let e = parse_expr(q, 0)?
+        let k = skip_nl(q, e.pos)
+        if not is_kind(tk(q, k), TokKind.Eof) {
+          return bad(tk(q, k), "unexpected {describe(tk(q, k))} in interpolation")
+        }
+        parts = parts.push(StrPiece.Code(expr: e.value))
+      },
+    }
+  }
+  return Ok(Expr.StrLit(span: span_of(t), parts: parts))
+}
+
+fn parse_map_lit(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  let q = p with { no_struct: false }
+  let start = span_of(tk(q, i))
+  var j = expect_op(p: q, i: next(q, i), v: "\{", ctx: "")?
+  var entries: List[MapEntry] = []
+  j = skip_nl(q, j)
+  while not is_op(tk(q, j), "\}") {
+    let k = parse_expr(q, j)?
+    let after = expect_op(p: q, i: k.pos, v: ":", ctx: " between map key and value")?
+    let v = parse_expr(q, after)?
+    entries = entries.push(MapEntry { span: merge(expr_span(k.value), expr_span(v.value)), key: k.value,
+      value: v.value })
+    j = v.pos
+    if is_op(tk(q, j), ",") {
+      j = next(q, j)
+    }
+    j = skip_nl(q, j)
+  }
+  j = expect_op(p: q, i: j, v: "\}", ctx: "")?
+  return Ok(Got { value: Expr.MapLit(span: span_from(p: q, start: start, i: j), entries: entries), pos: j })
+}
+
+fn parse_match(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  let start = span_of(tk(p, i))
+  let subject = parse_expr_ns(p, next(p, i))?
+  let q = p with { no_struct: false }
+  var j = skip_nl(q, subject.pos)
+  j = expect_op(p: q, i: j, v: "\{", ctx: " to start match arms")?
+  var arms: List[MatchArm] = []
+  j = skip_nl(q, j)
+  while not is_op(tk(q, j), "\}") {
+    let pat = parse_pattern(q, j)?
+    j = pat.pos
+    var guard: Option[Expr] = None
+    if is_kw(tk(q, j), "if") {
+      let g = parse_expr_ns(q, next(q, j))?
+      guard = Some(g.value)
+      j = g.pos
+    }
+    if is_op(tk(q, j), "->") or is_op(tk(q, j), ":") {
+      return bad(tk(q, j), "match arms use `=>`")
+    }
+    j = expect_op(p: q, i: j, v: "=>", ctx: " after pattern")?
+    var body = Body.ExprBody(expr: Expr.UnitLit(span: span_of(tk(q, j))))
+    if is_op(tk(q, j), "\{") {
+      let b = parse_block(q, j)?
+      body = Body.BlockBody(block: b.value)
+      j = b.pos
+    } else {
+      let e = parse_expr(q, j)?
+      body = Body.ExprBody(expr: e.value)
+      j = e.pos
+    }
+    arms = arms.push(MatchArm { span: merge(pattern_span(pat.value), body_span(body)), pattern: pat.value, guard: guard,
+      body: body })
+    if is_op(tk(q, j), ",") {
+      j = next(q, j)
+    }
+    j = skip_nl(q, j)
+  }
+  j = expect_op(p: q, i: j, v: "\}", ctx: "")?
+  if arms.is_empty() {
+    return bad(tk(q, j - 1), "match needs at least one arm")
+  }
+  return Ok(Got { value: Expr.Match(span: span_from(p: q, start: start, i: j), subject: subject.value, arms: arms),
+    pos: j })
+}
+
+fn parse_pattern(p: Ps, i: Int) -> Result[Got[Pattern], ParseError] {
+  let t = tk(p, i)
+  let start = span_of(t)
+  let j = next(p, i)
+  if t.kind == TokKind.Ident and t.text == "_" {
+    return Ok(Got { value: Pattern.Wild(span: start), pos: j })
+  }
+  if t.kind == TokKind.IntLit {
+    return Ok(Got { value: Pattern.Lit(span: start, value: LitValue.IntV(value: t.text.to_int().unwrap_or(0))), pos: j })
+  }
+  if t.kind == TokKind.FloatLit {
+    return Ok(Got { value: Pattern.Lit(span: start, value: LitValue.FloatV(value: t.text.to_float().unwrap_or(0.0))),
+      pos: j })
+  }
+  if t.kind == TokKind.Op and t.text == "-" and (is_kind(tk(p, j), TokKind.IntLit) or is_kind(tk(p, j), TokKind.FloatLit)) {
+    let num = tk(p, j)
+    let value = match num.kind {
+      TokKind.IntLit => LitValue.IntV(value: 0 - num.text.to_int().unwrap_or(0)),
+      _ => LitValue.FloatV(value: 0.0 - num.text.to_float().unwrap_or(0.0)),
+    }
+    let k = next(p, j)
+    return Ok(Got { value: Pattern.Lit(span: span_from(p: p, start: start, i: k), value: value), pos: k })
+  }
+  if t.kind == TokKind.StrLit {
+    if t.parts.any(fn(part) => match part {
+      StrPart.Expr(_, _, _) => true,
+      _ => false,
+    }) {
+      return bad(tk(p, i), "interpolated strings cannot be patterns")
+    }
+    return Ok(Got { value: Pattern.Lit(span: start, value: LitValue.StrV(value: t.text)), pos: j })
+  }
+  if t.kind == TokKind.Keyword and (t.text == "true" or t.text == "false") {
+    return Ok(Got { value: Pattern.Lit(span: start, value: LitValue.BoolV(value: t.text == "true")), pos: j })
+  }
+  if t.kind == TokKind.Ident {
+    let name = t.text
+    if name == "Some" or name == "Ok" or name == "Err" {
+      var k = expect_op(p: p, i: j, v: "(", ctx: " after `{name}` in pattern")?
+      let inner = parse_pattern(p, k)?
+      k = expect_op(p: p, i: inner.pos, v: ")", ctx: "")?
+      return Ok(Got { value: Pattern.Variant(span: span_from(p: p, start: start, i: k), enum_name: None, variant: name,
+        args: [inner.value]), pos: k })
+    }
+    if name == "None" {
+      return Ok(Got { value: Pattern.Variant(span: start, enum_name: None, variant: "None", args: []), pos: j })
+    }
+    if is_upper_start(name) {
+      if not is_op(tk(p, j), ".") {
+        return bad(t, "enum variants in patterns must be qualified: `EnumName.{name}`")
+      }
+      let v = expect_ident(p: p, i: next(p, j), what: "variant name")?
+      var k = v.pos
+      var args: List[Pattern] = []
+      if is_op(tk(p, k), "(") {
+        k = next(p, k)
+        while not is_op(tk(p, k), ")") {
+          let a = parse_pattern(p, k)?
+          args = args.push(a.value)
+          k = a.pos
+          if not is_op(tk(p, k), ",") {
+            break
+          }
+          k = next(p, k)
+        }
+        k = expect_op(p: p, i: k, v: ")", ctx: "")?
+      }
+      return Ok(Got { value: Pattern.Variant(span: span_from(p: p, start: start, i: k), enum_name: Some(name),
+        variant: v.value.text, args: args), pos: k })
+    }
+    return Ok(Got { value: Pattern.Bind(span: start, name: name), pos: j })
+  }
+  return bad(tk(p, i), "expected a pattern, found {describe(t)}")
+}
+
+fn parse_lambda(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  let start = span_of(tk(p, i))
+  var j = next(p, i)
+  if is_kind(tk(p, j), TokKind.Ident) {
+    return bad(tk(p, j), "named functions cannot be declared inside blocks")
+  }
+  j = expect_op(p: p, i: j, v: "(", ctx: " after `fn`")?
+  let params = parse_params(p: p, i: j, require_types: false, is_method: false)?
+  j = expect_op(p: p, i: params.pos, v: ")", ctx: "")?
+  var ret: Option[TypeExpr] = None
+  if is_op(tk(p, j), "->") {
+    let t = parse_type(p, next(p, j))?
+    ret = Some(t.value)
+    j = t.pos
+  }
+  let q = p with { no_struct: false }
+  if is_op(tk(q, j), "=>") {
+    let arrow = tk(q, j)
+    if is_op(tk(q, j + 1), "\{") {
+      return bad(arrow, "a lambda with a block body has no `=>`")
+    }
+    let e = parse_expr(q, next(q, j))?
+    return Ok(Got { value: Expr.Lambda(span: span_from(p: q, start: start, i: e.pos), params: params.value, ret: ret,
+      body: Body.ExprBody(expr: e.value)), pos: e.pos })
+  }
+  if is_op(tk(q, j), "\{") {
+    let b = parse_block(q, j)?
+    return Ok(Got { value: Expr.Lambda(span: span_from(p: q, start: start, i: b.pos), params: params.value, ret: ret,
+      body: Body.BlockBody(block: b.value)), pos: b.pos })
+  }
+  return bad(tk(q, j), "expected `=>` or `\{` after lambda parameters")
+}
+
+// ---- statements -------------------------------------------------------------------------------------------
+
+fn parse_block(p: Ps, i: Int) -> Result[Got[Block], ParseError] {
+  let start = span_of(tk(p, i))
+  let q = p with { no_struct: false }
+  var j = expect_op(p: q, i: i, v: "\{", ctx: "")?
+  var stmts: List[Stmt] = []
+  j = skip_nl(q, j)
+  while not is_op(tk(q, j), "\}") {
+    if is_kind(tk(q, j), TokKind.Eof) {
+      return bad(tk(q, j), "unclosed `\{`: reached end of file")
+    }
+    let s = parse_stmt(q, j)?
+    stmts = stmts.push(s.value)
+    j = end_of_statement(q, s.pos)?
+  }
+  j = expect_op(p: q, i: j, v: "\}", ctx: "")?
+  return Ok(Got { value: Block { span: span_from(p: q, start: start, i: j), stmts: stmts }, pos: j })
+}
+
+fn parse_stmt(p: Ps, i: Int) -> Result[Got[Stmt], ParseError] {
+  let t = tk(p, i)
+  let start = span_of(t)
+  if t.kind == TokKind.Keyword {
+    let kw = t.text
+    if kw == "let" or kw == "var" {
+      let name = expect_ident(p: p, i: next(p, i), what: "variable name")?
+      var j = name.pos
+      var ty: Option[TypeExpr] = None
+      if is_op(tk(p, j), ":") {
+        let tt = parse_type(p, next(p, j))?
+        ty = Some(tt.value)
+        j = tt.pos
+      }
+      if not is_op(tk(p, j), "=") {
+        return bad(tk(p, j), "`{kw} {name.value.text}` needs an initial value")
+      }
+      let value = parse_expr(p, next(p, j))?
+      return Ok(Got { value: Stmt.Let(span: span_from(p: p, start: start, i: value.pos), name: name.value.text,
+        name_span: span_of(name.value), ty: ty, value: value.value, mutable: kw == "var"), pos: value.pos })
+    }
+    if kw == "return" {
+      let j = next(p, i)
+      if is_kind(tk(p, j), TokKind.Newline) or is_op(tk(p, j), "\}") {
+        return Ok(Got { value: Stmt.Return(span: span_from(p: p, start: start, i: j), value: None), pos: j })
+      }
+      let value = parse_expr(p, j)?
+      return Ok(Got { value: Stmt.Return(span: span_from(p: p, start: start, i: value.pos), value: Some(value.value)),
+        pos: value.pos })
+    }
+    if kw == "if" {
+      return parse_if(p, i)
+    }
+    if kw == "while" {
+      let cond = parse_expr_ns(p, next(p, i))?
+      let body = parse_block(p, cond.pos)?
+      return Ok(Got { value: Stmt.While(span: span_from(p: p, start: start, i: body.pos), cond: cond.value,
+        body: body.value), pos: body.pos })
+    }
+    if kw == "for" {
+      let v = expect_ident(p: p, i: next(p, i), what: "loop variable")?
+      if not is_kw(tk(p, v.pos), "in") {
+        return bad(tk(p, v.pos), "expected `in` in for loop")
+      }
+      let it = parse_expr_ns(p, next(p, v.pos))?
+      let body = parse_block(p, it.pos)?
+      return Ok(Got { value: Stmt.For(span: span_from(p: p, start: start, i: body.pos), var_name: v.value.text,
+        var_span: span_of(v.value), iter: it.value, body: body.value), pos: body.pos })
+    }
+    if kw == "break" {
+      return Ok(Got { value: Stmt.Break(span: start), pos: next(p, i) })
+    }
+    if kw == "continue" {
+      return Ok(Got { value: Stmt.Continue(span: start), pos: next(p, i) })
+    }
+    if kw == "assert" {
+      let cond = parse_expr(p, next(p, i))?
+      if is_op(tk(p, cond.pos), ",") {
+        let msg = parse_expr(p, next(p, cond.pos))?
+        return Ok(Got { value: Stmt.Assert(span: span_from(p: p, start: start, i: msg.pos), cond: cond.value,
+          message: Some(msg.value)), pos: msg.pos })
+      }
+      return Ok(Got { value: Stmt.Assert(span: span_from(p: p, start: start, i: cond.pos), cond: cond.value,
+        message: None), pos: cond.pos })
+    }
+  }
+  let e = parse_expr(p, i)?
+  if is_op(tk(p, e.pos), "=") {
+    return match e.value {
+      Expr.Name(_, name) => assign_rest(p: p, start: start, name: name, i: next(p, e.pos)),
+      Expr.FieldAccess(_, _, _, _) => Err(error_at(t: tk(p, e.pos), code: "E0207",
+        message: "record fields cannot be assigned (values are immutable)")),
+      _ => bad(tk(p, e.pos), "invalid assignment target"),
+    }
+  }
+  return Ok(Got { value: Stmt.ExprStmt(span: span_from(p: p, start: start, i: e.pos), expr: e.value), pos: e.pos })
+}
+
+fn assign_rest(p: Ps, start: Span, name: Str, i: Int) -> Result[Got[Stmt], ParseError] {
+  let value = parse_expr(p, i)?
+  return Ok(Got { value: Stmt.Assign(span: span_from(p: p, start: start, i: value.pos), name: name, value: value.value),
+    pos: value.pos })
+}
+
+fn parse_if(p: Ps, i: Int) -> Result[Got[Stmt], ParseError] {
+  let start = span_of(tk(p, i))
+  let cond = parse_expr_ns(p, next(p, i))?
+  if not is_op(tk(p, cond.pos), "\{") {
+    return bad(tk(p, cond.pos), "expected `\{` after if condition, found {describe(tk(p, cond.pos))}")
+  }
+  let then = parse_block(p, cond.pos)?
+  var j = then.pos
+  var else_ = Else.NoElse
+  let k = skip_nl(p, j)
+  if is_kw(tk(p, k), "else") {
+    let after = next(p, k)
+    if is_kw(tk(p, after), "if") {
+      let nested = parse_if(p, after)?
+      else_ = Else.ElseIf(stmt: nested.value)
+      j = nested.pos
+    } else {
+      if not is_op(tk(p, after), "\{") {
+        return bad(tk(p, after), "expected `\{` or `if` after `else`")
+      }
+      let b = parse_block(p, after)?
+      else_ = Else.ElseBlock(block: b.value)
+      j = b.pos
+    }
+  }
+  return Ok(Got { value: Stmt.If(span: span_from(p: p, start: start, i: j), cond: cond.value, then: then.value,
+    else_: else_), pos: j })
+}
+
+// ---- declarations ----------------------------------------------------------------------------------------
+
+fn plain_fn(span: Span, name: Token) -> FnDecl {
+  return FnDecl {
+    span: span,
+    name: name.text,
+    name_span: span_of(name),
+    type_params: [],
+    params: [],
+    ret: None,
+    effects: [],
+    pre: [],
+    post: [],
+    body: None,
+    doc: None,
+    bounds: [],
+    owner_kind: None,
+    owner: None,
+    trait_name: None,
+    method_name: None,
+    public: false,
+  }
+}
+
+fn parse_fn(p: Ps, i: Int, doc: Option[Str], with_body: Bool, is_method: Bool) -> Result[Got[FnDecl], ParseError] {
+  let start = span_of(tk(p, i))
+  var j = next(p, i)
+  if is_op(tk(p, j), "(") {
+    return bad(tk(p, j), "top-level functions need a name: `fn name(...)`")
+  }
+  let name = expect_ident(p: p, i: j, what: "function name")?
+  let tps = parse_type_params(p: p, i: name.pos, allow_bounds: true)?
+  j = expect_op(p: p, i: tps.pos, v: "(", ctx: " after function name")?
+  let params = parse_params(p: p, i: j, require_types: true, is_method: is_method)?
+  j = expect_op(p: p, i: params.pos, v: ")", ctx: " to close the parameter list")?
+  var ret: Option[TypeExpr] = None
+  if is_op(tk(p, j), "->") {
+    let t = parse_type(p, next(p, j))?
+    ret = Some(t.value)
+    j = t.pos
+  } else if is_op(tk(p, j), ":") {
+    return bad(tk(p, j), "return types are written with `->`")
+  }
+  var effects: List[Str] = []
+  if is_kw(tk(p, j), "uses") {
+    j = next(p, j)
+    while true {
+      let e = expect_ident(p: p, i: j, what: "effect name (io, time, rand, fs, net)")?
+      effects = effects.push(e.value.text)
+      j = e.pos
+      if not is_op(tk(p, j), ",") {
+        break
+      }
+      j = next(p, j)
+    }
+  }
+  var pre: List[Expr] = []
+  var post: List[Expr] = []
+  while true {
+    let k = skip_nl(p, j)
+    if is_kw(tk(p, k), "requires") {
+      let c = parse_expr_ns(p, next(p, k))?
+      pre = pre.push(c.value)
+      j = c.pos
+    } else if is_kw(tk(p, k), "ensures") {
+      let c = parse_expr_ns(p, next(p, k))?
+      post = post.push(c.value)
+      j = c.pos
+    } else {
+      break
+    }
+  }
+  var body: Option[Block] = None
+  if with_body {
+    j = skip_nl(p, j)
+    if not is_op(tk(p, j), "\{") {
+      return bad(tk(p, j), "expected `\{` to start the body of `{name.value.text}`, found {describe(tk(p, j))}")
+    }
+    let b = parse_block(p, j)?
+    body = Some(b.value)
+    j = b.pos
+  }
+  let f = plain_fn(span: span_from(p: p, start: start, i: j), name: name.value) with {
+    type_params: tps.value.names,
+    params: params.value,
+    ret: ret,
+    effects: effects,
+    pre: pre,
+    post: post,
+    body: body,
+    doc: doc,
+    bounds: tps.value.bounds,
+  }
+  return Ok(Got { value: f, pos: j })
+}
+
+fn parse_field_decls(p: Ps, i: Int, closer: Str) -> Result[Got[List[FieldDecl]], ParseError] {
+  var fields: List[FieldDecl] = []
+  var j = skip_nl(p, i)
+  while not is_op(tk(p, j), closer) {
+    let name = expect_ident(p: p, i: j, what: "field name")?
+    let k = expect_op(p: p, i: name.pos, v: ":", ctx: " after field `{name.value.text}`")?
+    let t = parse_type(p, k)?
+    fields = fields.push(FieldDecl { span: span_from(p: p, start: span_of(name.value), i: t.pos), name: name.value.text,
+      ty: t.value })
+    j = t.pos
+    if is_op(tk(p, j), ",") {
+      j = next(p, j)
+    }
+    j = skip_nl(p, j)
+  }
+  return Ok(Got { value: fields, pos: j })
+}
+
+fn parse_type_decl(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseError] {
+  let start = span_of(tk(p, i))
+  let name = expect_ident(p: p, i: next(p, i), what: "type name")?
+  let tps = parse_type_params(p: p, i: name.pos, allow_bounds: false)?
+  var j = tps.pos
+  if is_op(tk(p, j), "=") {
+    if is_op(tk(p, j + 1), "\{") {
+      return bad(tk(p, j + 1), "record types are declared without `=`")
+    }
+    let target = parse_type(p, next(p, j))?
+    return Ok(Got { value: Decl.Alias(span: span_from(p: p, start: start, i: target.pos), name: name.value.text,
+      type_params: tps.value.names, target: target.value, doc: doc, public: false), pos: target.pos })
+  }
+  j = expect_op(p: p, i: j, v: "\{", ctx: " after `type {name.value.text}`")?
+  let fields = parse_field_decls(p: p, i: j, closer: "\}")?
+  j = expect_op(p: p, i: fields.pos, v: "\}", ctx: "")?
+  return Ok(Got { value: Decl.TypeD(span: span_from(p: p, start: start, i: j), name: name.value.text,
+    type_params: tps.value.names, fields: fields.value, doc: doc, public: false), pos: j })
+}
+
+fn parse_enum_decl(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseError] {
+  let start = span_of(tk(p, i))
+  let name = expect_ident(p: p, i: next(p, i), what: "enum name")?
+  let tps = parse_type_params(p: p, i: name.pos, allow_bounds: false)?
+  var j = expect_op(p: p, i: tps.pos, v: "\{", ctx: " after `enum {name.value.text}`")?
+  var variants: List[VariantDecl] = []
+  j = skip_nl(p, j)
+  while not is_op(tk(p, j), "\}") {
+    let v = expect_ident(p: p, i: j, what: "variant name")?
+    j = v.pos
+    var fields: List[FieldDecl] = []
+    if is_op(tk(p, j), "(") {
+      j = next(p, j)
+      if is_kind(tk(p, j), TokKind.Ident) and not is_op(tk(p, j + 1), ":") {
+        return bad(tk(p, j), "variant fields need names")
+      }
+      let fs = parse_field_decls(p: p, i: j, closer: ")")?
+      fields = fs.value
+      j = expect_op(p: p, i: fs.pos, v: ")", ctx: "")?
+    }
+    variants = variants.push(VariantDecl { span: span_from(p: p, start: span_of(v.value), i: j), name: v.value.text,
+      fields: fields })
+    if is_op(tk(p, j), ",") {
+      j = next(p, j)
+    }
+    j = skip_nl(p, j)
+  }
+  j = expect_op(p: p, i: j, v: "\}", ctx: "")?
+  return Ok(Got { value: Decl.EnumD(span: span_from(p: p, start: start, i: j), name: name.value.text,
+    type_params: tps.value.names, variants: variants, doc: doc, public: false), pos: j })
+}
+
+fn parse_test(p: Ps, i: Int) -> Result[Got[Decl], ParseError] {
+  let start = span_of(tk(p, i))
+  let j = next(p, i)
+  if not is_kind(tk(p, j), TokKind.StrLit) {
+    return bad(tk(p, j), "expected a test name string")
+  }
+  let body = parse_block(p, skip_nl(p, next(p, j)))?
+  return Ok(Got { value: Decl.Test(span: span_from(p: p, start: start, i: body.pos), name: tk(p, j).text,
+    body: body.value), pos: body.pos })
+}
+
+fn parse_property(p: Ps, i: Int) -> Result[Got[Decl], ParseError] {
+  let start = span_of(tk(p, i))
+  let j = next(p, i)
+  if not is_kind(tk(p, j), TokKind.StrLit) {
+    return bad(tk(p, j), "expected a property name string")
+  }
+  var k = expect_op(p: p, i: next(p, j), v: "(", ctx: " with the generated inputs")?
+  let params = parse_params(p: p, i: k, require_types: true, is_method: false)?
+  k = expect_op(p: p, i: params.pos, v: ")", ctx: "")?
+  let body = parse_block(p, skip_nl(p, k))?
+  return Ok(Got { value: Decl.Property(span: span_from(p: p, start: start, i: body.pos), name: tk(p, j).text,
+    params: params.value, body: body.value), pos: body.pos })
+}
+
+fn parse_const(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseError] {
+  let start = span_of(tk(p, i))
+  let name = expect_ident(p: p, i: next(p, i), what: "constant name")?
+  if not is_op(tk(p, name.pos), ":") {
+    return bad(tk(p, name.pos), "constant `{name.value.text}` needs a type")
+  }
+  let ty = parse_type(p, next(p, name.pos))?
+  let k = expect_op(p: p, i: ty.pos, v: "=", ctx: " after the type of `{name.value.text}`")?
+  let value = parse_expr(p, k)?
+  return Ok(Got { value: Decl.Const(span: span_from(p: p, start: start, i: value.pos), name: name.value.text,
+    ty: ty.value, value: value.value, doc: doc, public: false), pos: value.pos })
+}
+
+fn parse_use(p: Ps, i: Int) -> Result[Got[Decl], ParseError] {
+  let start = span_of(tk(p, i))
+  let first = expect_ident(p: p, i: next(p, i), what: "module name")?
+  var path = [first.value.text]
+  var items: List[Str] = []
+  var spans: List[Span] = []
+  var j = first.pos
+  while true {
+    if not is_op(tk(p, j), ".") {
+      return bad(tk(p, j), "expected `.\{ ... \}` with the imported names")
+    }
+    j = next(p, j)
+    if is_op(tk(p, j), "\{") {
+      j = next(p, j)
+      while not is_op(tk(p, j), "\}") {
+        let item = expect_ident(p: p, i: j, what: "imported name")?
+        items = items.push(item.value.text)
+        spans = spans.push(span_of(item.value))
+        j = item.pos
+        if not is_op(tk(p, j), ",") {
+          break
+        }
+        j = next(p, j)
+      }
+      j = expect_op(p: p, i: j, v: "\}", ctx: "")?
+      break
+    }
+    if is_op(tk(p, j), "*") {
+      return bad(tk(p, j), "wildcard imports are not allowed")
+    }
+    let part = expect_ident(p: p, i: j, what: "module name")?
+    path = path.push(part.value.text)
+    j = part.pos
+  }
+  if items.is_empty() {
+    return bad(tk(p, j - 1), "`use` must import at least one name")
+  }
+  return Ok(Got { value: Decl.Use(span: span_from(p: p, start: start, i: j), path: path, items: items,
+    item_spans: spans), pos: j })
+}
+
+/// The doc comment text of declaration (lines starting with `>>>` are doc-tests, not documentation).
+fn doc_text(docs: List[Token]) -> Option[Str] {
+  let text = docs.map(fn(t) => t.text.trim()).filter(fn(s) => not s.starts_with(">>>")).join("\n")
+  return match text.is_empty() {
+    true => None,
+    false => Some(text),
+  }
+}
+
+/// `/// >>> stmt` lines become a test named `doc: <name>`.
+fn doctest(docs: List[Token], name: Str) -> Result[Option[Decl], ParseError] {
+  var stmts: List[Stmt] = []
+  for t in docs {
+    let raw = t.text
+    let rest = raw.trim_start()
+    if rest.starts_with(">>>") {
+      let after = rest.slice(3, rest.len())
+      let col = t.col + 3 + (raw.len() - rest.len()) + 3 + (after.len() - after.trim_start().len())
+      let code = after.trim()
+      if not code.is_empty() {
+        let toks = match tokenize_at(src: code, first_line: t.line, first_col: col) {
+          Ok(ts) => ts,
+          Err(e) => {
+            return Err(from_lex(e))
+          },
+        }
+        let q = Ps { toks: toks, no_struct: false }
+        let s = parse_stmt(q, 0)?
+        let k = skip_nl(q, s.pos)
+        if not is_kind(tk(q, k), TokKind.Eof) {
+          return bad(tk(q, k), "unexpected {describe(tk(q, k))} in doc-test line")
+        }
+        stmts = stmts.push(s.value)
+      }
+    }
+  }
+  if stmts.is_empty() {
+    return Ok(None)
+  }
+  let first = docs.get(0).map(fn(d) => span_of(d))
+  let last = docs.last().map(fn(d) => span_of(d))
+  return match first {
+    Some(a) => {
+      let span = merge(a, last.unwrap_or(a))
+      return Ok(Some(Decl.Test(span: span, name: "doc: " + name, body: Block { span: span, stmts: stmts })))
+    },
+    None => Ok(None),
+  }
+}
+
+/// `{ [doc] fn ... }` of a trait or impl.
+type MethodSrc { decl: FnDecl, docs: List[Token] }
+
+fn method_block(p: Ps, i: Int, what: Str) -> Result[Got[List[MethodSrc]], ParseError] {
+  var j = expect_op(p: p, i: i, v: "\{", ctx: " to start the body of the {what}")?
+  var out: List[MethodSrc] = []
+  while true {
+    var docs: List[Token] = []
+    while is_kind(tk(p, j), TokKind.Newline) or is_kind(tk(p, j), TokKind.Doc) {
+      if is_kind(tk(p, j), TokKind.Doc) {
+        docs = docs.push(tk(p, j))
+      }
+      j = next(p, j)
+    }
+    if is_op(tk(p, j), "\}") {
+      return Ok(Got { value: out, pos: next(p, j) })
+    }
+    if not is_kw(tk(p, j), "fn") {
+      return bad(tk(p, j), "a {what} contains only methods (`fn name(self, ...)`), found {describe(tk(p, j))}")
+    }
+    let f = parse_fn(p: p, i: j, doc: doc_text(docs), with_body: false, is_method: true)?
+    var decl = f.value
+    j = f.pos
+    let k = skip_nl(p, j)
+    if is_op(tk(p, k), "\{") {
+      let b = parse_block(p, k)?
+      decl = decl with { body: Some(b.value), span: merge(decl.span, span_of(tk(p, b.pos - 1))) }
+      j = b.pos
+    } else if what == "impl" {
+      return bad(tk(p, j), "method `{decl.name}` in an impl needs a body")
+    }
+    if decl.params.get(0).map(fn(x) => x.name) != Some("self") {
+      return bad(tk(p, j - 1), "method `{decl.name}` must take `self` as its first parameter")
+    }
+    out = out.push(MethodSrc { decl: decl, docs: docs })
+    if not (is_kind(tk(p, j), TokKind.Newline) or is_op(tk(p, j), "\}")) {
+      return bad(tk(p, j), "expected end of line after method `{decl.name}`, found {describe(tk(p, j))}")
+    }
+  }
+  return Ok(Got { value: out, pos: j })
+}
+
+fn parse_trait(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[List[Decl]], ParseError] {
+  let start = span_of(tk(p, i))
+  let name = expect_ident(p: p, i: next(p, i), what: "trait name")?
+  if is_op(tk(p, name.pos), "[") {
+    return bad(tk(p, name.pos), "generic traits are not supported yet")
+  }
+  let block = method_block(p: p, i: name.pos, what: "trait")?
+  var required: List[FnDecl] = []
+  var defaults: List[Str] = []
+  var extra: List[Decl] = []
+  let tname = name.value.text
+  for m in block.value {
+    let f = m.decl with { trait_name: Some(tname), method_name: Some(m.decl.name) }
+    if f.body == None {
+      required = required.push(f)
+    } else {
+      if not f.type_params.is_empty() {
+        return bad(tk(p, block.pos), "trait method `{f.name}` cannot have its own type parameters (not supported yet)")
+      }
+      defaults = defaults.push(f.name)
+      let d = f with {
+        owner_kind: Some("default"),
+        owner: Some(tname),
+        name: tname + "." + f.name,
+        type_params: ["Self"],
+        bounds: [Pair { first: "Self", second: [Pair { first: tname, second: span_of(name.value) }] }],
+      }
+      extra = extra.push(Decl.Fn(decl: d))
+      match doctest(m.docs, d.name)? {
+        Some(t) => {
+          extra = extra.push(t)
+        },
+        None => {},
+      }
+    }
+  }
+  let decl = Decl.Trait(span: span_from(p: p, start: start, i: block.pos), name: tname, methods: required,
+    defaults: defaults, doc: doc, public: false)
+  return Ok(Got { value: [decl].concat(extra), pos: block.pos })
+}
+
+fn parse_impl(p: Ps, i: Int) -> Result[Got[List[Decl]], ParseError] {
+  let start = span_of(tk(p, i))
+  var j = next(p, i)
+  if is_op(tk(p, j), "[") {
+    return bad(tk(p, j), "generic impls are not supported yet")
+  }
+  let trait_tok = expect_ident(p: p, i: j, what: "trait name")?
+  if not is_kw(tk(p, trait_tok.pos), "for") {
+    return bad(tk(p, trait_tok.pos), "expected `for` after the trait name")
+  }
+  let target = parse_type(p, next(p, trait_tok.pos))?
+  let tname = match target.value {
+    TypeExpr.Named(_, n, _) => n,
+    _ => "?",
+  }
+  let block = method_block(p: p, i: target.pos, what: "impl")?
+  var methods: List[Decl] = []
+  var names: List[Str] = []
+  var spans: List[Span] = []
+  var extra: List[Decl] = []
+  for m in block.value {
+    if not m.decl.type_params.is_empty() {
+      return bad(tk(p, block.pos), "method `{m.decl.name}` cannot have its own type parameters (not supported yet)")
+    }
+    let f = m.decl with {
+      owner_kind: Some("impl"),
+      owner: Some(tname),
+      trait_name: Some(trait_tok.value.text),
+      method_name: Some(m.decl.name),
+      name: tname + "." + m.decl.name,
+    }
+    methods = methods.push(Decl.Fn(decl: f))
+    names = names.push(m.decl.name)
+    spans = spans.push(m.decl.name_span)
+    match doctest(m.docs, f.name)? {
+      Some(t) => {
+        extra = extra.push(t)
+      },
+      None => {},
+    }
+  }
+  let decl = Decl.Impl(span: span_from(p: p, start: start, i: block.pos), trait_name: trait_tok.value.text,
+    target: target.value, methods: names, method_spans: spans, public: false)
+  return Ok(Got { value: [decl].concat(methods).concat(extra), pos: block.pos })
+}
+
+fn decl_name(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(f) => f.name,
+    Decl.TypeD(_, n, _, _, _, _) => n,
+    Decl.Alias(_, n, _, _, _, _) => n,
+    Decl.Const(_, n, _, _, _, _) => n,
+    Decl.EnumD(_, n, _, _, _, _) => n,
+    Decl.Test(_, n, _) => n,
+    Decl.Property(_, n, _, _) => n,
+    Decl.Trait(_, n, _, _, _, _) => n,
+    _ => "?",
+  }
+}
+
+fn make_public(d: Decl) -> Decl {
+  return match d {
+    Decl.Fn(f) => Decl.Fn(decl: f with { public: true }),
+    Decl.TypeD(s, n, tp, fs, doc, _) => Decl.TypeD(span: s, name: n, type_params: tp, fields: fs, doc: doc, public: true),
+    Decl.Alias(s, n, tp, t, doc, _) => Decl.Alias(span: s, name: n, type_params: tp, target: t, doc: doc, public: true),
+    Decl.Const(s, n, t, v, doc, _) => Decl.Const(span: s, name: n, ty: t, value: v, doc: doc, public: true),
+    Decl.EnumD(s, n, tp, vs, doc, _) => Decl.EnumD(span: s, name: n, type_params: tp, variants: vs, doc: doc, public: true),
+    Decl.Trait(s, n, ms, ds, doc, _) => Decl.Trait(span: s, name: n, methods: ms, defaults: ds, doc: doc, public: true),
+    other => other,
+  }
+}
+
+fn expect_line_end(p: Ps, i: Int) -> Result[Int, ParseError] {
+  if is_kind(tk(p, i), TokKind.Newline) or is_kind(tk(p, i), TokKind.Eof) {
+    return Ok(i)
+  }
+  return bad(tk(p, i), "expected end of line after declaration, found {describe(tk(p, i))}")
+}
+
+/// Parses a whole file.
+pub fn parse_program(src: Str) -> Result[Program, ParseError] {
+  let toks = match tokenize_at(src: src, first_line: 1, first_col: 1) {
+    Ok(ts) => ts,
+    Err(e) => {
+      return Err(from_lex(e))
+    },
+  }
+  let p = Ps { toks: toks, no_struct: false }
+  let start = span_of(tk(p, 0))
+  var j = 0
+  var module_name: Option[Str] = None
+  while is_kind(tk(p, j), TokKind.Newline) {
+    j = next(p, j)
+  }
+  if is_kw(tk(p, j), "module") {
+    let first = expect_ident(p: p, i: next(p, j), what: "module name")?
+    var parts = [first.value.text]
+    j = first.pos
+    while is_op(tk(p, j), ".") {
+      let part = expect_ident(p: p, i: next(p, j), what: "module name")?
+      parts = parts.push(part.value.text)
+      j = part.pos
+    }
+    module_name = Some(parts.join("."))
+    if not is_kind(tk(p, j), TokKind.Newline) {
+      return bad(tk(p, j), "expected end of line after module name, found {describe(tk(p, j))}")
+    }
+  }
+  var decls: List[Decl] = []
+  var seen_other = false
+  while true {
+    var docs: List[Token] = []
+    while is_kind(tk(p, j), TokKind.Newline) or is_kind(tk(p, j), TokKind.Doc) {
+      if is_kind(tk(p, j), TokKind.Doc) {
+        docs = docs.push(tk(p, j))
+      }
+      j = next(p, j)
+    }
+    if is_kind(tk(p, j), TokKind.Eof) {
+      break
+    }
+    let doc = doc_text(docs)
+    if is_kw(tk(p, j), "use") {
+      if seen_other {
+        return bad(tk(p, j), "`use` must come before all other declarations")
+      }
+      let u = parse_use(p, j)?
+      decls = decls.push(u.value)
+      j = u.pos
+    } else {
+      seen_other = true
+      var public = false
+      if is_kw(tk(p, j), "pub") {
+        public = true
+        j = next(p, j)
+        if not (is_kw(tk(p, j), "fn") or is_kw(tk(p, j), "type") or is_kw(tk(p, j), "enum") or is_kw(tk(p, j), "const") or
+            is_kw(tk(p, j), "trait")) {
+            return bad(tk(p, j), "`pub` goes before `fn`, `type`, `enum`, `const` or `trait`, found {describe(tk(p, j))}")
+          }
+      }
+      if is_kw(tk(p, j), "trait") or is_kw(tk(p, j), "impl") {
+        let group = match is_kw(tk(p, j), "trait") {
+          true => parse_trait(p: p, i: j, doc: doc)?,
+          false => parse_impl(p, j)?,
+        }
+        var items = group.value
+        if public {
+          items = items.set(0, make_public(items.get_or(0, Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] }))))
+        }
+        decls = decls.concat(items)
+        match doctest(docs, decl_name(items.get_or(0, Decl.Test(span: start, name: "?", body: Block { span: start, stmts: [] }))))? {
+          Some(t) => {
+            decls = decls.push(t)
+          },
+          None => {},
+        }
+        j = expect_line_end(p, group.pos)?
+        continue
+      }
+      var d = Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] })
+      if is_kw(tk(p, j), "fn") {
+        let f = parse_fn(p: p, i: j, doc: doc, with_body: true, is_method: false)?
+        d = Decl.Fn(decl: f.value)
+        j = f.pos
+      } else if is_kw(tk(p, j), "type") {
+        let t = parse_type_decl(p: p, i: j, doc: doc)?
+        d = t.value
+        j = t.pos
+      } else if is_kw(tk(p, j), "enum") {
+        let t = parse_enum_decl(p: p, i: j, doc: doc)?
+        d = t.value
+        j = t.pos
+      } else if is_kw(tk(p, j), "const") {
+        let t = parse_const(p: p, i: j, doc: doc)?
+        d = t.value
+        j = t.pos
+      } else if is_kw(tk(p, j), "test") {
+        let t = parse_test(p, j)?
+        d = t.value
+        j = t.pos
+      } else if is_kw(tk(p, j), "property") {
+        let t = parse_property(p, j)?
+        d = t.value
+        j = t.pos
+      } else if is_kw(tk(p, j), "let") or is_kw(tk(p, j), "var") {
+        return bad(tk(p, j), "top-level variables are not allowed")
+      } else {
+        return bad(tk(p, j), "expected a declaration (`fn`, `type`, `enum`, `trait`, `impl`, `const`, `test`, " +
+            "`property`, `use`), found {describe(tk(p, j))}")
+      }
+      if public {
+        d = make_public(d)
+      }
+      decls = decls.push(d)
+      match doctest(docs, decl_name(d))? {
+        Some(t) => {
+          decls = decls.push(t)
+        },
+        None => {},
+      }
+    }
+    j = expect_line_end(p, j)?
+  }
+  return Ok(Program { span: merge(start, span_of(tk(p, j))), module_name: module_name, decls: decls })
+}
