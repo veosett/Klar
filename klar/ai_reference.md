@@ -77,7 +77,8 @@ assert x > 0, "message"
 - Enum values: `Shape.Circle(radius: 1.0)`, `Shape.Empty` — always qualified.
 - Option: `Some(v)`, `None`. Result: `Ok(v)`, `Err(e)`. No null, no exceptions.
 - `expr?` unwraps Some/Ok, otherwise returns None/Err from the current function (same error type).
-- Lambdas: `fn(x) => x * 2`, `fn(x: Int) -> Int { return x * 2 }`. Param types may be inferred.
+- Lambdas: `fn(x) => x * 2`, `fn(x: Int) -> Int { return x * 2 }` (no `=>` before a block). Param types may be
+  inferred. Lambdas may capture `let` values but not a `var` (E0216): snapshot it (`let n_now = n`) or use `fold`.
 - Calls: `f(a, b)`; functions with 3+ parameters REQUIRE named args: `f(a: 1, b: 2, c: 3)`.
 - Method syntax works for any function on its first parameter: `acc.deposit(10)` == `deposit(acc, 10)`.
 - `match` is an expression and must be exhaustive:

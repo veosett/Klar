@@ -146,6 +146,10 @@ CODES = {
               "compatible Option/Result (with the same error type)."),
     "E0213": ("break/continue outside loop", "`break` and `continue` only work inside `while`/`for`."),
     "E0214": ("cannot infer type", "Add a type annotation, e.g. `let xs: List[Int] = []`."),
+    "E0216": ("lambda captures a `var`",
+              "Lambdas may capture `let` values, parameters and loop variables, but not a `var`: whether the lambda "
+              "would see later changes (and whether it could change the variable) is a classic source of bugs. "
+              "Take a snapshot (`let n_now = n`) or accumulate with `fold` / a `for` loop."),
     "E0215": ("values are not ordered", "`sort`, `min`, `max` (and the keys of `sort_by`/`min_by`/`max_by`) need Int, "
               "Float or Str. Sort records by a field: `xs.sort_by(fn(p) => p.age)`."),
     # match

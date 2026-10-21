@@ -399,6 +399,31 @@ class Checker:
                 return sc[name]
         return None
 
+    def captured_var(self, name, span, assigning=False):
+        """A lambda may only capture immutable bindings: a captured `var` would be ambiguous
+        (snapshot or shared?) and is a classic source of closure bugs."""
+        bounds = getattr(self, "lambda_bounds", None)
+        if not bounds:
+            return
+        for i in range(len(self.scopes) - 1, -1, -1):
+            if name in self.scopes[i]:
+                v = self.scopes[i][name]
+                if v.mutable and i < bounds[-1]:
+                    key = (name, id(self.scopes[bounds[-1]]))
+                    reported = self.__dict__.setdefault("reported_captures", set())
+                    if key in reported:
+                        return
+                    reported.add(key)
+                    if assigning:
+                        self.error("E0216", f"a lambda cannot assign `{name}`, a `var` of the enclosing function",
+                                   span, hint="lambdas cannot change outer variables: accumulate with "
+                                              "`xs.fold(start, fn(acc, x) => ...)` or use a `for` loop")
+                    else:
+                        self.error("E0216", f"a lambda cannot capture `{name}`: it is a `var` and may change",
+                                   span, hint=f"capture a snapshot: `let {name}_now = {name}` before the lambda, "
+                                              f"and use `{name}_now` inside it")
+                return
+
     def declare(self, name, t, mutable, span, kind, kw_span=None):
         if name == "_":
             return
@@ -531,6 +556,8 @@ class Checker:
 
     def s_Assign(self, s: N.Assign):
         v = self.lookup(s.name)
+        if v is not None and v.mutable:
+            self.captured_var(s.name, s.span, assigning=True)
         if v is None:
             if s.name in self.fns:
                 self.error("E0207", f"cannot assign to function `{s.name}`", s.span)
@@ -759,6 +786,8 @@ class Checker:
         v = self.lookup(e.name)
         if v is not None:
             v.used = True
+            if v.mutable:
+                self.captured_var(e.name, e.span)
             return v.type
         if e.name == "None":
             return option_of(TVar())
@@ -1295,6 +1324,9 @@ class Checker:
         e.ptypes, e.ret_t = ptypes, ret
         self.ctx = Ctx(outer.name, ret, outer.effects, purpose=purpose, sig_end=outer.sig_end)
         self.ctx.is_test = False
+        if not hasattr(self, "lambda_bounds"):
+            self.lambda_bounds = []
+        self.lambda_bounds.append(len(self.scopes))
         self.push()
         for p, t in zip(e.params, ptypes):
             self.declare(p.name, t, False, p.span, "param")
@@ -1310,6 +1342,7 @@ class Checker:
         else:
             self.expr(e.body, ret)
         self.pop()
+        self.lambda_bounds.pop()
         self.ctx = outer
         return TFn(ptypes, ret)
 

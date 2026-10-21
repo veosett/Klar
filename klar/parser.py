@@ -831,7 +831,14 @@ class Parser:
             ret = self.parse_type()
         old = self.no_struct
         self.no_struct = False
-        if self.accept_op("=>"):
+        if self.at_op("=>"):
+            arrow = self.advance()
+            if self.at_op("{"):
+                self.fail("a lambda with a block body has no `=>`", tok=arrow,
+                          hint="write `fn(x) { return value }` (statements on their own lines), or keep `=>` with one expression: "
+                               "`fn(x) => x * 2`",
+                          fix={"span": Span(arrow.span.file, arrow.span.line, arrow.span.col,
+                                            self.cur.span.line, self.cur.span.col), "text": ""})
             body = self.parse_expr()
         elif self.at_op("{"):
             body = self.parse_block()

@@ -157,16 +157,17 @@ fn main() uses io {
     let k = i * 10
     fns = fns.push(fn() => k + i)
   }
-  var counter = 0
-  let bump = fn(n: Int) {
-    counter = counter + n
-  }
-  bump(5)
-  bump(2)
   print(fns.map(fn(f) => f()))
-  print(counter)
 }""")
-        self.assertEqual(out, "[0, 11, 22]\n7\n")
+        self.assertEqual(out, "[0, 11, 22]\n")
+
+    def test_lambdas_cannot_capture_vars(self):
+        assign = "fn main() uses io {\n var counter = 0\n let bump = fn(n: Int) {\n counter = counter + n\n }\n bump(5)\n}"
+        self.assertEqual(errors(assign), ["E0216"])
+        read = "fn main() uses io {\n var n = 1\n let f = fn(x: Int) => x + n\n n = 5\n print(f(1))\n}"
+        self.assertEqual(errors(read), ["E0216"])
+        snapshot = "fn main() uses io {\n var n = 1\n let n_now = n\n let f = fn(x: Int) => x + n_now\n n = 5\n print(f(1))\n}"
+        self.assertEqual(errors(snapshot), [])
 
 
 class Programs(unittest.TestCase):
