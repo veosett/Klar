@@ -2502,3 +2502,307 @@ fn main() {
   let _ = f
   let _ = g
 }
+=== safety_division
+fn by_param(a: Int, b: Int) -> Int {
+  return a / b
+}
+
+fn guarded(a: Int, b: Int) -> Int {
+  if b != 0 {
+    return a / b
+  }
+  return 0
+}
+
+fn early(a: Int, b: Int) -> Int {
+  if b == 0 {
+    return 0
+  }
+  return a % b
+}
+
+fn required(a: Int, b: Int) -> Int requires b > 0 {
+  return a / b
+}
+
+fn by_zero(a: Int) -> Int {
+  return a / 0
+}
+
+fn float_zero(a: Float) -> Float {
+  return a / 0.0
+}
+
+fn float_ok(a: Float, b: Float) -> Float {
+  return a / b
+}
+
+fn matched(a: Int, b: Int) -> Int {
+  return match b {
+    0 => 0,
+    _ => a / b,
+  }
+}
+
+fn matched_bind(a: Int, b: Int) -> Int {
+  return match b {
+    0 => 0,
+    n => a / n,
+  }
+}
+
+fn counter(a: Int) -> Int {
+  var d = 3
+  var i = 0
+  while i < 10 {
+    d = d + 2
+    i = i + 1
+  }
+  return a / d
+}
+
+fn may_hit_zero(a: Int) -> Int {
+  var d = 3
+  d = d - 1
+  return a / d
+}
+
+fn loop_var(a: Int) -> Int {
+  var total = 0
+  for k in range(1, 10) {
+    total = total + a / k
+  }
+  for j in range(0, 10) {
+    total = total + a / j
+  }
+  return total
+}
+
+fn lengths(xs: List[Int]) -> Int {
+  if xs.is_empty() {
+    return 0
+  }
+  return 100 / xs.len()
+}
+
+fn raw_len(xs: List[Int]) -> Int {
+  return 100 / xs.len()
+}
+
+fn abs_plus(a: Int, b: Int) -> Int {
+  return a / (b.abs() + 1)
+}
+
+fn with_assert(a: Int, b: Int) -> Int {
+  assert b > 0
+  return a / b
+}
+
+fn both(a: Int, b: Int, c: Int) -> Int {
+  if b > 0 and c > 0 {
+    return a / b + a / c
+  }
+  if b == 0 or c == 0 {
+    return 0
+  }
+  return a / b
+}
+
+fn negated(a: Int, b: Int) -> Int {
+  if not (b == 0) {
+    return a / b
+  }
+  return 0
+}
+
+const STEP: Int = 4
+const NONE_STEP: Int = 0
+
+fn by_const(a: Int) -> Int {
+  return a / STEP + a / NONE_STEP
+}
+
+fn positive() -> Int ensures result > 0 {
+  return 5
+}
+
+fn by_ensured(a: Int) -> Int {
+  return a / positive()
+}
+
+fn in_lambda(xs: List[Int], d: Int) -> List[Int] {
+  return xs.map(fn(x) => x / d)
+}
+
+fn product(a: Int, b: Int) -> Int requires b > 0 {
+  return a / (b * b) + a / (b - b)
+}
+
+fn main() {}
+=== safety_contracts_recursion
+fn half(n: Int) -> Int requires n > 0, n % 2 == 0 {
+  return n / 2
+}
+
+fn named(x: Int, y: Int) -> Int requires y != 0 {
+  return x / y
+}
+
+fn loop_forever(n: Int) -> Int {
+  return loop_forever(n - 1) + 1
+}
+
+fn with_base(n: Int) -> Int {
+  if n <= 1 {
+    return 1
+  }
+  return with_base(n - 1) * n
+}
+
+fn let_first(n: Int) -> Int {
+  let x = let_first(n)
+  return x
+}
+
+fn cond_first(n: Int) -> Bool {
+  if cond_first(n) {
+    return true
+  }
+  return false
+}
+
+fn guarded_and(n: Int) -> Bool {
+  return n > 0 and guarded_and(n - 1)
+}
+
+type Counter { n: Int }
+
+fn tick(c: Counter) -> Int {
+  return c.tick()
+}
+
+trait Walk {
+  fn walk(self) -> Int
+}
+
+impl Walk for Counter {
+  fn walk(self) -> Int {
+    return self.walk()
+  }
+}
+
+fn main() {
+  let _ = half(3)
+  let _ = half(4)
+  let _ = half(-2)
+  let _ = named(x: 1, y: 0)
+  let _ = named(1, 2)
+  let _ = loop_forever(1) + with_base(3) + let_first(1) + tick(Counter { n: 1 })
+  let _ = cond_first(1)
+  let _ = guarded_and(1)
+}
+=== safety_builtins
+type P { x: Int }
+
+fn main() {
+  let xs = [3, 1, 2]
+  let _ = xs.get(xs.len())
+  let _ = xs.get(-1)
+  let _ = xs.set(-2, 0)
+  let _ = xs.insert(xs.len(), 0)
+  let _ = xs.get(0)
+  let _ = 2.pow(-1)
+  let _ = (-4.0).sqrt()
+  let _ = 0.0.ln()
+  let _ = xs.chunks(0)
+  let _ = 1.5.fixed(-1)
+  let _ = "abc".count("")
+  let ps = [P { x: 1 }]
+  let _ = ps.sort()
+  let _ = ps.max()
+  let _ = ps.sort_by(fn(p) => p)
+  let _ = ps.sort_by(fn(p) => p.x)
+  let fs = [fn(x: Int) => x]
+  let _ = fs.min()
+  let b = bytes_of([1, 2, 300])
+  let _ = b.push(256)
+  let _ = b.set(0, -1)
+  let _ = b.push_le(1, 3)
+  let _ = b.push_le(70000, 2)
+  let _ = b.push_le(-129, 1)
+  let _ = b.push_le(255, 1)
+}
+=== safety_facts_flow
+fn after_loop(n: Int) -> Int {
+  var k = n
+  while k > 0 {
+    k = k - 1
+  }
+  return 10 / k
+}
+
+fn loop_break(n: Int) -> Int {
+  var k = n
+  while k != 0 {
+    if k > 5 {
+      break
+    }
+    k = k - 1
+  }
+  return 10 / k
+}
+
+fn reassigned(a: Int, b: Int) -> Int {
+  var d = b
+  if d == 0 {
+    d = 1
+  }
+  return a / d
+}
+
+fn branches(a: Int, b: Int) -> Int {
+  var d = 1
+  if b > 0 {
+    d = b
+  } else {
+    d = 2
+  }
+  return a / d
+}
+
+fn record_field(p: Pair[Int, Int]) -> Int {
+  if p.second > 0 {
+    return p.first / p.second
+  }
+  return p.first / p.second
+}
+
+fn mixed(a: Int, b: Int) -> Int {
+  let c = b * 2
+  if b > 0 {
+    return a / c
+  }
+  return 0
+}
+
+fn max_of(a: Int, b: Int) -> Int {
+  return a / b.max(1)
+}
+
+fn main() {}
+=== safety_in_tests
+fn div(a: Int, b: Int) -> Int requires b != 0 {
+  return a / b
+}
+
+test "zero" {
+  let _ = div(1, 0)
+  let n = 0
+  let _ = 5 / n
+}
+
+property "nonzero" (k: Int) {
+  let _ = 10 / k
+}
+
+fn main() {}

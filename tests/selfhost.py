@@ -305,17 +305,33 @@ def check_parser(files, interp):
 
 
 def python_diags(path):
-    """Diagnostics of `klar check path` without the safety analysis (a separate pass, not ported yet)."""
-    import klar.safety
+    """The diagnostics of `klar check path` (checker and safety analysis) and the checker's annotations."""
     from klar.loader import load_path
-    saved = klar.safety.analyze
-    klar.safety.analyze = lambda checker, program: []
-    try:
-        loaded = load_path(path)
-    finally:
-        klar.safety.analyze = saved
-    return sorted_diags({"severity": d.severity, "code": d.code, "message": d.message, "hint": d.hint,
-                         "file": d.span.file, "span": [d.span.line, d.span.col]} for d in loaded.diags)
+    loaded = load_path(path)
+    diags = sorted_diags({"severity": d.severity, "code": d.code, "message": d.message, "hint": d.hint,
+                          "file": d.span.file, "span": [d.span.line, d.span.col]} for d in loaded.diags)
+    return diags, annotations(loaded.program)
+
+
+EXPRESSIONS = (N.IntLit, N.FloatLit, N.StrLit, N.BoolLit, N.UnitLit, N.ListLit, N.MapLit, N.Name, N.Unary, N.Binary,
+               N.Call, N.MethodCall, N.FieldAccess, N.Try, N.RecordLit, N.WithExpr, N.Match, N.Lambda)
+
+
+def annotations(program):
+    """The static type of every expression and the resolution of every method call (by span), as recorded by the
+    Python checker on the main module."""
+    from klar.types import prune, show
+    if program is None:
+        return None
+    types, resolved = {}, {}
+    for n in N.walk(program):
+        key = f"{n.span.line}:{n.span.col}:{n.span.end_line}:{n.span.end_col}"
+        if isinstance(n, EXPRESSIONS) and getattr(n, "kt", None) is not None:
+            types[key] = show(prune(n.kt))
+        res = getattr(n, "resolved", None)
+        if isinstance(n, N.MethodCall) and res:
+            resolved[key] = f"{res[0]} {res[-1] if len(res) > 1 else n.method}"
+    return {"types": types, "resolved": resolved}
 
 
 def sorted_diags(ds):
@@ -324,24 +340,38 @@ def sorted_diags(ds):
 
 def klar_diags(paths, interp):
     out = run_driver("dump_check.klar", [os.path.join(ROOT, "klar")] + paths, interp)
-    result, cur = {}, None
+    result, notes, cur = {}, {}, None
     for line in out.splitlines():
         obj = json.loads(line)
         if set(obj) == {"file"}:
             cur = obj["file"]
             result[cur] = []
+            notes[cur] = None
+        elif "types" in obj:
+            notes[cur] = obj
         else:
             result[cur].append(obj)
-    return {k: sorted_diags(v) for k, v in result.items()}
+    return {k: (sorted_diags(v), notes[k]) for k, v in result.items()}
 
 
 def check_checker(files, interp):
     got = klar_diags(files, interp)
-    bad = total = 0
+    bad = total = typed = 0
     for path in files:
-        want = python_diags(path)
-        have = got.get(path)
+        want, want_notes = python_diags(path)
+        have, have_notes = got.get(path, (None, None))
         total += len(want)
+        typed += len(want_notes["types"]) if want_notes else 0
+        if have == want and have_notes != want_notes:
+            bad += 1
+            for table in ("types", "resolved"):
+                w, h = (want_notes or {}).get(table, {}), (have_notes or {}).get(table, {})
+                diff = sorted(k for k in set(w) | set(h) if w.get(k) != h.get(k))
+                if diff:
+                    k = diff[0]
+                    print(f"DIFF {short(path)}: {len(diff)} {table} differ, e.g. at {k}: python {w.get(k)!r}, "
+                          f"klar {h.get(k)!r}")
+            continue
         if have != want:
             bad += 1
             first = next((k for k, (a, b) in enumerate(zip(want, have or [])) if a != b),
@@ -349,7 +379,7 @@ def check_checker(files, interp):
             print(f"DIFF {short(path)}: diagnostic {first} of {len(want)} (klar: {len(have or [])})\n"
                   f"  python: {want[first] if first < len(want) else None}\n"
                   f"  klar:   {have[first] if have and first < len(have) else None}")
-    print(f"checker: {len(files) - bad}/{len(files)} files identical ({total} diagnostics)")
+    print(f"checker: {len(files) - bad}/{len(files)} files identical ({total} diagnostics, {typed} typed expressions)")
     return bad
 
 

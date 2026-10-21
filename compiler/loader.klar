@@ -1,6 +1,6 @@
 // The module loader, written in Klar (self-hosting, stage 4): loads the prelude, the main file and every module
-// it `use`s, in dependency order, and checks each one. Mirrors klar/loader.py (without the safety analysis,
-// which is a separate pass).
+// it `use`s, in dependency order, and checks each one (the checker, then the safety analysis on modules without
+// errors). Mirrors klar/loader.py.
 //
 // Modules are files: `use geometry.{Point}` in `dir/main.klar` loads `dir/geometry.klar`, `use std.json.{...}`
 // loads `<lib>/std/json.klar` (`lib` is the directory of the Python package `klar/`, which holds the prelude, the
@@ -9,6 +9,7 @@ use ast.{Decl, Program, Span}
 use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, load_builtins, new_checker}
 use checker.{private_decl}
 use parser.{parse_program}
+use safety.{analyze}
 use similar.{closest}
 
 pub type Module {
@@ -288,7 +289,11 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
     imports: imports))
   let m = Module { name: name, path: path, display: display, failed: false, is_sys: is_sys, checker: Some(ck),
     exports: exports(ck) }
-  ld = ld with { uni: ck.uni, diags: ld.diags.concat(ck.diags), by_path: ld.by_path.set(path, m) }
+  var diags = ck.diags
+  if not is_sys and not diags.any(fn(x) => x.severity == "error") {
+    diags = diags.concat(analyze(ck))
+  }
+  ld = ld with { uni: ck.uni, diags: ld.diags.concat(diags), by_path: ld.by_path.set(path, m) }
   return Loaded { ld: ld, path: Some(path) }
 }
 

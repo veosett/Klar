@@ -19,6 +19,9 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   `compiler/loader.klar` (prelude, `use`, std, cycles, private items) and `compiler/similar.klar` ("did you mean"
   exactly like Python's `difflib`). `tests/selfhost.py` compares every diagnostic (code, message, hint, position) with
   klar/checker.py on every repository file and on the ~210 programs of `tests/selfhost_cases.txt`.
+- Self-hosting, stage 4b: the safety analysis in Klar (`compiler/safety.klar`: E0701–E0705, E0215 — sign analysis,
+  facts from conditions, `var` summaries, contracts, unconditional recursion). The Klar checker now records the static
+  type of every expression and how each method call was resolved, and `tests/selfhost.py` compares those too.
 - The Klar parser reports the same hints as the Python one, and the parser comparison now covers every `*_span`.
 
 ### Fixed

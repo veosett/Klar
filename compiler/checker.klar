@@ -9,7 +9,8 @@ use ast.{Stmt, StrPiece, TypeExpr, expr_span, pattern_span}
 use builtin_sigs.{foreign_methods, foreign_notes, global_sigs, method_sigs, sys_sigs}
 use parser.{parse_signature}
 use similar.{closest}
-use types.{Subst, Type, args_of, con, head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify}
+use types.{Subst, Type, args_of, con, head, is_unit, list_of, map_of, option_of, prune, resolved, result_of, show, subst}
+use types.{unify}
 
 /// A diagnostic: an error or a warning at a position of a file.
 pub type Diag { code: Str, severity: Str, message: Str, file: Str, span: Span, hint: Option[Str] }
@@ -30,7 +31,13 @@ pub type Sig {
   name_span: Span,
   /// `Self` of an impl method
   self_type: Option[Type],
+  /// the declaration of a user function or method (its `requires` and `ensures` are used by the safety analysis)
+  fdecl: Option[FnDecl],
 }
+
+/// How a method call `x.m(...)` was resolved: "builtin", "ufcs" (a function or impl method `name`), "trait",
+/// "variant", "to_str" or "field_fn".
+pub type Resolution { kind: Str, name: Str, sig: Option[Sig] }
 
 pub type RecordInfo { name: Str, tparams: List[Str], mod_name: Str, fields: Map[Str, Type] }
 
@@ -120,6 +127,37 @@ pub type Ck {
   cur_decl: Int,
   /// `x.f()` calls that resolved to a function `f`: (name, declaration index of the call)
   ufcs: List[Pair[Str, Int]],
+  /// the static type of each expression (by its span), as long as the substitution of its body is in use
+  raw_types: Map[Str, Type],
+  /// the static type of each expression, with the type variables replaced (for the passes after the checker)
+  types: Map[Str, Type],
+  /// how each method call was resolved (by the span of the call)
+  resolutions: Map[Str, Resolution],
+}
+
+/// The key of an expression in the tables of the checker: its position.
+pub fn span_key(sp: Span) -> Str {
+  return "{sp.line}:{sp.col}:{sp.end_line}:{sp.end_col}"
+}
+
+fn record_type(c: Ck, e: Expr, t: Type) -> Ck {
+  return c with { raw_types: c.raw_types.set(span_key(expr_span(e)), t) }
+}
+
+fn resolve_as(c: Ck, span: Span, kind: Str, name: Str, sig: Option[Sig]) -> Ck {
+  return c with { resolutions: c.resolutions.set(span_key(span), Resolution { kind: kind, name: name, sig: sig }) }
+}
+
+/// Moves the recorded types out of the current substitution (before it is dropped).
+fn settle_types(c: Ck) -> Ck {
+  if c.raw_types.is_empty() {
+    return c
+  }
+  var types = c.types
+  for entry in c.raw_types.entries() {
+    types = types.set(entry.key, resolved(c.s, entry.value))
+  }
+  return c with { types: types, raw_types: Map {} }
 }
 
 /// A result together with the updated checker state.
@@ -314,6 +352,7 @@ fn builtin_sig(text: Str) -> Sig {
     decl: -1,
     name_span: d.name_span,
     self_type: None,
+    fdecl: None,
   }
 }
 
@@ -417,6 +456,9 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       impl_keys: Map {},
       cur_decl: -1,
       ufcs: [],
+      raw_types: Map {},
+      types: Map {},
+      resolutions: Map {},
     }
   }
 
@@ -1046,6 +1088,7 @@ fn resolve_fn_sig(ck: Ck, f: FnDecl, idx: Int) -> Ck {
     decl: idx,
     name_span: f.name_span,
     self_type: None,
+    fdecl: Some(f),
   }
   return c with { fns: c.fns.set(f.name, Some(sig)) }
 }
@@ -1117,6 +1160,7 @@ fn method_sig(ck: Ck, f: FnDecl, self_type: Type, idx: Int) -> Res[Sig] {
     decl: idx,
     name_span: f.name_span,
     self_type: None,
+    fdecl: Some(f),
   } }
 }
 
@@ -1162,7 +1206,7 @@ fn collect_traits(ck: Ck, own_traits: List[Int]) -> Ck {
           } else {
             let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: idx)
             c = r.c with { methods: r.c.methods.set(f.name, r.v) }
-            let generic = r.v with { name: mname, decl: -1, bounds: no_bounds() }
+            let generic = r.v with { name: mname, decl: -1, bounds: no_bounds(), fdecl: None }
             let now = c.uni.traits.get(tname).unwrap_or(info)
             c = set_trait(c, now with { defaults: now.defaults.set(mname, r.v), methods: now.methods.set(mname, generic) })
           }
@@ -1666,7 +1710,8 @@ fn declare(ck: Ck, name: Str, t: Type, mutable: Bool, span: Span, kind: Str, kw:
 // ---- functions, constants & tests ---------------------------------------------------------------------------
 
 /// A function starts with a fresh substitution: no type variable outlives the body it was created in.
-fn enter(c: Ck, ctx: Ctx, tparams: Map[Str, Type], bounds: Map[Str, List[Str]]) -> Ck {
+fn enter(ck: Ck, ctx: Ctx, tparams: Map[Str, Type], bounds: Map[Str, List[Str]]) -> Ck {
+  let c = settle_types(ck)
   return c with { ctx: ctx, tparams: tparams, bounds: bounds, scopes: [], s: Map {}, lambda_bounds: [] }
 }
 
@@ -1693,7 +1738,7 @@ fn check_const(ck: Ck, idx: Int, name: Str, value: Expr) -> Ck {
     }
   }
   let ctx = Ctx { name: "const {name}", ret: t, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "const" }
-  var c = enter(c: ck, ctx: ctx, tparams: Map {}, bounds: Map {}) with { scopes: [Scope { id: ck.next_scope, vars: Map {} }],
+  var c = enter(ck: ck, ctx: ctx, tparams: Map {}, bounds: Map {}) with { scopes: [Scope { id: ck.next_scope, vars: Map {} }],
     next_scope: ck.next_scope + 1, const_allowed: Some(allowed) }
   c = expr(ck: c, e: value, exp: Some(t)).c
   return c with { const_allowed: None, ctx: top_ctx() }
@@ -1721,7 +1766,7 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
     None => {},
   }
   let contract = Ctx { name: f.name, ret: sig.ret, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "contract" }
-  var c = push_scope(enter(c: ck, ctx: contract, tparams: tps, bounds: sig.bounds))
+  var c = push_scope(enter(ck: ck, ctx: contract, tparams: tps, bounds: sig.bounds))
   var k = 0
   for p in sig.params {
     let pspan = f.params.get(k).map(fn(x) => x.span).unwrap_or(f.name_span)
@@ -1770,7 +1815,7 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
 fn check_test(ck: Ck, name: Str, body: Block) -> Ck {
   let ctx = Ctx { name: "test \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
     purpose: "test" }
-  var c = push_scope(enter(c: ck, ctx: ctx, tparams: Map {}, bounds: Map {}))
+  var c = push_scope(enter(ck: ck, ctx: ctx, tparams: Map {}, bounds: Map {}))
   c = block(c, body)
   c = pop_scope(c)
   return c with { ctx: top_ctx() }
@@ -1779,7 +1824,7 @@ fn check_test(ck: Ck, name: Str, body: Block) -> Ck {
 fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
   let ctx = Ctx { name: "property \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
     purpose: "test" }
-  var c = push_scope(enter(c: ck, ctx: top_ctx(), tparams: Map {}, bounds: Map {}))
+  var c = push_scope(enter(ck: ck, ctx: top_ctx(), tparams: Map {}, bounds: Map {}))
   for p in params {
     let r = resolve_opt(ck: c, te: p.ty, tps: Map {})
     c = r.c
@@ -2156,11 +2201,11 @@ fn expr(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     Some(want) => {
       let u = uni(ck: r.c, a: want, b: r.v)
       if u.v {
-        return ok(u.c, r.v)
+        return ok(record_type(c: u.c, e: e, t: r.v), r.v)
       }
       return ok(mismatch(ck: u.c, expected: want, found: r.v, span: expr_span(e)), want)
     },
-    None => r,
+    None => ok(record_type(c: r.c, e: e, t: r.v), r.v),
   }
 }
 
@@ -2928,7 +2973,9 @@ fn e_method_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
               decl: -1,
               name_span: span,
               self_type: None,
+              fdecl: None,
             }
+            c = resolve_as(c: c, span: span, kind: "variant", name: m, sig: Some(vsig))
             return call_sig(ck: c, sig: vsig, args: args, span: span, expected: exp, self_type: None, display: vsig.name)
           },
         }
@@ -2966,7 +3013,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
     return ok(args_any(c, args), Type.Any)
   }
   if m == "to_str" and args.is_empty() {
-    return ok(c, con("Str"))
+    return ok(resolve_as(c: c, span: span, kind: "to_str", name: m, sig: None), con("Str"))
   }
   let h = hd(c, rt)
   match h {
@@ -2977,6 +3024,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
             Some(fty) => {
               let ft = sub(c: c, t: fty, m: args_map(c: c, tparams: info.tparams, t: rt))
               if is_fn_type(pr(c, ft)) {
+                c = resolve_as(c: c, span: span, kind: "field_fn", name: m, sig: None)
                 return call_fn_type(ck: c, ft: ft, args: args, span: span)
               }
             },
@@ -2996,6 +3044,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
   let builtins = builtin_methods_of(c, h)
   match builtins.get(m) {
     Some(bsig) => {
+      c = resolve_as(c: c, span: span, kind: "builtin", name: m, sig: Some(bsig))
       return call_sig(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
     },
     None => {},
@@ -3015,6 +3064,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
           let tsig = c.uni.traits.get(tr).map(fn(i) => i.methods.get(m)).unwrap_or(None)
           match tsig {
             Some(s) => {
+              c = resolve_as(c: c, span: span, kind: "trait", name: m, sig: Some(s))
               return call_sig(ck: c, sig: s, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
             },
             None => {},
@@ -3036,6 +3086,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
     Some(entry) => {
       if c.visible.has(entry.first) {
         c = c with { ufcs: c.ufcs.push(Pair { first: entry.second.name, second: c.cur_decl }) }
+        c = resolve_as(c: c, span: span, kind: "ufcs", name: entry.second.name, sig: Some(entry.second))
         return call_sig(ck: c, sig: entry.second, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
       }
     },
@@ -3051,6 +3102,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
         c = u.c
         if u.v {
           c = c with { ufcs: c.ufcs.push(Pair { first: usig.name, second: c.cur_decl }) }
+          c = resolve_as(c: c, span: span, kind: "ufcs", name: usig.name, sig: Some(usig))
           return call_sig(ck: c, sig: usig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
         }
       }
@@ -4156,7 +4208,7 @@ pub fn check_module(ck: Ck) -> Ck {
       None => {},
     }
   }
-  c = unused_private_functions(c)
+  c = unused_private_functions(settle_types(c))
   return c
 }
 

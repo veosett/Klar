@@ -1,6 +1,7 @@
 // Checks each file given on the command line (the first argument is the directory of `klar/`: the prelude,
 // std and rt) and prints its diagnostics as JSON lines (used by tests/selfhost.py to compare the Klar checker with klar/checker.py).
-use checker.{Diag}
+use checker.{Ck, Diag}
+use types.{show}
 use loader.{load_program}
 use std.json.{Json, json_object, json_text}
 
@@ -18,6 +19,17 @@ fn diag_json(d: Diag) -> Json {
   ])
 }
 
+/// The static types and method resolutions the checker recorded for the main module.
+fn annotations(ck: Ck) -> Json {
+  let types = ck.types.entries().map(fn(e) => Pair { first: e.key, second: Json.Text(value: show(Map {}, e.value)) })
+  let resolved = ck.resolutions.entries().map(fn(e) => Pair { first: e.key, second: Json.Text(value: e.value.kind + " " +
+      e.value.name) })
+  return json_object([
+    Pair { first: "types", second: json_object(types) },
+    Pair { first: "resolved", second: json_object(resolved) },
+  ])
+}
+
 fn main() uses io, fs {
   let args = cli_args()
   let lib = args.get_or(0, "klar")
@@ -26,6 +38,10 @@ fn main() uses io, fs {
     let ld = load_program(path, lib)
     for d in ld.diags {
       print(json_text(diag_json(d)))
+    }
+    match ld.by_path.get(path).map(fn(m) => m.checker) {
+      Some(Some(ck)) => print(json_text(annotations(ck))),
+      _ => {},
     }
   }
 }

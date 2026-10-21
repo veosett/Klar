@@ -1,0 +1,1719 @@
+// Compile-time safety analysis, written in Klar (self-hosting, stage 4b). Mirrors klar/safety.py: it runs after
+// the checker on a module without errors and rejects what would certainly or possibly fail at run time:
+//
+//   E0701  Int division / remainder by a value that is not proven non-zero (Float only when certainly 0.0)
+//   E0702  unconditional recursion
+//   E0703  a call whose constant arguments violate the callee's `requires`
+//   E0704  a constant argument outside a built-in's domain
+//   E0705  a list index that is out of bounds on every call
+//   E0215  sorting / min / max of values that have no order
+//
+// Signs are sets of {-, 0, +}, written as bit sets (NEG = 1, ZERO = 2, POS = 4). Like the checker, the analysis
+// threads its state (`Sf`) through every function, because Klar values are immutable.
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Pattern, Span, Stmt}
+use ast.{StrPiece, expr_span}
+use checker.{Ck, Diag, Resolution, span_key}
+use types.{Type, show}
+
+const NEG: Int = 1
+const ZERO: Int = 2
+const POS: Int = 4
+const ANY_SIGN: Int = 7
+const NONZERO: Int = 5
+const NONNEG: Int = 6
+const NONPOS: Int = 3
+
+/// A sign together with the variables it depends on (a fact is forgotten when one of them is assigned).
+type Fact { sign: Int, vars: List[Str] }
+
+type Facts = Map[Str, Fact]
+
+/// A `var`: its initial value (the last declaration with that name) and every value assigned to it.
+type VarSum { init: Option[Expr], assigns: List[Expr] }
+
+/// A compile-time constant value.
+enum CVal {
+  I(value: Int),
+  F(value: Float),
+  B(value: Bool),
+  S(value: Str),
+}
+
+/// The analysis state of one module.
+type Sf {
+  ck: Ck,
+  diags: List[Diag],
+  consts: Map[Str, CVal],
+  const_signs: Map[Str, Int],
+  fn_decls: Map[Str, FnDecl],
+  decl: Option[FnDecl],
+  params: List[Str],
+  vars: Map[Str, VarSum],
+  lets: Map[Str, Expr],
+  loopvars: Map[Str, Int],
+  var_init: Map[Str, Int],
+  memo: Map[Str, Int],
+}
+
+/// A result with the updated state.
+type SR[T] { s: Sf, v: T }
+
+/// The facts after some statements, and whether they always leave the block.
+type Flow { facts: Facts, exits: Bool }
+
+// ---- signs --------------------------------------------------------------------------------------------------
+
+fn subset(a: Int, b: Int) -> Bool {
+  return a.bit_and(b.bit_xor(ANY_SIGN)) == 0
+}
+
+fn has_sign(a: Int, bit: Int) -> Bool {
+  return a.bit_and(bit) != 0
+}
+
+fn bits_of(a: Int) -> List[Int] {
+  return [NEG, ZERO, POS].filter(fn(b) => has_sign(a, b))
+}
+
+fn sign_of_int(v: Int) -> Int {
+  if v > 0 {
+    return POS
+  }
+  if v < 0 {
+    return NEG
+  }
+  return ZERO
+}
+
+fn sign_of_float(v: Float) -> Int {
+  if v > 0.0 {
+    return POS
+  }
+  if v < 0.0 {
+    return NEG
+  }
+  return ZERO
+}
+
+fn add_one(x: Int, y: Int) -> Int {
+  if x == ZERO {
+    return y
+  }
+  if y == ZERO or x == y {
+    return x
+  }
+  return ANY_SIGN
+}
+
+fn mul_one(x: Int, y: Int) -> Int {
+  if x == ZERO or y == ZERO {
+    return ZERO
+  }
+  if x == y {
+    return POS
+  }
+  return NEG
+}
+
+fn s_add(a: Int, b: Int) -> Int {
+  var out = 0
+  for x in bits_of(a) {
+    for y in bits_of(b) {
+      out = out.bit_or(add_one(x, y))
+    }
+  }
+  return out
+}
+
+fn flip(x: Int) -> Int {
+  if x == POS {
+    return NEG
+  }
+  if x == NEG {
+    return POS
+  }
+  return x
+}
+
+fn s_neg(a: Int) -> Int {
+  var out = 0
+  for x in bits_of(a) {
+    out = out.bit_or(flip(x))
+  }
+  return out
+}
+
+fn s_mul(a: Int, b: Int) -> Int {
+  var out = 0
+  for x in bits_of(a) {
+    for y in bits_of(b) {
+      out = out.bit_or(mul_one(x, y))
+    }
+  }
+  return out
+}
+
+fn s_div(a: Int, b: Int) -> Int {
+  var out = 0
+  for x in bits_of(a) {
+    for y in bits_of(b) {
+      if x == ZERO {
+        out = out.bit_or(ZERO)
+      } else if y == ZERO {
+        out = ANY_SIGN
+      } else {
+        out = out.bit_or(ZERO).bit_or(mul_one(x, y))
+      }
+    }
+  }
+  return out
+}
+
+fn s_mod(a: Int) -> Int {
+  var out = 0
+  for x in bits_of(a) {
+    out = out.bit_or(ZERO).bit_or(x)
+  }
+  return out
+}
+
+// ---- the AST as a tree of nodes (in the field order of klar/nodes.py) -------------------------------------
+
+enum Nd {
+  E(e: Expr),
+  S(st: Stmt),
+  B(b: Block),
+  Ar(a: Arg),
+  Fi(f: FieldInit),
+  Me(m: MapEntry),
+  Ma(m: MatchArm),
+}
+
+fn opt_nd(e: Option[Expr]) -> List[Nd] {
+  return match e {
+    Some(x) => [Nd.E(e: x)],
+    None => [],
+  }
+}
+
+fn body_nd(b: Body) -> Nd {
+  return match b {
+    Body.ExprBody(e) => Nd.E(e: e),
+    Body.BlockBody(blk) => Nd.B(b: blk),
+  }
+}
+
+fn else_nd(e: Else) -> List[Nd] {
+  return match e {
+    Else.NoElse => [],
+    Else.ElseBlock(b) => [Nd.B(b: b)],
+    Else.ElseIf(s) => [Nd.S(st: s)],
+  }
+}
+
+/// The child nodes that can hold names, `let`s and assignments (types and patterns hold none).
+fn children(n: Nd) -> List[Nd] {
+  return match n {
+    Nd.B(b) => b.stmts.map(fn(s) => Nd.S(st: s)),
+    Nd.Ar(a) => [Nd.E(e: a.value)],
+    Nd.Fi(f) => [Nd.E(e: f.value)],
+    Nd.Me(m) => [Nd.E(e: m.key), Nd.E(e: m.value)],
+    Nd.Ma(m) => opt_nd(m.guard).push(body_nd(m.body)),
+    Nd.S(s) => match s {
+      Stmt.Let(_, _, _, _, _, v, _) => [Nd.E(e: v)],
+      Stmt.Assign(_, _, v) => [Nd.E(e: v)],
+      Stmt.Return(_, v) => opt_nd(v),
+      Stmt.If(_, cond, then, else_) => [Nd.E(e: cond), Nd.B(b: then)].concat(else_nd(else_)),
+      Stmt.While(_, cond, body) => [Nd.E(e: cond), Nd.B(b: body)],
+      Stmt.For(_, _, _, it, body) => [Nd.E(e: it), Nd.B(b: body)],
+      Stmt.Assert(_, cond, m) => [Nd.E(e: cond)].concat(opt_nd(m)),
+      Stmt.ExprStmt(_, e) => [Nd.E(e: e)],
+      _ => [],
+    },
+    Nd.E(e) => expr_children(e),
+  }
+}
+
+fn expr_children(e: Expr) -> List[Nd] {
+  return match e {
+    Expr.StrLit(_, parts) => parts.flat_map(fn(p) => match p {
+      StrPiece.Code(x) => [Nd.E(e: x)],
+      _ => [],
+    }),
+    Expr.ListLit(_, items) => items.map(fn(x) => Nd.E(e: x)),
+    Expr.MapLit(_, entries) => entries.map(fn(m) => Nd.Me(m: m)),
+    Expr.Unary(_, _, x) => [Nd.E(e: x)],
+    Expr.Binary(_, _, l, r) => [Nd.E(e: l), Nd.E(e: r)],
+    Expr.Call(_, f, args) => [Nd.E(e: f)].concat(args.map(fn(a) => Nd.Ar(a: a))),
+    Expr.MethodCall(_, o, _, _, args) => [Nd.E(e: o)].concat(args.map(fn(a) => Nd.Ar(a: a))),
+    Expr.FieldAccess(_, o, _, _) => [Nd.E(e: o)],
+    Expr.Try(_, x) => [Nd.E(e: x)],
+    Expr.RecordLit(_, _, fs) => fs.map(fn(f) => Nd.Fi(f: f)),
+    Expr.WithExpr(_, b, fs) => [Nd.E(e: b)].concat(fs.map(fn(f) => Nd.Fi(f: f))),
+    Expr.Match(_, subj, arms) => [Nd.E(e: subj)].concat(arms.map(fn(a) => Nd.Ma(m: a))),
+    Expr.Lambda(_, _, _, body) => [body_nd(body)],
+    _ => [],
+  }
+}
+
+/// Every node under `root`, in the order of klar/safety.py `iter_nodes` (a stack: the last child first).
+fn iter_nodes(root: Nd) -> List[Nd] {
+  var out: List[Nd] = []
+  var stack = [root]
+  while not stack.is_empty() {
+    let x = stack.last().unwrap_or(root)
+    stack = stack.take(stack.len() - 1)
+    out = out.push(x)
+    stack = stack.concat(children(x))
+  }
+  return out
+}
+
+fn assigned_in(n: Nd) -> List[Str] {
+  return iter_nodes(n).flat_map(fn(x) => match x {
+    Nd.S(Stmt.Assign(_, name, _)) => [name],
+    _ => [],
+  }).unique()
+}
+
+fn assigned_in_else(e: Else) -> List[Str] {
+  return else_nd(e).flat_map(assigned_in)
+}
+
+/// `break` in the loop body itself (not in nested loops or lambdas).
+fn has_break(n: Nd) -> Bool {
+  return match n {
+    Nd.S(Stmt.Break(_)) => true,
+    Nd.S(Stmt.While(_, _, _)) => false,
+    Nd.S(Stmt.For(_, _, _, _, _)) => false,
+    Nd.E(Expr.Lambda(_, _, _, _)) => false,
+    _ => children(n).any(has_break),
+  }
+}
+
+// ---- helpers --------------------------------------------------------------------------------------------
+
+fn type_of(sf: Sf, e: Expr) -> Option[Type] {
+  return sf.ck.types.get(span_key(expr_span(e)))
+}
+
+/// The name of the static type (`Int`, `List`, ...), if it is a constructed type.
+fn tname(t: Option[Type]) -> Option[Str] {
+  return match t {
+    Some(Type.Con(name, _)) => Some(name),
+    _ => None,
+  }
+}
+
+fn resolution(sf: Sf, span: Span) -> Option[Resolution] {
+  return sf.ck.resolutions.get(span_key(span))
+}
+
+fn is_builtin_call(sf: Sf, span: Span) -> Bool {
+  return resolution(sf, span).map(fn(r) => r.kind == "builtin").unwrap_or(false)
+}
+
+fn keyof(sf: Sf, e: Expr) -> Option[Str] {
+  return match e {
+    Expr.Name(_, n) => Some(n),
+    Expr.FieldAccess(_, o, name, _) => keyof(sf, o).map(fn(k) => k + "." + name),
+    Expr.MethodCall(span, o, m, _, args) => match args.is_empty() and is_builtin_call(sf, span) {
+      true => keyof(sf, o).map(fn(k) => k + "." + m + "()"),
+      false => None,
+    },
+    _ => None,
+  }
+}
+
+fn vars_of(e: Expr) -> List[Str] {
+  return match e {
+    Expr.Name(_, n) => [n],
+    Expr.FieldAccess(_, o, _, _) => vars_of(o),
+    Expr.MethodCall(_, o, _, _, _) => vars_of(o),
+    _ => [],
+  }
+}
+
+fn invalidate(facts: Facts, names: List[Str]) -> Facts {
+  if names.is_empty() {
+    return facts
+  }
+  return facts.filter(fn(k, v) => not v.vars.any(fn(x) => names.contains(x)) and not names.contains(k))
+}
+
+fn float_text(v: Float) -> Str {
+  return v.to_str()
+}
+
+fn source_text(e: Expr) -> Str {
+  return match e {
+    Expr.Name(_, n) => n,
+    Expr.IntLit(_, v) => v.to_str(),
+    Expr.FloatLit(_, v) => float_text(v),
+    Expr.FieldAccess(_, o, name, _) => source_text(o) + "." + name,
+    Expr.MethodCall(_, o, m, _, args) => source_text(o) + "." + m + "(" + args.map(fn(a) => source_text(a.value))
+      .join(", ") + ")",
+    Expr.Call(_, Expr.Name(_, f), args) => f + "(" + args.map(fn(a) => source_text(a.value)).join(", ") + ")",
+    Expr.Binary(_, op, l, r) => source_text(l) + " " + op + " " + source_text(r),
+    Expr.Unary(_, op, x) => match op == "not" {
+      true => "not " + source_text(x),
+      false => op + source_text(x),
+    },
+    Expr.BoolLit(_, b) => match b {
+      true => "true",
+      false => "false",
+    },
+    Expr.StrLit(_, parts) => match plain_text(parts) {
+      Some(t) => "\"" + t + "\"",
+      None => "...",
+    },
+    _ => "...",
+  }
+}
+
+/// The text of a string literal without interpolation.
+fn plain_text(parts: List[StrPiece]) -> Option[Str] {
+  var out = ""
+  for p in parts {
+    match p {
+      StrPiece.Text(t) => {
+        out = out + t
+      },
+      StrPiece.Code(_) => {
+        return None
+      },
+    }
+  }
+  return Some(out)
+}
+
+fn add_error(sf: Sf, code: Str, msg: Str, span: Span, hint: Str) -> Sf {
+  return sf with {
+    diags: sf.diags.push(Diag { code: code, severity: "error", message: msg, file: sf.ck.file, span: span, hint: Some(hint) }),
+  }
+}
+
+// ---- constant evaluation --------------------------------------------------------------------------------
+
+fn int_div(a: Int, b: Int) -> Int requires b != 0 {
+  let q = a.abs() / b.abs()
+  return match (a < 0) == (b < 0) {
+    true => q,
+    false => 0 - q,
+  }
+}
+
+fn compare_values(op: Str, a: CVal, b: CVal) -> Option[CVal] {
+  return match a {
+    CVal.I(x) => match b {
+      CVal.I(y) => Some(CVal.B(value: order(op: op, lt: x < y, eq: x == y))),
+      _ => None,
+    },
+    CVal.F(x) => match b {
+      CVal.F(y) => Some(CVal.B(value: order(op: op, lt: x < y, eq: x == y))),
+      _ => None,
+    },
+    CVal.S(x) => match b {
+      CVal.S(y) => Some(CVal.B(value: order(op: op, lt: x < y, eq: x == y))),
+      _ => None,
+    },
+    _ => None,
+  }
+}
+
+fn order(op: Str, lt: Bool, eq: Bool) -> Bool {
+  return match op {
+    "<" => lt,
+    ">" => not lt and not eq,
+    "<=" => lt or eq,
+    _ => not lt,
+  }
+}
+
+fn arith(op: Str, a: CVal, b: CVal) -> Option[CVal] {
+  return match a {
+    CVal.I(x) => match b {
+      CVal.I(y) => match op {
+        "+" => Some(CVal.I(value: x + y)),
+        "-" => Some(CVal.I(value: x - y)),
+        "*" => Some(CVal.I(value: x * y)),
+        "/" => match y == 0 {
+          true => None,
+          false => Some(CVal.I(value: int_div(x, y))),
+        },
+        "%" => match y == 0 {
+          true => None,
+          false => Some(CVal.I(value: x - y * int_div(x, y))),
+        },
+        _ => None,
+      },
+      _ => None,
+    },
+    CVal.F(x) => match b {
+      CVal.F(y) => match op {
+        "+" => Some(CVal.F(value: x + y)),
+        "-" => Some(CVal.F(value: x - y)),
+        "*" => Some(CVal.F(value: x * y)),
+        "/" => match y == 0.0 {
+          true => None,
+          false => Some(CVal.F(value: x / y)),
+        },
+        "%" => match y == 0.0 {
+          true => None,
+          false => Some(CVal.F(value: x - y * (x / y).to_int().to_float())),
+        },
+        _ => None,
+      },
+      _ => None,
+    },
+    CVal.S(x) => match b {
+      CVal.S(y) => match op == "+" {
+        true => Some(CVal.S(value: x + y)),
+        false => None,
+      },
+      _ => None,
+    },
+    _ => None,
+  }
+}
+
+fn same_kind(a: CVal, b: CVal) -> Bool {
+  return match a {
+    CVal.I(_) => match b {
+      CVal.I(_) => true,
+      _ => false,
+    },
+    CVal.F(_) => match b {
+      CVal.F(_) => true,
+      _ => false,
+    },
+    CVal.B(_) => match b {
+      CVal.B(_) => true,
+      _ => false,
+    },
+    CVal.S(_) => match b {
+      CVal.S(_) => true,
+      _ => false,
+    },
+  }
+}
+
+/// The value of a constant expression (literals, constants, `env`, arithmetic, comparisons), or None.
+fn const_value(sf: Sf, e: Expr, env: Map[Str, CVal]) -> Option[CVal] {
+  return match e {
+    Expr.IntLit(_, v) => Some(CVal.I(value: v)),
+    Expr.FloatLit(_, v) => Some(CVal.F(value: v)),
+    Expr.BoolLit(_, v) => Some(CVal.B(value: v)),
+    Expr.StrLit(_, parts) => plain_text(parts).map(fn(t) => CVal.S(value: t)),
+    Expr.Name(_, n) => match env.get(n) {
+      Some(v) => Some(v),
+      None => sf.consts.get(n),
+    },
+    Expr.Unary(_, op, x) => match const_value(sf: sf, e: x, env: env) {
+      Some(CVal.I(v)) => match op == "-" {
+        true => Some(CVal.I(value: 0 - v)),
+        false => None,
+      },
+      Some(CVal.F(v)) => match op == "-" {
+        true => Some(CVal.F(value: 0.0 - v)),
+        false => None,
+      },
+      Some(CVal.B(v)) => match op == "not" {
+        true => Some(CVal.B(value: not v)),
+        false => None,
+      },
+      _ => None,
+    },
+    Expr.Binary(_, op, l, r) => binary_value(sf: sf, op: op, l: l, r: r, env: env),
+    Expr.MethodCall(_, o, m, _, args) => match args.is_empty() {
+      true => match const_value(sf: sf, e: o, env: env) {
+        Some(CVal.S(t)) => match m == "len" {
+          true => Some(CVal.I(value: t.len())),
+          false => None,
+        },
+        Some(CVal.I(v)) => match m == "abs" {
+          true => Some(CVal.I(value: v.abs())),
+          false => None,
+        },
+        Some(CVal.F(v)) => match m == "abs" {
+          true => Some(CVal.F(value: v.abs())),
+          false => None,
+        },
+        _ => None,
+      },
+      false => None,
+    },
+    _ => None,
+  }
+}
+
+fn binary_value(sf: Sf, op: Str, l: Expr, r: Expr, env: Map[Str, CVal]) -> Option[CVal] {
+  if op == "and" or op == "or" {
+    let a = const_value(sf: sf, e: l, env: env)
+    if op == "and" and a == Some(CVal.B(value: false)) {
+      return a
+    }
+    if op == "or" and a == Some(CVal.B(value: true)) {
+      return a
+    }
+    if a == None {
+      return None
+    }
+    return const_value(sf: sf, e: r, env: env)
+  }
+  let a = match const_value(sf: sf, e: l, env: env) {
+    Some(v) => v,
+    None => {
+      return None
+    },
+  }
+  let b = match const_value(sf: sf, e: r, env: env) {
+    Some(v) => v,
+    None => {
+      return None
+    },
+  }
+  if not same_kind(a, b) {
+    return None
+  }
+  if op == "==" {
+    return Some(CVal.B(value: a == b))
+  }
+  if op == "!=" {
+    return Some(CVal.B(value: a != b))
+  }
+  if ["<", ">", "<=", ">="].contains(op) {
+    return compare_values(op: op, a: a, b: b)
+  }
+  return arith(op: op, a: a, b: b)
+}
+
+/// An Int constant (not Bool).
+fn constant(sf: Sf, e: Expr) -> Option[Int] {
+  return match const_value(sf: sf, e: e, env: Map {}) {
+    Some(CVal.I(v)) => Some(v),
+    _ => None,
+  }
+}
+
+fn is_zero(v: Option[CVal]) -> Bool {
+  return match v {
+    Some(CVal.I(n)) => n == 0,
+    Some(CVal.F(x)) => x == 0.0,
+    Some(CVal.B(b)) => not b,
+    _ => false,
+  }
+}
+
+// ---- signs of expressions ---------------------------------------------------------------------------------
+
+fn sr(s: Sf, v: Int) -> SR[Int] {
+  return SR { s: s, v: v }
+}
+
+/// The possible signs of a numeric expression under `facts` (`override`: signs of variables while a `var` summary
+/// is computed; `computing`: the summaries in progress).
+fn sign_of(sf: Sf, e: Expr, facts: Facts, override: Option[Map[Str, Int]], computing: List[Str]) -> SR[Int] {
+  match keyof(sf, e) {
+    Some(k) => {
+      match facts.get(k) {
+        Some(f) => {
+          return sr(sf, f.sign)
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  match e {
+    Expr.IntLit(_, v) => {
+      return sr(sf, sign_of_int(v))
+    },
+    Expr.FloatLit(_, v) => {
+      return sr(sf, sign_of_float(v))
+    },
+    Expr.Name(_, n) => {
+      return name_sign(sf: sf, n: n, override: override, computing: computing)
+    },
+    Expr.Unary(_, "-", x) => {
+      let r = sign_of(sf: sf, e: x, facts: facts, override: override, computing: computing)
+      return sr(r.s, s_neg(r.v))
+    },
+    Expr.Binary(_, op, l, r) => {
+      let numeric = tname(type_of(sf, e))
+      if ["+", "-", "*", "/", "%"].contains(op) and (numeric == Some("Int") or numeric == Some("Float")) {
+        let a = sign_of(sf: sf, e: l, facts: facts, override: override, computing: computing)
+        let b = sign_of(sf: a.s, e: r, facts: facts, override: override, computing: computing)
+        let v = match op {
+          "+" => s_add(a.v, b.v),
+          "-" => s_add(a.v, s_neg(b.v)),
+          "*" => s_mul(a.v, b.v),
+          "/" => s_div(a.v, b.v),
+          _ => s_mod(a.v),
+        }
+        return sr(b.s, v)
+      }
+    },
+    Expr.MethodCall(span, o, m, _, args) => {
+      if is_builtin_call(sf, span) {
+        let recv = sign_of(sf: sf, e: o, facts: facts, override: override, computing: computing)
+        if (m == "len" or m == "count") and args.is_empty() {
+          return sr(recv.s, NONNEG)
+        }
+        if m == "abs" {
+          return sr(recv.s, match has_sign(recv.v, ZERO) {
+            true => NONNEG,
+            false => POS,
+          })
+        }
+        if m == "to_float" {
+          return recv
+        }
+        if m == "max" and not args.is_empty() {
+          let other = sign_of(sf: recv.s, e: args.get_or(0, args.get_or(0, Arg { span: span, name: None, value: e })).value,
+            facts: facts, override: override, computing: computing)
+          if subset(recv.v, POS) or subset(other.v, POS) {
+            return sr(other.s, POS)
+          }
+          if subset(recv.v, NONNEG) or subset(other.v, NONNEG) {
+            return sr(other.s, NONNEG)
+          }
+          return sr(other.s, ANY_SIGN)
+        }
+        return sr(recv.s, ANY_SIGN)
+      }
+    },
+    _ => {},
+  }
+  match callee_of(sf, e) {
+    Some(callee) => {
+      if not callee.first.post.is_empty() {
+        var s = sf
+        var fx: Facts = Map {}
+        for en in callee.first.post {
+          let a = assume(sf: s, c: en, truth: true, facts: fx)
+          s = a.s
+          fx = a.v
+        }
+        match fx.get("result") {
+          Some(f) => {
+            return sr(s, f.sign)
+          },
+          None => {},
+        }
+        return sr(s, ANY_SIGN)
+      }
+    },
+    None => {},
+  }
+  return sr(sf, ANY_SIGN)
+}
+
+fn name_sign(sf: Sf, n: Str, override: Option[Map[Str, Int]], computing: List[Str]) -> SR[Int] {
+  match override {
+    Some(o) => {
+      match o.get(n) {
+        Some(v) => {
+          return sr(sf, v)
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  match sf.loopvars.get(n) {
+    Some(v) => {
+      return sr(sf, v)
+    },
+    None => {},
+  }
+  if sf.vars.has(n) {
+    if override == None {
+      match sf.memo.get(n) {
+        Some(v) => {
+          return sr(sf, v)
+        },
+        None => {},
+      }
+    }
+    let r = summary(sf: sf, name: n, computing: computing)
+    if override == None {
+      return sr(r.s with { memo: r.s.memo.set(n, r.v) }, r.v)
+    }
+    return r
+  }
+  match sf.lets.get(n) {
+    Some(value) => {
+      if computing.contains(n) {
+        return sr(sf, ANY_SIGN)
+      }
+      return sign_of(sf: sf, e: value, facts: Map {}, override: override, computing: computing.push(n))
+    },
+    None => {},
+  }
+  return sr(sf, sf.const_signs.get(n).unwrap_or(ANY_SIGN))
+}
+
+/// The signs a `var` can have: its initial value and every assignment, to a fixed point.
+fn summary(sf: Sf, name: Str, computing: List[Str]) -> SR[Int] {
+  if computing.contains(name) {
+    return sr(sf, ANY_SIGN)
+  }
+  let vs = sf.vars.get(name).unwrap_or(VarSum { init: None, assigns: [] })
+  let init = match vs.init {
+    Some(x) => x,
+    None => {
+      return sr(sf, ANY_SIGN)
+    },
+  }
+  let inner = computing.push(name)
+  var s = sf
+  var cur = 0
+  match s.var_init.get(name) {
+    Some(v) => {
+      cur = v
+    },
+    None => {
+      let r = sign_of(sf: s, e: init, facts: Map {}, override: None, computing: inner)
+      s = r.s
+      cur = r.v
+    },
+  }
+  var round = 0
+  while round < 4 {
+    var nxt = cur
+    for rhs in vs.assigns {
+      let o: Map[Str, Int] = Map {}
+      let r = sign_of(sf: s, e: rhs, facts: Map {}, override: Some(o.set(name, cur)), computing: inner)
+      s = r.s
+      nxt = nxt.bit_or(r.v)
+    }
+    if nxt == cur {
+      return sr(s, cur)
+    }
+    cur = nxt
+    round = round + 1
+  }
+  return sr(s, cur)
+}
+
+// ---- facts from conditions --------------------------------------------------------------------------------
+
+fn fr(s: Sf, facts: Facts) -> SR[Facts] {
+  return SR { s: s, v: facts }
+}
+
+fn refine(sf: Sf, x: Expr, sign: Int, facts: Facts) -> SR[Facts] {
+  let k = match keyof(sf, x) {
+    Some(key) => key,
+    None => {
+      return fr(sf, facts)
+    },
+  }
+  let cur = sign_of(sf: sf, e: x, facts: facts, override: None, computing: [])
+  let both = cur.v.bit_and(sign)
+  let new = match both == 0 {
+    true => sign,
+    false => both,
+  }
+  return fr(cur.s, facts.set(k, Fact { sign: new, vars: vars_of(x) }))
+}
+
+fn swap_op(op: Str) -> Str {
+  return match op {
+    "<" => ">",
+    ">" => "<",
+    "<=" => ">=",
+    ">=" => "<=",
+    _ => op,
+  }
+}
+
+fn negate_op(op: Str) -> Str {
+  return match op {
+    "<" => ">=",
+    ">=" => "<",
+    ">" => "<=",
+    "<=" => ">",
+    "==" => "!=",
+    _ => "==",
+  }
+}
+
+/// What is known when condition `c` has the value `truth`.
+fn assume(sf: Sf, c: Expr, truth: Bool, facts: Facts) -> SR[Facts] {
+  match c {
+    Expr.Binary(_, "and", l, r) => {
+      if truth {
+        let a = assume(sf: sf, c: l, truth: true, facts: facts)
+        return assume(sf: a.s, c: r, truth: true, facts: a.v)
+      }
+      return fr(sf, facts)
+    },
+    Expr.Binary(_, "or", l, r) => {
+      if not truth {
+        let a = assume(sf: sf, c: l, truth: false, facts: facts)
+        return assume(sf: a.s, c: r, truth: false, facts: a.v)
+      }
+      return fr(sf, facts)
+    },
+    Expr.Unary(_, "not", x) => {
+      return assume(sf: sf, c: x, truth: not truth, facts: facts)
+    },
+    Expr.MethodCall(_, o, "is_empty", _, args) => {
+      if args.is_empty() {
+        return match keyof(sf, o) {
+          Some(k) => fr(sf, facts.set(k + ".len()", Fact { sign: match truth {
+            true => ZERO,
+            false => POS,
+          }, vars: vars_of(o) })),
+          None => fr(sf, facts),
+        }
+      }
+    },
+    Expr.Binary(_, op, l, r) => {
+      if ["<", ">", "<=", ">=", "==", "!="].contains(op) {
+        let o = match truth {
+          true => op,
+          false => negate_op(op),
+        }
+        let a = compare_fact(sf: sf, x: l, op: o, y: r, facts: facts)
+        return compare_fact(sf: a.s, x: r, op: swap_op(o), y: l, facts: a.v)
+      }
+    },
+    _ => {},
+  }
+  return fr(sf, facts)
+}
+
+/// Learns the sign of x from `x op y` being true.
+fn compare_fact(sf: Sf, x: Expr, op: Str, y: Expr, facts: Facts) -> SR[Facts] {
+  if keyof(sf, x) == None {
+    return fr(sf, facts)
+  }
+  let r = sign_of(sf: sf, e: y, facts: facts, override: None, computing: [])
+  let s = r.s
+  let sy = r.v
+  if op == "==" {
+    return refine(sf: s, x: x, sign: sy, facts: facts)
+  }
+  if op == "!=" and sy == ZERO {
+    return refine(sf: s, x: x, sign: NONZERO, facts: facts)
+  }
+  if op == ">" and subset(sy, NONNEG) {
+    return refine(sf: s, x: x, sign: POS, facts: facts)
+  }
+  if op == ">=" and subset(sy, POS) {
+    return refine(sf: s, x: x, sign: POS, facts: facts)
+  }
+  if op == ">=" and subset(sy, NONNEG) {
+    return refine(sf: s, x: x, sign: NONNEG, facts: facts)
+  }
+  if op == "<" and subset(sy, NONPOS) {
+    return refine(sf: s, x: x, sign: NEG, facts: facts)
+  }
+  if op == "<=" and subset(sy, NEG) {
+    return refine(sf: s, x: x, sign: NEG, facts: facts)
+  }
+  if op == "<=" and subset(sy, NONPOS) {
+    return refine(sf: s, x: x, sign: NONPOS, facts: facts)
+  }
+  return fr(s, facts)
+}
+
+// ---- statements ---------------------------------------------------------------------------------------------
+
+fn flow(s: Sf, facts: Facts, exits: Bool) -> SR[Flow] {
+  return SR { s: s, v: Flow { facts: facts, exits: exits } }
+}
+
+fn walk(sf: Sf, stmts: List[Stmt], facts: Facts) -> SR[Flow] {
+  var s = sf
+  var cur = facts
+  for st in stmts {
+    let r = stmt(sf: s, st: st, facts: cur)
+    s = r.s
+    cur = r.v.facts
+    if r.v.exits {
+      return flow(s: s, facts: cur, exits: true)
+    }
+  }
+  return flow(s: s, facts: cur, exits: false)
+}
+
+fn else_block(sf: Sf, e: Else, facts: Facts) -> SR[Flow] {
+  return match e {
+    Else.NoElse => flow(s: sf, facts: facts, exits: false),
+    Else.ElseBlock(b) => walk(sf: sf, stmts: b.stmts, facts: facts),
+    Else.ElseIf(st) => stmt(sf: sf, st: st, facts: facts),
+  }
+}
+
+fn stmt(sf: Sf, st: Stmt, facts: Facts) -> SR[Flow] {
+  var s = sf
+  match st {
+    Stmt.Let(_, name, _, _, _, value, mutable) => {
+      s = expr(sf: s, e: value, facts: facts)
+      if mutable {
+        let r = sign_of(sf: s, e: value, facts: facts, override: None, computing: [])
+        s = r.s with { var_init: r.s.var_init.set(name, r.v) }
+      }
+      return flow(s: s, facts: facts, exits: false)
+    },
+    Stmt.Assign(_, name, value) => {
+      s = expr(sf: s, e: value, facts: facts)
+      let r = sign_of(sf: s, e: value, facts: facts, override: None, computing: [])
+      // until the next assignment, the variable has this sign
+      let after = invalidate(facts, [name]).set(name, Fact { sign: r.v, vars: [name] })
+      return flow(s: r.s, facts: after, exits: false)
+    },
+    Stmt.Return(_, value) => {
+      match value {
+        Some(v) => {
+          s = expr(sf: s, e: v, facts: facts)
+        },
+        None => {},
+      }
+      return flow(s: s, facts: facts, exits: true)
+    },
+    Stmt.Break(_) => {
+      return flow(s: s, facts: facts, exits: true)
+    },
+    Stmt.Continue(_) => {
+      return flow(s: s, facts: facts, exits: true)
+    },
+    Stmt.Assert(_, cond, message) => {
+      s = expr(sf: s, e: cond, facts: facts)
+      match message {
+        Some(m) => {
+          s = expr(sf: s, e: m, facts: facts)
+        },
+        None => {},
+      }
+      let a = assume(sf: s, c: cond, truth: true, facts: facts)
+      return flow(s: a.s, facts: a.v, exits: false)
+    },
+    Stmt.ExprStmt(_, e) => {
+      s = expr(sf: s, e: e, facts: facts)
+      let never = match e {
+        Expr.Call(_, Expr.Name(_, n), _) => n == "fail" or n == "todo",
+        _ => false,
+      }
+      return flow(s: s, facts: facts, exits: never)
+    },
+    Stmt.If(_, cond, then, else_) => {
+      s = expr(sf: s, e: cond, facts: facts)
+      let tf = assume(sf: s, c: cond, truth: true, facts: facts)
+      let ef = assume(sf: tf.s, c: cond, truth: false, facts: facts)
+      let t = walk(sf: ef.s, stmts: then.stmts, facts: tf.v)
+      let el = else_block(sf: t.s, e: else_, facts: ef.v)
+      s = el.s
+      if t.v.exits and el.v.exits {
+        return flow(s: s, facts: facts, exits: true)
+      }
+      if t.v.exits {
+        return flow(s: s, facts: el.v.facts, exits: false)
+      }
+      if el.v.exits {
+        return flow(s: s, facts: t.v.facts, exits: false)
+      }
+      let changed = assigned_in(Nd.B(b: then)).concat(assigned_in_else(else_))
+      return flow(s: s, facts: invalidate(facts, changed), exits: false)
+    },
+    Stmt.While(_, cond, body) => {
+      let lp = invalidate(facts, assigned_in(Nd.B(b: body)))
+      s = expr(sf: s, e: cond, facts: lp)
+      let bf = assume(sf: s, c: cond, truth: true, facts: lp)
+      s = walk(sf: bf.s, stmts: body.stmts, facts: bf.v).s
+      if not body.stmts.any(fn(x) => has_break(Nd.S(st: x))) {
+        let after = assume(sf: s, c: cond, truth: false, facts: lp)
+        return flow(s: after.s, facts: after.v, exits: false)
+      }
+      return flow(s: s, facts: lp, exits: false)
+    },
+    Stmt.For(_, var_name, _, iter, body) => {
+      s = expr(sf: s, e: iter, facts: facts)
+      var sign = ANY_SIGN
+      match iter {
+        Expr.Call(_, Expr.Name(_, "range"), args) => {
+          match args.get(0) {
+            Some(a) => {
+              let lo = sign_of(sf: s, e: a.value, facts: facts, override: None, computing: [])
+              s = lo.s
+              if subset(lo.v, POS) {
+                sign = POS
+              } else if subset(lo.v, NONNEG) {
+                sign = NONNEG
+              }
+            },
+            None => {},
+          }
+        },
+        _ => {},
+      }
+      s = s with { loopvars: s.loopvars.set(var_name, sign) }
+      let lp = invalidate(facts, assigned_in(Nd.B(b: body)))
+      s = walk(sf: s, stmts: body.stmts, facts: lp).s
+      return flow(s: s, facts: lp, exits: false)
+    },
+  }
+  return flow(s: s, facts: facts, exits: false)
+}
+
+// ---- expressions --------------------------------------------------------------------------------------------
+
+fn exprs(sf: Sf, es: List[Expr], facts: Facts) -> Sf {
+  var s = sf
+  for x in es {
+    s = expr(sf: s, e: x, facts: facts)
+  }
+  return s
+}
+
+fn expr_nd(sf: Sf, n: Nd, facts: Facts) -> Sf {
+  return match n {
+    Nd.E(x) => expr(sf: sf, e: x, facts: facts),
+    _ => exprs(sf: sf, es: children(n).flat_map(fn(c) => match c {
+      Nd.E(x) => [x],
+      _ => [],
+    }), facts: facts),
+  }
+}
+
+fn expr(sf: Sf, e: Expr, facts: Facts) -> Sf {
+  var s = sf
+  match e {
+    Expr.Binary(_, op, l, r) => {
+      if op == "and" or op == "or" {
+        s = expr(sf: s, e: l, facts: facts)
+        let rf = assume(sf: s, c: l, truth: op == "and", facts: facts)
+        return expr(sf: rf.s, e: r, facts: rf.v)
+      }
+      s = expr(sf: s, e: l, facts: facts)
+      s = expr(sf: s, e: r, facts: facts)
+      if op == "/" or op == "%" {
+        s = check_divisor(sf: s, e: e, facts: facts)
+      }
+      return s
+    },
+    Expr.Match(_, subject, arms) => {
+      s = expr(sf: s, e: subject, facts: facts)
+      let k = keyof(s, subject)
+      var excluded_zero = false
+      for arm in arms {
+        var af = facts
+        if k != None and excluded_zero {
+          let r = refine(sf: s, x: subject, sign: NONZERO, facts: af)
+          s = r.s
+          af = r.v
+        }
+        match arm.pattern {
+          Pattern.Bind(_, name) => {
+            s = s with { lets: s.lets.set(name, subject) }
+            let known = match k {
+              Some(key) => af.get(key),
+              None => None,
+            }
+            match known {
+              Some(f) => {
+                af = af.set(name, Fact { sign: f.sign, vars: [] })
+              },
+              None => {},
+            }
+          },
+          _ => {},
+        }
+        match arm.guard {
+          Some(g) => {
+            s = expr(sf: s, e: g, facts: af)
+            let r = assume(sf: s, c: g, truth: true, facts: af)
+            s = r.s
+            af = r.v
+          },
+          None => {},
+        }
+        match arm.body {
+          Body.BlockBody(b) => {
+            s = walk(sf: s, stmts: b.stmts, facts: af).s
+          },
+          Body.ExprBody(x) => {
+            s = expr(sf: s, e: x, facts: af)
+          },
+        }
+        let zero_lit = match arm.pattern {
+          Pattern.Lit(_, LitValue.IntV(0)) => true,
+          Pattern.Lit(_, LitValue.FloatV(v)) => v == 0.0,
+          _ => false,
+        }
+        if arm.guard == None and zero_lit {
+          excluded_zero = true
+        }
+      }
+      return s
+    },
+    Expr.Lambda(_, _, _, body) => {
+      let own = s.vars.keys()
+      let lf = facts.filter(fn(_, f) => not f.vars.any(fn(v) => own.contains(v)))
+      return match body {
+        Body.BlockBody(b) => walk(sf: s, stmts: b.stmts, facts: lf).s,
+        Body.ExprBody(x) => expr(sf: s, e: x, facts: lf),
+      }
+    },
+    Expr.Call(_, callee, args) => {
+      s = exprs(sf: s, es: args.map(fn(a) => a.value), facts: facts)
+      s = expr(sf: s, e: callee, facts: facts)
+      s = check_contract(s, e)
+      return check_builtin_call(s, e)
+    },
+    Expr.MethodCall(_, obj, _, _, args) => {
+      s = expr(sf: s, e: obj, facts: facts)
+      s = exprs(sf: s, es: args.map(fn(a) => a.value), facts: facts)
+      s = check_builtin(sf: s, e: e, facts: facts)
+      return check_contract(s, e)
+    },
+    _ => {},
+  }
+  for c in expr_children(e) {
+    s = expr_nd(sf: s, n: c, facts: facts)
+  }
+  return s
+}
+
+// ---- the checks ---------------------------------------------------------------------------------------------
+
+fn check_divisor(sf: Sf, e: Expr, facts: Facts) -> Sf {
+  let parts = match e {
+    Expr.Binary(_, op, l, r) => Pair { first: op, second: Pair { first: l, second: r } },
+    _ => {
+      return sf
+    },
+  }
+  let op = parts.first
+  let left = parts.second.first
+  let right = parts.second.second
+  let kind = tname(type_of(sf, left))
+  if kind != Some("Int") and kind != Some("Float") {
+    return sf
+  }
+  let r = sign_of(sf: sf, e: right, facts: facts, override: None, computing: [])
+  var s = r.s
+  var sign = r.v
+  if is_zero(const_value(sf: s, e: right, env: Map {})) {
+    sign = ZERO
+  }
+  let what = match op == "/" {
+    true => "division",
+    false => "remainder",
+  }
+  let text = source_text(right)
+  if sign == ZERO {
+    return add_error(sf: s, code: "E0701", msg: "{what} by zero: `{text}` is always 0", span: expr_span(right),
+      hint: "the result would be a run-time error (R0001); fix the divisor")
+  }
+  if kind == Some("Int") and has_sign(sign, ZERO) {
+    var hint = "prove the divisor is not zero first: `if {text} != 0 \{ ... \}`, " +
+      "`match {text} \{ 0 => ..., _ => ... \}`, an early `if {text} == 0 \{ return ... \}`"
+    let is_param = match right {
+      Expr.Name(_, n) => s.params.contains(n) and s.decl != None,
+      _ => false,
+    }
+    if is_param {
+      hint = hint + ", or make it the caller's job: `requires {text} != 0`"
+    }
+    return add_error(sf: s, code: "E0701", msg: "{what} by `{text}`, which may be zero", span: expr_span(right), hint: hint)
+  }
+  return s
+}
+
+const ORDERED: List[Str] = ["Int", "Float", "Str"]
+
+fn elem_name(t: Type) -> Str {
+  return match t {
+    Type.Con(name, _) => name,
+    Type.Param(name) => name,
+    _ => show(Map {}, t),
+  }
+}
+
+fn check_builtin(sf: Sf, e: Expr, facts: Facts) -> Sf {
+  let parts = match e {
+    Expr.MethodCall(span, obj, m, mspan, args) => Pair { first: Pair { first: span, second: mspan }, second: Pair {
+      first: Pair { first: obj, second: m }, second: args } },
+    _ => {
+      return sf
+    },
+  }
+  let span = parts.first.first
+  let mspan = parts.first.second
+  let obj = parts.second.first.first
+  let m = parts.second.first.second
+  let args = parts.second.second.map(fn(a) => a.value)
+  if not is_builtin_call(sf, span) {
+    return sf
+  }
+  var s = sf
+  let recv_t = tname(type_of(s, obj))
+  if recv_t == Some("List") and ["sort", "min", "max", "sort_by", "min_by", "max_by"].contains(m) {
+    let plain = ["sort", "min", "max"].contains(m)
+    let elem = match plain {
+      true => match type_of(s, obj) {
+        Some(Type.Con(_, targs)) => targs.get(0),
+        _ => None,
+      },
+      false => match args.get(0).map(fn(a) => type_of(sf, a)) {
+        Some(Some(Type.Fun(_, ret))) => Some(ret),
+        _ => None,
+      },
+    }
+    match elem {
+      Some(t) => {
+        let ordered = match t {
+          Type.Con(name, targs) => ORDERED.contains(name) and targs.is_empty(),
+          _ => false,
+        }
+        if not ordered {
+          let what = match plain {
+            true => "elements",
+            false => "keys",
+          }
+          s = add_error(sf: s, code: "E0215", msg: "`{m}` needs ordered values, but the {what} have type `{elem_name(t)}`",
+            span: mspan, hint: "only Int, Float and Str are ordered; use `sort_by(fn(x) => x.some_field)` " +
+              "with an Int/Float/Str key")
+        }
+      },
+      None => {},
+    }
+    return s
+  }
+  if recv_t == Some("List") and ["get", "set", "insert", "remove_at"].contains(m) and not args.is_empty() {
+    let idx = args.get_or(0, obj)
+    let k = keyof(s, obj)
+    var always_out = match k {
+      Some(key) => keyof(s, idx) == Some(key + ".len()") and m != "insert",
+      None => false,
+    }
+    if not always_out {
+      let r = sign_of(sf: s, e: idx, facts: facts, override: None, computing: [])
+      s = r.s
+      always_out = subset(r.v, NEG)
+    }
+    if always_out {
+      let result = match m == "get" {
+        true => "is always `None`",
+        false => "always fails (R0011)",
+      }
+      let shown = source_text(obj)
+      return add_error(sf: s, code: "E0705", msg: "index `{source_text(idx)}` is out of bounds on every call: `.{m}` {result}",
+        span: expr_span(idx), hint: "indexes go from 0 to `{shown}.len() - 1`; the last element is `{shown}.last()`")
+    }
+  }
+  var bad: Option[Str] = None
+  let first = args.get_or(0, obj)
+  if recv_t == Some("Int") and m == "pow" and not args.is_empty() {
+    let r = sign_of(sf: s, e: first, facts: facts, override: None, computing: [])
+    s = r.s
+    if subset(r.v, NEG) {
+      bad = Some("`Int.pow` needs a non-negative exponent (use Float for fractions)")
+    }
+  } else if recv_t == Some("Float") and m == "sqrt" {
+    let r = sign_of(sf: s, e: obj, facts: facts, override: None, computing: [])
+    s = r.s
+    if subset(r.v, NEG) {
+      bad = Some("`sqrt` of a negative number")
+    }
+  } else if recv_t == Some("Float") and m == "ln" {
+    let r = sign_of(sf: s, e: obj, facts: facts, override: None, computing: [])
+    s = r.s
+    if subset(r.v, NONPOS) {
+      bad = Some("`ln` needs a positive number")
+    }
+  } else if recv_t == Some("List") and m == "chunks" and not args.is_empty() {
+    let r = sign_of(sf: s, e: first, facts: facts, override: None, computing: [])
+    s = r.s
+    if subset(r.v, NONPOS) {
+      bad = Some("`chunks` needs a positive size")
+    }
+  } else if recv_t == Some("Float") and m == "fixed" and not args.is_empty() {
+    let r = sign_of(sf: s, e: first, facts: facts, override: None, computing: [])
+    s = r.s
+    if subset(r.v, NEG) {
+      bad = Some("`fixed` needs a non-negative number of digits")
+    }
+  } else if recv_t == Some("Str") and m == "count" and not args.is_empty() {
+    let empty = match first {
+      Expr.StrLit(_, ps) => ps.is_empty() or ps == [StrPiece.Text(value: "")],
+      _ => false,
+    }
+    if empty {
+      bad = Some("`count` of the empty string")
+    }
+  } else if recv_t == Some("Bytes") and not parts.second.second.any(fn(a) => a.name != None) {
+    bad = bytes_problem(sf: s, m: m, args: args)
+  }
+  return match bad {
+    Some(b) => add_error(sf: s, code: "E0704", msg: "invalid argument: {b}", span: span,
+      hint: "the call would always fail at run time (R0009)"),
+    None => s,
+  }
+}
+
+fn not_byte(b: Option[Int]) -> Option[Int] {
+  return match b {
+    Some(v) => match v >= 0 and v <= 255 {
+      true => None,
+      false => Some(v),
+    },
+    None => None,
+  }
+}
+
+/// A Bytes call whose constant arguments always fail at run time (R0009).
+fn bytes_problem(sf: Sf, m: Str, args: List[Expr]) -> Option[Str] {
+  if m == "push" and not args.is_empty() {
+    match not_byte(args.get(0).map(fn(a) => constant(sf, a)).unwrap_or(None)) {
+      Some(v) => {
+        return Some("{v} is not a byte (0..255)")
+      },
+      None => {},
+    }
+  }
+  if m == "set" and args.len() >= 2 {
+    match not_byte(args.get(1).map(fn(a) => constant(sf, a)).unwrap_or(None)) {
+      Some(v) => {
+        return Some("{v} is not a byte (0..255)")
+      },
+      None => {},
+    }
+  }
+  if m == "push_le" and args.len() >= 2 {
+    let size = args.get(1).map(fn(a) => constant(sf, a)).unwrap_or(None)
+    match size {
+      Some(n) => {
+        if not [1, 2, 4, 8].contains(n) {
+          return Some("`push_le` size must be 1, 2, 4 or 8, got {n}")
+        }
+        match args.get(0).map(fn(a) => constant(sf, a)).unwrap_or(None) {
+          Some(v) => {
+            let hi = 2.pow(8 * n)
+            let lo = 0 - 2.pow(8 * n - 1)
+            if v < lo or v >= hi {
+              return Some("{v} does not fit in {n} byte(s)")
+            }
+          },
+          None => {},
+        }
+      },
+      None => {},
+    }
+  }
+  return None
+}
+
+fn check_builtin_call(sf: Sf, e: Expr) -> Sf {
+  let items = match e {
+    Expr.Call(_, Expr.Name(_, "bytes_of"), args) => match args.get(0).map(fn(a) => a.value) {
+      Some(Expr.ListLit(_, xs)) => xs,
+      _ => [],
+    },
+    _ => [],
+  }
+  for item in items {
+    match not_byte(constant(sf, item)) {
+      Some(v) => {
+        return add_error(sf: sf, code: "E0704", msg: "invalid argument: {v} is not a byte (0..255)", span: expr_span(item),
+          hint: "the call would always fail at run time (R0009)")
+      },
+      None => {},
+    }
+  }
+  return sf
+}
+
+/// The function called by `f(a, b)` or `a.f(b)` (through UFCS or an impl), with its positional arguments.
+fn callee_of(sf: Sf, e: Expr) -> Option[Pair[FnDecl, List[Expr]]] {
+  return match e {
+    Expr.Call(_, Expr.Name(_, f), args) => sf.fn_decls.get(f).map(fn(d) => Pair { first: d, second: args.filter(fn(a) =>
+      a.name == None).map(fn(a) => a.value) }),
+    Expr.MethodCall(span, obj, _, _, args) => match resolution(sf, span) {
+      Some(r) => match r.kind == "ufcs" {
+        true => match r.sig.map(fn(s) => s.fdecl) {
+          Some(Some(d)) => Some(Pair { first: d, second: [obj].concat(args.filter(fn(a) => a.name == None).map(fn(a) =>
+            a.value)) }),
+          _ => None,
+        },
+        false => None,
+      },
+      None => None,
+    },
+    _ => None,
+  }
+}
+
+fn call_args(e: Expr) -> List[Arg] {
+  return match e {
+    Expr.Call(_, _, args) => args,
+    Expr.MethodCall(_, _, _, _, args) => args,
+    _ => [],
+  }
+}
+
+fn check_contract(sf: Sf, e: Expr) -> Sf {
+  let found = match callee_of(sf, e) {
+    Some(c) => c,
+    None => {
+      return sf
+    },
+  }
+  let callee = found.first
+  if callee.pre.is_empty() {
+    return sf
+  }
+  var env: Map[Str, Expr] = Map {}
+  var k = 0
+  for p in callee.params {
+    match found.second.get(k) {
+      Some(a) => {
+        env = env.set(p.name, a)
+      },
+      None => {},
+    }
+    k = k + 1
+  }
+  for a in call_args(e) {
+    match a.name {
+      Some(n) => {
+        env = env.set(n, a.value)
+      },
+      None => {},
+    }
+  }
+  var values: Map[Str, CVal] = Map {}
+  for entry in env.entries() {
+    match const_value(sf: sf, e: entry.value, env: Map {}) {
+      Some(v) => {
+        values = values.set(entry.key, v)
+      },
+      None => {},
+    }
+  }
+  for r in callee.pre {
+    if const_value(sf: sf, e: r, env: values) == Some(CVal.B(value: false)) {
+      let shown_name = match callee.owner_kind {
+        Some(_) => callee.name.split(".").last().unwrap_or(callee.name),
+        None => callee.name,
+      }
+      return add_error(sf: sf, code: "E0703", msg: "this call always violates `requires {source_text(r)}` of `{shown_name}`",
+        span: expr_span(e), hint: "pass arguments that satisfy the precondition")
+    }
+  }
+  return sf
+}
+
+// ---- unconditional recursion --------------------------------------------------------------------------------
+
+/// The call of `name` that evaluating `e` certainly makes (ignoring lambdas and lazy branches), if any.
+fn calls_self(sf: Sf, e: Expr, name: Str) -> Option[Span] {
+  return match e {
+    Expr.Call(span, callee, args) => match callee {
+      Expr.Name(_, n) => match n == name {
+        true => Some(span),
+        false => first_call(sf: sf, es: args.map(fn(a) => a.value), name: name),
+      },
+      _ => first_call(sf: sf, es: args.map(fn(a) => a.value), name: name),
+    },
+    Expr.MethodCall(span, obj, _, _, args) => {
+      let res = resolution(sf, span)
+      if res.map(fn(r) => r.kind == "ufcs" and r.name == name).unwrap_or(false) {
+        return Some(span)
+      }
+      return first_call(sf: sf, es: [obj].concat(args.map(fn(a) => a.value)), name: name)
+    },
+    Expr.Binary(_, "and", l, _) => calls_self(sf: sf, e: l, name: name),
+    Expr.Binary(_, "or", l, _) => calls_self(sf: sf, e: l, name: name),
+    Expr.Lambda(_, _, _, _) => None,
+    Expr.Match(_, subject, _) => calls_self(sf: sf, e: subject, name: name),
+    _ => first_call(sf: sf, es: expr_children(e).flat_map(fn(c) => match c {
+      Nd.E(x) => [x],
+      Nd.Me(m) => [m.key, m.value],
+      Nd.Fi(f) => [f.value],
+      _ => [],
+    }), name: name),
+  }
+}
+
+fn first_call(sf: Sf, es: List[Expr], name: Str) -> Option[Span] {
+  for x in es {
+    let r = calls_self(sf: sf, e: x, name: name)
+    if r != None {
+      return r
+    }
+  }
+  return None
+}
+
+fn opt_calls(sf: Sf, e: Option[Expr], name: Str) -> Option[Span] {
+  return match e {
+    Some(x) => calls_self(sf: sf, e: x, name: name),
+    None => None,
+  }
+}
+
+fn check_recursion(sf: Sf, d: FnDecl) -> Sf {
+  let body = match d.body {
+    Some(b) => b,
+    None => {
+      return sf
+    },
+  }
+  let name = d.name
+  for st in body.stmts {
+    let found = match st {
+      Stmt.Let(_, _, _, _, _, v, _) => calls_self(sf: sf, e: v, name: name),
+      Stmt.Assign(_, _, v) => calls_self(sf: sf, e: v, name: name),
+      Stmt.Return(_, v) => opt_calls(sf: sf, e: v, name: name),
+      Stmt.ExprStmt(_, x) => calls_self(sf: sf, e: x, name: name),
+      Stmt.If(_, cond, _, _) => calls_self(sf: sf, e: cond, name: name),
+      Stmt.While(_, cond, _) => calls_self(sf: sf, e: cond, name: name),
+      Stmt.Assert(_, cond, _) => calls_self(sf: sf, e: cond, name: name),
+      _ => None,
+    }
+    match found {
+      Some(span) => {
+        return add_error(sf: sf, code: "E0702", msg: "`{name}` calls itself on every path: the recursion never ends",
+          span: span, hint: "add a base case at the start of `{name}` that returns without calling it " +
+            "(e.g. `if n <= 1 \{ return 1 \}`)")
+      },
+      None => {},
+    }
+    let stops = match st {
+      Stmt.Return(_, _) => true,
+      Stmt.If(_, _, _, _) => true,
+      Stmt.While(_, _, _) => true,
+      Stmt.For(_, _, _, _, _) => true,
+      Stmt.Break(_) => true,
+      Stmt.Continue(_) => true,
+      Stmt.ExprStmt(_, Expr.Match(_, _, _)) => true,
+      _ => false,
+    }
+    if stops {
+      return sf
+    }
+  }
+  return sf
+}
+
+// ---- driver -------------------------------------------------------------------------------------------------
+
+fn begin(sf: Sf, decl: Option[FnDecl], params: List[Str]) -> Sf {
+  return sf with { decl: decl, params: params, vars: Map {}, lets: Map {}, loopvars: Map {}, var_init: Map {}, memo: Map {} }
+}
+
+/// The `var`s and `let`s of a body (flow-insensitive summaries).
+fn collect(sf: Sf, body: Block) -> Sf {
+  var vars = sf.vars
+  var lets = sf.lets
+  for n in iter_nodes(Nd.B(b: body)) {
+    match n {
+      Nd.S(Stmt.Let(_, name, _, _, _, value, mutable)) => {
+        if mutable {
+          let cur = vars.get(name).unwrap_or(VarSum { init: None, assigns: [] })
+          vars = vars.set(name, cur with { init: Some(value) })
+        } else {
+          lets = lets.set(name, value)
+        }
+      },
+      Nd.S(Stmt.Assign(_, name, value)) => {
+        let cur = vars.get(name).unwrap_or(VarSum { init: None, assigns: [] })
+        vars = vars.set(name, cur with { assigns: cur.assigns.push(value) })
+      },
+      _ => {},
+    }
+  }
+  return sf with { vars: vars, lets: lets }
+}
+
+fn function(sf: Sf, d: FnDecl) -> Sf {
+  let body = match d.body {
+    Some(b) => b,
+    None => {
+      return sf
+    },
+  }
+  var s = collect(begin(sf: sf, decl: Some(d), params: d.params.map(fn(p) => p.name)), body)
+  var facts: Facts = Map {}
+  for r in d.pre {
+    let a = assume(sf: s, c: r, truth: true, facts: facts)
+    s = a.s
+    facts = a.v
+  }
+  return walk(sf: s, stmts: body.stmts, facts: facts).s
+}
+
+/// The safety diagnostics of a checked module (run it only when the module has no errors).
+pub fn analyze(ck: Ck) -> List[Diag] {
+  var fn_decls: Map[Str, FnDecl] = Map {}
+  for entry in ck.fns.entries() {
+    match entry.value {
+      Some(sig) => {
+        match sig.fdecl {
+          Some(d) => {
+            fn_decls = fn_decls.set(entry.key, d)
+          },
+          None => {},
+        }
+      },
+      None => {},
+    }
+  }
+  var s = Sf {
+    ck: ck,
+    diags: [],
+    consts: Map {},
+    const_signs: Map {},
+    fn_decls: fn_decls,
+    decl: None,
+    params: [],
+    vars: Map {},
+    lets: Map {},
+    loopvars: Map {},
+    var_init: Map {},
+    memo: Map {},
+  }
+  for d in ck.decls {
+    match d {
+      Decl.Const(_, name, _, _, value, _, _) => {
+        match const_value(sf: s, e: value, env: Map {}) {
+          Some(v) => {
+            s = s with { consts: s.consts.set(name, v) }
+            match v {
+              CVal.I(n) => {
+                s = s with { const_signs: s.const_signs.set(name, sign_of_int(n)) }
+              },
+              CVal.F(x) => {
+                s = s with { const_signs: s.const_signs.set(name, sign_of_float(x)) }
+              },
+              _ => {},
+            }
+          },
+          None => {},
+        }
+      },
+      _ => {},
+    }
+  }
+  for d in ck.decls {
+    match d {
+      Decl.Fn(f) => {
+        s = check_recursion(function(s, f), f)
+      },
+      Decl.Test(_, _, body) => {
+        s = walk(sf: begin(sf: s, decl: None, params: []), stmts: body.stmts, facts: Map {}).s
+      },
+      Decl.Property(_, _, params, body) => {
+        s = walk(sf: begin(sf: s, decl: None, params: params.map(fn(p) => p.name)), stmts: body.stmts, facts: Map {}).s
+      },
+      _ => {},
+    }
+  }
+  return s.diags
+}
