@@ -2,14 +2,16 @@
 
 Calling convention (Klar internal): the caller reserves an argument area of 8*n bytes
 (rounded up to 16) at [rsp], stores argument i at [rsp+8*i] and calls; the callee
-reads it at [rbp+16+8*i]. The result is returned in rax. RBX and R12-R15 are
-callee-saved; RAX, RCX, RDX, RSI, RDI, R8-R11 may be clobbered by a call.
+reads it at [rbp+16+8*i]. The result is returned in rax. RBX and R12-R14 are
+callee-saved; RAX, RCX, RDX, RSI, RDI, R8-R11 may be clobbered by a call. R15 is reserved in all
+generated code: it counts the nesting depth of Klar calls (R0006 above 10000), which costs two register
+instructions per call instead of a load/store pair on a global.
 
 Each function is first optimized (opt.py) and register-allocated (regalloc.py): vregs
 live in machine registers where possible and in stack slots otherwise. Int slow paths,
 division-by-zero and freeing are emitted out of line after the function body.
 """
-from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, XMM0, XMM1)
+from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R15, XMM0, XMM1)
 
 MAX_DEPTH = 10000
 
@@ -150,7 +152,12 @@ class Emitter:
         self.scratch_off = -(base + 8 * (len(self.saved) + 1))
         self.xmm_used = sorted(set(self.xloc.values()))
         self.xsave_off = [self.scratch_off - 16 - 8 * k for k in range(len(self.xmm_used))]
-        frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used)))
+        self.call_saves = getattr(fn, "call_saves", {})
+        csave = sorted({r for regs in self.call_saves.values() for r in regs})
+        first = self.scratch_off - 16 - 8 * len(self.xmm_used)
+        self.csave_off = {r: first - 8 * k for k, r in enumerate(csave)}
+        self.cur_saves = ()
+        frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used) + len(csave)))
         a.alu_ri("sub", RSP, frame)
         for r, off in zip(self.saved, self.save_off):
             a.store(RBP, off, r)
@@ -162,7 +169,12 @@ class Emitter:
         for k, ins in enumerate(code):
             nxt = code[k + 1] if k + 1 < len(code) else None
             self.next_label = nxt[1] if nxt is not None and nxt[0] == "label" else None
+            self.cur_saves = sorted(self.call_saves.get(k, ()))
+            n_cold = len(self.cold)
             getattr(self, "i_" + ins[0])(fn, *ins[1:])
+            if self.cur_saves:
+                for j in range(n_cold, len(self.cold)):   # out-of-line code runs later: keep its save set
+                    self.cold[j] = self.with_saves(self.cold[j], self.cur_saves)
             if self.xloc and ins[0] not in self.XMM_AWARE:
                 # an instruction that knows nothing about XMM wrote the value to its slot: refresh the register
                 from .opt import defs
@@ -180,8 +192,26 @@ class Emitter:
             a.label(end)
             self.user_fns.append((fn.name, end, enter[1]))
 
+    def with_saves(self, emit_cold, saves):
+        def run():
+            old, self.cur_saves = self.cur_saves, saves
+            try:
+                emit_cold()
+            finally:
+                self.cur_saves = old
+        return run
+
+    def save_live(self):
+        for r in self.cur_saves:
+            self.a.store(RBP, self.csave_off[r], r)
+
+    def restore_live(self):
+        for r in self.cur_saves:
+            self.a.load(r, RBP, self.csave_off[r])
+
     def emit_call(self, fn, target, args, indirect_reg_of=None):
         a = self.a
+        self.save_live()
         area = align16(8 * len(args))
         if area:
             a.alu_ri("sub", RSP, area)
@@ -195,6 +225,7 @@ class Emitter:
         self.note_site()
         if area:
             a.alu_ri("add", RSP, area)
+        self.restore_live()
 
     def note_site(self):
         """Remember the return address of a call inside a Klar function and its source span:
@@ -210,6 +241,7 @@ class Emitter:
         a = self.a
         for x, off in zip(self.xmm_used, self.xsave_off):
             a.movsd_store(RBP, off, x)
+        self.save_live()
         area = align16(8 * len(regs_values))
         if area:
             a.alu_ri("sub", RSP, area)
@@ -219,6 +251,7 @@ class Emitter:
         self.note_site()
         if area:
             a.alu_ri("add", RSP, area)
+        self.restore_live()
         for x, off in zip(self.xmm_used, self.xsave_off):
             a.movsd_load(x, RBP, off)
 
@@ -889,9 +922,18 @@ class Emitter:
 
     # ---- calls & control -------------------------------------------------------------------
     def i_call(self, fn, d, target, args):
+        cold = target.startswith("cold:")
+        if cold:
+            # slow path of an inlined runtime accessor: floats may live in XMM registers across it
+            target = target[5:]
+            for x, off in zip(self.xmm_used, self.xsave_off):
+                self.a.movsd_store(RBP, off, x)
         if target in OS_FUNCS:
             target = "__" + target
         self.emit_call(fn, target, args)
+        if cold:
+            for x, off in zip(self.xmm_used, self.xsave_off):
+                self.a.movsd_load(x, RBP, off)
         if d is not None:
             self.st(fn, d, RAX)
 
@@ -927,10 +969,8 @@ class Emitter:
     def i_enter(self, fn, name_sym):
         a = self.a
         over = a.new_label("dep")
-        a.load_rip(RAX, "g_depth")
-        a.alu_ri("add", RAX, 1)
-        a.store_rip("g_depth", RAX)
-        a.alu_ri("cmp", RAX, MAX_DEPTH)
+        a.alu_ri("add", R15, 1)              # R15: call depth (reserved register)
+        a.alu_ri("cmp", R15, MAX_DEPTH)
         a.jcc("g", over)
 
         def cold():
@@ -940,10 +980,7 @@ class Emitter:
         self.cold.append(cold)
 
     def i_leave(self, fn):
-        a = self.a
-        a.load_rip(RAX, "g_depth")
-        a.alu_ri("sub", RAX, 1)
-        a.store_rip("g_depth", RAX)
+        self.a.alu_ri("sub", R15, 1)
 
     def i_site(self, fn, span_sym):
         self.cur_site = span_sym
@@ -1085,6 +1122,7 @@ class Emitter:
         a.alu_rr("add", RAX, RCX)
         a.mov_rr(RSP, RAX)
         a.mov_rr(RBP, RSP)
+        a.mov_ri(R15, 0)                # call depth
         a.call(self.rt["main_entry"])
         a.mov_rr(RDI, RAX)
         a.mov_ri(RAX, 231)
@@ -1259,6 +1297,7 @@ class Emitter:
         a.store(RSP, 0, RAX)
         a.store(RSP, 8, RAX)
         a.mov_rr(RBP, RSP)
+        a.mov_ri(R15, 0)                # call depth
         a.call(self.rt["main_entry"])
         a.mov_rr(RCX, RAX)
         a.alu_ri("and", RSP, -16)

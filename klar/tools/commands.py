@@ -261,3 +261,5 @@ def register(sub):
     p.set_defaults(fn=cmd_new)
     from .lsp import register as register_lsp
     register_lsp(sub)
+    from .repl import register as register_repl
+    register_repl(sub)

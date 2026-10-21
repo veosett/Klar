@@ -798,6 +798,34 @@ class LanguageServer(unittest.TestCase):
         self.assertIsNone(res[3])
 
 
+class Repl(unittest.TestCase):
+    def session(self, text, cwd=None):
+        from klar.tools.repl import Repl as R
+        out = io.StringIO()
+        R(cwd=cwd, out=out, inp=io.StringIO(text)).loop()
+        return out.getvalue()
+
+    def test_values_types_and_state(self):
+        out = self.session('let xs = [3, 1, 2]\nxs.sort()\nfn double(n: Int) -> Int {\n  return n * 2\n}\n'
+                           'xs.map(double)\nvar total = 0\nfor x in xs {\n  total = total + x\n}\nprint("t={total}")\n'
+                           ':type total.to_float()\n')
+        self.assertEqual(out, "[1, 2, 3] : List[Int]\ndefined double\n[6, 2, 4] : List[Int]\nt=6\nFloat\n")
+
+    def test_errors_do_not_change_the_session(self):
+        out = self.session('let n = 1\nlet n = 2\n"a" + n\nfail("boom")\nn\n:quit\nprint("never")\n')
+        self.assertIn("E0102", out)
+        self.assertIn("E0211", out)
+        self.assertIn("runtime error[R0004]: fail: boom", out)
+        self.assertTrue(out.endswith("1 : Int\n"))
+
+    def test_load_and_use(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "lib.klar"), "w", encoding="utf-8") as f:
+                f.write("/// Squares.\nfn sq(n: Int) -> Int {\n  return n * n\n}\n\nfn main() uses io {\n  print(1)\n}\n")
+            out = self.session(":load lib.klar\nsq(7)\nuse std.math.{gcd}\ngcd(12, 18)\n", cwd=d)
+            self.assertEqual(out, "defined sq\n49 : Int\n6 : Int\n")
+
+
 class Modules(unittest.TestCase):
     def write(self, d, name, text):
         path = os.path.join(d, *name.split("/"))

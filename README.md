@@ -164,7 +164,7 @@ flowchart TB
         v01 --> v02 --> v03 --> v04
     end
     subgraph now["🚧 In progress"]
-        v05["0.5 — ✅ language server (klar lsp) + VS Code,<br/>REPL, Bytes, faster calls, Windows CI"]
+        v05["0.5 — ✅ language server (klar lsp) + VS Code,<br/>✅ REPL, ✅ faster calls, Bytes, Windows CI"]
     end
     subgraph next["🔜 Planned"]
         direction TB

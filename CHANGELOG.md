@@ -6,6 +6,12 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 ## [Unreleased]
 
 ### Added
+- Faster calls in native code: the call depth (R0006 above 10000, exactly as in the interpreter) lives in the
+  reserved register R15 instead of a global (`fib` 1.0 → 0.68 ms); values may stay in caller-saved registers
+  across calls (saved around them); calls inside inlined runtime accessors are cold, so floats stay in XMM
+  registers across them. The native R0006 message names the function, like the interpreter.
+- `klar repl`: an interactive session. Every input is type-checked with the whole session (same rules as a
+  program); only new statements run, variables persist; `:type`, `:doc`, `:load`, `:defs`, `:reset`.
 - Language server `klar lsp` (LSP over stdio, no dependencies): diagnostics as you type with quick fixes (including
   fixes in another module), hover with types/signatures/docs, go to definition across modules, references and
   rename (locals stay inside their function), completion of names and of `.` members, signature help, document

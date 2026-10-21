@@ -467,6 +467,9 @@ def inline_calls(fns, rounds=2):
                             out.append(("jmp", end))
                         continue
                     c = rename(c, ren, lab)
+                    if c[0] == "call" and c[2] not in small and not c[2].startswith("cold:"):
+                        # a call inside an inlined runtime accessor is its slow path (bignum, growth, ...)
+                        c = (c[0], c[1], "cold:" + c[2], c[3])
                     out.append(c)
                 out.append(("label", end))
             f.code = out

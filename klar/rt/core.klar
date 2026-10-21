@@ -783,8 +783,16 @@ fn div_zero(sp: Word) -> Word {
 }
 
 fn stack_overflow() -> Word {
-  return fail_with(bits("R0006"), bits("stack overflow: more than 10000 nested calls"), current_span(), 0,
-    bits("check the base case of the recursion"))
+  let sp = current_span()
+  let depth = peek(static_addr("g_depth"))
+  let b = sb_new()
+  sb_add_cstr(b, "stack overflow: more than 10000 nested calls")
+  if depth > 0 {
+    sb_add_cstr(b, " (in `")
+    sb_add_str(b, peek(static_addr("g_frames") + depth * 16))
+    sb_add_cstr(b, "`)")
+  }
+  return fail_with(bits("R0006"), sb_finish(b), sp, 0, bits("check the base case of the recursion"))
 }
 
 fn unreachable() -> Word {
