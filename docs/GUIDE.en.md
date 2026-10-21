@@ -1,0 +1,337 @@
+# Klar in 20 minutes — an illustrated guide
+
+This guide is for people: what the language is, how to read and write it, and why it is designed this way.
+The reference for models is `klar spec`, the full grammar is in [SPEC.md](SPEC.md) (Russian), the compiler
+internals in [ARCHITECTURE.md](ARCHITECTURE.md) (Russian). [Русская версия](GUIDE.md).
+
+---
+
+## 1. The idea: the AI writes, the compiler checks, a human reads
+
+```mermaid
+flowchart LR
+    ai["🤖 The AI writes code<br/>and tests next to it"] --> klar["⚙️ Klar compiler<br/>types · effects · exhaustiveness<br/>safety"]
+    klar -- "error + hint + fix" --> ai
+    klar -- "everything checked" --> exe["📦 Fast executable<br/>Linux / Windows"]
+    klar --> view["👀 klar view<br/>a picture of the program"]
+    view --> human["🧑 Human reviewer"]
+```
+
+Klar removes whole classes of bugs before the program runs. The model fixes them from precise hints, and the
+human reviews the result instead of hunting for bugs.
+
+## 2. A first program
+
+```klar
+/// Greeting: run it with `klar run hello.klar`.
+fn main() uses io {
+  let name = "world"
+  print("Hello, {name}!")
+}
+```
+
+* `fn main() uses io` is the entry point; `uses io` declares that the function prints (section 8).
+* `let` is a value that cannot change; `"…{name}…"` interpolates a value into a string.
+* No `;` — one statement per line; blocks use `{ }`.
+
+```sh
+klar run hello.klar      # compile to machine code and run
+klar build hello.klar    # hello / hello.exe — a single file without dependencies
+```
+
+## 3. Data types
+
+```mermaid
+flowchart TB
+    T["Klar types"] --> P["Simple"]
+    T --> C["Collections"]
+    T --> M["May be missing / may fail"]
+    T --> U["Your own"]
+    P --> P1["Int — arbitrary size"]
+    P --> P2["Float"]
+    P --> P3["Bool — true / false"]
+    P --> P4["Str — Unicode string"]
+    C --> C1["List[T]"]
+    C --> C2["Map[K, V] — insertion ordered"]
+    M --> M1["Option[T] — Some(v) or None"]
+    M --> M2["Result[T, E] — Ok(v) or Err(e)"]
+    U --> U1["type — a record with fields"]
+    U --> U2["enum — one of several variants"]
+```
+
+```klar
+type Point { x: Float, y: Float }                       // a record
+
+enum Shape {                                            // variants
+  Circle(radius: Float),
+  Rect(w: Float, h: Float),
+}
+
+fn main() uses io {
+  let p = Point { x: 1.0, y: 2.0 }
+  let _shape = Shape.Circle(radius: 2.0)                // a leading `_` means "not used yet"
+  let big = 2.pow(100)                                  // Int never overflows
+  print("{p.x} {big}")
+}
+```
+
+**There is no `null` and no exceptions.** "There may be no value" is visible in the type (`Option`), and so is
+"this may fail" (`Result`); the compiler does not let you forget either case.
+
+## 4. Immutability: values never change, names are rebound
+
+```mermaid
+flowchart LR
+    a["xs = [1, 2, 3]"] -- "xs.push(4)" --> b["a NEW list [1, 2, 3, 4]"]
+    a -. "xs is unchanged" .-> a
+    b -- "xs = xs.push(4)" --> c["now the name xs<br/>refers to the new list"]
+```
+
+```klar
+fn main() uses io {
+  var xs = [1, 2, 3]       // var: the name can be rebound
+  xs = xs.push(4)          // correct: keep the new list
+  let ys = xs.push(5)      // ys = [1, 2, 3, 4, 5], xs = [1, 2, 3, 4]
+  print("{xs} {ys}")
+}
+```
+
+A bare `xs.push(4)` statement is **a compile error** (E0405) — the most common model mistake. Immutability makes
+code predictable: passing a value to a function never changes it behind your back. It costs no speed: when a
+list has only one reference, the compiler quietly updates it in place.
+
+## 5. Functions: the signature is a contract
+
+```mermaid
+flowchart LR
+    in["Arguments<br/>(types required)"] --> req{"requires<br/>precondition"}
+    req -- "false" --> e1["caller's fault<br/>R0002"]
+    req -- "true" --> body["Function body"]
+    body --> ens{"ensures<br/>postcondition"}
+    ens -- "false" --> e2["bug in the body<br/>R0003"]
+    ens -- "true" --> out["Result<br/>(type required)"]
+```
+
+```klar
+/// Splits a sum evenly.
+/// >>> assert share(total: 10, people: 3, min: 1) == 3
+fn share(total: Int, people: Int, min: Int) -> Int
+  requires people > 0
+  ensures result >= 0 or total < 0
+{
+  let part = total / people
+  return part.max(min)
+}
+
+fn main() uses io {
+  print(share(total: 100, people: 4, min: 1))
+}
+```
+
+* Parameter and result types are always written: a function can be understood from one line.
+* With 3+ parameters, calls must name the arguments — arguments cannot be swapped by accident.
+* `/// >>>` is an example in the documentation that `klar test` runs as a test.
+* `total / people` compiles only because `requires people > 0` proves the divisor is not zero (section 10).
+
+## 6. Option, Result and `?`
+
+```mermaid
+flowchart TB
+    get["users.get(id)"] --> o{"Option"}
+    o -- "Some(user)" --> use["use the user"]
+    o -- "None" --> none["no such user:<br/>handled explicitly"]
+    parse["text.to_int()"] --> r{"Option[Int]"}
+    r -- "Some(n)" --> ok["work with n"]
+    r -- "None" --> q["operator ? — return None<br/>from the current function"]
+```
+
+```klar
+fn age_next_year(ages: Map[Str, Int], name: Str) -> Option[Int] {
+  let age = ages.get(name)?          // None -> the function returns None right away
+  return Some(age + 1)
+}
+
+fn main() uses io {
+  let ages = Map { "ann": 31 }
+  match age_next_year(ages, "bob") {
+    Some(a) => print("will be {a}"),
+    None => print("unknown person"),
+  }
+  print(ages.get("ann").unwrap_or(0))   // or a default value
+}
+```
+
+An `Option` cannot be used as a plain number: `ages.get(name) + 1` is a compile error that tells you to handle
+`None`. For errors with details there is `Result[T, E]` with `Err(...)`: the function declares in its type that it
+may fail, and the caller must handle it (`match`, `?`, or an explicit `let _ =`).
+
+## 7. match: the compiler checks that every case is handled
+
+```mermaid
+flowchart LR
+    s["Shape"] --> c["Circle(radius)"]
+    s --> r["Rect(w, h)"]
+    s --> t["Triangle(a, h)<br/>added later"]
+    t -. "arm forgotten?" .-> err["error E0301:<br/>missing Shape.Triangle(...) =>"]
+```
+
+```klar
+enum Shape {
+  Circle(radius: Float),
+  Rect(w: Float, h: Float),
+}
+
+fn area(s: Shape) -> Float {
+  return match s {
+    Shape.Circle(r) => 3.14159 * r * r,
+    Shape.Rect(w, h) => w * h,
+  }
+}
+
+fn label(n: Int) -> Str {
+  return match n {
+    0 => "zero",
+    x if x < 0 => "negative",           // a guard
+    _ => "positive",
+  }
+}
+
+fn main() uses io {
+  print("{area(Shape.Rect(w: 2.0, h: 3.0))} {label(-5)}")
+}
+```
+
+Add a variant to an `enum` and the compiler lists every `match` that does not handle it, with the text of the
+missing arm. `match` also replaces the ternary operator: `let sign = match n > 0 { true => 1, false => -1 }`.
+
+## 8. Effects: the signature says what a function does to the world
+
+```mermaid
+flowchart TB
+    main["main() uses io"] --> report["report() uses io<br/>prints"]
+    main --> calc["total(xs) — pure"]
+    report --> fmt["format(x) — pure"]
+    calc --> sum["xs.sum() — pure"]
+    bad["calc2() without uses"] -. "calls print" .-> err["error E0401:<br/>add uses io"]
+```
+
+| effect | allows |
+|---|---|
+| `io` | printing, reading input, `dbg` |
+| `fs` | files (`read_file`, `write_file` return `Result`) |
+| `time` | the clock (`now_ms`, `now_ns`) |
+| `rand` | random numbers |
+| `net` | network (reserved) |
+
+A function without `uses` is **pure**: the same arguments always give the same result, so it is easy to test and
+safe to call. `klar view` colours such functions green.
+
+## 9. Tests are part of the language
+
+```mermaid
+flowchart LR
+    t1["test &quot;...&quot; { assert ... }"] --> run["klar test"]
+    t2["/// >>> example in the docs"] --> run
+    t3["property &quot;...&quot; (xs: List[Int])"] --> gen["100 random inputs"] --> run
+    run -- "failure" --> show["both sides of assert,<br/>variable values, call stack,<br/>minimal counterexample"]
+```
+
+```klar
+fn reverse_twice(xs: List[Int]) -> List[Int] {
+  return xs.reverse().reverse()
+}
+
+test "small example" {
+  assert reverse_twice([1, 2]) == [1, 2]
+}
+
+property "reverse twice changes nothing" (xs: List[Int]) {
+  assert reverse_twice(xs) == xs
+}
+```
+
+A property is checked on a hundred random inputs; on failure Klar **shrinks** the input to a minimal example
+(e.g. `xs = [0, 1]`) so the cause is obvious.
+
+## 10. Safety before the program runs
+
+Klar follows Rust's principle: what can be found at compile time is found by the compiler.
+
+```mermaid
+flowchart TB
+    d["a / b  (Int)"] --> q{"Can the compiler see<br/>that b ≠ 0?"}
+    q -- "a literal: a / 2" --> ok["✅ compiles"]
+    q -- "if b != 0 { ... }" --> ok
+    q -- "requires b != 0" --> ok
+    q -- "match b { 0 => ..., _ => a / b }" --> ok
+    q -- "if xs.is_empty() { return } … / xs.len()" --> ok
+    q -- "var d = 3 … d = d + 2" --> ok
+    q -- "cannot see it" --> err["❌ E0701: the divisor may be zero<br/>+ a hint how to prove it"]
+```
+
+Also rejected before running:
+
+| mistake | code |
+|---|---|
+| using an `Option`/`Result` as a plain value | E0211 |
+| discarding the result of `push`/`trim`/`set` | E0405 |
+| an unhandled `enum` variant in `match` | E0301 |
+| an unhandled `Result` | E0402 |
+| swappable arguments (3+ parameters without names) | E0208 |
+| shadowing a variable | E0102 |
+| calling an effectful function without `uses` | E0401 |
+| recursion without a base case | E0702 |
+| constant arguments that violate `requires` | E0703 |
+| `2.pow(-1)`, `(-1.0).sqrt()`, `xs.chunks(0)` | E0704 |
+| `xs.get(xs.len())` — always out of bounds | E0705 |
+| sorting values that have no order | E0215 |
+
+`klar explain <code>` explains each one. Integer overflow, `null`, exceptions and data races do not exist in Klar.
+
+## 11. Modules
+
+```mermaid
+flowchart LR
+    main["main.klar<br/>use lib.geo.{Point, dist}<br/>use std.math.{gcd}"] --> geo["lib/geo.klar"]
+    main --> std["std/math.klar<br/>(standard module)"]
+    geo -. "cycles are forbidden" .-x main
+```
+
+A module is a file. Imports are explicit (`use a.b.{x, y}`), type names are unique in the whole program, and import
+cycles are forbidden — so a name always leads back to its origin (`klar refs`).
+
+## 12. How an AI works with Klar
+
+```mermaid
+sequenceDiagram
+    participant AI as AI agent
+    participant K as klar
+    AI->>K: klar spec (once, into the prompt, ~2k tokens)
+    loop until "done"
+        AI->>K: klar dev main.klar --json
+        K-->>AI: errors (code, place, hint, fix) / failed tests / output, field "next"
+        AI->>K: klar fix · klar doc split · klar eval '…'
+    end
+    AI->>K: klar coverage · klar build
+    K-->>AI: coverage, executable
+```
+
+## 13. Cheat sheet: "I want → I write"
+
+| I want | I write |
+|---|---|
+| an immutable value / a variable | `let x = 1` / `var n = 0`, then `n = n + 1` |
+| a conditional value (ternary) | `match ok { true => "yes", false => "no" }` |
+| length, element, last | `xs.len()`, `xs.get(i)` → `Option`, `xs.last()` |
+| add to a list / map | `xs = xs.push(v)`, `m = m.set(k, v)` |
+| loop over numbers | `for i in range(0, n) { ... }` |
+| a string with a number | `"total: {n}"` |
+| convert | `n.to_float()`, `f.round()`, `s.to_int()` → `Option[Int]`, `x.to_str()` |
+| update a record field | `p with { x: 2.0 }` |
+| a default value | `opt.unwrap_or(0)` |
+| pass an error on | `let v = parse(s)?` |
+| a lambda | `xs.map(fn(x) => x * 2)` |
+| debug | `dbg(x)` prints the expression and its value |
+| a placeholder | `todo("write later")` |
+
+Details of every function: `klar doc <name>`; check behaviour: `klar eval '<expression>'`.

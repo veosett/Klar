@@ -440,6 +440,22 @@ class CompileTimeSafety(unittest.TestCase):
                          [])
 
 
+class Documentation(unittest.TestCase):
+    def test_guide_examples_compile_and_pass(self):
+        """Every ```klar block in the guides is a complete program that type-checks and whose tests pass."""
+        for name in ("GUIDE.md", "GUIDE.en.md"):
+            with open(os.path.join(ROOT, "docs", name), encoding="utf-8") as f:
+                blocks = re.findall(r"```klar\n(.*?)```", f.read(), re.S)
+            self.assertGreaterEqual(len(blocks), 7)
+            for i, src in enumerate(blocks):
+                with tempfile.TemporaryDirectory() as d:
+                    path = os.path.join(d, f"example{i}.klar")
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(src)
+                    code, out, err = cli("test", path)
+                    self.assertEqual(code, 0, f"{name} block {i}:\n{src}\n{out}{err}")
+
+
 class DeveloperTools(unittest.TestCase):
     def test_fmt_is_stable_on_the_repository_and_canonicalizes(self):
         import glob

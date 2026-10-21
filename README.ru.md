@@ -8,7 +8,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Version](https://img.shields.io/badge/version-0.3.0-informational)
 
-[English](README.md) · [Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·
+[English](README.md) · [**Руководство в картинках**](docs/GUIDE.md) · [Инструменты](docs/TOOLS.md) ·
+[Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·
 [Анализ языков](docs/FEATURES.md) · [Бенчмарк скорости](bench/README.md) · [Бенчмарк для ИИ](bench/ai/README.md) ·
 [История изменений](CHANGELOG.md)
 

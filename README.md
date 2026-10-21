@@ -9,7 +9,8 @@
 ![Version](https://img.shields.io/badge/version-0.3.0-informational)
 ![Targets](https://img.shields.io/badge/targets-x86--64%20Linux%20%7C%20Windows-lightgrey)
 
-[Русская версия](README.ru.md) · [Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.md) ·
+[Русская версия](README.ru.md) · [**Guide in pictures**](docs/GUIDE.en.md) · [Tools](docs/TOOLS.md) ·
+[Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.md) ·
 [Speed benchmark](bench/README.md) · [AI benchmark](bench/ai/README.md) · [Changelog](CHANGELOG.md)
 
 </div>

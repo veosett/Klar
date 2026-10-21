@@ -13,6 +13,8 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   `klar view` (interactive HTML for human reviewers: overview, call graph with run counts, step-by-step flow of each
   function, EN/RU), `klar new` (project skeleton with `AGENTS.md`).
 - VS Code extension (`editors/vscode`): highlighting, snippets, problem matcher.
+- Illustrated language guides with diagrams: `docs/GUIDE.md` (Russian), `docs/GUIDE.en.md` (English); every code
+  example in them is compiled and tested by the test-suite. Architecture diagrams converted to Mermaid.
 - `AGENTS.md` / `CLAUDE.md` for AI assistants working on the repository.
 
 ## [0.3.0] — 2026-10-21
