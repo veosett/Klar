@@ -13,12 +13,12 @@ from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11,
 
 MAX_DEPTH = 10000
 
-OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_open", "os_close",
+OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
-               "SetConsoleOutputCP", "GetEnvironmentVariableA"]
+               "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime"]
 
 
 def udiv_magic(d):
@@ -136,7 +136,8 @@ class Emitter:
         from .opt import optimize
         from .regalloc import allocate
         optimize(fn)
-        self.loc, self.saved = allocate(fn)
+        self.loc, self.saved, self.xloc = allocate(fn)
+        self.slot_needed = self.xmm_slot_needed(fn)
         a = self.a
         enter = next((ins for ins in fn.code if ins[0] == "enter"), None)
         self.user = enter is not None
@@ -147,7 +148,9 @@ class Emitter:
         base = 8 * max(fn.nregs - fn.nparams, 0)
         self.save_off = [-(base + 8 * (k + 1)) for k in range(len(self.saved))]
         self.scratch_off = -(base + 8 * (len(self.saved) + 1))
-        frame = align16(base + 8 * (len(self.saved) + 2))
+        self.xmm_used = sorted(set(self.xloc.values()))
+        self.xsave_off = [self.scratch_off - 16 - 8 * k for k in range(len(self.xmm_used))]
+        frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used)))
         a.alu_ri("sub", RSP, frame)
         for r, off in zip(self.saved, self.save_off):
             a.store(RBP, off, r)
@@ -160,6 +163,12 @@ class Emitter:
             nxt = code[k + 1] if k + 1 < len(code) else None
             self.next_label = nxt[1] if nxt is not None and nxt[0] == "label" else None
             getattr(self, "i_" + ins[0])(fn, *ins[1:])
+            if self.xloc and ins[0] not in self.XMM_AWARE:
+                # an instruction that knows nothing about XMM wrote the value to its slot: refresh the register
+                from .opt import defs
+                for d in defs(ins):
+                    if d in self.xloc:
+                        a.movsd_load(self.xloc[d], RBP, self.slot(fn, d))
         # safety net: a function body always ends with an explicit ret
         a.ud2()
         self.next_label = None
@@ -196,8 +205,11 @@ class Emitter:
             self.call_sites.append((lab, self.cur_site))
 
     def call_rt(self, fn, name, regs_values):
-        """Call a runtime helper with values already in machine registers (pushed in order)."""
+        """Call a runtime helper with values already in machine registers (pushed in order). These calls sit
+        on out-of-line paths, so they also save and restore the XMM registers holding floats."""
         a = self.a
+        for x, off in zip(self.xmm_used, self.xsave_off):
+            a.movsd_store(RBP, off, x)
         area = align16(8 * len(regs_values))
         if area:
             a.alu_ri("sub", RSP, area)
@@ -207,6 +219,8 @@ class Emitter:
         self.note_site()
         if area:
             a.alu_ri("add", RSP, area)
+        for x, off in zip(self.xmm_used, self.xsave_off):
+            a.movsd_load(x, RBP, off)
 
     # ---- branches ------------------------------------------------------------------
     NEG = {"e": "ne", "ne": "e", "l": "ge", "ge": "l", "le": "g", "g": "le", "b": "ae", "ae": "b",
@@ -223,14 +237,78 @@ class Emitter:
             a.jcc(cc, lt)
             a.jmp(lf)
 
+    # ---- floats in XMM registers -------------------------------------------------------
+    # A value in self.xloc lives in an XMM register. Its stack slot is kept current too (written through)
+    # whenever some instruction reads it the generic way, so every other instruction stays correct.
+    XMM_AWARE = {"fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun"}
+
+    def xmm_slot_needed(self, fn):
+        from .opt import uses
+        need = set()
+        if not self.xloc:
+            return need
+        for ins in fn.code:
+            op = ins[0]
+            if op in ("fbin", "fcmp", "fbr", "f2i", "mov") or (op == "fun" and ins[1] == "sqrt"):
+                continue
+            for u in uses(ins):
+                if u in self.xloc:
+                    need.add(u)
+        return need
+
+    def xsrc(self, fn, v, scratch):
+        """An XMM register holding the float v."""
+        x = self.xloc.get(v)
+        if x is not None:
+            return x
+        r = self.loc.get(v)
+        if r is None:
+            self.a.movsd_load(scratch, RBP, self.slot(fn, v))
+        else:
+            self.a.movq_xr(scratch, r)
+        return scratch
+
+    def xfin(self, fn, d, x):
+        """Store the float result held in XMM register x into d."""
+        xd = self.xloc.get(d)
+        if xd is not None:
+            self.a.movapd(xd, x)
+            if d in self.slot_needed:
+                self.a.movsd_store(RBP, self.slot(fn, d), xd)
+            return
+        r = self.loc.get(d)
+        if r is None:
+            self.a.movsd_store(RBP, self.slot(fn, d), x)
+        else:
+            self.a.movq_rx(r, x)
+
+    def xtarget(self, d, *avoid):
+        """The XMM register to compute d in (its own one, unless an operand still needs it)."""
+        xd = self.xloc.get(d)
+        return xd if xd is not None and xd not in avoid else XMM0
+
     # ---- instructions ------------------------------------------------------------
     def i_const(self, fn, d, imm):
+        if d in self.xloc:
+            self.a.mov_ri(RAX, imm)
+            self.a.movq_xr(self.xloc[d], RAX)
+            if d in self.slot_needed:
+                self.a.store(RBP, self.slot(fn, d), RAX)
+            return
         r = self.dst(d, RAX)
         self.a.mov_ri(r, imm)
         self.fin(fn, d, r)
 
     def i_mov(self, fn, d, s):
         if d == s:
+            return
+        if d in self.xloc or s in self.xloc:
+            if d in self.xloc:
+                self.xfin(fn, d, self.xsrc(fn, s, XMM0))
+            elif d in self.loc:
+                self.a.movq_rx(self.loc[d], self.xloc[s])
+            else:
+                self.a.movsd_store(RBP, self.slot(fn, d), self.xloc[s])
             return
         rd = self.loc.get(d)
         if rd is not None:
@@ -393,27 +471,26 @@ class Emitter:
         self.branch("ne", lt, lf)
 
     def fload2(self, fn, x, y):
-        self.a.movq_xr(XMM0, self.src(fn, x, RAX))
-        self.a.movq_xr(XMM1, self.src(fn, y, RAX))
+        return self.xsrc(fn, x, XMM0), self.xsrc(fn, y, XMM1)
 
     def i_fbin(self, fn, op, d, x, y):
-        self.fload2(fn, x, y)
-        self.a.sse(op, XMM0, XMM1)
-        r = self.dst(d, RAX)
-        self.a.movq_rx(r, XMM0)
-        self.fin(fn, d, r)
+        xa, xb = self.fload2(fn, x, y)
+        t = self.xtarget(d, xb)
+        self.a.movapd(t, xa)
+        self.a.sse(op, t, xb)
+        self.xfin(fn, d, t)
 
     FCC = {"lt": ("a", True), "le": ("ae", True), "gt": ("a", False), "ge": ("ae", False)}
 
     def i_fcmp(self, fn, cc, d, x, y):
         a = self.a
-        self.fload2(fn, x, y)
+        xa, xb = self.fload2(fn, x, y)
         if cc in self.FCC:
             c, swap = self.FCC[cc]
-            a.ucomisd(XMM1, XMM0) if swap else a.ucomisd(XMM0, XMM1)
+            a.ucomisd(xb, xa) if swap else a.ucomisd(xa, xb)
             a.setcc(c, RAX)
         else:
-            a.ucomisd(XMM0, XMM1)
+            a.ucomisd(xa, xb)
             a.setcc("e", RAX)
             a.setcc("np", RCX)
             a.alu_rr("and", RAX, RCX)
@@ -423,21 +500,20 @@ class Emitter:
 
     def i_fbr(self, fn, cc, x, y, lt, lf):
         a = self.a
-        self.fload2(fn, x, y)
+        xa, xb = self.fload2(fn, x, y)
         c, swap = self.FCC[cc]
-        a.ucomisd(XMM1, XMM0) if swap else a.ucomisd(XMM0, XMM1)
+        a.ucomisd(xb, xa) if swap else a.ucomisd(xa, xb)
         self.branch(c, lt, lf)
 
     def i_i2f(self, fn, d, x):
-        self.a.cvtsi2sd(XMM0, self.src(fn, x, RAX))
-        r = self.dst(d, RAX)
-        self.a.movq_rx(r, XMM0)
-        self.fin(fn, d, r)
+        t = self.xtarget(d)
+        self.a.cvtsi2sd(t, self.src(fn, x, RAX))
+        self.xfin(fn, d, t)
 
     def i_f2i(self, fn, d, x):
-        self.a.movq_xr(XMM0, self.src(fn, x, RAX))
+        xa = self.xsrc(fn, x, XMM0)
         r = self.dst(d, RAX)
-        self.a.cvttsd2si(r, XMM0)
+        self.a.cvttsd2si(r, xa)
         self.fin(fn, d, r)
 
     def fstp_to(self, fn, d):
@@ -445,6 +521,8 @@ class Emitter:
         r = self.loc.get(d)
         if r is None:
             a.fstp_m(RBP, self.slot(fn, d))
+            if d in self.xloc:
+                a.movsd_load(self.xloc[d], RBP, self.slot(fn, d))
         else:
             a.fstp_m(RBP, self.scratch_off)
             a.load(r, RBP, self.scratch_off)
@@ -452,11 +530,10 @@ class Emitter:
     def i_fun(self, fn, op, d, x):
         a = self.a
         if op == "sqrt":
-            a.movq_xr(XMM1, self.src(fn, x, RAX))
-            a.sse("sqrt", XMM0, XMM1)
-            r = self.dst(d, RAX)
-            a.movq_rx(r, XMM0)
-            self.fin(fn, d, r)
+            xs = self.xsrc(fn, x, XMM1)
+            t = self.xtarget(d)
+            a.sse("sqrt", t, xs)
+            self.xfin(fn, d, t)
             return
         a.fld_m(*self.mem(fn, x))
         if op == "sin":
@@ -930,18 +1007,19 @@ class Emitter:
         a.mov_ri(RAX, 9)
         a.syscall()
         self.stub_end()
-        self.stub_begin("os_time_ns")
-        a.alu_ri("sub", RSP, 16)
-        a.mov_ri(RDI, 1)
-        a.mov_rr(RSI, RSP)
-        a.mov_ri(RAX, 228)
-        a.syscall()
-        a.load(RAX, RSP, 0)
-        a.mov_ri(RCX, 1000000000)
-        a.imul_rr(RAX, RCX)
-        a.load(RCX, RSP, 8)
-        a.alu_rr("add", RAX, RCX)
-        self.stub_end()
+        for name, clock in (("os_time_ns", 1), ("os_wall_ns", 0)):   # CLOCK_MONOTONIC / CLOCK_REALTIME
+            self.stub_begin(name)
+            a.alu_ri("sub", RSP, 16)
+            a.mov_ri(RDI, clock)
+            a.mov_rr(RSI, RSP)
+            a.mov_ri(RAX, 228)
+            a.syscall()
+            a.load(RAX, RSP, 0)
+            a.mov_ri(RCX, 1000000000)
+            a.imul_rr(RAX, RCX)
+            a.load(RCX, RSP, 8)
+            a.alu_rr("add", RAX, RCX)
+            self.stub_end()
         self.stub_begin("os_open")
         self.arg(RDI, 0)
         self.arg(RSI, 1)
@@ -1099,6 +1177,16 @@ class Emitter:
         a.mul(RCX)
         a.load(RCX, RSP, 56)
         a.div(RCX)
+        win_end()
+
+        win_begin("os_wall_ns")                  # FILETIME: 100 ns since 1601-01-01
+        a.lea(RCX, RSP, 48)
+        call("GetSystemTimeAsFileTime")
+        a.load(RAX, RSP, 48)
+        a.mov_ri(RCX, 116444736000000000)
+        a.alu_rr("sub", RAX, RCX)
+        a.mov_ri(RCX, 100)
+        a.imul_rr(RAX, RCX)
         win_end()
 
         win_begin("os_open", 16)

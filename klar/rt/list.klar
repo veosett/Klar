@@ -154,6 +154,19 @@ fn List_get(xs: Word, i: Int, rtd: Word) -> Word {
   return some_elem(xs, k, rtd)
 }
 
+fn List_get_or(xs: Word, i: Int, d: Word, td_T: Word) -> Word {
+  if is_small(i) {
+    let k = untag(i)
+    if k >= 0 and k < peek(xs + 16) {
+      let v = list_at(xs, k)
+      retain_v(v, td_T)
+      return v
+    }
+  }
+  retain_v(d, td_T)
+  return d
+}
+
 fn List_first(xs: Word, rtd: Word) -> Word {
   if peek(xs + 16) == 0 {
     return none()

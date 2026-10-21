@@ -190,6 +190,13 @@ CODES = {
     # modules / constants / properties
     "E0601": ("module not found", "`use a.b.{x}` loads the file `a/b.klar` next to the importing file."),
     "E0602": ("circular import", "Modules may not import each other in a cycle. Move shared code into a third module."),
+    "W0406": ("unused function",
+              "A private function that nothing calls (tests count as callers) is dead code. Remove it, or mark it "
+              "`pub` when it is meant for other modules."),
+    "E0606": ("private item",
+              "Only declarations marked `pub` can be imported: `pub fn`, `pub type`, `pub enum`, `pub const`, "
+              "`pub trait`. Everything else is private to its module, so a module's API is exactly its `pub` lines "
+              "(`klar outline` shows them). `klar fix` adds the `pub`."),
     "E0603": ("unknown import", "The module does not declare that name. Imports are explicit: `use m.{name}`."),
     "E0604": ("constant used before declaration", "A constant may only use constants declared above it."),
     "E0605": ("property input not generatable", "Property inputs must be data types (no functions or generic parameters)."),

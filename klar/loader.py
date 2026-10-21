@@ -142,6 +142,15 @@ class Loader:
                         continue
                     imports[item] = dep.exports[item]
                     m.import_from[item] = (dep, dep.exports[item][0])
+                elif dep.checker is not None and dep.checker.private_decl(item) is not None:
+                    decl = dep.checker.private_decl(item)
+                    kw = {N.FnDecl: "fn", N.ConstDecl: "const", N.TypeDecl: "type", N.EnumDecl: "enum",
+                          N.AliasDecl: "type", N.TraitDecl: "trait"}[type(decl)]
+                    at = decl.span
+                    fix = {"span": Span(at.file, at.line, at.col, at.line, at.col), "text": "pub ", "safe": True}
+                    self.diags.append(Diagnostic(
+                        "E0606", "error", f"`{item}` is private to module `{dep_name}`", sp,
+                        f"mark it public in {dep.display}: `pub {kw} {item}`", fix))
                 else:
                     close = difflib.get_close_matches(item, list(dep.exports), n=1)
                     hint = f"did you mean `{close[0]}`?" if close else \

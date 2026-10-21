@@ -120,6 +120,11 @@ class Parser:
                 decls.append(self.parse_use())
             else:
                 seen_other = True
+                pub_tok = self.cur if self.accept_kw("pub") else None
+                if pub_tok is not None and not any(self.at_kw(k) for k in ("fn", "type", "enum", "const", "trait")):
+                    self.fail(f"`pub` goes before `fn`, `type`, `enum`, `const` or `trait`, found {self.cur.describe()}",
+                              hint="impls, tests and `use` have no visibility: an impl is visible wherever its "
+                                   "trait is" if self.at_kw("impl") else None)
                 if self.at_kw("fn"):
                     d = self.parse_fn(doc)
                 elif self.at_kw("type"):
@@ -134,6 +139,7 @@ class Parser:
                     d = self.parse_property()
                 elif self.at_kw("trait") or self.at_kw("impl"):
                     group = self.parse_trait(doc) if self.at_kw("trait") else self.parse_impl()
+                    group[0].public = pub_tok is not None
                     decls.extend(group)
                     doctest = self.doctest(docs, group[0])
                     if doctest is not None:
@@ -148,6 +154,8 @@ class Parser:
                     self.fail("expected a declaration (`fn`, `type`, `enum`, `trait`, `impl`, `const`, `test`, "
                               "`property`, `use`), "
                               f"found {self.cur.describe()}")
+                if pub_tok is not None:
+                    d.public = True
                 decls.append(d)
                 doctest = self.doctest(docs, d)
                 if doctest is not None:

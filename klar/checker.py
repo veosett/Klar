@@ -222,8 +222,33 @@ class Checker:
             if sig.params or not ok_ret:
                 self.error("E0502", "`main` must take no parameters and return `Unit` or `Result[Unit, E]`",
                            sig.decl.name_span)
+        self.unused_private_functions()
         self.diags.sort(key=lambda d: (d.span.file != self.file, d.span.line, d.span.col))
         return self.diags
+
+    def unused_private_functions(self):
+        if self.all_public():
+            return
+        own = {d.name: d for d in self.program.decls
+               if isinstance(d, N.FnDecl) and not d.owner_kind and not d.public and d.name != "main"
+               and isinstance(self.fns.get(d.name), Sig) and self.fns[d.name].decl is d}
+        if not own:
+            return
+        used = set()
+        for d in self.program.decls:
+            for n in N.walk(d):
+                if isinstance(n, N.Name) and n.name in own and own[n.name] is not d:
+                    used.add(n.name)
+                elif isinstance(n, N.MethodCall):
+                    res = getattr(n, "resolved", None)
+                    if res and res[0] == "ufcs" and res[2] in own and own[res[2]] is not d:
+                        used.add(res[2])
+        for name, d in own.items():
+            if name not in used:
+                self.warn("W0406", f"function `{name}` is never used", d.name_span,
+                          hint="remove it, call it, or mark it `pub` if other modules should use it",
+                          fix={"span": Span(d.span.file, d.span.line, d.span.col, d.span.line, d.span.col),
+                               "text": "pub ", "safe": False})
 
     # ---- declarations --------------------------------------------------------
     def type_names_visible(self):
@@ -1666,11 +1691,8 @@ class Checker:
         result = TVar()
         if exp is not None:
             unify(result, exp)
-        catch_all = False
-        covered = set()
+        rows = []          # unguarded arms seen so far, as pattern vectors for the usefulness check
         for arm in e.arms:
-            if catch_all:
-                self.warn("W0303", "unreachable match arm (an earlier arm matches everything)", arm.pattern.span)
             self.push()
             self.pattern(arm.pattern, st)
             if arm.guard is not None:
@@ -1688,47 +1710,81 @@ class Checker:
                     self.error("E0202", f"match arms have different types: `{show(result)}` and `{show(at)}`",
                                arm.body.span)
             self.pop()
-            if arm.guard is not None:
-                continue  # guarded arms never count for exhaustiveness
-            p = arm.pattern
-            if isinstance(p, (N.PWild, N.PBind)):
-                catch_all = True
-            elif isinstance(p, N.PVariant) and all(self.irrefutable(a) for a in p.args):
-                covered.add(p.variant)
-            elif isinstance(p, N.PLit) and isinstance(p.value, bool):
-                covered.add(p.value)
-        if not catch_all:
-            self.exhaustive(st, covered, e)
+            vec = [self.norm_pattern(arm.pattern)]
+            if rows and useful(rows, vec, [st], self.ctors_of) is None:
+                self.warn("W0303", "unreachable match arm: the arms above already cover every value it matches",
+                          arm.pattern.span, hint="remove it or move it above the arm that covers it")
+            if arm.guard is None:   # guarded arms never count for exhaustiveness
+                rows.append(vec)
+        self.exhaustive(st, rows, e)
         return result
 
-    def irrefutable(self, p):
-        return isinstance(p, (N.PWild, N.PBind))
+    # ---- exhaustiveness (usefulness algorithm, Maranget 2007) ------------------------------------
+    def norm_pattern(self, p):
+        if isinstance(p, N.PLit):
+            if isinstance(p.value, bool):
+                return ("true" if p.value else "false", [])
+            return (f"lit:{p.value!r}", [])
+        if isinstance(p, N.PVariant):
+            return (p.variant, [self.norm_pattern(a) for a in p.args])
+        return WILD
 
-    def exhaustive(self, st, covered, e):
-        h = head(st)
-        needed, render = None, None
+    def ctors_of(self, t):
+        """{constructor: [field types]} for a type with finitely many constructors, else None."""
+        t = prune(t)
+        h = head(t)
         if h == "Bool":
-            needed = [True, False]
-            render = lambda v: "true" if v else "false"
-        elif h == "Option":
-            needed = ["Some", "None"]
-            render = lambda v: "Some(value)" if v == "Some" else "None"
-        elif h == "Result":
-            needed = ["Ok", "Err"]
-            render = lambda v: "Ok(value)" if v == "Ok" else "Err(error)"
-        elif h in self.enums:
-            fields = self.enums[h].variants
-            needed = list(fields)
-            render = lambda v: f"{h}.{v}" + (f"({', '.join(f for f, _ in fields[v])})" if fields[v] else "")
-        if needed is None:
-            if st is ANY or isinstance(st, TVar):
-                return
-            self.error("E0301", f"match on `{show(st)}` needs a catch-all arm", e.span,
-                       hint="add `_ => ...` as the last arm")
+            return {"true": [], "false": []}
+        if h == "Option":
+            return {"Some": [t.args[0]], "None": []}
+        if h == "Result":
+            return {"Ok": [t.args[0]], "Err": [t.args[1]]}
+        if h in self.enums:
+            info = self.enums[h]
+            m = self.args_map(info, t)
+            return {v: [subst(ft, m) for _, ft in fs] for v, fs in info.variants.items()}
+        return None
+
+    def render_pattern(self, p, t, top=False):
+        if p is WILD:
+            return "_"
+        name, args = p
+        t = prune(t)
+        h = head(t)
+        if name in ("true", "false", "None"):
+            return name
+        fields = (self.ctors_of(t) or {}).get(name, [])
+        if h in self.enums:
+            names = [f for f, _ in self.enums[h].variants.get(name, [])]
+            if not args:
+                return f"{h}.{name}"
+            if top and all(a is WILD for a in args):
+                return f"{h}.{name}({', '.join(names)})"
+            return f"{h}.{name}({', '.join(self.render_pattern(a, ft) for a, ft in zip(args, fields))})"
+        if top and all(a is WILD for a in args):
+            return {"Some": "Some(value)", "Ok": "Ok(value)", "Err": "Err(error)"}.get(name, name)
+        return f"{name}({', '.join(self.render_pattern(a, ft) for a, ft in zip(args, fields))})"
+
+    def exhaustive(self, st, rows, e):
+        st = prune(st)
+        if st is ANY or isinstance(st, TVar):
             return
-        missing = [v for v in needed if v not in covered]
+        missing = []
+        rows = list(rows)
+        while len(missing) < 6:
+            w = useful(rows, [WILD], [st], self.ctors_of)
+            if w is None:
+                break
+            if w[0] is WILD:
+                if not missing:
+                    self.error("E0301", f"match on `{show(st)}` needs a catch-all arm", e.span,
+                               hint="add `_ => ...` as the last arm")
+                    return
+                break
+            missing.append(w[0])
+            rows.append([w[0]])
         if missing:
-            arms = ", ".join(f"`{render(v)} => ...`" for v in missing)
+            arms = ", ".join(f"`{self.render_pattern(w, st, top=True)} => ...`" for w in missing)
             self.error("E0301", f"non-exhaustive match on `{show(st)}`: missing {arms}", e.span,
                        hint="add the missing arms, or a catch-all `_ => ...` (arms with `if` guards do not count)")
 
@@ -1797,10 +1853,27 @@ class Checker:
                 self.pattern(a, ANY)
 
     # ---- module interface ------------------------------------------------------
-    def exports(self):
-        """Everything a module declares can be imported (visibility control is planned)."""
-        out = {}
+    def all_public(self):
+        """The prelude and the runtime export everything; other modules only their `pub` declarations."""
+        return self.sys or self.module == "prelude"
+
+    def private_decl(self, name):
+        """The declaration of `name` if this module declares it without `pub` (for a precise import error)."""
+        if self.all_public():
+            return None
         for d in self.program.decls:
+            if isinstance(d, (N.FnDecl, N.ConstDecl, N.TypeDecl, N.EnumDecl, N.AliasDecl, N.TraitDecl)) and \
+                    d.name == name and not d.public and not getattr(d, "owner_kind", None):
+                return d
+        return None
+
+    def exports(self):
+        """The importable names: `pub` declarations (everything in the prelude and the runtime)."""
+        out = {}
+        everything = self.all_public()
+        for d in self.program.decls:
+            if not everything and not getattr(d, "public", False):
+                continue
             if isinstance(d, N.FnDecl) and isinstance(self.fns.get(d.name), Sig) and self.fns[d.name].decl is d:
                 out[d.name] = ("fn", self.fns[d.name])
             elif isinstance(d, N.ConstDecl) and d.name in self.consts:
@@ -1809,6 +1882,55 @@ class Checker:
                     self.universe.owner(d.name) == self.module:
                 out[d.name] = ("type", d.name)
         return out
+
+
+WILD = None   # the wildcard in normalized patterns; a constructor is (name, [sub-patterns])
+
+
+def useful(rows, q, types, ctors_of):
+    """Is pattern vector `q` useful w.r.t. `rows` (does it match a value no row matches)? Returns a witness
+    vector of patterns (WILD or (ctor, args)) for such a value, or None."""
+    if not q:
+        return None if rows else []
+    t, rest_t = types[0], types[1:]
+    head_p = q[0]
+    all_ctors = ctors_of(t)
+
+    def specialize(c, arity):
+        out = []
+        for r in rows:
+            p = r[0]
+            if p is WILD:
+                out.append([WILD] * arity + r[1:])
+            elif p[0] == c:
+                args = (list(p[1]) + [WILD] * arity)[:arity]
+                out.append(args + r[1:])
+        return out
+
+    def field_types(c, arity):
+        fts = (all_ctors or {}).get(c)
+        return list(fts) if fts is not None and len(fts) == arity else [ANY] * arity
+
+    if head_p is not WILD:
+        c, args = head_p
+        k = len(args)
+        w = useful(specialize(c, k), list(args) + q[1:], field_types(c, k) + rest_t, ctors_of)
+        return None if w is None else [(c, w[:k])] + w[k:]
+    used = {r[0][0] for r in rows if r[0] is not WILD}
+    if all_ctors is not None and used >= set(all_ctors):
+        for c, fts in all_ctors.items():
+            k = len(fts)
+            w = useful(specialize(c, k), [WILD] * k + q[1:], list(fts) + rest_t, ctors_of)
+            if w is not None:
+                return [(c, w[:k])] + w[k:]
+        return None
+    w = useful([r[1:] for r in rows if r[0] is WILD], q[1:], rest_t, ctors_of)
+    if w is None:
+        return None
+    if all_ctors is None or not used:
+        return [WILD] + w
+    c = next(c for c in all_ctors if c not in used)
+    return [(c, [WILD] * len(all_ctors[c]))] + w
 
 
 def is_lit(e):

@@ -2,7 +2,7 @@
 
 /// All Ok values, or the first Err.
 /// >>> assert collect([Ok(1), Ok(2)]) == Ok([1, 2])
-fn collect[T, E](items: List[Result[T, E]]) -> Result[List[T], E] {
+pub fn collect[T, E](items: List[Result[T, E]]) -> Result[List[T], E] {
   var out: List[T] = []
   for r in items {
     let v = r?
@@ -13,7 +13,7 @@ fn collect[T, E](items: List[Result[T, E]]) -> Result[List[T], E] {
 
 /// All Some values, or None if any is missing.
 /// >>> assert collect_options([Some(1), None]) == None
-fn collect_options[T](items: List[Option[T]]) -> Option[List[T]] {
+pub fn collect_options[T](items: List[Option[T]]) -> Option[List[T]] {
   var out: List[T] = []
   for o in items {
     let v = o?
@@ -24,7 +24,7 @@ fn collect_options[T](items: List[Option[T]]) -> Option[List[T]] {
 
 /// Just the Ok values; errors are dropped.
 /// >>> assert oks([Ok(1), Err("x"), Ok(3)]) == [1, 3]
-fn oks[T, E](items: List[Result[T, E]]) -> List[T] {
+pub fn oks[T, E](items: List[Result[T, E]]) -> List[T] {
   return items.flat_map(fn(r) => match r {
     Ok(v) => [v],
     Err(_) => [],
@@ -33,7 +33,7 @@ fn oks[T, E](items: List[Result[T, E]]) -> List[T] {
 
 /// Just the errors.
 /// >>> assert errs([Ok(1), Err("x")]) == ["x"]
-fn errs[T, E](items: List[Result[T, E]]) -> List[E] {
+pub fn errs[T, E](items: List[Result[T, E]]) -> List[E] {
   return items.flat_map(fn(r) => match r {
     Ok(_) => [],
     Err(e) => [e],
@@ -42,7 +42,7 @@ fn errs[T, E](items: List[Result[T, E]]) -> List[E] {
 
 /// Just the Some values.
 /// >>> assert values([Some(1), None, Some(2)]) == [1, 2]
-fn values[T](items: List[Option[T]]) -> List[T] {
+pub fn values[T](items: List[Option[T]]) -> List[T] {
   return items.flat_map(fn(o) => match o {
     Some(v) => [v],
     None => [],
@@ -51,7 +51,7 @@ fn values[T](items: List[Option[T]]) -> List[T] {
 
 /// First Some, if any.
 /// >>> assert first_some([None, Some(2), Some(3)]) == Some(2)
-fn first_some[T](items: List[Option[T]]) -> Option[T] {
+pub fn first_some[T](items: List[Option[T]]) -> Option[T] {
   for o in items {
     if o.is_some() {
       return o
@@ -62,7 +62,7 @@ fn first_some[T](items: List[Option[T]]) -> Option[T] {
 
 /// Turns a Bool into a Result with the given error.
 /// >>> assert ensure(1 < 2, "bad") == Ok(())
-fn ensure[E](condition: Bool, error: E) -> Result[Unit, E] {
+pub fn ensure[E](condition: Bool, error: E) -> Result[Unit, E] {
   return match condition {
     true => Ok(()),
     false => Err(error),

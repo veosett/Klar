@@ -39,7 +39,8 @@ test "div works" { assert div(7, 2) == 3 }          // tests sit next to code
 ```
 ```klar
 use geometry.{Point, area}                          // first lines of a file; loads geometry.klar next to it
-use std.math.{gcd, mean}                            // standard modules: std.math std.text std.list std.result std.set
+pub fn area(p: Point) -> Float { ... }              // only `pub` fn/type/enum/const/trait can be imported (E0606)
+use std.math.{gcd, mean}                            // standard modules: std.math std.text std.list std.result std.set std.json std.time
 type Pair2[A, B] { left: A, right: B }              // generic record (prelude already has Pair/Entry/Indexed)
 enum Tree[T] { Leaf, Node(left: Tree[T], value: T, right: Tree[T]) }   // generic, recursive enum
 type UserId = Int                                   // alias (transparent)
@@ -141,7 +142,7 @@ collections: `let xs: List[Int] = []`.
 
 ## Effects
 A function without `uses` is pure. Calling something with an effect requires declaring it:
-`print`/`read_line`/`cli_args`/`dbg` → `io`, `now_ms`/`now_ns` → `time`, `random_int` → `rand`,
+`print`/`read_line`/`cli_args`/`dbg` → `io`, `now_ms` (wall clock, ms since 1970 UTC)/`now_ns` (monotonic, for measuring) → `time`, `random_int` → `rand`,
 `read_file`/`write_file`/`file_exists` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
 `exit(code)` (type `Never`, flushes output) → `io`. Contracts and constants must be
 pure. Tests may use only `io`.

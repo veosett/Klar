@@ -51,6 +51,7 @@ class FnDecl(Node):
     ensures: list
     body: Any
     doc: Optional[str] = None
+    public: bool = False              # declared with `pub`: importable by other modules
     # type parameter -> [(trait name, span)], from `[T: Shape + Show]`
     bounds: Dict[str, list] = field(default_factory=dict)
     # methods: "impl" (inside `impl Trait for Type`) or "default" (a trait method with a body);
@@ -70,6 +71,7 @@ class TraitDecl(Node):
     methods: List[FnDecl]            # required methods (no body)
     defaults: List[str]              # methods with a default body (FnDecls `Name.m` after the trait)
     doc: Optional[str] = None
+    public: bool = False              # declared with `pub`: importable by other modules
 
 
 @dataclass(eq=False)
@@ -94,6 +96,7 @@ class TypeDecl(Node):
     type_params: List[str]
     fields: List[FieldDecl]
     doc: Optional[str] = None
+    public: bool = False              # declared with `pub`: importable by other modules
 
 
 @dataclass(eq=False)
@@ -102,6 +105,7 @@ class AliasDecl(Node):
     type_params: List[str]
     target: Any
     doc: Optional[str] = None
+    public: bool = False              # declared with `pub`: importable by other modules
 
 
 @dataclass(eq=False)
@@ -111,6 +115,7 @@ class ConstDecl(Node):
     type: Any
     value: Any
     doc: Optional[str] = None
+    public: bool = False              # declared with `pub`: importable by other modules
 
 
 @dataclass(eq=False)
@@ -139,6 +144,7 @@ class EnumDecl(Node):
     type_params: List[str]
     variants: List[VariantDecl]
     doc: Optional[str] = None
+    public: bool = False              # declared with `pub`: importable by other modules
 
 
 @dataclass(eq=False)

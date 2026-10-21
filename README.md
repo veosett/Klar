@@ -111,15 +111,15 @@ machines in [bench/README.md](bench/README.md)):
 
 | benchmark | C -O2 | C++ -O2 | Rust -O | Go | **Klar** | Java 21 | Node.js 22 | Python 3.13 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `fib(25)` — function calls | 0.16 | 0.12 | 0.18 | 0.33 | **1.1** | 0.88 | 2.3 | 8.2 |
-| `loop` — integer arithmetic | 1.1 | 1.1 | 1.1 | 1.1 | **1.4** | 3.2 | 7.0 | 23.3 |
-| `primes` — division, branches | 0.83 | 0.85 | 0.52 | 0.90 | **1.0** | 2.2 | 2.5 | 16.2 |
-| `mandelbrot` — floating point | 0.28 | 0.29 | 0.30 | 0.29 | **1.1** | 3.2 | 5.2 | 11.8 |
-| `collections` — map/filter/sort 200k | 5.0 | 4.9 | 2.0 | 13.1 | **7.0** | 31.5 | 34.2 | 29.9 |
-| `strings` — 100k strings, join/split | 7.4 | 9.0 | 8.4 | 14.2 | **13.8** | 40.4 | 28.2 | 16.5 |
+| `fib(25)` — function calls | 0.13 | 0.11 | 0.21 | 0.34 | **1.0** | 0.98 | 2.0 | 7.8 |
+| `loop` — integer arithmetic | 1.1 | 1.1 | 1.2 | 0.94 | **1.4** | 3.3 | 5.8 | 30.2 |
+| `primes` — division, branches | 0.80 | 0.77 | 0.46 | 0.81 | **1.1** | 1.9 | 2.9 | 16.7 |
+| `mandelbrot` — floating point | 0.27 | 0.30 | 0.24 | 0.25 | **0.33** | 2.9 | 4.3 | 11.7 |
+| `collections` — map/filter/sort 200k | 4.0 | 4.5 | 2.1 | 13.5 | **7.0** | 36.3 | 28.8 | 21.4 |
+| `strings` — 100k strings, join/split | 7.6 | 8.8 | 7.5 | 14.1 | **12.5** | 45.7 | 29.3 | 16.0 |
 
-Klar is 1.2–17× faster than CPython, faster than Node.js on all six and than Java on five, close to C on integer code
-(1.2–1.4×) and faster than Go on collections — while `Int` never overflows, values are immutable and every error
+Klar is 1.3–35× faster than CPython, faster than Node.js on all six and than Java on five, close to C on integer and
+floating-point code (1.2–1.4×; floats live in XMM registers) and faster than Go on collections — while `Int` never overflows, values are immutable and every error
 shows a Klar stack trace. An executable starts in 1–2 ms.
 
 ## How it works
@@ -163,7 +163,7 @@ flowchart TB
         v01 --> v02 --> v03
     end
     subgraph now["🚧 In progress"]
-        v04["0.4 — ✅ traits &amp; bounded generics, ✅ bit operations,<br/>Set, exit, env_var · next: pub, nested patterns,<br/>floats in XMM registers, JSON &amp; time in std"]
+        v04["0.4 — ✅ traits &amp; bounded generics, ✅ pub, ✅ nested-pattern<br/>exhaustiveness, ✅ bit operations, Set, exit, env_var,<br/>✅ floats in XMM registers, ✅ std.json, std.time"]
     end
     subgraph next["🔜 Planned"]
         direction TB
@@ -213,7 +213,7 @@ repository root, on Linux `sh klar.sh ...`.
 klar/            compiler front-end, safety pass, interpreter, Python back-end, CLI
 klar/native/     native compiler: lowering, KIR, optimizer, register allocator, x86-64, linker
 klar/rt/         runtime of native executables, written in Klar
-klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result, std.set)
+klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result, std.set, std.json, std.time)
 examples/        example programs (examples/mistakes.klar: typical AI mistakes)
 tests/           test-suite, differential tests native vs interpreter
 bench/           speed benchmark (8 languages); bench/ai: AI-ergonomics benchmark (7 languages)

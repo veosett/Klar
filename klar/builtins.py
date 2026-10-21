@@ -459,6 +459,12 @@ def _(it, a, sp):
     return some(xs[i]) if 0 <= i < len(xs) else NONE
 
 
+@method("List", "fn get_or[T](self: List[T], index: Int, default: T) -> T")
+def _(it, a, sp):
+    xs, i, d = a
+    return xs[i] if 0 <= i < len(xs) else d
+
+
 @method("List", "fn first[T](self: List[T]) -> Option[T]")
 def _(it, a, sp): return some(a[0][0]) if a[0] else NONE
 

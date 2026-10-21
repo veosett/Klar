@@ -18,7 +18,8 @@ BINARY = {"+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "=", "->", 
 OPEN, CLOSE = "([{", ")]}"
 UNARY_BEFORE = {"(", "[", "{", ",", ":", "=", "=>", "->", "+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=",
                 ">=", "and", "or", "not", "return", "if", "while", "in", "match", "assert", "requires", "ensures"}
-TOP_LEVEL = ("fn ", "type ", "enum ", "test ", "property ", "const ", "///", "use ", "module ")
+TOP_LEVEL = ("fn ", "type ", "enum ", "test ", "property ", "const ", "///", "use ", "module ", "pub ", "trait ",
+             "impl ")
 
 
 class Tok:

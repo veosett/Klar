@@ -24,7 +24,7 @@ fn b_now_ns() -> Int {
 }
 
 fn b_now_ms() -> Int {
-  return tag(os_time_ns() / 1000000)
+  return tag(os_wall_ns() / 1000000)
 }
 
 fn b_fail(msg: Word, sp: Word) -> Word {

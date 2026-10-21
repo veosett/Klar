@@ -1,0 +1,507 @@
+// JSON: parse text into a `Json` value, read it with `field` / `item` / `lookup` / `as_*`, and print it back.
+// Integers stay exact (`Int` has arbitrary precision), so large ids survive a round trip.
+
+/// A JSON value. Objects keep the order of their keys.
+pub enum Json {
+  Null,
+  Bool(value: Bool),
+  Int(value: Int),
+  Num(value: Float),
+  Text(value: Str),
+  Arr(items: List[Json]),
+  Obj(fields: Map[Str, Json]),
+}
+
+// ---- reading values -------------------------------------------------------------------------------
+
+/// The value of a key of an object (`None` for other values or a missing key).
+/// >>> assert parse_json("\{\"a\": 1\}").map(fn(j) => field(j, "a")) == Ok(Some(Json.Int(value: 1)))
+pub fn field(j: Json, key: Str) -> Option[Json] {
+  return match j {
+    Json.Obj(fields) => fields.get(key),
+    _ => None,
+  }
+}
+
+/// The element at `index` of an array.
+pub fn item(j: Json, index: Int) -> Option[Json] {
+  return match j {
+    Json.Arr(items) => items.get(index),
+    _ => None,
+  }
+}
+
+/// Follows a dotted path: object keys and array indexes, e.g. `"users.0.name"`.
+/// >>> assert parse_json("\{\"u\": [\{\"n\": \"ann\"\}]\}").map(fn(j) => lookup(j, "u.0.n")) == Ok(Some(Json.Text(value: "ann")))
+pub fn lookup(j: Json, path: Str) -> Option[Json] {
+  var cur = j
+  if path.is_empty() {
+    return Some(cur)
+  }
+  for part in path.split(".") {
+    let next = match cur {
+      Json.Arr(items) => match part.to_int() {
+        Some(i) => items.get(i),
+        None => None,
+      },
+      Json.Obj(fields) => fields.get(part),
+      _ => None,
+    }
+    cur = next?
+  }
+  return Some(cur)
+}
+
+pub fn as_text(j: Json) -> Option[Str] {
+  return match j {
+    Json.Text(s) => Some(s),
+    _ => None,
+  }
+}
+
+/// Integers, and numbers like `3.0` that have no fractional part.
+pub fn as_int(j: Json) -> Option[Int] {
+  return match j {
+    Json.Int(n) => Some(n),
+    Json.Num(x) => match x.abs() < 9007199254740992.0 and x == x.floor().to_float() {
+      true => Some(x.to_int()),
+      false => None,
+    },
+    _ => None,
+  }
+}
+
+/// Any number, as a Float.
+pub fn as_num(j: Json) -> Option[Float] {
+  return match j {
+    Json.Int(n) => Some(n.to_float()),
+    Json.Num(x) => Some(x),
+    _ => None,
+  }
+}
+
+pub fn as_bool(j: Json) -> Option[Bool] {
+  return match j {
+    Json.Bool(b) => Some(b),
+    _ => None,
+  }
+}
+
+pub fn as_items(j: Json) -> Option[List[Json]] {
+  return match j {
+    Json.Arr(items) => Some(items),
+    _ => None,
+  }
+}
+
+pub fn as_fields(j: Json) -> Option[Map[Str, Json]] {
+  return match j {
+    Json.Obj(fields) => Some(fields),
+    _ => None,
+  }
+}
+
+pub fn is_null(j: Json) -> Bool {
+  return j == Json.Null
+}
+
+// ---- building values ------------------------------------------------------------------------------
+
+/// An object from key/value pairs, in order.
+/// >>> assert json_text(json_object([Pair { first: "x", second: Json.Int(value: 1) }])) == "\{\"x\":1\}"
+pub fn json_object(pairs: List[Pair[Str, Json]]) -> Json {
+  var fields: Map[Str, Json] = Map {}
+  for p in pairs {
+    fields = fields.set(p.first, p.second)
+  }
+  return Json.Obj(fields: fields)
+}
+
+pub fn json_strings(xs: List[Str]) -> Json {
+  return Json.Arr(items: xs.map(fn(s) => Json.Text(value: s)))
+}
+
+pub fn json_ints(xs: List[Int]) -> Json {
+  return Json.Arr(items: xs.map(fn(n) => Json.Int(value: n)))
+}
+
+// ---- printing -------------------------------------------------------------------------------------
+
+const HEX: Str = "0123456789abcdef"
+
+fn escape(s: Str) -> Str {
+  var plain = true
+  for c in s.codes() {
+    if c < 32 or c == 34 or c == 92 {
+      plain = false
+      break
+    }
+  }
+  if plain {
+    return "\"" + s + "\""
+  }
+  var out: List[Str] = ["\""]
+  for c in s.codes() {
+    let piece = match c {
+      34 => "\\\"",
+      92 => "\\\\",
+      10 => "\\n",
+      13 => "\\r",
+      9 => "\\t",
+      8 => "\\b",
+      12 => "\\f",
+      x if x < 32 => "\\u00" + HEX.slice(x / 16, x / 16 + 1) + HEX.slice(x % 16, x % 16 + 1),
+      x => x.to_char().unwrap_or("?"),
+    }
+    out = out.push(piece)
+  }
+  return out.push("\"").join("")
+}
+
+fn number_text(x: Float) -> Str {
+  if x - x != 0.0 {      // NaN and infinities have no JSON form
+    return "null"
+  }
+  return x.to_str()
+}
+
+/// Compact JSON text (no spaces).
+/// >>> assert json_text(Json.Arr(items: [Json.Null, Json.Bool(value: true), Json.Text(value: "a\"b")])) == "[null,true,\"a\\\"b\"]"
+pub fn json_text(j: Json) -> Str {
+  return match j {
+    Json.Null => "null",
+    Json.Bool(b) => b.to_str(),
+    Json.Int(n) => n.to_str(),
+    Json.Num(x) => number_text(x),
+    Json.Text(s) => escape(s),
+    Json.Arr(items) => "[" + items.map(json_text).join(",") + "]",
+    Json.Obj(fields) => "\{" + fields.keys().map(fn(k) => escape(k) + ":" + json_text(fields.get(k).unwrap_or(Json.Null)))
+      .join(",") + "\}",
+  }
+}
+
+fn pretty_at(j: Json, depth: Int) -> Str {
+  let pad = "  ".repeat(depth + 1)
+  let end = "  ".repeat(depth)
+  return match j {
+    Json.Arr(items) => match items.is_empty() {
+      true => "[]",
+      false => "[\n" + items.map(fn(x) => pad + pretty_at(x, depth + 1)).join(",\n") + "\n" + end + "]",
+    },
+    Json.Obj(fields) => match fields.len() == 0 {
+      true => "\{\}",
+      false => "\{\n" + fields.keys()
+        .map(fn(k) => pad + escape(k) + ": " + pretty_at(fields.get(k).unwrap_or(Json.Null), depth + 1))
+        .join(",\n") + "\n" + end + "\}",
+    },
+    _ => json_text(j),
+  }
+}
+
+/// JSON text indented by two spaces, one value per line.
+pub fn json_pretty(j: Json) -> Str {
+  return pretty_at(j, 0)
+}
+
+// ---- parsing --------------------------------------------------------------------------------------
+
+/// What the parser has read so far: the value and the position after it.
+type Step { value: Json, pos: Int }
+
+type Source { text: Str, codes: List[Int] }
+
+fn code_at(src: Source, i: Int) -> Int {
+  return src.codes.get_or(i, -1)
+}
+
+fn where(src: Source, pos: Int) -> Str {
+  var line = 1
+  var col = 1
+  for c in src.codes.take(pos) {
+    if c == 10 {
+      line = line + 1
+      col = 1
+    } else {
+      col = col + 1
+    }
+  }
+  return "line {line}, column {col}"
+}
+
+fn fail_at(src: Source, pos: Int, what: Str) -> Result[Step, Str] {
+  let found = match code_at(src, pos) {
+    -1 => "the end of the text",
+    c => "`" + c.to_char().unwrap_or("?") + "`",
+  }
+  return Err("JSON: expected {what} at {where(src, pos)}, found {found}")
+}
+
+fn skip_ws(src: Source, start: Int) -> Int {
+  var i = start
+  while true {
+    let c = code_at(src, i)
+    if c != 32 and c != 10 and c != 13 and c != 9 {
+      return i
+    }
+    i = i + 1
+  }
+}
+
+fn hex_value(c: Int) -> Int {
+  if c >= 48 and c <= 57 {
+    return c - 48
+  }
+  if c >= 97 and c <= 102 {
+    return c - 87
+  }
+  if c >= 65 and c <= 70 {
+    return c - 55
+  }
+  return -1
+}
+
+fn hex4(src: Source, at: Int) -> Int {
+  var n = 0
+  for k in range(0, 4) {
+    let h = hex_value(code_at(src, at + k))
+    if h < 0 {
+      return -1
+    }
+    n = n * 16 + h
+  }
+  return n
+}
+
+fn parse_string(src: Source, start: Int) -> Result[Step, Str] {
+  // start is just after the opening quote
+  var parts: List[Str] = []
+  var run = start
+  var i = start
+  while true {
+    let c = code_at(src, i)
+    if c == -1 {
+      return fail_at(src: src, pos: i, what: "`\"` to close the string")
+    }
+    if c < 32 {
+      return fail_at(src: src, pos: i, what: "an escaped control character (`\\n`, `\\t`, ...)")
+    }
+    if c == 34 {
+      parts = parts.push(src.text.slice(run, i))
+      return Ok(Step { value: Json.Text(value: parts.join("")), pos: i + 1 })
+    }
+    if c == 92 {
+      parts = parts.push(src.text.slice(run, i))
+      let e = code_at(src, i + 1)
+      var len = 2
+      let piece = match e {
+        34 => "\"",
+        92 => "\\",
+        47 => "/",
+        98 => 8.to_char().unwrap_or(""),
+        102 => 12.to_char().unwrap_or(""),
+        110 => "\n",
+        114 => "\r",
+        116 => "\t",
+        117 => "",
+        _ => "?",
+      }
+      if piece == "?" {
+        return fail_at(src: src, pos: i + 1, what: "an escape (`\\\"`, `\\\\`, `\\n`, `\\u0041`, ...)")
+      }
+      if e == 117 {
+        var cp = hex4(src, i + 2)
+        len = 6
+        if cp < 0 {
+          return fail_at(src: src, pos: i + 2, what: "4 hex digits after `\\u`")
+        }
+        if cp >= 55296 and cp <= 56319 and code_at(src, i + 6) == 92 and code_at(src, i + 7) == 117 {
+          let low = hex4(src, i + 8)
+          if low >= 56320 and low <= 57343 {
+            cp = 65536 + (cp - 55296) * 1024 + (low - 56320)
+            len = 12
+          }
+        }
+        parts = parts.push(cp.to_char().unwrap_or("?"))
+      } else {
+        parts = parts.push(piece)
+      }
+      i = i + len
+      run = i
+    } else {
+      i = i + 1
+    }
+  }
+  return fail_at(src: src, pos: i, what: "the end of the string")
+}
+
+fn is_number_char(c: Int) -> Bool {
+  return (c >= 48 and c <= 57) or c == 45 or c == 43 or c == 46 or c == 101 or c == 69
+}
+
+fn parse_number(src: Source, start: Int) -> Result[Step, Str] {
+  var i = start
+  var float = false
+  while is_number_char(code_at(src, i)) {
+    let c = code_at(src, i)
+    if c == 46 or c == 101 or c == 69 {
+      float = true
+    }
+    i = i + 1
+  }
+  let text = src.text.slice(start, i)
+  let digits = match text.starts_with("-") {
+    true => text.slice(1, text.len()),
+    false => text,
+  }
+  let bad_start = digits.is_empty() or not digits.slice(0, 1).is_numeric() or
+    (digits.len() > 1 and digits.starts_with("0") and digits.slice(1, 2).is_numeric())
+  if bad_start or digits.ends_with(".") or digits.contains(".e") or digits.contains(".E") {
+    return fail_at(src: src, pos: start, what: "a number like 12, -3.5 or 1e9")
+  }
+  if not float {
+    return match text.to_int() {
+      Some(n) => Ok(Step { value: Json.Int(value: n), pos: i }),
+      None => fail_at(src: src, pos: start, what: "a number"),
+    }
+  }
+  return match text.to_float() {
+    Some(x) => Ok(Step { value: Json.Num(value: x), pos: i }),
+    None => fail_at(src: src, pos: start, what: "a number like 12, -3.5 or 1e9"),
+  }
+}
+
+fn word(src: Source, start: Int, w: Str, value: Json) -> Result[Step, Str] {
+  if src.text.slice(start, start + w.len()) == w {
+    return Ok(Step { value: value, pos: start + w.len() })
+  }
+  return fail_at(src: src, pos: start, what: "a value (`null`, `true`, `false`, a number, a string, `[` or `\{`)")
+}
+
+fn parse_array(src: Source, start: Int) -> Result[Step, Str] {
+  var items: List[Json] = []
+  var i = skip_ws(src, start)
+  if code_at(src, i) == 93 {
+    return Ok(Step { value: Json.Arr(items: items), pos: i + 1 })
+  }
+  while true {
+    let step = parse_value(src, i)?
+    items = items.push(step.value)
+    i = skip_ws(src, step.pos)
+    let c = code_at(src, i)
+    if c == 93 {
+      return Ok(Step { value: Json.Arr(items: items), pos: i + 1 })
+    }
+    if c != 44 {
+      return fail_at(src: src, pos: i, what: "`,` or `]`")
+    }
+    i = i + 1
+  }
+  return fail_at(src: src, pos: i, what: "`]`")
+}
+
+fn parse_object(src: Source, start: Int) -> Result[Step, Str] {
+  var fields: Map[Str, Json] = Map {}
+  var i = skip_ws(src, start)
+  if code_at(src, i) == 125 {
+    return Ok(Step { value: Json.Obj(fields: fields), pos: i + 1 })
+  }
+  while true {
+    if code_at(src, i) != 34 {
+      return fail_at(src: src, pos: i, what: "a key in double quotes")
+    }
+    let key = parse_string(src, i + 1)?
+    i = skip_ws(src, key.pos)
+    if code_at(src, i) != 58 {
+      return fail_at(src: src, pos: i, what: "`:` after the key")
+    }
+    let step = parse_value(src, i + 1)?
+    fields = fields.set(as_text(key.value).unwrap_or(""), step.value)
+    i = skip_ws(src, step.pos)
+    let c = code_at(src, i)
+    if c == 125 {
+      return Ok(Step { value: Json.Obj(fields: fields), pos: i + 1 })
+    }
+    if c != 44 {
+      return fail_at(src: src, pos: i, what: "`,` or `\}`")
+    }
+    i = skip_ws(src, i + 1)
+  }
+  return fail_at(src: src, pos: i, what: "`\}`")
+}
+
+fn parse_value(src: Source, start: Int) -> Result[Step, Str] {
+  let i = skip_ws(src, start)
+  let c = code_at(src, i)
+  if c == 123 {
+    return parse_object(src, i + 1)
+  }
+  if c == 91 {
+    return parse_array(src, i + 1)
+  }
+  if c == 34 {
+    return parse_string(src, i + 1)
+  }
+  if c == 110 {
+    return word(src: src, start: i, w: "null", value: Json.Null)
+  }
+  if c == 116 {
+    return word(src: src, start: i, w: "true", value: Json.Bool(value: true))
+  }
+  if c == 102 {
+    return word(src: src, start: i, w: "false", value: Json.Bool(value: false))
+  }
+  if c == 45 or (c >= 48 and c <= 57) {
+    return parse_number(src, i)
+  }
+  return fail_at(src: src, pos: i, what: "a value (`null`, `true`, `false`, a number, a string, `[` or `\{`)")
+}
+
+/// Parses a complete JSON text. Errors say what was expected and where (line and column).
+/// >>> assert parse_json("[1, 2.5, \"x\", null]").map(json_text) == Ok("[1,2.5,\"x\",null]")
+/// >>> assert parse_json("\{\"a\": \}").is_err()
+pub fn parse_json(text: Str) -> Result[Json, Str] {
+  let src = Source { text: text, codes: text.codes() }
+  let step = parse_value(src, 0)?
+  let end = skip_ws(src, step.pos)
+  if end != src.codes.len() {
+    return Err("JSON: unexpected text after the value at {where(src, end)}")
+  }
+  return Ok(step.value)
+}
+
+test "round trip of a document" {
+  let text = "\{\"id\": 12345678901234567890, \"name\": \"Ann \\\"A\\\" \\u00e9\\ud83d\\ude00\", \"tags\": [\"x\", \"y\"]," +
+    " \"score\": -0.5, \"ok\": true, \"none\": null, \"nested\": \{\"empty\": [], \"obj\": \{\}\}\}"
+  let j = parse_json(text).unwrap_or(Json.Null)
+  assert as_int(field(j, "id").unwrap_or(Json.Null)) == Some(12345678901234567890)
+  assert lookup(j, "name").map(fn(n) => as_text(n)) == Some(Some("Ann \"A\" é😀"))
+  assert lookup(j, "tags.1") == Some(Json.Text(value: "y"))
+  assert lookup(j, "tags.5") == None
+  assert as_num(field(j, "score").unwrap_or(Json.Null)) == Some(-0.5)
+  assert parse_json(json_text(j)) == Ok(j)
+  assert parse_json(json_pretty(j)) == Ok(j)
+}
+
+test "errors point at the problem" {
+  assert parse_json("[1, 2") == Err("JSON: expected `,` or `]` at line 1, column 6, found the end of the text")
+  assert parse_json("\{\n  \"a\" 1\}") == Err("JSON: expected `:` after the key at line 2, column 7, found `1`")
+  assert parse_json("01").is_err()
+  assert parse_json("[1,]").is_err()
+  assert parse_json("tru").is_err()
+  assert parse_json("\"a\nb\"").is_err()
+  assert parse_json("1 2").is_err()
+}
+
+test "pretty printing" {
+  let j = json_object([Pair { first: "a", second: json_ints([1, 2]) }, Pair { first: "b", second: Json.Obj(fields: Map {}) }])
+  assert json_pretty(j) == "\{\n  \"a\": [\n    1,\n    2\n  ],\n  \"b\": \{\}\n\}"
+  assert json_text(Json.Text(value: "tab\there")) == "\"tab\\there\""
+}
+
+property "strings survive a round trip" (s: Str) {
+  assert parse_json(json_text(Json.Text(value: s))) == Ok(Json.Text(value: s))
+}
+
+property "integers survive a round trip" (xs: List[Int]) {
+  assert parse_json(json_text(json_ints(xs))) == Ok(json_ints(xs))
+}

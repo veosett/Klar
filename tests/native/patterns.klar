@@ -1,0 +1,33 @@
+// Nested patterns: literals, enums inside Option/Result, guards — exhaustive without a catch-all.
+
+enum Shape {
+  Circle(r: Int),
+  Rect(w: Int, h: Int),
+}
+
+fn kind(x: Option[Shape]) -> Str {
+  return match x {
+    Some(Shape.Circle(0)) => "dot",
+    Some(Shape.Circle(r)) => "circle {r}",
+    Some(Shape.Rect(w, h)) if w == h => "square {w}",
+    Some(Shape.Rect(w, _)) => "rect {w}",
+    None => "none",
+  }
+}
+
+fn pair(a: Result[Option[Bool], Str]) -> Int {
+  return match a {
+    Ok(Some(true)) => 1,
+    Ok(Some(false)) => 2,
+    Ok(None) => 3,
+    Err("boom") => 4,
+    Err(_) => 5,
+  }
+}
+
+fn main() uses io {
+  for s in [Some(Shape.Circle(r: 0)), Some(Shape.Circle(r: 2)), Some(Shape.Rect(w: 3, h: 3)), Some(Shape.Rect(w: 1, h: 2)), None] {
+    print(kind(s))
+  }
+  print([Ok(Some(true)), Ok(Some(false)), Ok(None), Err("boom"), Err("x")].map(pair))
+}

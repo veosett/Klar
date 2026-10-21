@@ -1,0 +1,263 @@
+// Dates and times in UTC: calendar arithmetic, ISO 8601 text, Unix timestamps.
+// All functions are pure except `now_utc` (effect `time`). There are no time zones: store UTC, show UTC.
+
+/// A moment in UTC: a calendar date and a time of day (milliseconds included).
+pub type DateTime { year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, millis: Int }
+
+const MS_PER_DAY: Int = 86400000
+
+/// Floor division (rounds towards minus infinity, unlike `/`): correct for dates before 1970.
+fn floor_div(a: Int, b: Int) -> Int
+  requires b > 0
+{
+  let q = a / b
+  if a % b < 0 {
+    return q - 1
+  }
+  return q
+}
+
+/// >>> assert is_leap_year(2024)
+/// >>> assert not is_leap_year(1900)
+/// >>> assert is_leap_year(2000)
+pub fn is_leap_year(year: Int) -> Bool {
+  return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+}
+
+/// >>> assert days_in_month(2024, 2) == 29
+/// >>> assert days_in_month(2023, 2) == 28
+/// >>> assert days_in_month(2023, 11) == 30
+pub fn days_in_month(year: Int, month: Int) -> Int
+  requires month >= 1 and month <= 12
+{
+  if month == 2 {
+    return match is_leap_year(year) {
+      true => 29,
+      false => 28,
+    }
+  }
+  if month == 4 or month == 6 or month == 9 or month == 11 {
+    return 30
+  }
+  return 31
+}
+
+/// Days since 1970-01-01 (negative before it).
+/// >>> assert days_from_civil(year: 1970, month: 1, day: 1) == 0
+/// >>> assert days_from_civil(year: 2000, month: 3, day: 1) == 11017
+pub fn days_from_civil(year: Int, month: Int, day: Int) -> Int
+  requires month >= 1 and month <= 12
+{
+  var y = year
+  if month <= 2 {
+    y = y - 1
+  }
+  let era = floor_div(y, 400)
+  let yoe = y - era * 400
+  var mp = month - 3
+  if month <= 2 {
+    mp = month + 9
+  }
+  let doy = (153 * mp + 2) / 5 + day - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  return era * 146097 + doe - 719468
+}
+
+/// The calendar date `days` days after 1970-01-01, at midnight.
+pub fn date_from_days(days: Int) -> DateTime {
+  let z = days + 719468
+  let era = floor_div(z, 146097)
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let day = doy - (153 * mp + 2) / 5 + 1
+  var month = mp + 3
+  if mp >= 10 {
+    month = mp - 9
+  }
+  var year = yoe + era * 400
+  if month <= 2 {
+    year = year + 1
+  }
+  return DateTime { year: year, month: month, day: day, hour: 0, minute: 0, second: 0, millis: 0 }
+}
+
+/// Midnight of a calendar date; `Err` for dates that do not exist.
+/// >>> assert date(year: 2024, month: 2, day: 30).is_err()
+pub fn date(year: Int, month: Int, day: Int) -> Result[DateTime, Str] {
+  if month < 1 or month > 12 {
+    return Err("month {month} is not in 1..12")
+  }
+  if day < 1 or day > days_in_month(year, month) {
+    return Err("{year}-{month} has no day {day}")
+  }
+  return Ok(DateTime { year: year, month: month, day: day, hour: 0, minute: 0, second: 0, millis: 0 })
+}
+
+/// The moment `ms` milliseconds after 1970-01-01T00:00:00Z (a Unix timestamp in ms).
+/// >>> assert format_iso(from_unix_ms(0)) == "1970-01-01T00:00:00Z"
+/// >>> assert format_iso(from_unix_ms(1700000000123)) == "2023-11-14T22:13:20.123Z"
+pub fn from_unix_ms(ms: Int) -> DateTime {
+  let days = floor_div(ms, MS_PER_DAY)
+  let rest = ms - days * MS_PER_DAY
+  let d = date_from_days(days)
+  return d with { hour: rest / 3600000, minute: rest / 60000 % 60, second: rest / 1000 % 60, millis: rest % 1000 }
+}
+
+/// >>> assert to_unix_ms(from_unix_ms(-86400001)) == -86400001
+pub fn to_unix_ms(t: DateTime) -> Int {
+  let days = days_from_civil(year: t.year, month: t.month, day: t.day)
+  return days * MS_PER_DAY + t.hour * 3600000 + t.minute * 60000 + t.second * 1000 + t.millis
+}
+
+/// Seconds since 1970-01-01T00:00:00Z (rounded down).
+pub fn to_unix_seconds(t: DateTime) -> Int {
+  return floor_div(to_unix_ms(t), 1000)
+}
+
+/// The current moment, from the system clock.
+pub fn now_utc() -> DateTime uses time {
+  return from_unix_ms(now_ms())
+}
+
+fn two(n: Int) -> Str {
+  return n.to_str().pad_left(2, "0")
+}
+
+/// `2026-10-21`
+pub fn format_date(t: DateTime) -> Str {
+  let year = t.year.to_str().pad_left(4, "0")
+  return "{year}-{two(t.month)}-{two(t.day)}"
+}
+
+/// `2026-10-21T18:05:09Z`, with `.123` milliseconds when they are not zero.
+pub fn format_iso(t: DateTime) -> Str {
+  let base = "{format_date(t)}T{two(t.hour)}:{two(t.minute)}:{two(t.second)}"
+  if t.millis == 0 {
+    return base + "Z"
+  }
+  return base + "." + t.millis.to_str().pad_left(3, "0") + "Z"
+}
+
+fn number(s: Str, start: Int, len: Int, what: Str) -> Result[Int, Str] {
+  let part = s.slice(start, start + len)
+  if part.len() != len or not part.is_numeric() {
+    return Err("expected {len} digits for the {what} at position {start} of \"{s}\"")
+  }
+  return Ok(part.to_int().unwrap_or(0))
+}
+
+/// Parses `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS` with optional `.sss` milliseconds and
+/// an optional `Z` (a space may replace the `T`).
+/// >>> assert parse_iso("2024-02-29T12:30:05.5Z").map(format_iso) == Ok("2024-02-29T12:30:05.500Z")
+/// >>> assert parse_iso("2023-02-29").is_err()
+pub fn parse_iso(text: Str) -> Result[DateTime, Str] {
+  var s = text.trim()
+  if s.ends_with("Z") {
+    s = s.slice(0, s.len() - 1)
+  }
+  if s.slice(4, 5) != "-" or s.slice(7, 8) != "-" {
+    return Err("expected a date like 2026-10-21, got \"{text}\"")
+  }
+  let year = number(s: s, start: 0, len: 4, what: "year")?
+  let month = number(s: s, start: 5, len: 2, what: "month")?
+  let day = number(s: s, start: 8, len: 2, what: "day")?
+  var t = date(year: year, month: month, day: day)?
+  if s.len() == 10 {
+    return Ok(t)
+  }
+  let sep = s.slice(10, 11)
+  if (sep != "T" and sep != " ") or s.slice(13, 14) != ":" {
+    return Err("expected `T` and a time like 18:05:09 after the date in \"{text}\"")
+  }
+  let hour = number(s: s, start: 11, len: 2, what: "hour")?
+  let minute = number(s: s, start: 14, len: 2, what: "minute")?
+  var second = 0
+  var millis = 0
+  if s.len() > 16 {
+    if s.slice(16, 17) != ":" {
+      return Err("expected `:` before the seconds in \"{text}\"")
+    }
+    second = number(s: s, start: 17, len: 2, what: "second")?
+    if s.len() > 19 {
+      let frac = s.slice(20, s.len())
+      if s.slice(19, 20) != "." or frac.is_empty() or not frac.is_numeric() {
+        return Err("expected `.` and milliseconds after the seconds in \"{text}\"")
+      }
+      millis = (frac + "00").slice(0, 3).to_int().unwrap_or(0)
+    }
+  }
+  if hour > 23 or minute > 59 or second > 59 {
+    return Err("time {two(hour)}:{two(minute)}:{two(second)} is out of range")
+  }
+  t = t with { hour: hour, minute: minute, second: second, millis: millis }
+  return Ok(t)
+}
+
+/// ISO weekday: 1 = Monday ... 7 = Sunday.
+/// >>> assert weekday(from_unix_ms(0)) == 4
+pub fn weekday(t: DateTime) -> Int {
+  let days = days_from_civil(year: t.year, month: t.month, day: t.day)
+  return days + 3 - floor_div(days + 3, 7) * 7 + 1
+}
+
+/// `Monday` ... `Sunday`
+pub fn weekday_name(t: DateTime) -> Str {
+  return ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    .get(weekday(t) - 1)
+    .unwrap_or("?")
+}
+
+/// 1 for January 1st ... 365 or 366.
+/// >>> assert day_of_year(from_unix_ms(0) with { year: 2024, month: 12, day: 31 }) == 366
+pub fn day_of_year(t: DateTime) -> Int {
+  return days_from_civil(year: t.year, month: t.month, day: t.day) -
+    days_from_civil(year: t.year, month: 1, day: 1) + 1
+}
+
+/// >>> assert format_date(add_days(from_unix_ms(0), -1)) == "1969-12-31"
+pub fn add_days(t: DateTime, days: Int) -> DateTime {
+  return from_unix_ms(to_unix_ms(t) + days * MS_PER_DAY)
+}
+
+pub fn add_seconds(t: DateTime, seconds: Int) -> DateTime {
+  return from_unix_ms(to_unix_ms(t) + seconds * 1000)
+}
+
+/// Whole calendar days from `a` to `b` (negative when `b` is earlier); the time of day is ignored.
+pub fn days_between(a: DateTime, b: DateTime) -> Int {
+  return days_from_civil(year: b.year, month: b.month, day: b.day) -
+    days_from_civil(year: a.year, month: a.month, day: a.day)
+}
+
+/// Milliseconds from `a` to `b`.
+pub fn millis_between(a: DateTime, b: DateTime) -> Int {
+  return to_unix_ms(b) - to_unix_ms(a)
+}
+
+test "round trip through days" {
+  for d in [-719468, -1, 0, 1, 59, 365, 10957, 11016, 20747, 2932896] {
+    let t = date_from_days(d)
+    assert days_from_civil(year: t.year, month: t.month, day: t.day) == d
+  }
+}
+
+test "known dates" {
+  assert format_iso(from_unix_ms(951782400000)) == "2000-02-29T00:00:00Z"
+  assert weekday_name(parse_iso("2026-10-21").unwrap_or(from_unix_ms(0))) == "Wednesday"
+  assert days_between(from_unix_ms(0), parse_iso("2000-01-01").unwrap_or(from_unix_ms(0))) == 10957
+  assert format_iso(add_seconds(from_unix_ms(0), -1)) == "1969-12-31T23:59:59Z"
+}
+
+property "unix milliseconds round trip" (ms: Int) {
+  let t = from_unix_ms(ms)
+  assert to_unix_ms(t) == ms
+  assert t.month >= 1 and t.month <= 12
+  assert t.day >= 1 and t.day <= days_in_month(t.year, t.month)
+}
+
+property "ISO text round trip" (ms: Int) {
+  let t = from_unix_ms(ms.abs() % 253402300800000)
+  assert parse_iso(format_iso(t)) == Ok(t)
+}

@@ -366,6 +366,19 @@ flowchart LR
 Модуль — это файл. Импорт всегда явный (`use a.b.{x, y}`), имена типов уникальны во всей программе, циклы
 импорта запрещены. Поэтому, глядя на имя, всегда можно найти, откуда оно (`klar refs`).
 
+Импортировать можно только объявления с `pub`. Всё остальное — внутреннее дело модуля:
+
+```text
+// lib/geo.klar
+pub type Point { x: Float, y: Float }     // видно снаружи
+fn square(v: Float) -> Float { ... }      // вспомогательная, только для этого файла
+pub fn dist(p: Point) -> Float { ... }
+```
+
+Публичный интерфейс модуля — это ровно его строки с `pub`, `klar outline` показывает их первыми словами. Импорт
+закрытого имени — ошибка E0606, `klar fix` сам добавит `pub`. Закрытая функция, которую никто не вызывает (тесты
+считаются), — предупреждение W0406: это мёртвый код.
+
 ## 13. Как ИИ работает с Klar
 
 ```mermaid
@@ -402,6 +415,9 @@ sequenceDiagram
 | битовые операции | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (операторов `&`, `\|`, `<<` нет) |
 | коды символов | `"hé".codes()` → `[104, 233]`, `65.to_char()` → `Some("A")` |
 | множество | `use std.set.{set_of}`, `set_of([1, 2]).has(1)` |
+| JSON | `use std.json.{parse_json, lookup, json_text}`, `lookup(parse_json(text)?, "users.0.name")` |
+| дата и время (UTC) | `use std.time.{now_utc, format_iso, parse_iso}`, `format_iso(now_utc())` |
+| элемент или значение по умолчанию | `xs.get_or(i, 0)` |
 | общий метод у разных типов | `trait Shape { fn area(self) -> Float }`, `impl Shape for Circle { ... }` |
 | функция для любого типа с методом | `fn total[T: Shape](xs: List[T]) -> Float` |
 | список разных фигур | `enum AnyShape { ... }` + `impl Shape for AnyShape` (трейт — не тип) |

@@ -2,11 +2,11 @@
 // Every operation returns a new set; methods work through UFCS: `s.add(4).has(4)`.
 
 /// A set: each value at most once, in insertion order.
-type Set[T] { items: Map[T, Bool] }
+pub type Set[T] { items: Map[T, Bool] }
 
 /// Builds a set from a list (duplicates are dropped).
 /// >>> assert set_of([3, 1, 3, 2]).values() == [3, 1, 2]
-fn set_of[T](xs: List[T]) -> Set[T] {
+pub fn set_of[T](xs: List[T]) -> Set[T] {
   var m: Map[T, Bool] = Map {}
   for x in xs {
     m = m.set(x, true)
@@ -15,59 +15,59 @@ fn set_of[T](xs: List[T]) -> Set[T] {
 }
 
 /// The empty set of a given element type: `let s: Set[Int] = empty_set()`.
-fn empty_set[T]() -> Set[T] {
+pub fn empty_set[T]() -> Set[T] {
   let m: Map[T, Bool] = Map {}
   return Set { items: m }
 }
 
 /// >>> assert set_of([1]).add(2).values() == [1, 2]
-fn add[T](s: Set[T], x: T) -> Set[T] {
+pub fn add[T](s: Set[T], x: T) -> Set[T] {
   return Set { items: s.items.set(x, true) }
 }
 
 /// >>> assert set_of([1, 2]).remove(1).values() == [2]
-fn remove[T](s: Set[T], x: T) -> Set[T] {
+pub fn remove[T](s: Set[T], x: T) -> Set[T] {
   return Set { items: s.items.remove(x) }
 }
 
 /// >>> assert set_of(["a"]).has("a")
-fn has[T](s: Set[T], x: T) -> Bool {
+pub fn has[T](s: Set[T], x: T) -> Bool {
   return s.items.has(x)
 }
 
 /// >>> assert set_of([1, 1, 2]).size() == 2
-fn size[T](s: Set[T]) -> Int {
+pub fn size[T](s: Set[T]) -> Int {
   return s.items.len()
 }
 
 /// The elements in insertion order.
-fn values[T](s: Set[T]) -> List[T] {
+pub fn values[T](s: Set[T]) -> List[T] {
   return s.items.keys()
 }
 
 /// >>> assert set_of([1, 2]).union(set_of([2, 3])).values() == [1, 2, 3]
-fn union[T](a: Set[T], b: Set[T]) -> Set[T] {
+pub fn union[T](a: Set[T], b: Set[T]) -> Set[T] {
   return Set { items: a.items.merge(b.items) }
 }
 
 /// >>> assert set_of([1, 2, 3]).intersect(set_of([3, 2, 9])).values() == [2, 3]
-fn intersect[T](a: Set[T], b: Set[T]) -> Set[T] {
+pub fn intersect[T](a: Set[T], b: Set[T]) -> Set[T] {
   return Set { items: a.items.filter(fn(k, _v) => b.items.has(k)) }
 }
 
 /// >>> assert set_of([1, 2, 3]).minus(set_of([2])).values() == [1, 3]
-fn minus[T](a: Set[T], b: Set[T]) -> Set[T] {
+pub fn minus[T](a: Set[T], b: Set[T]) -> Set[T] {
   return Set { items: a.items.filter(fn(k, _v) => not b.items.has(k)) }
 }
 
 /// >>> assert set_of([1, 2]).is_subset(set_of([2, 1, 5]))
-fn is_subset[T](a: Set[T], b: Set[T]) -> Bool {
+pub fn is_subset[T](a: Set[T], b: Set[T]) -> Bool {
   return a.values().all(fn(x) => b.items.has(x))
 }
 
 /// Same elements, in any order.
 /// >>> assert set_of([1, 2]).same_as(set_of([2, 1]))
-fn same_as[T](a: Set[T], b: Set[T]) -> Bool {
+pub fn same_as[T](a: Set[T], b: Set[T]) -> Bool {
   return a.size() == b.size() and a.is_subset(b)
 }
 

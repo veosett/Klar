@@ -48,6 +48,7 @@ SYS_SIGNATURES = [
     "fn os_exit(code: Word) -> Never",
     "fn os_alloc(n: Word) -> Word",
     "fn os_time_ns() -> Word",
+    "fn os_wall_ns() -> Word",
     "fn os_open(path: Word, mode: Word) -> Word",
     "fn os_close(fd: Word) -> Word",
     "fn os_file_exists(path: Word) -> Bool",

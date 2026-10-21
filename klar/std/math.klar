@@ -3,7 +3,7 @@
 /// Greatest common divisor (always >= 0).
 /// >>> assert gcd(12, 18) == 6
 /// >>> assert gcd(-4, 6) == 2
-fn gcd(a: Int, b: Int) -> Int
+pub fn gcd(a: Int, b: Int) -> Int
   ensures result >= 0
 {
   var x = a.abs()
@@ -18,7 +18,7 @@ fn gcd(a: Int, b: Int) -> Int
 
 /// Least common multiple; lcm(0, n) == 0.
 /// >>> assert lcm(4, 6) == 12
-fn lcm(a: Int, b: Int) -> Int {
+pub fn lcm(a: Int, b: Int) -> Int {
   let g = gcd(a, b)
   if g == 0 {
     return 0
@@ -29,7 +29,7 @@ fn lcm(a: Int, b: Int) -> Int {
 /// Primality test by trial division.
 /// >>> assert is_prime(97)
 /// >>> assert not is_prime(1)
-fn is_prime(n: Int) -> Bool {
+pub fn is_prime(n: Int) -> Bool {
   if n < 2 {
     return false
   }
@@ -51,7 +51,7 @@ fn is_prime(n: Int) -> Bool {
 
 /// All primes below `limit` (sieve of Eratosthenes).
 /// >>> assert primes_below(20) == [2, 3, 5, 7, 11, 13, 17, 19]
-fn primes_below(limit: Int) -> List[Int] {
+pub fn primes_below(limit: Int) -> List[Int] {
   var marks: List[Bool] = []
   for _i in range(0, limit) {
     marks = marks.push(true)
@@ -72,7 +72,7 @@ fn primes_below(limit: Int) -> List[Int] {
 
 /// n! for n >= 0.
 /// >>> assert factorial(5) == 120
-fn factorial(n: Int) -> Int
+pub fn factorial(n: Int) -> Int
   requires n >= 0
 {
   var acc = 1
@@ -84,7 +84,7 @@ fn factorial(n: Int) -> Int
 
 /// n-th Fibonacci number (fib(0) == 0), linear time.
 /// >>> assert fib(10) == 55
-fn fib(n: Int) -> Int
+pub fn fib(n: Int) -> Int
   requires n >= 0
 {
   var a = 0
@@ -99,7 +99,7 @@ fn fib(n: Int) -> Int
 
 /// Integer square root: the largest r with r * r <= n.
 /// >>> assert isqrt(17) == 4
-fn isqrt(n: Int) -> Int
+pub fn isqrt(n: Int) -> Int
   requires n >= 0
   ensures result * result <= n and (result + 1) * (result + 1) > n
 {
@@ -117,7 +117,7 @@ fn isqrt(n: Int) -> Int
 
 /// Arithmetic mean; None for an empty list.
 /// >>> assert mean([1.0, 2.0, 3.0]) == Some(2.0)
-fn mean(xs: List[Float]) -> Option[Float] {
+pub fn mean(xs: List[Float]) -> Option[Float] {
   if xs.is_empty() {
     return None
   }
@@ -127,7 +127,7 @@ fn mean(xs: List[Float]) -> Option[Float] {
 /// Median; None for an empty list.
 /// >>> assert median([3.0, 1.0, 2.0]) == Some(2.0)
 /// >>> assert median([4.0, 1.0, 3.0, 2.0]) == Some(2.5)
-fn median(xs: List[Float]) -> Option[Float] {
+pub fn median(xs: List[Float]) -> Option[Float] {
   let sorted = xs.sort()
   let n = sorted.len()
   if n == 0 {
@@ -142,7 +142,7 @@ fn median(xs: List[Float]) -> Option[Float] {
 }
 
 /// Population standard deviation; None for an empty list.
-fn std_dev(xs: List[Float]) -> Option[Float] {
+pub fn std_dev(xs: List[Float]) -> Option[Float] {
   let m = mean(xs)?
   let squares = xs.map(fn(x) => (x - m) * (x - m))
   return Some((squares.sum_float() / xs.len().to_float()).sqrt())
@@ -150,7 +150,7 @@ fn std_dev(xs: List[Float]) -> Option[Float] {
 
 /// Clamps a Float into [low, high].
 /// >>> assert clamp_float(x: 5.5, low: 0.0, high: 1.0) == 1.0
-fn clamp_float(x: Float, low: Float, high: Float) -> Float
+pub fn clamp_float(x: Float, low: Float, high: Float) -> Float
   requires low <= high
 {
   return x.max(low).min(high)
@@ -158,18 +158,18 @@ fn clamp_float(x: Float, low: Float, high: Float) -> Float
 
 /// Product of all numbers (1 for an empty list).
 /// >>> assert product([2, 3, 4]) == 24
-fn product(xs: List[Int]) -> Int {
+pub fn product(xs: List[Int]) -> Int {
   return xs.fold(1, fn(acc, x) => acc * x)
 }
 
 /// Floats are equal within an absolute tolerance.
 /// >>> assert approx_eq(a: 0.1 + 0.2, b: 0.3, tolerance: 0.000001)
-fn approx_eq(a: Float, b: Float, tolerance: Float) -> Bool {
+pub fn approx_eq(a: Float, b: Float, tolerance: Float) -> Bool {
   return (a - b).abs() <= tolerance
 }
 
 /// Degrees to radians.
-fn to_radians(degrees: Float) -> Float {
+pub fn to_radians(degrees: Float) -> Float {
   return degrees * PI / 180.0
 }
 

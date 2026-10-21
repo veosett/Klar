@@ -308,6 +308,26 @@ class Asm:
         self.b(0x0F, opc)
         self.modrm_rr(dst, src)
 
+    def movsd_load(self, x, base, disp):          # movsd xmm, [base + disp]
+        self.b(0xF2)
+        self.rex(0, x, 0, base)
+        self.b(0x0F, 0x10)
+        self.modrm_mem(x, base, disp)
+
+    def movsd_store(self, base, disp, x):         # movsd [base + disp], xmm
+        self.b(0xF2)
+        self.rex(0, x, 0, base)
+        self.b(0x0F, 0x11)
+        self.modrm_mem(x, base, disp)
+
+    def movapd(self, dst, src):                   # movapd xmm, xmm (a register rename, no latency)
+        if dst == src:
+            return
+        self.b(0x66)
+        self.rex(0, dst, 0, src)
+        self.b(0x0F, 0x28)
+        self.modrm_rr(dst, src)
+
     def ucomisd(self, a, b):
         self.b(0x66)
         self.rex(0, a, 0, b)

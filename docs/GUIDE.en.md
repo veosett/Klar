@@ -365,6 +365,19 @@ flowchart LR
 A module is a file. Imports are explicit (`use a.b.{x, y}`), type names are unique in the whole program, and import
 cycles are forbidden — so a name always leads back to its origin (`klar refs`).
 
+Only `pub` declarations can be imported; everything else is the module's own business:
+
+```text
+// lib/geo.klar
+pub type Point { x: Float, y: Float }     // visible outside
+fn square(v: Float) -> Float { ... }      // a helper for this file only
+pub fn dist(p: Point) -> Float { ... }
+```
+
+A module's public interface is exactly its `pub` lines (`klar outline` shows them first thing). Importing a
+private name is error E0606 and `klar fix` adds the `pub`. A private function nothing calls (tests count) is
+warning W0406: dead code.
+
 ## 13. How an AI works with Klar
 
 ```mermaid
@@ -401,6 +414,9 @@ sequenceDiagram
 | bit operations | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (there are no `&`, `\|`, `<<` operators) |
 | character codes | `"hé".codes()` → `[104, 233]`, `65.to_char()` → `Some("A")` |
 | a set | `use std.set.{set_of}`, `set_of([1, 2]).has(1)` |
+| JSON | `use std.json.{parse_json, lookup, json_text}`, `lookup(parse_json(text)?, "users.0.name")` |
+| date and time (UTC) | `use std.time.{now_utc, format_iso, parse_iso}`, `format_iso(now_utc())` |
+| an element or a default | `xs.get_or(i, 0)` |
 | a shared method of different types | `trait Shape { fn area(self) -> Float }`, `impl Shape for Circle { ... }` |
 | a function for any type with a method | `fn total[T: Shape](xs: List[T]) -> Float` |
 | a list of different shapes | `enum AnyShape { ... }` + `impl Shape for AnyShape` (a trait is not a type) |

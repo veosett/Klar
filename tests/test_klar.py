@@ -526,6 +526,34 @@ class DeveloperTools(unittest.TestCase):
             self.assertEqual(data["functions"]["make_greeting"]["flow"][0]["kind"], "return")
 
 
+class Exhaustiveness(unittest.TestCase):
+    ENUM = "enum Shape {\n  Circle(r: Int),\n  Rect(w: Int, h: Int),\n}\n\n"
+
+    def messages(self, body):
+        return [(d.code, d.message) for d in diags(self.ENUM + body)]
+
+    def test_nested_patterns_are_checked(self):
+        got = self.messages("fn f(x: Option[Shape]) -> Int {\n  return match x {\n    Some(Shape.Circle(_)) => 1,\n"
+                            "    None => 0,\n  }\n}\n")
+        self.assertTrue(any(c == "E0301" and "Some(Shape.Rect(_, _))" in m for c, m in got), got)
+        got = self.messages("fn f(x: Option[Option[Bool]]) -> Int {\n  return match x {\n    Some(Some(true)) => 1,\n"
+                            "    None => 2,\n  }\n}\n")
+        msg = next(m for c, m in got if c == "E0301")
+        self.assertIn("Some(None)", msg)
+        self.assertIn("Some(Some(false))", msg)
+
+    def test_complete_nested_match_needs_no_catch_all(self):
+        self.assertEqual(errors(self.ENUM + "fn f(x: Option[Shape]) -> Int {\n  return match x {\n"
+                                            "    Some(Shape.Circle(_)) => 1,\n    Some(Shape.Rect(_, _)) => 2,\n"
+                                            "    None => 0,\n  }\n}\n"), [])
+
+    def test_unreachable_arms(self):
+        got = codes(self.ENUM + "fn f(x: Option[Bool]) -> Int {\n  return match x {\n    Some(true) => 1,\n"
+                                "    Some(false) => 2,\n    Some(_) => 3,\n    None => 4,\n  }\n}\n")
+        self.assertIn("W0303", got)
+        self.assertNotIn("E0301", got)
+
+
 class Traits(unittest.TestCase):
     BASE = """trait Shape {
   fn area(self) -> Float
@@ -643,9 +671,9 @@ fn main() uses io {
     def test_traits_across_modules(self):
         with tempfile.TemporaryDirectory() as d:
             for name, text in {
-                "geo.klar": "trait Area {\n  fn area(self) -> Int\n}\n\ntype Sq { s: Int }\n\nimpl Area for Sq {\n"
+                "geo.klar": "pub trait Area {\n  fn area(self) -> Int\n}\n\ntype Sq { s: Int }\n\nimpl Area for Sq {\n"
                             "  fn area(self) -> Int {\n    return self.s * self.s\n  }\n}\n\n"
-                            "fn make() -> Sq {\n  return Sq { s: 3 }\n}\n",
+                            "pub fn make() -> Sq {\n  return Sq { s: 3 }\n}\n",
                 "main.klar": "use geo.{Area, make}\n\ntype Rect { w: Int, h: Int }\n\nimpl Area for Rect {\n"
                              "  fn area(self) -> Int {\n    return self.w * self.h\n  }\n}\n\n"
                              "fn sum_area[T: Area](xs: List[T]) -> Int {\n  return xs.map(fn(x) => x.area()).sum()\n}"
@@ -663,7 +691,7 @@ fn main() uses io {
     def test_own_function_wins_when_the_trait_is_not_imported(self):
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "a.klar"), "w", encoding="utf-8") as f:
-                f.write("trait Describe {\n  fn describe(self) -> Str\n}\n\ntype C { x: Int }\n\n"
+                f.write("pub trait Describe {\n  fn describe(self) -> Str\n}\n\npub type C { x: Int }\n\n"
                         "impl Describe for C {\n  fn describe(self) -> Str {\n    return \"impl\"\n  }\n}\n")
             main = os.path.join(d, "main.klar")
             with open(main, "w", encoding="utf-8") as f:
@@ -696,8 +724,8 @@ class Modules(unittest.TestCase):
 
     def test_import_and_run(self):
         with tempfile.TemporaryDirectory() as d:
-            self.write(d, "lib/geo.klar", "type P { x: Int }\nfn helper(n: Int) -> Int { return n * 2 }\n"
-                                          "fn double_x(p: P) -> Int { return helper(p.x) }\nconst K: Int = 7\n")
+            self.write(d, "lib/geo.klar", "pub type P { x: Int }\nfn helper(n: Int) -> Int { return n * 2 }\n"
+                                          "pub fn double_x(p: P) -> Int { return helper(p.x) }\npub const K: Int = 7\n")
             main = self.write(d, "main.klar", "use lib.geo.{P, double_x, K}\nuse std.math.{gcd}\n"
                                               "fn main() uses io { print(P { x: 4 }.double_x() + K + gcd(9, 6)) }\n")
             code, out, err = cli("run", main)
@@ -705,13 +733,32 @@ class Modules(unittest.TestCase):
 
     def test_private_names_need_import(self):
         with tempfile.TemporaryDirectory() as d:
-            self.write(d, "a.klar", "type P { x: Int }\nfn make() -> P { return P { x: 1 } }\n")
+            self.write(d, "a.klar", "type P { x: Int }\npub fn make() -> P { return P { x: 1 } }\n")
             main = self.write(d, "main.klar", "use a.{make}\nfn main() uses io { let p = P { x: 2 }\n print(p.x) }\n")
             loaded = load_path(main)
             self.assertIn("E0104", [x.code for x in loaded.diags])
             # field access on a value of a non-imported type is fine
             main2 = self.write(d, "m2.klar", "use a.{make}\nfn main() uses io { print(make().x) }\n")
             self.assertEqual(cli("run", main2)[1], "1\n")
+
+    def test_only_pub_declarations_are_importable(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write(d, "a.klar", "pub fn shown() -> Int {\n  return hidden() + 1\n}\n\nfn hidden() -> Int {\n"
+                                    "  return 41\n}\n")
+            main = self.write(d, "main.klar", "use a.{shown, hidden}\n\nfn main() uses io {\n"
+                                              "  print(shown() + hidden())\n}\n")
+            got = [(x.code, x.span.file) for x in load_path(main).diags]
+            self.assertIn(("E0606", "main.klar"), got)
+            cli("fix", main)                        # the fix adds `pub` in a.klar
+            with open(os.path.join(d, "a.klar"), encoding="utf-8") as f:
+                self.assertIn("pub fn hidden", f.read())
+            self.assertEqual(cli("run", "--interp", main)[1], "83\n")
+
+    def test_unused_private_function_warns(self):
+        got = codes("fn helper() -> Int {\n  return 1\n}\n\nfn main() uses io {\n  print(2)\n}\n")
+        self.assertIn("W0406", got)
+        self.assertNotIn("W0406", codes("fn helper() -> Int {\n  return 1\n}\n\ntest \"h\" {\n"
+                                        "  assert helper() == 1\n}\n"))
 
     def test_module_errors(self):
         with tempfile.TemporaryDirectory() as d:

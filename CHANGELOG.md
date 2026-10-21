@@ -6,6 +6,21 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 ## [Unreleased]
 
 ### Added
+- `std.json`: `Json` enum (exact `Int` numbers, ordered objects), `parse_json` with line/column errors,
+  `json_text`, `json_pretty`, `field` / `item` / `lookup("a.0.b")`, `as_*` accessors and builders.
+- `std.time`: `DateTime` in UTC, `from_unix_ms` / `to_unix_ms`, `now_utc`, ISO 8601 `format_iso` / `parse_iso`,
+  `weekday`, `day_of_year`, `add_days`, `days_between`, leap years — pure calendar arithmetic, valid before 1970.
+- `List.get_or(index, default)`: an element without allocating an `Option`.
+
+- Native code keeps floats in XMM registers (XMM2–XMM15, a second register class in the linear-scan allocator);
+  Int slow paths save them, so float loops with Int counters stay in registers. `mandelbrot`: 1.1 ms → 0.33 ms
+  (C: 0.27 ms, Go: 0.25 ms).
+- Visibility: only `pub fn` / `pub type` / `pub enum` / `pub const` / `pub trait` can be imported (E0606, with a
+  `klar fix` that adds the `pub` in the other module); a private function nothing calls warns (W0406). The
+  standard modules mark their API `pub`. **Breaking:** modules imported by others need `pub` on what they share.
+- Exhaustiveness of nested patterns (usefulness algorithm): `match` reports the exact missing values
+  (`Some(Shape.Rect(_, _))`, `Ok(None)`, ...), accepts complete nested matches without a catch-all, and warns
+  about every unreachable arm, not only those after a catch-all.
 - Traits: `trait Name { fn m(self, ...) -> T }` with default methods, `impl Name for Type` (Int, Float, Bool, Str
   and non-generic records/enums), bounds on generic functions `fn f[T: A + B](x: T)` and the `Self` type.
   Checked statically (E0220 not implemented, E0221 impl does not match, E0222 impl misplaced/duplicated,
@@ -29,6 +44,10 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - Illustrated language guides with diagrams: `docs/GUIDE.md` (Russian), `docs/GUIDE.en.md` (English); every code
   example in them is compiled and tested by the test-suite. Architecture diagrams converted to Mermaid.
 - `AGENTS.md` / `CLAUDE.md` for AI assistants working on the repository.
+
+### Changed
+- `now_ms()` is the wall clock (ms since 1970 UTC) on every back-end; the native build used a monotonic clock.
+  `now_ns()` stays monotonic for measuring durations.
 
 ## [0.3.0] — 2026-10-21
 

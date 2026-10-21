@@ -3,7 +3,7 @@
 /// Integers from `start` (inclusive) to `end` (exclusive) with a step.
 /// >>> assert range_step(start: 0, end: 10, step: 3) == [0, 3, 6, 9]
 /// >>> assert range_step(start: 5, end: 0, step: -2) == [5, 3, 1]
-fn range_step(start: Int, end: Int, step: Int) -> List[Int]
+pub fn range_step(start: Int, end: Int, step: Int) -> List[Int]
   requires step != 0
 {
   var out: List[Int] = []
@@ -17,13 +17,13 @@ fn range_step(start: Int, end: Int, step: Int) -> List[Int]
 
 /// How many times each element occurs.
 /// >>> assert frequencies(["a", "b", "a"]).get("a") == Some(2)
-fn frequencies[T](xs: List[T]) -> Map[T, Int] {
+pub fn frequencies[T](xs: List[T]) -> Map[T, Int] {
   return xs.fold(Map {}, fn(acc, x) => acc.update(x, 0, fn(n) => n + 1))
 }
 
 /// Sliding windows of `size` consecutive elements.
 /// >>> assert windows([1, 2, 3, 4], 3) == [[1, 2, 3], [2, 3, 4]]
-fn windows[T](xs: List[T], size: Int) -> List[List[T]]
+pub fn windows[T](xs: List[T], size: Int) -> List[List[T]]
   requires size > 0
 {
   var out: List[List[T]] = []
@@ -35,7 +35,7 @@ fn windows[T](xs: List[T], size: Int) -> List[List[T]]
 
 /// Swaps rows and columns; rows shorter than the first are padded by skipping.
 /// >>> assert transpose([[1, 2, 3], [4, 5, 6]]) == [[1, 4], [2, 5], [3, 6]]
-fn transpose[T](rows: List[List[T]]) -> List[List[T]] {
+pub fn transpose[T](rows: List[List[T]]) -> List[List[T]] {
   let width = rows.first().map(fn(r) => r.len()).unwrap_or(0)
   return range(0, width).map(fn(c) => rows.flat_map(fn(r) => match r.get(c) {
     Some(v) => [v],
@@ -45,7 +45,7 @@ fn transpose[T](rows: List[List[T]]) -> List[List[T]] {
 
 /// Puts `sep` between elements.
 /// >>> assert intersperse([1, 2, 3], 0) == [1, 0, 2, 0, 3]
-fn intersperse[T](xs: List[T], sep: T) -> List[T] {
+pub fn intersperse[T](xs: List[T], sep: T) -> List[T] {
   var out: List[T] = []
   for e in xs.enumerate() {
     if e.index > 0 {
@@ -58,7 +58,7 @@ fn intersperse[T](xs: List[T], sep: T) -> List[T] {
 
 /// Rotates left by `n` positions (negative rotates right).
 /// >>> assert rotate([1, 2, 3, 4], 1) == [2, 3, 4, 1]
-fn rotate[T](xs: List[T], n: Int) -> List[T] {
+pub fn rotate[T](xs: List[T], n: Int) -> List[T] {
   if xs.is_empty() {
     return xs
   }
@@ -68,20 +68,20 @@ fn rotate[T](xs: List[T], n: Int) -> List[T] {
 
 /// Elements present in both lists (order of the first list, no duplicates).
 /// >>> assert intersection([1, 2, 2, 3], [2, 3, 4]) == [2, 3]
-fn intersection[T](a: List[T], b: List[T]) -> List[T] {
+pub fn intersection[T](a: List[T], b: List[T]) -> List[T] {
   return a.filter(fn(x) => b.contains(x)).unique()
 }
 
 /// Elements of `a` that are not in `b`.
 /// >>> assert difference([1, 2, 3], [2]) == [1, 3]
-fn difference[T](a: List[T], b: List[T]) -> List[T] {
+pub fn difference[T](a: List[T], b: List[T]) -> List[T] {
   return a.filter(fn(x) => not b.contains(x))
 }
 
 /// Binary search in a sorted list of Ints; returns the index if found.
 /// >>> assert binary_search([1, 3, 5, 7], 5) == Some(2)
 /// >>> assert binary_search([1, 3, 5, 7], 4) == None
-fn binary_search(sorted: List[Int], target: Int) -> Option[Int] {
+pub fn binary_search(sorted: List[Int], target: Int) -> Option[Int] {
   var lo = 0
   var hi = sorted.len() - 1
   while lo <= hi {
@@ -101,7 +101,7 @@ fn binary_search(sorted: List[Int], target: Int) -> Option[Int] {
 
 /// Cumulative sums.
 /// >>> assert running_sum([1, 2, 3]) == [1, 3, 6]
-fn running_sum(xs: List[Int]) -> List[Int] {
+pub fn running_sum(xs: List[Int]) -> List[Int] {
   var total = 0
   var out: List[Int] = []
   for x in xs {

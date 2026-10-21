@@ -325,21 +325,26 @@ def cmd_fix(args):
                 continue
             if not d.fix.get("safe", True) and not args.all:
                 continue
-            if d.span.file.startswith("std/") or d.span.file == "prelude.klar":
-                continue
-            per_file.setdefault(d.span.file, []).append(d)
+            for e in fix_edits(d.fix):   # an edit may target another module (e.g. adding `pub` there)
+                fname = e["span"].file or d.span.file
+                if fname.startswith("std/") or fname.startswith("rt/") or fname == "prelude.klar":
+                    continue
+                per_file.setdefault(fname, []).append((d, e))
         if not per_file:
             break
         changed = False
-        for fname, ds in per_file.items():
+        for fname, pairs in per_file.items():
             path = os.path.join(root_dir, *fname.split("/"))
             with open(path, encoding="utf-8") as f:
                 text = f.read()
-            edits = [e for d in ds for e in fix_edits(d.fix)]
-            new = apply_edits(text, edits)
+            new = apply_edits(text, [e for _, e in pairs])
             if new != text:
                 changed = True
-                applied += [{"code": d.code, "at": d.span.short(), "message": d.message} for d in ds]
+                seen = []
+                for d, _ in pairs:
+                    if d not in seen:
+                        seen.append(d)
+                applied += [{"code": d.code, "at": d.span.short(), "message": d.message} for d in seen]
                 if not args.dry_run:
                     with open(path, "w", encoding="utf-8") as f:
                         f.write(new)

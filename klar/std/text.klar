@@ -3,38 +3,38 @@
 /// Upper-cases the first character.
 /// >>> assert capitalize("hello") == "Hello"
 /// >>> assert capitalize("") == ""
-fn capitalize(s: Str) -> Str {
+pub fn capitalize(s: Str) -> Str {
   return s.slice(0, 1).upper() + s.slice(1, s.len())
 }
 
 /// Capitalizes every word separated by single spaces.
 /// >>> assert title_case("the quick fox") == "The Quick Fox"
-fn title_case(s: Str) -> Str {
+pub fn title_case(s: Str) -> Str {
   return s.split(" ").map(fn(w) => capitalize(w)).join(" ")
 }
 
 /// Non-empty words separated by any amount of whitespace.
 /// >>> assert words("  a  b\tc ") == ["a", "b", "c"]
-fn words(s: Str) -> List[Str] {
+pub fn words(s: Str) -> List[Str] {
   return s.replace("\t", " ").replace("\n", " ").split(" ").filter(fn(w) => not w.is_empty())
 }
 
 /// True for strings that read the same backwards, ignoring case and spaces.
 /// >>> assert is_palindrome("Never odd or even")
-fn is_palindrome(s: Str) -> Bool {
+pub fn is_palindrome(s: Str) -> Bool {
   let clean = s.lower().replace(" ", "")
   return clean == clean.reverse()
 }
 
 /// True if the string is empty or only whitespace.
 /// >>> assert is_blank("  ")
-fn is_blank(s: Str) -> Bool {
+pub fn is_blank(s: Str) -> Bool {
   return s.trim().is_empty()
 }
 
 /// Number of occurrences of every word (case-insensitive).
 /// >>> assert word_frequencies("a b A").get("a") == Some(2)
-fn word_frequencies(s: Str) -> Map[Str, Int] {
+pub fn word_frequencies(s: Str) -> Map[Str, Int] {
   var counts: Map[Str, Int] = Map {}
   for w in words(s.lower()) {
     counts = counts.update(w, 0, fn(n) => n + 1)
@@ -44,7 +44,7 @@ fn word_frequencies(s: Str) -> Map[Str, Int] {
 
 /// Centers `s` in a field of `width` characters.
 /// >>> assert center(s: "ab", width: 6, fill: "*") == "**ab**"
-fn center(s: Str, width: Int, fill: Str) -> Str {
+pub fn center(s: Str, width: Int, fill: Str) -> Str {
   let total = width - s.len()
   if total <= 0 {
     return s
@@ -55,7 +55,7 @@ fn center(s: Str, width: Int, fill: Str) -> Str {
 
 /// Shortens `s` to at most `max` characters, ending with "...".
 /// >>> assert truncate("hello world", 8) == "hello..."
-fn truncate(s: Str, max: Int) -> Str
+pub fn truncate(s: Str, max: Int) -> Str
   requires max >= 3
 {
   if s.len() <= max {
@@ -66,7 +66,7 @@ fn truncate(s: Str, max: Int) -> Str
 
 /// Breaks text into lines of at most `width` characters (words longer than width stay whole).
 /// >>> assert wrap("aa bb cc dd", 5) == ["aa bb", "cc dd"]
-fn wrap(text: Str, width: Int) -> List[Str]
+pub fn wrap(text: Str, width: Int) -> List[Str]
   requires width > 0
 {
   var lines: List[Str] = []
@@ -89,7 +89,7 @@ fn wrap(text: Str, width: Int) -> List[Str]
 
 /// Converts snake_case to camelCase.
 /// >>> assert snake_to_camel("max_user_count") == "maxUserCount"
-fn snake_to_camel(s: Str) -> Str {
+pub fn snake_to_camel(s: Str) -> Str {
   let parts = s.split("_")
   let head = parts.first().unwrap_or("")
   let rest = parts.drop(1).map(fn(p) => capitalize(p)).join("")
@@ -98,7 +98,7 @@ fn snake_to_camel(s: Str) -> Str {
 
 /// Joins items as "a, b and c".
 /// >>> assert join_human(["a", "b", "c"]) == "a, b and c"
-fn join_human(items: List[Str]) -> Str {
+pub fn join_human(items: List[Str]) -> Str {
   let n = items.len()
   if n == 0 {
     return ""

@@ -1,0 +1,101 @@
+// Floats in XMM registers: many live values, values across calls and across Int slow paths
+// (bignum overflow runs out-of-line runtime code while floats sit in XMM registers), x87 functions.
+
+type Vec { x: Float, y: Float }
+
+fn length(v: Vec) -> Float {
+  return (v.x * v.x + v.y * v.y).sqrt()
+}
+
+fn scale(v: Vec, k: Float) -> Vec {
+  return Vec { x: v.x * k, y: v.y * k }
+}
+
+fn many_live(a: Float) -> Float {
+  let b = a + 1.0
+  let c = b * 2.0
+  let d = c - 0.5
+  let e = d / 3.0
+  let f = e + a
+  let g = f * b
+  let h = g - c
+  let i = h + d
+  let j = i * 0.25
+  let k = j + e
+  let l = k - f
+  let m = l * g
+  let n = m + h
+  let o = n - i
+  let p = o * j
+  let q = p + k
+  let r = q - l
+  let s = r + m
+  return a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p + q + r + s
+}
+
+fn across_bignum(steps: Int) -> Str {
+  var x = 1.5
+  var y = 0.25
+  var big = 1
+  var i = 0
+  while i < steps {
+    x = x * 1.01 + y
+    big = big * 1000003
+    y = y * 0.99 - 0.001
+    i = i + 1
+  }
+  return "{x.round_to(6)} {y.round_to(6)} {big % 1000000007}"
+}
+
+fn across_calls(n: Int) -> Float {
+  var acc = 0.0
+  var v = Vec { x: 1.0, y: 2.0 }
+  for i in range(0, n) {
+    let before = acc * 0.5
+    v = scale(v, 1.1)
+    acc = before + length(v) + i.to_float()
+  }
+  return acc
+}
+
+fn transcendental(x: Float) -> Float {
+  let s = x.sin()
+  let c = x.cos()
+  let e = (x / 10.0).exp()
+  let l = (x + 1.0).ln()
+  return s * s + c * c + e - l + x.sqrt()
+}
+
+fn compare_chain(xs: List[Float]) -> Int {
+  var count = 0
+  var prev = -1000.0
+  for x in xs {
+    if x > prev and x != 0.0 {
+      count = count + 1
+    }
+    if x <= prev or x == prev {
+      count = count + 100
+    }
+    prev = x
+  }
+  return count
+}
+
+fn main() uses io {
+  print(many_live(1.25).round_to(4))
+  print(across_bignum(40))
+  print(across_calls(20).round_to(4))
+  print(transcendental(2.0).round_to(6))
+  print(compare_chain([1.0, 2.0, 0.0, 0.5, 0.5, 3.0]))
+  let xs = range(0, 10).map(fn(i) => i.to_float() * 0.3)
+  print(xs.map(fn(x) => (x * x - x).round_to(3)))
+  print((7.9).to_int() + (-7.9).to_int())
+  print(-(2.5) * 4.0)
+  let v = scale(Vec { x: 3.0, y: 4.0 }, 2.0)
+  print(length(v))
+}
+
+test "floats" {
+  assert length(Vec { x: 3.0, y: 4.0 }) == 5.0
+  assert transcendental(0.0) == 2.0
+}

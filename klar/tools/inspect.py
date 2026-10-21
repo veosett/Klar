@@ -63,7 +63,7 @@ def sig_text(src_lines, d):
             lines[-1] = lines[-1][:d.span.end_col - 1]
             lines[0] = lines[0][d.span.col - 1:]
         text = " ".join(x.strip() for x in lines)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"^pub\s+", "", re.sub(r"\s+", " ", text).strip())
 
 
 def user_modules(loaded):
@@ -86,7 +86,7 @@ def outline(loaded, all_modules=False):
             item = {"kind": kind, "line": d.span.line}
             if kind == "trait":
                 item["name"] = d.name
-                item["signature"] = f"trait {d.name}"
+                item["signature"] = ("pub " if d.public else "") + f"trait {d.name}"
                 item["methods"] = [sig_text(lines, f) for f in d.methods] + \
                     [sig_text(lines, f) + "   (default)" for f in decls
                      if isinstance(f, N.FnDecl) and f.owner_kind == "default" and f.trait == d.name]
@@ -103,7 +103,9 @@ def outline(loaded, all_modules=False):
                 item["items"] = list(d.items)
             else:
                 item["name"] = d.name
-                item["signature"] = sig_text(lines, d)
+                item["signature"] = ("pub " if getattr(d, "public", False) else "") + sig_text(lines, d)
+                if getattr(d, "public", False):
+                    item["public"] = True
             doc = getattr(d, "doc", None)
             if doc:
                 first = [x for x in doc.splitlines() if x.strip()]
