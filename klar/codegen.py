@@ -14,7 +14,7 @@ import sys
 
 from . import nodes as N
 from .builtins import GLOBALS, METHODS
-from .diagnostics import BUILTIN_SPAN, Span
+from .diagnostics import BUILTIN_SPAN
 from .errors import KlarRuntimeError
 from .values import (UNIT, KMap, NONE, Record, Variant, err, ok, show, some)
 

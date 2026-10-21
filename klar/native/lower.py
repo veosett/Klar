@@ -15,7 +15,7 @@ import struct
 
 from .. import nodes as N
 from ..builtins import GLOBALS, METHODS, parsed
-from ..types import ANY, NEVER, TCon, TFn, TParam, TVar, prune, show
+from ..types import NEVER, TCon, TFn, TParam, prune, show
 from .intrinsics import SYS_NAMES
 from .kir import Fn
 
@@ -770,7 +770,6 @@ class FnLowering:
         if e.name == "None":
             t = self.ty(e)
             return V(self.addr(self.p.static_variant(t, 0)), t, False)
-        m = self.m
         cmod, cname = self.resolve_const(e.name)
         if cmod is not None:
             r = self.reg()

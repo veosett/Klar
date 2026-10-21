@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "klar-lang"
+version = "0.3.0"
+description = "Klar: a fast, compile-time-safe programming language designed for AI authors, with its own native x86-64 compiler"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "veosett" }]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["programming-language", "compiler", "ai", "llm", "x86-64", "static-typing"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Software Development :: Compilers",
+    "Development Status :: 3 - Alpha",
+]
+
+[project.urls]
+Homepage = "https://github.com/veosett/Klar"
+Issues = "https://github.com/veosett/Klar/issues"
+
+[project.scripts]
+klar = "klar.cli:main"
+
+[tool.setuptools]
+packages = ["klar", "klar.native"]
+
+[tool.setuptools.package-data]
+klar = ["*.klar", "*.md", "std/*.klar", "rt/*.klar"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E741", "E731"]

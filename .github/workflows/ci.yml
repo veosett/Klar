@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}   # Windows runs are still experimental
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compiler test-suite (front-end, 3 back-ends, tools, compile-time safety)
+        run: python -m unittest discover -s tests -v
+      - name: Native back-end == reference interpreter
+        run: python tests/native_diff.py
+      - name: Example programs
+        run: |
+          python -m klar test examples/bank.klar
+          python -m klar run examples/features.klar
+          python -m klar build examples/shapes.klar -o shapes-bin
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check klar tests bench

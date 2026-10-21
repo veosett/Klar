@@ -106,7 +106,7 @@ test "List basics" {
   assert not xs.is_empty()
   assert xs.get(0) == Some(3)
   assert xs.get(3) == None
-  assert xs.get(-1) == None
+  assert xs.get(xs.len() - 4) == None      // a provably negative index is a compile error (E0705)
   assert xs.first() == Some(3)
   assert xs.last() == Some(2)
   assert xs.push(4) == [3, 1, 2, 4]

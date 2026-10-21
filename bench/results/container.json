@@ -8,6 +8,7 @@
     "python": "CPython 3.13.16",
     "javascript": "Node.js v22.22.0",
     "c": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 -O2",
+    "cpp": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 -O2",
     "java": "openjdk version \"21.0.12.1\" 2026-08-18",
     "go": "go version go1.24.7 linux/amd64",
     "rust": "rustc 1.97.0 (2d8144b78 2026-07-07) -O"
@@ -16,283 +17,313 @@
     "collections": {
       "klar": {
         "result": "100010,500348980,5004",
-        "compute_ms": 6.59201,
-        "wall_ms": 8.017791999009205
+        "compute_ms": 7.039885,
+        "wall_ms": 8.149970000886242
       },
       "klar-py": {
         "result": "100010,500348980,5004",
-        "compute_ms": 45.039066,
-        "wall_ms": 162.77150099995197
+        "compute_ms": 46.014058,
+        "wall_ms": 161.68677999849024
       },
       "klar-interp": {
         "result": "100010,500348980,5004",
-        "compute_ms": 706.662986,
-        "wall_ms": 822.9543739998917
+        "compute_ms": 827.266528,
+        "wall_ms": 945.5266940003639
       },
       "python": {
         "result": "100010,500348980,5004",
-        "compute_ms": 23.284,
-        "wall_ms": 40.05285799939884
+        "compute_ms": 29.936,
+        "wall_ms": 52.50169200007804
       },
       "javascript": {
         "result": "100010,500348980,5004",
-        "compute_ms": 28.498,
-        "wall_ms": 58.25611499858496
+        "compute_ms": 34.163,
+        "wall_ms": 75.34777899854816
       },
       "c": {
         "result": "100010,500348980,5004",
-        "compute_ms": 4.535,
-        "wall_ms": 6.182656999953906
+        "compute_ms": 4.967,
+        "wall_ms": 7.117422999726841
+      },
+      "cpp": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 4.868,
+        "wall_ms": 8.085161000053631
       },
       "java": {
         "result": "100010,500348980,5004",
-        "compute_ms": 39.271,
-        "wall_ms": 765.2218650000577
+        "compute_ms": 31.517,
+        "wall_ms": 820.7608939992497
       },
       "go": {
         "result": "100010,500348980,5004",
-        "compute_ms": 13.321,
-        "wall_ms": 16.798063999885926
+        "compute_ms": 13.069,
+        "wall_ms": 16.488995001054718
       },
       "rust": {
         "result": "100010,500348980,5004",
-        "compute_ms": 2.289,
-        "wall_ms": 4.2909390012937365
+        "compute_ms": 2.025,
+        "wall_ms": 3.959595000196714
       }
     },
     "fib": {
       "klar": {
         "result": "75025",
-        "compute_ms": 1.016514,
-        "wall_ms": 1.7003129996737698
+        "compute_ms": 1.109322,
+        "wall_ms": 1.8944949988508597
       },
       "klar-py": {
         "result": "75025",
-        "compute_ms": 8.731036,
-        "wall_ms": 133.41415299873916
+        "compute_ms": 8.262112,
+        "wall_ms": 112.54168699997535
       },
       "klar-interp": {
         "result": "75025",
-        "compute_ms": 1221.405211,
-        "wall_ms": 1362.5126229999296
+        "compute_ms": 1202.725554,
+        "wall_ms": 1360.1680980009405
       },
       "python": {
         "result": "75025",
-        "compute_ms": 7.945,
-        "wall_ms": 24.28524500101048
+        "compute_ms": 8.22,
+        "wall_ms": 25.104091999310185
       },
       "javascript": {
         "result": "75025",
-        "compute_ms": 2.001,
-        "wall_ms": 42.96593399885751
+        "compute_ms": 2.339,
+        "wall_ms": 43.63828600071429
       },
       "c": {
         "result": "75025",
-        "compute_ms": 0.117,
-        "wall_ms": 1.618308000615798
+        "compute_ms": 0.157,
+        "wall_ms": 2.1371910006564576
+      },
+      "cpp": {
+        "result": "75025",
+        "compute_ms": 0.123,
+        "wall_ms": 2.5411770002392586
       },
       "java": {
         "result": "75025",
-        "compute_ms": 0.539,
-        "wall_ms": 649.6203579990834
+        "compute_ms": 0.883,
+        "wall_ms": 713.580745001309
       },
       "go": {
         "result": "75025",
-        "compute_ms": 0.34,
-        "wall_ms": 1.9979389999207342
+        "compute_ms": 0.331,
+        "wall_ms": 1.9214799995097565
       },
       "rust": {
         "result": "75025",
         "compute_ms": 0.179,
-        "wall_ms": 2.0787749999726657
+        "wall_ms": 1.9006279999302933
       }
     },
     "loop": {
       "klar": {
         "result": "806000",
-        "compute_ms": 1.597614,
-        "wall_ms": 2.435756998238503
+        "compute_ms": 1.399416,
+        "wall_ms": 2.106138999806717
       },
       "klar-py": {
         "result": "806000",
-        "compute_ms": 26.66676,
-        "wall_ms": 144.38413899915759
+        "compute_ms": 28.481586,
+        "wall_ms": 132.9249999998865
       },
       "klar-interp": {
         "result": "806000",
-        "compute_ms": 1162.241329,
-        "wall_ms": 1296.8948540001293
+        "compute_ms": 1056.541021,
+        "wall_ms": 1164.936619999935
       },
       "python": {
         "result": "806000",
-        "compute_ms": 24.074,
-        "wall_ms": 40.57158499927027
+        "compute_ms": 23.251,
+        "wall_ms": 39.150547001554514
       },
       "javascript": {
         "result": "806000",
-        "compute_ms": 7.082,
-        "wall_ms": 40.280909999637515
+        "compute_ms": 6.979,
+        "wall_ms": 44.73229199902562
       },
       "c": {
         "result": "806000",
-        "compute_ms": 1.087,
-        "wall_ms": 2.7079880001110723
+        "compute_ms": 1.114,
+        "wall_ms": 2.5505559988232562
+      },
+      "cpp": {
+        "result": "806000",
+        "compute_ms": 1.054,
+        "wall_ms": 3.2256790000246838
       },
       "java": {
         "result": "806000",
-        "compute_ms": 3.821,
-        "wall_ms": 703.834136000296
+        "compute_ms": 3.18,
+        "wall_ms": 621.1968669995258
       },
       "go": {
         "result": "806000",
         "compute_ms": 1.123,
-        "wall_ms": 3.1155189990386134
+        "wall_ms": 3.3280469997407636
       },
       "rust": {
         "result": "806000",
-        "compute_ms": 0.98,
-        "wall_ms": 2.707309000470559
+        "compute_ms": 1.129,
+        "wall_ms": 2.9443410003295867
       }
     },
     "mandelbrot": {
       "klar": {
         "result": "1655",
-        "compute_ms": 1.053947,
-        "wall_ms": 1.596301000972744
+        "compute_ms": 1.090811,
+        "wall_ms": 1.7221470006916206
       },
       "klar-py": {
         "result": "1655",
-        "compute_ms": 12.950285,
-        "wall_ms": 122.77472400091938
+        "compute_ms": 11.962203,
+        "wall_ms": 119.3494009985443
       },
       "klar-interp": {
         "result": "1655",
-        "compute_ms": 918.369744,
-        "wall_ms": 1038.144835998537
+        "compute_ms": 985.047723,
+        "wall_ms": 1096.3129480005591
       },
       "python": {
         "result": "1655",
-        "compute_ms": 11.272,
-        "wall_ms": 27.337458001056802
+        "compute_ms": 11.814,
+        "wall_ms": 28.198254000017187
       },
       "javascript": {
         "result": "1655",
-        "compute_ms": 4.295,
-        "wall_ms": 33.46137500011537
+        "compute_ms": 5.155,
+        "wall_ms": 47.18098400007875
       },
       "c": {
         "result": "1655",
-        "compute_ms": 0.253,
-        "wall_ms": 1.3769590004812926
+        "compute_ms": 0.278,
+        "wall_ms": 1.975219000087236
+      },
+      "cpp": {
+        "result": "1655",
+        "compute_ms": 0.289,
+        "wall_ms": 2.393569000560092
       },
       "java": {
         "result": "1655",
-        "compute_ms": 2.931,
-        "wall_ms": 574.8512049995043
+        "compute_ms": 3.21,
+        "wall_ms": 600.9593280014087
       },
       "go": {
         "result": "1655",
-        "compute_ms": 0.224,
-        "wall_ms": 1.7574470002728049
+        "compute_ms": 0.286,
+        "wall_ms": 2.0481369992921827
       },
       "rust": {
         "result": "1655",
-        "compute_ms": 0.266,
-        "wall_ms": 1.943974999448983
+        "compute_ms": 0.301,
+        "wall_ms": 2.4688519988558255
       }
     },
     "primes": {
       "klar": {
         "result": "3245",
-        "compute_ms": 1.119476,
-        "wall_ms": 1.7670779998297803
+        "compute_ms": 1.032144,
+        "wall_ms": 1.6636480013403343
       },
       "klar-py": {
         "result": "3245",
-        "compute_ms": 19.337113,
-        "wall_ms": 109.84931999882974
+        "compute_ms": 25.993012,
+        "wall_ms": 139.80663099937374
       },
       "klar-interp": {
         "result": "3245",
-        "compute_ms": 1238.475364,
-        "wall_ms": 1356.4060819990118
+        "compute_ms": 1311.165753,
+        "wall_ms": 1474.1373239994573
       },
       "python": {
         "result": "3245",
-        "compute_ms": 16.461,
-        "wall_ms": 32.4344780001411
+        "compute_ms": 16.158,
+        "wall_ms": 31.47159400032251
       },
       "javascript": {
         "result": "3245",
-        "compute_ms": 2.147,
-        "wall_ms": 33.37019600076019
+        "compute_ms": 2.519,
+        "wall_ms": 38.18959100135544
       },
       "c": {
         "result": "3245",
-        "compute_ms": 0.832,
-        "wall_ms": 2.1955299998808187
+        "compute_ms": 0.826,
+        "wall_ms": 2.5787510003283387
+      },
+      "cpp": {
+        "result": "3245",
+        "compute_ms": 0.852,
+        "wall_ms": 3.7323720007407246
       },
       "java": {
         "result": "3245",
-        "compute_ms": 1.836,
-        "wall_ms": 594.0861640010553
+        "compute_ms": 2.183,
+        "wall_ms": 725.3998050000519
       },
       "go": {
         "result": "3245",
-        "compute_ms": 0.867,
-        "wall_ms": 2.9326849999051774
+        "compute_ms": 0.901,
+        "wall_ms": 3.0060049994062865
       },
       "rust": {
         "result": "3245",
-        "compute_ms": 0.585,
-        "wall_ms": 2.5992060000135098
+        "compute_ms": 0.52,
+        "wall_ms": 2.3960319995239843
       }
     },
     "strings": {
       "klar": {
         "result": "10000,988889",
-        "compute_ms": 12.390047,
-        "wall_ms": 15.180016000158503
+        "compute_ms": 13.820431,
+        "wall_ms": 17.06691899926227
       },
       "klar-py": {
         "result": "10000,988889",
-        "compute_ms": 29.965723,
-        "wall_ms": 146.7255360003037
+        "compute_ms": 34.116772,
+        "wall_ms": 156.76026199980697
       },
       "klar-interp": {
         "result": "10000,988889",
-        "compute_ms": 522.159197,
-        "wall_ms": 646.3747009984218
+        "compute_ms": 514.044569,
+        "wall_ms": 633.4114069995849
       },
       "python": {
         "result": "10000,988889",
-        "compute_ms": 17.579,
-        "wall_ms": 35.770828999375226
+        "compute_ms": 16.517,
+        "wall_ms": 34.42786899904604
       },
       "javascript": {
         "result": "10000,988889",
-        "compute_ms": 35.167,
-        "wall_ms": 82.73555199957627
+        "compute_ms": 28.231,
+        "wall_ms": 65.87390700042306
       },
       "c": {
         "result": "10000,988889",
-        "compute_ms": 8.387,
-        "wall_ms": 10.5465569995431
+        "compute_ms": 7.441,
+        "wall_ms": 9.232278000126826
+      },
+      "cpp": {
+        "result": "10000,988889",
+        "compute_ms": 9.022,
+        "wall_ms": 12.018542000078014
       },
       "java": {
         "result": "10000,988889",
-        "compute_ms": 48.346,
-        "wall_ms": 838.5581110014755
+        "compute_ms": 40.362,
+        "wall_ms": 768.0648370005656
       },
       "go": {
         "result": "10000,988889",
-        "compute_ms": 16.721,
-        "wall_ms": 21.81709700016654
+        "compute_ms": 14.236,
+        "wall_ms": 16.882435000297846
       },
       "rust": {
         "result": "10000,988889",
-        "compute_ms": 9.212,
-        "wall_ms": 12.778365000485792
+        "compute_ms": 8.366,
+        "wall_ms": 11.351672999808216
       }
     }
   }

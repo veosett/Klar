@@ -1,16 +1,45 @@
+<div align="center">
+
 # Klar
 
-**Klar** — язык программирования, спроектированный так, чтобы его было удобно **писать, читать и проверять языковой модели**,
-и при этом **быстрый**: у него собственный компилятор в машинный код x86-64 и собственный линкер.
-Человек в этой схеме — ревьюер: по сигнатуре функции он сразу видит типы, эффекты и контракты.
+**A fast, compile-time-safe programming language designed for AI authors.**
+
+[![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Version](https://img.shields.io/badge/version-0.3.0-informational)
+![Targets](https://img.shields.io/badge/targets-x86--64%20Linux%20%7C%20Windows-lightgrey)
+
+[Русская версия](README.ru.md) · [Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.md) ·
+[Speed benchmark](bench/README.md) · [AI benchmark](bench/ai/README.md) · [Changelog](CHANGELOG.md)
+
+</div>
+
+---
+
+## Goal
+
+Language models now write a large share of all code — but they write it in languages designed for humans, and
+they fail in predictable ways: they mix up idioms of different languages, forget to handle errors and missing
+values, expect immutable values to change, miss enum cases, swap arguments, and divide by values that can be zero.
+Worst of all, many of these mistakes **run without an error and silently print a wrong result**.
+
+**Klar** is built around the AI as the author and the human as the reviewer:
+
+1. **Catch mistakes before the program runs** — like Rust, everything that can be ruled out at compile time is
+   rejected by the compiler, with the exact location, a hint and often a machine-applicable fix.
+2. **Make the feedback loop cheap** — one command (`klar dev --json`) checks, tests and runs, and returns compact
+   JSON with a `next` step; the whole language reference fits into ~2,000 tokens (`klar spec`).
+3. **Be fast** — Klar compiles to native x86-64 machine code with its **own compiler and linker**: no C compiler,
+   no libc, no virtual machine.
+4. **Be autonomous** — the runtime is written in Klar itself; the next milestone is a self-hosted compiler.
 
 ```klar
 use std.math.{gcd}
 
-/// Списывает деньги со счёта
+/// Withdraws money from an account.
 /// >>> assert withdraw(Account { id: 1, balance: 100 }, 30) == Ok(Account { id: 1, balance: 70 })
 fn withdraw(acc: Account, amount: Int) -> Result[Account, BankError]
-  ensures result.is_err() or amount > 0
+  requires amount > 0
 {
   if acc.balance < amount {
     return Err(BankError.InsufficientFunds(need: amount, have: acc.balance))
@@ -19,118 +48,161 @@ fn withdraw(acc: Account, amount: Int) -> Result[Account, BankError]
 }
 
 property "balance never goes negative" (start: Int, amount: Int) {
-  match withdraw(Account { id: 1, balance: start.abs() }, amount) {
+  match withdraw(Account { id: 1, balance: start.abs() }, amount.abs() + 1) {
     Ok(acc) => { assert acc.balance >= 0 },
     Err(_) => { },
   }
 }
 ```
 
-## Быстрый старт
+## What the compiler catches
 
-Для компилятора нужен Python 3.8+ (без зависимостей) — это временный bootstrap, см. «Автономность».
-Скомпилированные программы не зависят ни от чего.
-
-```bat
-klar.bat run examples\features.klar            :: компиляция в машинный код (с кэшем) и запуск
-klar.bat build examples\shapes.klar            :: shapes.exe — один файл без зависимостей
-klar.bat build app.klar --target linux         :: кросс-компиляция: ELF для Linux из Windows
-klar.bat dev examples\bank.klar --json         :: один шаг цикла ИИ: проверка + тесты + запуск
-klar.bat test examples\bank.klar               :: test-, doc- и property-тесты
-klar.bat fix examples\mistakes.klar            :: применить все безопасные исправления
-klar.bat check examples\mistakes.klar --json   :: диагностики в JSON для агента
-klar.bat profile bench\programs\primes\primes.klar   :: профилировщик
-klar.bat spec                                  :: справка по языку для промпта (~2 тыс. токенов)
-klar.bat explain E0405
-python bench\run_bench.py                      :: сравнение скорости с C/Rust/Go/Java/JS/Python
-python -m unittest discover -s tests           :: тесты компилятора
-python tests\native_diff.py                    :: native-бэкенд против эталонного интерпретатора
-python bench\ai\run_ai_bench.py                :: когда язык ловит типичные ошибки ИИ (Klar vs 7 языков)
+```text
+error[E0701]: division by `count`, which may be zero
+  --> stats.klar:2:18
+    |
+  2 |   return total / count
+    |                  ^^^^^
+  hint: prove the divisor is not zero first: `if count != 0 { ... }`, `match count { 0 => ..., _ => ... }`,
+        an early `if count == 0 { return ... }`, or make it the caller's job: `requires count != 0`
+  maybe: insert at 1:38 ' requires count != 0'
 ```
-На Linux: `sh klar.sh run examples/hello.klar` или `python3 -m klar ...` из корня проекта.
 
-## Как ИИ работает с Klar
+| the mistake | in most languages | in Klar |
+|---|---|---|
+| using a possibly-missing value (`map.get(k) + 1`) | crash or silent `0` / `NaN` | compile error: handle `Option` |
+| ignoring a parse error | crash or a silently wrong number | compile error: handle `Option`/`Result` |
+| dividing by something that may be 0 | crash or `NaN` | compile error until the divisor is proven ≠ 0 |
+| `s.trim()` / `xs.push(1)` without assigning | silently does nothing | compile error E0405 (+ fix) |
+| a forgotten enum case | often silent | compile error listing the missing arms |
+| swapped same-typed arguments | silent | named arguments are required for ≥ 3 parameters |
+| integer overflow | silent / crash | impossible: `Int` is arbitrary precision |
+| `xs[len]`, off by one | crash / undefined behaviour | no indexing; `xs.get(xs.len())` is a compile error |
+| recursion without a base case | stack overflow | compile error E0702 |
+| `null`, exceptions, data races | everywhere | do not exist |
 
-1. В системный промпт кладётся вывод `klar spec`: весь язык и вся стандартная библиотека с сигнатурами.
-2. Модель пишет код вместе с тестами: `test`, doc-тесты `/// >>>`, `property` и контракты `requires`/`ensures`.
-3. Цикл: `klar dev file.klar --json` → JSON с ошибками (код, место, `hint`, `fix`), провалившимися тестами
-   (обе стороны `assert`, значения, стек, минимальный контрпример) и полем `next` — что делать дальше.
-   `klar fix` применяет безопасные правки сам. Когда всё зелёное — `klar run` / `klar build`.
+**AI benchmark** ([`bench/ai`](bench/ai/README.md)): the same 13 typical AI mistakes written idiomatically in
+7 languages. Klar stops **13 / 13** before the program runs (Rust 4 + 3 warnings, TypeScript strict 4,
+Python + mypy 6 / 12, Java 5, Go 4, C++ 2), produces **no silently wrong result** (TypeScript and C++: 8 / 13),
+and every message carries a fix hint (Rust: 6 / 12, the others: none).
 
-## Безопасность: ошибки — на этапе компиляции
+## Speed
 
-Как в Rust, всё, что можно отсечь до запуска, отсекает компилятор — с точным местом, подсказкой и часто готовой правкой:
+Compute time in milliseconds, best of 5, lower is better (2 vCPU x86-64 Linux; full methodology and other
+machines in [bench/README.md](bench/README.md)):
 
-* нет `null`, исключений, индексации `xs[i]`, переполнений, общей изменяемой памяти — этих ошибок просто не написать;
-* `Option`/`Result` нельзя использовать как значение, не обработав (`match`, `?`, `unwrap_or`); выброшенный `Result` — ошибка;
-* полнота `match`, запрет затенения, обязательные именованные аргументы при ≥3 параметрах, выброшенный результат
-  `trim()`/`push()` — ошибка;
-* **деление `Int` компилируется, только если делитель доказуемо не ноль** (`if b != 0`, `requires b != 0`, `match`,
-  `if xs.is_empty() { return ... }`, переменная, которая только растёт от положительного значения) — E0701;
-* рекурсия без базового случая (E0702), вызов с константами, нарушающими `requires` (E0703), заведомо неверный
-  аргумент встроенной функции (E0704), индекс `xs.get(xs.len())` (E0705), сортировка неупорядочиваемых значений (E0215).
+| benchmark | C -O2 | C++ -O2 | Rust -O | Go | **Klar** | Java 21 | Node.js 22 | Python 3.13 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `fib(25)` — function calls | 0.16 | 0.12 | 0.18 | 0.33 | **1.1** | 0.88 | 2.3 | 8.2 |
+| `loop` — integer arithmetic | 1.1 | 1.1 | 1.1 | 1.1 | **1.4** | 3.2 | 7.0 | 23.3 |
+| `primes` — division, branches | 0.83 | 0.85 | 0.52 | 0.90 | **1.0** | 2.2 | 2.5 | 16.2 |
+| `mandelbrot` — floating point | 0.28 | 0.29 | 0.30 | 0.29 | **1.1** | 3.2 | 5.2 | 11.8 |
+| `collections` — map/filter/sort 200k | 5.0 | 4.9 | 2.0 | 13.1 | **7.0** | 31.5 | 34.2 | 29.9 |
+| `strings` — 100k strings, join/split | 7.4 | 9.0 | 8.4 | 14.2 | **13.8** | 40.4 | 28.2 | 16.5 |
 
-**Бенчмарк для ИИ** (`bench/ai/`): 13 типичных ошибок моделей, одинаково написанных на 7 языках. Klar останавливает
-до запуска **13 из 13**, Rust — 4 (+3 предупреждения), TypeScript strict — 4, Python + mypy — 6 из 12, Go — 4, C++ — 2.
-«Молча неверный результат»: Klar — 0, TypeScript и C++ — 8, Go — 6. Подсказку с исправлением дают все сообщения Klar
-и половина сообщений Rust; остальные языки — ни одного. Подробно — `bench/ai/README.md`.
+Klar is 1.2–17× faster than CPython, faster than Node.js on all six and than Java on five, close to C on integer code
+(1.2–1.4×) and faster than Go on collections — while `Int` never overflows, values are immutable and every error
+shows a Klar stack trace. An executable starts in 1–2 ms.
 
-## Автономность
+## How it works
 
-Klar не транслируется в C и не использует чужой компилятор или рантайм:
+```mermaid
+flowchart LR
+    src["file.klar"] --> fe["Lexer → Parser → AST"]
+    fe --> chk["Checker<br/>types · effects · exhaustiveness"]
+    chk --> safe["Safety pass<br/>E0701–E0705"]
+    safe --> diag["Diagnostics<br/>human / JSON + fixes"]
+    safe --> lower["Lowering → KIR"]
+    lower --> opt["Optimizer<br/>inline · fold · fuse"]
+    opt --> ra["Register allocator"]
+    ra --> asm["x86-64 assembler"]
+    asm --> link["Linker"]
+    link --> elf["ELF (Linux)"]
+    link --> pe["PE .exe (Windows)"]
+    rt["Runtime in Klar<br/>klar/rt/*.klar"] --> lower
+    safe -.-> interp["Reference interpreter<br/>tests · profiler"]
+    safe -.-> py["Python back-end<br/>fallback"]
+```
 
-* **компилятор** (`klar/native/`): AST → промежуточное представление KIR → оптимизатор → регистровый аллокатор →
-  собственный ассемблер x86-64 → собственный линкер, который пишет ELF (Linux) или PE (Windows);
-* **рантайм** (`klar/rt/*.klar`, ~4,5 тыс. строк) написан **на самом Klar** (системное подмножество с типом `Word`):
-  аллокатор, подсчёт ссылок, большие целые, печать Float, строки UTF-8, List, Map, ввод-вывод;
-* исполняемый файл обращается только к ядру ОС: системные вызовы на Linux, `KERNEL32.dll` на Windows. Ни libc, ни Python;
-* Python сейчас нужен только как bootstrap для самого компилятора. Следующий этап — переписать компилятор на Klar
-  (self-hosting, план в `docs/ARCHITECTURE.md`, раздел 6).
+* Values are 64-bit words: small `Int`s are tagged inline (`(n << 1) | 1`; overflow transparently becomes a bignum),
+  heap objects carry a reference count and a type descriptor. Values are immutable, so reference counting needs no
+  cycle collector, and uniquely referenced values are updated in place (`xs = xs.push(v)` is amortized O(1)).
+* Executables call only the OS: raw syscalls on Linux, `KERNEL32.dll` on Windows. Typical size: 50–150 KB.
+* Every back-end must produce identical output and error codes — `tests/native_diff.py` checks it on Linux and
+  Windows.
 
-## Скорость
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (in Russian).
 
-Время вычислений, мс (лучшее из 5; Intel Core i5-8400, Linux, 2 vCPU; меньше — лучше):
+## Status and roadmap
 
-| задача | C -O2 | **Klar** | Java 21 | Node.js 22 | Python 3.10 |
-|---|---:|---:|---:|---:|---:|
-| fib(25), рекурсия | 0,16 | **1,1** | 0,65 | 2,3 | 18,6 |
-| loop, 300 тыс. итераций с `%` | 0,98 | **1,3** | 5,0 | 6,4 | 41,6 |
-| primes, перебор делителей до 30 000 | 1,9 | **3,6** | 4,9 | 2,9 | 23,9 |
-| mandelbrot, Float | 0,38 | **1,1** | 3,7 | 5,2 | 21,9 |
-| collections, map/filter/sort 200 тыс. | 5,1 | **10,0** | 37,7 | 43,1 | 39,3 |
-| strings, 100 тыс. строк, join/split | 11,6 | **19,9** | 72,7 | 36,3 | 28,5 |
+```mermaid
+flowchart TB
+    subgraph done["✅ Done"]
+        direction TB
+        v01["0.1 — core language, types, effects,<br/>contracts, tests, JSON diagnostics"]
+        v02["0.2 — modules, generics, doc &amp; property tests,<br/>dev / fix / profile, std library"]
+        v03["0.3 — native x86-64 compiler + linker,<br/>runtime in Klar, compile-time safety,<br/>speed &amp; AI benchmarks"]
+        v01 --> v02 --> v03
+    end
+    subgraph next["🔜 Planned"]
+        direction TB
+        v04["0.4 — floats in XMM registers, mutable lambda captures,<br/>Bytes, interval analysis for safety"]
+        v05["0.5 — self-hosting: compiler rewritten in Klar,<br/>klar fmt, LSP"]
+        v06["0.6 — AI patch protocol (edits by AST node id),<br/>static contract checking"]
+        v10["1.0 — ARM64 / macOS, package manager,<br/>stable specification"]
+        v04 --> v05 --> v06 --> v10
+    end
+    v03 --> v04
+```
 
-Klar в 1,4–32 раза быстрее Python, на 4 задачах из 6 быстрее Java и Node.js и в 1,3–7 раз медленнее C — при этом
-`Int` никогда не переполняется, все значения неизменяемы, а ошибки показывают стек вызовов Klar. Исполняемый файл
-стартует за 1–2 мс. Методика, все 9 реализаций (C, Rust, Go, Java, JS, Python и три бэкенда Klar) и история
-оптимизаций — в `bench/README.md`.
-
-## Что внутри
-
-| Часть | Что делает |
+| area | status |
 |---|---|
-| Язык | статические типы с выводом, дженерики (функции, записи, enum), алиасы, константы, `Option`/`Result`/`?`, `match` с guard'ами и проверкой полноты, лямбды, UFCS, модули `use m.{a, b}`, эффекты `uses io`, контракты |
-| Проверка | ~60 кодов диагностик с подсказками и машинными `fix`, распознавание «чужих» идиом (`.length`, `&&`, `unwrap`, `xs[0]`, `null`…) |
-| Бэкенды | **native** (по умолчанию): x86-64 Linux/Windows; `--py`: байткод Python; `--interp`: эталонный интерпретатор. Дифференциальные тесты держат их идентичными |
-| Тесты | `test`, doc-тесты, property-тесты со сжатием контрпримера, `assert` с обеими сторонами |
-| Инструменты | `dev`, `fix`, `profile`, `build`, `spec`, `explain`, `ast`, `--json` везде |
-| Stdlib | ~110 встроенных функций и методов + модули на Klar `std.math`, `std.text`, `std.list`, `std.result`; каждая функция покрыта тестом |
-| Бенчмарки | 6 задач × 9 реализаций, сверка результатов |
+| Language core: types with inference, generics, records/enums, `Option`/`Result`/`?`, `match`, modules | ✅ |
+| Effects (`uses io`), contracts (`requires`/`ensures`), immutability with in-place updates | ✅ |
+| Tests, doc-tests, property tests with shrinking, profiler | ✅ |
+| Native compiler for x86-64 Linux and Windows, own linker, runtime in Klar | ✅ |
+| Compile-time safety pass (division, recursion, contracts, built-in domains, indexes) | ✅ |
+| AI tooling: `dev --json`, `fix`, `spec`, `explain`, stable error codes | ✅ |
+| Self-hosted compiler | 🔜 0.5 |
+| ARM64, macOS, package manager | 🔜 1.0 |
 
-## Структура
+## Quick start
+
+Requirements for the compiler: **Python 3.10+** (no dependencies; a temporary bootstrap until the compiler is
+self-hosted). Compiled programs need nothing.
+
+```sh
+git clone https://github.com/veosett/Klar.git && cd Klar
+python -m klar run examples/hello.klar          # compile to machine code (cached) and run
+python -m klar build examples/shapes.klar       # standalone executable
+python -m klar build app.klar --target windows  # cross-compile a .exe from Linux (or the reverse)
+python -m klar dev examples/bank.klar --json    # one AI-loop step: check + tests + run
+python -m klar test examples/bank.klar          # tests, doc-tests, properties
+python -m klar fix examples/mistakes.klar       # apply all safe fixes
+python -m klar spec                             # the language reference for a prompt
+python -m klar explain E0701
+```
+
+`pip install -e .` installs a `klar` command. On Windows `klar.bat run examples\hello.klar` works from the
+repository root, on Linux `sh klar.sh ...`.
+
+## Repository
 
 ```
-docs/ARCHITECTURE.md   архитектура: принципы, тулчейн, нативный компилятор, self-hosting, дорожная карта
-docs/FEATURES.md       анализ основных языков → список функций Klar со статусами
-docs/SPEC.md           спецификация: грамматика, типы, семантика
-klar/                  фронтенд (lexer, parser, checker, loader), интерпретатор, codegen (Python), cli
-klar/native/           компилятор в машинный код: lower, kir, opt, regalloc, emit, x64, link, build
-klar/rt/*.klar         рантайм native-бэкенда на самом Klar
-klar/prelude.klar      прелюдия на Klar (Pair, Entry, Indexed, PI, E)
-klar/std/*.klar        стандартные модули на Klar с тестами
-klar/ai_reference.md   компактная справка для модели (klar spec)
-examples/              hello, bank, collections, shapes, features (+ lib/geo), mistakes
-tests/                 тесты компилятора, tests/stdlib, tests/native, native_diff.py
-bench/                 скорость: программы на 8 языках (C, C++, Rust, Go, Java, JS, Python, Klar), run_bench.py
-bench/ai/              «насколько ИИ проще»: 13 типичных ошибок × 7 языков, run_ai_bench.py
+klar/            compiler front-end, safety pass, interpreter, Python back-end, CLI
+klar/native/     native compiler: lowering, KIR, optimizer, register allocator, x86-64, linker
+klar/rt/         runtime of native executables, written in Klar
+klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result)
+examples/        example programs (examples/mistakes.klar: typical AI mistakes)
+tests/           test-suite, differential tests native vs interpreter
+bench/           speed benchmark (8 languages); bench/ai: AI-ergonomics benchmark (7 languages)
+docs/            architecture, specification, analysis of languages → feature list
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and pull requests are welcome.
+
+## License
+
+[MIT](LICENSE) © 2026 veosett

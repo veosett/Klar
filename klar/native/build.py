@@ -6,7 +6,7 @@ import sys
 from .emit import Emitter
 from .opt import inline_calls
 from .link import Image
-from .lower import NativeUnsupported, lower_program
+from .lower import lower_program
 from ..loader import load_path
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".klar-cache")

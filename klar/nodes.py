@@ -1,6 +1,6 @@
 """AST nodes. Every node carries a span and a stable numeric id
 (useful for AI tools that want to address a node instead of a text range)."""
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, fields
 from typing import Any, List, Optional
 
 from .diagnostics import Span
