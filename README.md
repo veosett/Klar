@@ -86,6 +86,23 @@ error[E0701]: division by `count`, which may be zero
 Python + mypy 6 / 12, Java 5, Go 4, C++ 2), produces **no silently wrong result** (TypeScript and C++: 8 / 13),
 and every message carries a fix hint (Rust: 6 / 12, the others: none).
 
+## Tooling
+
+Built for an AI author **and** a human reviewer ([docs/TOOLS.md](docs/TOOLS.md)):
+
+| for the AI author | | for the human reviewer | |
+|---|---|---|---|
+| `klar dev f.klar --json` | check + tests + run in one step | `klar view f.klar --run` | interactive HTML: overview → call graph → each function step by step |
+| `klar doc split` | signature + tested examples | `klar outline f.klar` | the API of a file in a few lines |
+| `klar eval '<expr>'` | value and type, no file needed | `klar coverage f.klar` | statements the tests never run |
+| `klar fix` / `klar fmt` | safe fixes, canonical layout | `editors/vscode` | highlighting, snippets, problem matcher |
+| `klar refs` / `klar rename` | exact (no shadowing in Klar) | `klar new app` | project skeleton with tests and `AGENTS.md` |
+
+`klar view` turns any Klar program into a page a human can read — the big picture first, details on demand:
+
+<p><img src="docs/img/view-overview.png" width="49%" alt="klar view: overview and call graph">
+<img src="docs/img/view-function.png" width="49%" alt="klar view: one function step by step"></p>
+
 ## Speed
 
 Compute time in milliseconds, best of 5, lower is better (2 vCPU x86-64 Linux; full methodology and other

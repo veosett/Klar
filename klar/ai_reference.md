@@ -7,7 +7,11 @@ exactly; the compiler rejects everything else with a coded error (`klar explain 
 1. Write code (with `test` blocks / doc-tests next to it).
 2. `klar dev file.klar --json` — ONE step: check + all tests + run `main`; compact JSON with a `next` field.
    Or separately: `klar check --json`, `klar test --json`, `klar run`.
-3. `klar fix file.klar` applies every safe machine fix (`;`, `&&`, missing named args, effects, ...).
+3. `klar fix file.klar` applies every safe machine fix (`;`, `&&`, missing named args, effects, ...);
+   `klar fmt file.klar` normalizes the layout.
+   Look things up instead of guessing: `klar doc split` / `klar doc List.sort` (signature + tested examples),
+   `klar eval '"a,b".split(",")'` (value : type), `klar outline file.klar` (API of a file),
+   `klar refs file.klar name`, `klar rename file.klar old new`, `klar coverage file.klar` (untested statements).
 4. Failures show values, both sides of `assert`, the Klar call stack, minimal property counterexamples.
 5. `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
    `.exe`/ELF (`--target windows|linux`); `klar profile file.klar` shows where time goes.

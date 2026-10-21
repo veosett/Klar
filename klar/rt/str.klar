@@ -473,7 +473,7 @@ fn Str_lines(s: Word, rtd: Word) -> Word {
     let c = cp_at(s + 32 + i)
     let l = cp_len(peek8(s + 32 + i))
     if c == 10 or c == 13 or c == 11 or c == 12 or c == 28 or c == 29 or c == 30 or c == 133 or
-        c == 8232 or c == 8233 {
+      c == 8232 or c == 8233 {
       out = list_push_owned_raw(out, str_from(s + 32 + start, i - start))
       if c == 13 and i + 1 < n and peek8(s + 33 + i) == 10 {
         i = i + 1

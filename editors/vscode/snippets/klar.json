@@ -1,0 +1,9 @@
+{
+  "function": { "prefix": "fn", "body": ["/// ${1:What it does.}", "/// >>> assert ${2:name}(${3}) == ${4}", "fn ${2:name}(${5:x: Int}) -> ${6:Int} {", "  $0", "}"], "description": "function with a doc-test" },
+  "main": { "prefix": "main", "body": ["fn main() uses io {", "  $0", "}"], "description": "entry point" },
+  "test": { "prefix": "test", "body": ["test \"${1:description}\" {", "  assert $0", "}"], "description": "test block" },
+  "property": { "prefix": "property", "body": ["property \"${1:description}\" (${2:xs: List[Int]}) {", "  assert $0", "}"], "description": "property test" },
+  "match": { "prefix": "match", "body": ["match ${1:value} {", "  ${2:Some(v)} => ${3},", "  ${4:None} => ${5},", "}"], "description": "match" },
+  "record": { "prefix": "type", "body": ["type ${1:Name} {", "  ${2:field}: ${3:Int},", "}"], "description": "record type" },
+  "enum": { "prefix": "enum", "body": ["enum ${1:Name} {", "  ${2:Variant}(${3:field}: ${4:Int}),", "  ${5:Other},", "}"], "description": "enum" }
+}

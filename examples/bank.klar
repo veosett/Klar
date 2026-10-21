@@ -56,6 +56,7 @@ fn describe(e: BankError) -> Str {
   }
 }
 
+/// Demo: two transfers between Alice and Bob — the first succeeds, the second fails with a typed error.
 fn main() uses io {
   let alice = Account { id: 1, owner: "Alice", balance: 100 }
   let bob = Account { id: 2, owner: "Bob", balance: 20 }

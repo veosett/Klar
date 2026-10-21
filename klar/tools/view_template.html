@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ — Klar view</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1d1f23; --muted: #6b7078; --line: #e2e3e0;
+  --accent: #2f6fdd; --accent-soft: #e6eefc; --pure: #2e8b57; --pure-soft: #e6f4ec;
+  --effect: #c96a12; --effect-soft: #fbefe2; --err: #c0392b; --err-soft: #fbe9e7;
+  --code-bg: #f3f4f1; --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a; --panel: #1d2024; --ink: #e8e9ea; --muted: #9aa0a8; --line: #2e3238;
+    --accent: #78a6ff; --accent-soft: #1f2b44; --pure: #6cc78f; --pure-soft: #1c2e24;
+    --effect: #f0a35a; --effect-soft: #33261a; --err: #ff8a7a; --err-soft: #3a211e;
+    --code-bg: #24282d; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line);
+  background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+header .file { color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+header .spacer { flex: 1; }
+button, .seg button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.layout { display: grid; grid-template-columns: 280px 1fr; min-height: calc(100vh - 53px); }
+aside { border-right: 1px solid var(--line); padding: 16px; background: var(--panel); overflow: auto;
+  height: calc(100vh - 53px); position: sticky; top: 53px; }
+aside h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 6px; }
+aside h3:first-child { margin-top: 0; }
+.fnlink { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+.fnlink:hover { background: var(--accent-soft); }
+.fnlink.sel { background: var(--accent-soft); color: var(--accent); }
+.fnlink .count { margin-left: auto; color: var(--muted); font-size: 11px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--pure); }
+.dot.effect { background: var(--effect); }
+.dot.ext { background: var(--muted); }
+main { padding: 20px; overflow: auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+  margin-bottom: 16px; box-shadow: var(--shadow); }
+.card h2 { margin: 0 0 8px; font-size: 18px; }
+.muted { color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.stat { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+.stat b { font-size: 18px; display: block; }
+code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+svg text { font-family: ui-monospace, Consolas, monospace; font-size: 12px; fill: var(--ink); }
+.node rect { fill: var(--pure-soft); stroke: var(--pure); stroke-width: 1.4; rx: 8; cursor: pointer; }
+.node.effect rect { fill: var(--effect-soft); stroke: var(--effect); }
+.node.ext rect { fill: var(--bg); stroke: var(--muted); stroke-dasharray: 4 3; }
+.node.cold rect { opacity: .45; }
+.node.sel rect { stroke: var(--accent); stroke-width: 2.6; }
+.node .badge { font-size: 10px; fill: var(--muted); }
+.edge { fill: none; stroke: var(--muted); stroke-width: 1.2; opacity: .55; }
+.edge.hot { stroke: var(--accent); opacity: 1; stroke-width: 2; }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.graph-wrap { overflow: auto; }
+.graph-wrap svg { display: block; margin: 8px auto 0; }
+.sig { font-family: ui-monospace, Consolas, monospace; background: var(--code-bg); padding: 8px 10px;
+  border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin-top: 10px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+.chip { display: inline-block; padding: 0 8px; border-radius: 10px; font-size: 12px; margin: 0 4px 4px 0;
+  border: 1px solid var(--line); cursor: default; }
+.chip.link { cursor: pointer; color: var(--accent); border-color: var(--accent); }
+.chip.effect { background: var(--effect-soft); color: var(--effect); border-color: var(--effect); }
+.chip.pure { background: var(--pure-soft); color: var(--pure); border-color: var(--pure); }
+.chip.err { background: var(--err-soft); color: var(--err); border-color: var(--err); }
+.toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
+.blk { border-left: 3px solid var(--line); margin: 4px 0 4px 6px; padding: 2px 0 2px 10px; }
+.blk > .hd { display: flex; gap: 8px; align-items: baseline; cursor: default; }
+.blk > .hd.tog { cursor: pointer; }
+.blk > .hd .ln { margin-left: auto; color: var(--muted); font-size: 11px; cursor: pointer; }
+.blk .kw { font-weight: 650; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; min-width: 54px; }
+.blk.k-if { border-color: #8e6ccf; } .blk.k-if > .hd .kw { color: #8e6ccf; }
+.blk.k-loop { border-color: #2a9d8f; } .blk.k-loop > .hd .kw { color: #2a9d8f; }
+.blk.k-match { border-color: #d17a22; } .blk.k-match > .hd .kw { color: #d17a22; }
+.blk.k-return > .hd .kw { color: var(--accent); }
+.blk.k-assert > .hd .kw { color: var(--err); }
+.blk.k-step > .hd .kw { color: var(--muted); }
+.blk .arm { margin: 4px 0 4px 4px; }
+.blk .arm > .lbl { font-size: 12px; color: var(--muted); }
+.blk.closed > .kids { display: none; }
+.blk > .hd .caret { width: 10px; color: var(--muted); }
+pre.src { background: var(--code-bg); padding: 10px 0; border-radius: 6px; overflow-x: auto; margin: 0;
+  counter-reset: ln; }
+pre.src span.l { display: block; padding: 0 12px; }
+pre.src span.l::before { content: attr(data-n); display: inline-block; width: 3em; color: var(--muted);
+  text-align: right; margin-right: 12px; user-select: none; }
+pre.src span.l.hl { background: var(--accent-soft); }
+.sk { color: #8e6ccf; } .ss { color: #2a9d8f; } .sc { color: var(--muted); font-style: italic; } .sn { color: #d17a22; }
+details summary { cursor: pointer; color: var(--muted); margin: 8px 0; }
+.types { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.type { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.type .nm { font-family: ui-monospace, Consolas, monospace; font-weight: 650; }
+.out { white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; background: var(--code-bg);
+  padding: 8px 10px; border-radius: 6px; max-height: 220px; overflow: auto; }
+@media (max-width: 800px) { .layout { grid-template-columns: 1fr; } aside { position: static; height: auto; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Klar view</h1><span class="file" id="file"></span>
+  <span class="spacer"></span>
+  <span class="seg" id="langsel"><button data-l="en">EN</button> <button data-l="ru">RU</button></span>
+</header>
+<div class="layout">
+  <aside id="side"></aside>
+  <main id="main"></main>
+</div>
+<script>
+const DATA = /*__DATA__*/null;
+const T = {
+  en: {
+    overview: "Overview", functions: "Functions", types: "Data types", tests: "Tests", consts: "Constants",
+    entry: "Entry point", graph: "Who calls whom", graphHint: "Click a function to see what it does. Arrows point from caller to callee.",
+    pure: "pure (no side effects)", effect: "has side effects (io, files, time…)", ext: "from another module", cold: "never ran",
+    takes: "Takes", nothing: "no arguments", returns: "Returns", requires: "Requires", guarantees: "Guarantees",
+    sideEffects: "Side effects", pureFn: "Pure: the same input always gives the same output.", canReturn: "Can return", propagates: "errors of the functions it calls (via ?)",
+    calls: "Calls", calledBy: "Called by", testedBy: "Tested by", examples: "Examples", builtins: "Uses built-ins",
+    flow: "What it does, step by step", depth: "Detail level", all: "all", source: "Source code",
+    noCallers: "nobody (entry point or unused)", none: "—", ranTimes: "Called %d× in the run", run: "Run",
+    output: "Output of the run", runError: "The run stopped with an error", back: "← Overview",
+    eff: { io: "console input/output", fs: "files", time: "the clock", rand: "random numbers", net: "network" },
+    k: { let: "let", var: "var", set: "set", if: "if", then: "yes", else: "otherwise", while: "repeat while",
+         for: "for each", in: "in", match: "depending on", ret: "return", assert: "check", do: "do",
+         brk: "stop loop", cont: "next iteration" },
+    statements: "statements", program: "Program", progDesc: "No description: add a `///` doc comment to `main`.",
+    noMain: "This file has no main(): it is a library.", fnCount: "functions", typeCount: "types", testCount: "tests",
+    effectFns: "with side effects", lines: "line",
+  },
+  ru: {
+    overview: "Обзор", functions: "Функции", types: "Типы данных", tests: "Тесты", consts: "Константы",
+    entry: "Точка входа", graph: "Кто кого вызывает", graphHint: "Нажмите на функцию, чтобы увидеть, что она делает. Стрелки идут от вызывающей к вызываемой.",
+    pure: "чистая (без побочных эффектов)", effect: "с побочными эффектами (ввод-вывод, файлы, время…)", ext: "из другого модуля", cold: "не выполнялась",
+    takes: "Принимает", nothing: "ничего", returns: "Возвращает", requires: "Требует", guarantees: "Гарантирует",
+    sideEffects: "Побочные эффекты", pureFn: "Чистая: при одних и тех же входных данных всегда один результат.", canReturn: "Может вернуть", propagates: "ошибки вызываемых функций (через ?)",
+    calls: "Вызывает", calledBy: "Кем вызывается", testedBy: "Проверяется тестами", examples: "Примеры", builtins: "Встроенные функции",
+    flow: "Что делает, по шагам", depth: "Уровень детализации", all: "всё", source: "Исходный код",
+    noCallers: "никем (точка входа или не используется)", none: "—", ranTimes: "Вызовов при запуске: %d", run: "Запуск",
+    output: "Вывод программы при запуске", runError: "Запуск остановился с ошибкой", back: "← Обзор",
+    eff: { io: "консольный ввод-вывод", fs: "файлы", time: "часы", rand: "случайные числа", net: "сеть" },
+    k: { let: "пусть", var: "перем.", set: "присвоить", if: "если", then: "да", else: "иначе", while: "пока", for: "для каждого",
+         in: "из", match: "в зависимости от", ret: "вернуть", assert: "проверить", do: "выполнить",
+         brk: "выйти из цикла", cont: "следующий шаг" },
+    statements: "инструкций", program: "Программа", progDesc: "Описания нет: добавьте `///` комментарий к `main`.",
+    noMain: "В файле нет main(): это библиотека.", fnCount: "функций", typeCount: "типов", testCount: "тестов",
+    effectFns: "с побочными эффектами", lines: "строка",
+  }
+};
+let stored = null;
+try { stored = localStorage.getItem("klar-view-lang"); } catch (e) {}
+let lang = (stored || navigator.language || "en").startsWith("ru") ? "ru" : "en";
+let selected = null, depth = 2;
+const fns = DATA.functions, trace = DATA.trace;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const t = () => T[lang];
+const calls = name => trace && trace.calls[name] ? trace.calls[name].calls : 0;
+
+function highlight(code) {
+  return esc(code)
+    .replace(/(\/\/.*)$/gm, '<span class="sc">$1</span>')
+    .replace(/(&quot;(?:[^&]|&(?!quot;))*?&quot;)/g, '<span class="ss">$1</span>')
+    .replace(/\b(fn|let|var|return|if|else|while|for|in|match|requires|ensures|uses|and|or|not|with|test|assert|type|enum|const|use|property|true|false)\b/g, '<span class="sk">$1</span>')
+    .replace(/\b(\d[\d_]*(?:\.\d+)?)\b/g, '<span class="sn">$1</span>');
+}
+
+// ---- sidebar ------------------------------------------------------------------------------------
+function side() {
+  const own = Object.values(fns).filter(f => f.own), ext = Object.values(fns).filter(f => !f.own);
+  const link = f => `<div class="fnlink ${selected === f.name ? "sel" : ""}" data-fn="${esc(f.name)}">
+      <span class="dot ${f.effects.length ? "effect" : ""} ${f.own ? "" : "ext"}"></span>${esc(f.name)}
+      ${trace ? `<span class="count">${calls(f.name) ? calls(f.name) + "×" : ""}</span>` : ""}</div>`;
+  let h = `<div class="fnlink ${selected ? "" : "sel"}" data-fn="">${t().overview}</div>`;
+  h += `<h3>${t().functions} (${own.length})</h3>` + own.map(link).join("");
+  if (ext.length) h += `<h3>${t().ext}</h3>` + ext.map(link).join("");
+  if (DATA.types.length) h += `<h3>${t().types}</h3>` + DATA.types.map(x => `<div class="mono muted" style="padding:2px 8px">${esc(x.name)}</div>`).join("");
+  if (DATA.tests.length) h += `<h3>${t().tests} (${DATA.tests.length})</h3>` + DATA.tests.map(x => `<div class="muted" style="padding:2px 8px;font-size:12px">${esc(x.name)}</div>`).join("");
+  $("#side").innerHTML = h;
+  document.querySelectorAll(".fnlink").forEach(el => el.onclick = () => select(el.dataset.fn || null));
+}
+
+// ---- call graph ---------------------------------------------------------------------------------
+function graph() {
+  const names = Object.keys(fns);
+  if (!names.length) return "";
+  const layer = {};
+  const roots = names.filter(n => n === DATA.entry).concat(names.filter(n => n !== DATA.entry && !fns[n].called_by.filter(c => c !== n).length));
+  const queue = roots.map(r => [r, 0]);
+  while (queue.length) {
+    const [n, d] = queue.shift();
+    if (layer[n] !== undefined && layer[n] >= d) continue;
+    if (d > names.length) continue;
+    layer[n] = d;
+    for (const c of fns[n].calls) if (c !== n && fns[c]) queue.push([c, d + 1]);
+  }
+  names.forEach(n => { if (layer[n] === undefined) layer[n] = 0; });
+  const layers = [];
+  names.forEach(n => (layers[layer[n]] = layers[layer[n]] || []).push(n));
+  const W = 150, H = 40, GX = 26, GY = 56;
+  const avail = Math.max(($("#main") ? $("#main").clientWidth : 1000) - 80, 4 * (W + GX));
+  const perRow = Math.max(3, Math.floor(avail / (W + GX)));
+  const rows = [];
+  layers.filter(Boolean).forEach(l => {
+    l.sort((a, b) => (fns[b].own - fns[a].own) || a.localeCompare(b));
+    for (let i = 0; i < l.length; i += perRow) rows.push(l.slice(i, i + perRow));
+  });
+  const width = Math.max(...rows.map(r => r.length)) * (W + GX) + GX;
+  const pos = {};
+  rows.forEach((r, i) => {
+    const off = (width - r.length * (W + GX) + GX) / 2;
+    r.forEach((n, j) => pos[n] = { x: off + j * (W + GX), y: 16 + i * (H + GY) });
+  });
+  const height = rows.length * (H + GY) + 10;
+  let s = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+  s += `<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor" opacity=".6"/></marker></defs>`;
+  for (const n of names) for (const c of fns[n].calls) {
+    if (!fns[c]) continue;
+    const a = pos[n], b = pos[c];
+    const hot = selected && (selected === n || selected === c);
+    if (n === c) {
+      s += `<path class="edge ${hot ? "hot" : ""}" d="M${a.x + W - 18},${a.y} c 20,-26 40,0 18,14" marker-end="url(#arr)"/>`;
+      continue;
+    }
+    const x1 = a.x + W / 2, y1 = a.y + H, x2 = b.x + W / 2, y2 = b.y;
+    const up = y2 <= y1;
+    const d = up ? `M${x1},${y1} C${x1},${y1 + 40} ${x2},${y2 - 40} ${x2},${y2}`
+                 : `M${x1},${y1} C${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}`;
+    s += `<path class="edge ${hot ? "hot" : ""}" style="color:var(--muted)" d="${d}" marker-end="url(#arr)"/>`;
+  }
+  for (const n of names) {
+    const f = fns[n], p = pos[n];
+    const cls = ["node", f.effects.length ? "effect" : "", f.own ? "" : "ext", trace && !calls(n) ? "cold" : "", selected === n ? "sel" : ""].join(" ");
+    const label = n.length > 18 ? n.slice(0, 17) + "…" : n;
+    const badge = trace ? (calls(n) ? calls(n) + "×" : "0×") : (f.effects.length ? f.effects.join(",") : "");
+    s += `<g class="${cls}" data-fn="${esc(n)}"><title>${esc(f.signature)}</title><rect x="${p.x}" y="${p.y}" width="${W}" height="${H}"/>
+      <text x="${p.x + 10}" y="${p.y + 17}">${esc(label)}</text>
+      <text class="badge" x="${p.x + 10}" y="${p.y + 32}">${esc(badge)}</text></g>`;
+  }
+  return s + "</svg>";
+}
+
+// ---- overview ------------------------------------------------------------------------------------
+function overview() {
+  const own = Object.values(fns).filter(f => f.own);
+  const eff = own.filter(f => f.effects.length).length;
+  let h = `<div class="card"><h2>${t().program}: ${esc(DATA.file)}</h2>
+    <div>${DATA.description ? esc(DATA.description) : `<span class="muted">${t().progDesc}</span>`}</div>
+    <div class="stats">
+      <div class="stat"><b>${own.length}</b>${t().fnCount}</div>
+      <div class="stat"><b>${eff}</b>${t().effectFns}</div>
+      <div class="stat"><b>${DATA.types.length}</b>${t().typeCount}</div>
+      <div class="stat"><b>${DATA.tests.length}</b>${t().testCount}</div>
+      ${trace ? `<div class="stat"><b>${trace.total_ms} ms</b>${t().run}</div>` : ""}
+    </div>
+    ${DATA.entry ? `<p>${t().entry}: <span class="chip link" data-fn="main">main</span></p>` : `<p class="muted">${t().noMain}</p>`}
+  </div>`;
+  if (DATA.entry && fns.main) {
+    h += `<div class="card"><h2>main — ${t().flow}</h2>${flowHtml(fns.main.flow, 1, 1)}</div>`;
+  }
+  h += `<div class="card"><h2>${t().graph}</h2><div class="muted">${t().graphHint}</div>
+    <div class="legend"><span><span class="dot"></span>${t().pure}</span><span><span class="dot effect"></span>${t().effect}</span>
+    <span><span class="dot ext"></span>${t().ext}</span>${trace ? `<span style="opacity:.5">▭ ${t().cold}</span>` : ""}</div>
+    <div class="graph-wrap">${graph()}</div></div>`;
+  if (trace) {
+    h += `<div class="card"><h2>${t().run}</h2>`;
+    if (trace.error) h += `<p class="chip err">${t().runError}: [${esc(trace.error.code)}] ${esc(trace.error.message)} (${t().lines} ${trace.error.line})</p>`;
+    h += `<div class="muted">${t().output}</div><div class="out">${esc(trace.output || "")}</div></div>`;
+  }
+  if (DATA.types.length) {
+    h += `<div class="card"><h2>${t().types}</h2><div class="types">` + DATA.types.map(x => `<div class="type">
+      <div class="nm">${esc(x.kind)} ${esc(x.name)}</div>${x.doc ? `<div class="muted">${esc(x.doc)}</div>` : ""}
+      ${x.fields.map(f => `<div class="mono">${esc(f)}</div>`).join("")}</div>`).join("") + `</div></div>`;
+  }
+  if (DATA.consts.length) {
+    h += `<div class="card"><h2>${t().consts}</h2>` + DATA.consts.map(c => `<div class="mono">${esc(c.name)} = ${esc(c.value)}</div>`).join("") + `</div>`;
+  }
+  return h;
+}
+
+// ---- control flow blocks ---------------------------------------------------------------------------
+function flowHtml(list, level, maxLevel) {
+  return list.map(n => blk(n, level, maxLevel)).join("");
+}
+function blk(n, level, maxLevel) {
+  const K = t().k, open = maxLevel === 0 || level < maxLevel;
+  const ln = `<span class="ln" data-line="${n.line}">${n.line}</span>`;
+  const box = (cls, kw, text, kids) => {
+    const tog = kids ? "tog" : "";
+    return `<div class="blk ${cls} ${kids && !open ? "closed" : ""}"><div class="hd ${tog}">
+      <span class="caret">${kids ? (open ? "▾" : "▸") : ""}</span><span class="kw">${kw}</span><span class="mono">${text}</span>${ln}</div>
+      ${kids ? `<div class="kids">${kids}</div>` : ""}</div>`;
+  };
+  const sub = (v) => v ? blk(v, level + 1, maxLevel) : "";
+  switch (n.kind) {
+    case "let": return n.value ? box("k-step", n.mutable ? K.var : K.let, esc(n.name) + " =", sub(n.value))
+                               : box("k-step", n.mutable ? K.var : K.let, `${esc(n.name)} = ${esc(n.text)}`);
+    case "assign": return n.value ? box("k-step", K.set, esc(n.name) + " =", sub(n.value))
+                                  : box("k-step", K.set, `${esc(n.name)} = ${esc(n.text)}`);
+    case "return": return n.value ? box("k-return", K.ret, "", sub(n.value)) : box("k-return", K.ret, esc(n.text));
+    case "if": {
+      let kids = `<div class="arm"><div class="lbl">${K.then}</div>${flowHtml(n.then, level + 1, maxLevel)}</div>`;
+      if (n.else) kids += `<div class="arm"><div class="lbl">${K.else}</div>${flowHtml(n.else, level + 1, maxLevel)}</div>`;
+      return box("k-if", K.if, esc(n.cond), kids);
+    }
+    case "while": return box("k-loop", K.while, esc(n.cond), flowHtml(n.body, level + 1, maxLevel));
+    case "for": return box("k-loop", K.for, `${esc(n.var)} ${K.in} ${esc(n.iter)}`, flowHtml(n.body, level + 1, maxLevel));
+    case "match": return box("k-match", K.match, esc(n.subject),
+      n.arms.map(a => `<div class="arm"><div class="lbl mono">${esc(a.pattern)} →</div>${flowHtml(a.body, level + 1, maxLevel)}</div>`).join(""));
+    case "assert": return box("k-assert", K.assert, esc(n.text));
+    case "break": return box("k-step", K.brk, "");
+    case "continue": return box("k-step", K.cont, "");
+    default: return box("k-step", K.do, esc(n.text));
+  }
+}
+
+// ---- one function ----------------------------------------------------------------------------------------
+function describe(f) {
+  const L = t(), parts = [];
+  if (f.doc) parts.push(esc(f.doc.split("\n")[0]));
+  parts.push(`${L.takes} ${f.params.length ? f.params.map(p => `<code>${esc(p.name)}</code> (${esc(p.type)})`).join(", ") : L.nothing}.`);
+  parts.push(`${L.returns} <code>${esc(f.returns)}</code>.`);
+  return parts.join(" ");
+}
+function fnView(name) {
+  const f = fns[name], L = t();
+  const chips = (arr, cls) => arr.length ? arr.map(x => `<span class="chip ${cls}" ${cls === "link" ? `data-fn="${esc(x)}"` : ""}>${esc(x)}</span>`).join("") : L.none;
+  let h = `<div class="toolbar"><button data-fn="">${L.back}</button></div>
+  <div class="card"><h2 class="mono">${esc(f.name)} <span class="muted" style="font-size:13px">${esc(f.module)}:${f.line}</span></h2>
+    <div class="sig">${esc(f.signature)}</div>
+    <p>${describe(f)}</p>
+    <dl class="facts">
+      ${f.requires.length ? `<dt>${L.requires}</dt><dd>${f.requires.map(r => `<code>${esc(r)}</code>`).join(" ")}</dd>` : ""}
+      ${f.ensures.length ? `<dt>${L.guarantees}</dt><dd>${f.ensures.map(r => `<code>${esc(r)}</code>`).join(" ")}</dd>` : ""}
+      <dt>${L.sideEffects}</dt><dd>${f.effects.length ? f.effects.map(e => `<span class="chip effect">${esc(L.eff[e] || e)}</span>`).join("") : `<span class="chip pure">${L.pureFn}</span>`}</dd>
+      ${f.errors.length ? `<dt>${L.canReturn}</dt><dd>${chips(f.errors.map(e => e === "?" ? L.propagates : e), "err")}</dd>` : ""}
+      <dt>${L.calls}</dt><dd>${chips(f.calls.filter(c => fns[c]), "link")}</dd>
+      <dt>${L.calledBy}</dt><dd>${f.called_by.length ? chips(f.called_by, "link") : L.noCallers}</dd>
+      ${f.builtins.length ? `<dt>${L.builtins}</dt><dd>${f.builtins.map(b => `<code>${esc(b)}</code>`).join(" ")}</dd>` : ""}
+      <dt>${L.testedBy}</dt><dd>${f.tests.length ? f.tests.map(x => `<span class="chip">${esc(x)}</span>`).join("") : L.none}</dd>
+      ${trace ? `<dt>${L.run}</dt><dd>${L.ranTimes.replace("%d", calls(name))}${trace.calls[name] ? `, ${trace.calls[name].ms} ms` : ""}</dd>` : ""}
+    </dl>
+    ${f.examples.length ? `<p class="muted">${L.examples}:</p>` + f.examples.map(e => `<div class="mono">${highlight(e)}</div>`).join("") : ""}
+  </div>
+  <div class="card"><h2>${L.flow}</h2>
+    <div class="toolbar">${L.depth}: ${[1, 2, 3, 0].map(d => `<button class="depth ${depth === d ? "on" : ""}" data-d="${d}">${d || L.all}</button>`).join("")}</div>
+    <div id="flow">${flowHtml(f.flow, 1, depth)}</div></div>
+  <div class="card"><h2>${L.source}</h2><pre class="src" id="src">${f.source.split("\n").map((l, i) =>
+      `<span class="l" data-n="${f.line + i}">${highlight(l) || " "}</span>`).join("")}</pre></div>`;
+  return h;
+}
+
+// ---- wiring ------------------------------------------------------------------------------------------------
+function select(name) {
+  selected = name && fns[name] ? name : null;
+  render();
+  window.scrollTo(0, 0);
+  history.replaceState(null, "", selected ? "#" + encodeURIComponent(selected) : "#");
+}
+function render() {
+  document.documentElement.lang = lang;
+  $("#file").textContent = DATA.file;
+  document.querySelectorAll("#langsel button").forEach(b => b.classList.toggle("on", b.dataset.l === lang));
+  side();
+  $("#main").innerHTML = selected ? fnView(selected) : overview();
+  document.querySelectorAll("#main [data-fn]").forEach(el => el.addEventListener("click", () => select(el.dataset.fn || null)));
+  document.querySelectorAll(".blk > .hd.tog").forEach(el => el.addEventListener("click", ev => {
+    if (ev.target.classList.contains("ln")) return;
+    const b = el.parentElement;
+    b.classList.toggle("closed");
+    el.querySelector(".caret").textContent = b.classList.contains("closed") ? "▸" : "▾";
+  }));
+  document.querySelectorAll(".ln").forEach(el => el.addEventListener("click", () => {
+    const n = el.dataset.line;
+    document.querySelectorAll("pre.src span.l").forEach(l => l.classList.toggle("hl", l.dataset.n === n));
+    const target = document.querySelector(`pre.src span.l[data-n="${n}"]`);
+    if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }));
+  document.querySelectorAll("button.depth").forEach(b => b.addEventListener("click", () => { depth = +b.dataset.d; render(); }));
+}
+document.querySelectorAll("#langsel button").forEach(b => b.onclick = () => {
+  lang = b.dataset.l; try { localStorage.setItem("klar-view-lang", lang); } catch (e) {} render();
+});
+selected = decodeURIComponent(location.hash.slice(1)) || null;
+if (selected && !fns[selected]) selected = null;
+render();
+</script>
+</body>
+</html>

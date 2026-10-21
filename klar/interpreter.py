@@ -681,7 +681,7 @@ def run_with_big_stack(fn):
     def target():
         try:
             result["value"] = fn()
-        except BaseException as ex:  # noqa: propagate to caller thread
+        except BaseException as ex:  # noqa: BLE001 (propagated to the caller thread)
             result["error"] = ex
 
     old_limit = sys.getrecursionlimit()

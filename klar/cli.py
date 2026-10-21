@@ -594,5 +594,7 @@ def main(argv=None):
     p = sub.add_parser("explain", help="explain an error code, e.g. E0202")
     p.add_argument("code")
     p.set_defaults(fn=cmd_explain)
+    from .tools.commands import register
+    register(sub)
     args = ap.parse_args(argv)
     return args.fn(args)

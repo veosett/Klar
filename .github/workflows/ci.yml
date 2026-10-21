@@ -37,3 +37,4 @@ jobs:
           python-version: "3.12"
       - run: pip install ruff
       - run: ruff check klar tests bench
+      - run: python -m klar fmt --check .

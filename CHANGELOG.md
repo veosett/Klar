@@ -3,6 +3,18 @@
 All notable changes to Klar. The format follows [Keep a Changelog](https://keepachangelog.com/),
 versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may break things).
 
+## [Unreleased]
+
+### Added
+- Developer tools (`klar/tools/`, documented in `docs/TOOLS.md`):
+  `klar fmt` (canonical layout, token-stream safety net, `--check`/`--diff`), `klar outline` (API of a file),
+  `klar doc` (built-ins, std and project symbols with tested examples), `klar eval` (value : type of an expression),
+  `klar refs` / `klar rename` (exact thanks to no shadowing), `klar coverage` (statements tests never run),
+  `klar view` (interactive HTML for human reviewers: overview, call graph with run counts, step-by-step flow of each
+  function, EN/RU), `klar new` (project skeleton with `AGENTS.md`).
+- VS Code extension (`editors/vscode`): highlighting, snippets, problem matcher.
+- `AGENTS.md` / `CLAUDE.md` for AI assistants working on the repository.
+
 ## [0.3.0] — 2026-10-21
 
 ### Added

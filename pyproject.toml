@@ -29,10 +29,10 @@ Issues = "https://github.com/veosett/Klar/issues"
 klar = "klar.cli:main"
 
 [tool.setuptools]
-packages = ["klar", "klar.native"]
+packages = ["klar", "klar.native", "klar.tools"]
 
 [tool.setuptools.package-data]
-klar = ["*.klar", "*.md", "std/*.klar", "rt/*.klar"]
+klar = ["*.klar", "*.md", "std/*.klar", "rt/*.klar", "tools/*.html"]
 
 [tool.ruff]
 line-length = 120

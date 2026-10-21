@@ -13,6 +13,7 @@ python -m unittest discover -s tests          # compiler test-suite
 python tests/native_diff.py                   # native back-end == reference interpreter
 python tests/native_diff.py --windows         # same for .exe (Linux host needs wine)
 ruff check klar tests bench                   # lint
+python -m klar fmt --check .                  # Klar code in canonical layout
 ```
 
 ## Repository layout

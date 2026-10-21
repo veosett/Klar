@@ -440,6 +440,66 @@ class CompileTimeSafety(unittest.TestCase):
                          [])
 
 
+class DeveloperTools(unittest.TestCase):
+    def test_fmt_is_stable_on_the_repository_and_canonicalizes(self):
+        import glob
+        from klar.tools.fmt import format_checked
+        for path in glob.glob(os.path.join(ROOT, "**", "*.klar"), recursive=True):
+            if "build" in path:
+                continue
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+            self.assertEqual(format_checked(src), src, path)
+        messy = "fn  add( a:Int,b :Int )->Int{\nreturn a+b\n}\nfn main()uses io{\nprint(add(1,-2))\n}\n"
+        self.assertEqual(format_checked(messy), "fn add(a: Int, b: Int) -> Int {\n  return a + b\n}\n\n"
+                                                "fn main() uses io {\n  print(add(1, -2))\n}\n")
+
+    def test_eval(self):
+        from klar.tools.runtools import evaluate
+        r = evaluate(['"a,b".split(",")'])
+        self.assertEqual((r["value"], r["type"]), ('["a", "b"]', "List[Str]"))
+        r = evaluate(["let xs = [3, 1]", "xs.sort()"])
+        self.assertEqual(r["value"], "[1, 3]")
+        r = evaluate(["gcd(12, 18)"], os.path.join(ROOT, "klar", "std", "math.klar"))
+        self.assertEqual(r["value"], "6")
+        self.assertFalse(evaluate(["nope + 1"])["ok"])
+
+    def test_outline_doc_refs(self):
+        from klar.tools.inspect import doc_lookup, name_occurrences, outline
+        loaded = load_path(os.path.join(ROOT, "examples", "bank.klar"))
+        items = outline(loaded)[0]["items"]
+        self.assertIn("fn withdraw(acc: Account, amount: Int) -> Result[Account, BankError]",
+                      next(i["signature"] for i in items if i["name"] == "withdraw"))
+        occ = name_occurrences(loaded, "withdraw")
+        self.assertEqual([r for _, _, r in occ].count("definition"), 1)
+        self.assertGreaterEqual(len(occ), 3)
+        res = doc_lookup("split")
+        self.assertEqual(res[0]["name"], "Str.split")
+        self.assertTrue(res[0]["examples"])
+
+    def test_new_rename_coverage_view(self):
+        from klar.tools.inspect import rename
+        from klar.tools.runtools import coverage, new_project
+        from klar.tools.view import collect
+        with tempfile.TemporaryDirectory() as d:
+            proj = os.path.join(d, "demo")
+            new_project(proj)
+            main = os.path.join(proj, "main.klar")
+            code, out, err = cli("test", main)
+            self.assertEqual(code, 0, out + err)
+            files, occ = rename(load_path(main), "greeting", "make_greeting")
+            for path, text in files.items():
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+            self.assertFalse(load_path(main).has_errors())
+            self.assertEqual(len(occ), 4)
+            rep = coverage(main)
+            self.assertEqual(rep["percent"], 100.0)
+            data = collect(load_path(main))
+            self.assertEqual(data["functions"]["main"]["calls"], ["make_greeting"])
+            self.assertEqual(data["functions"]["make_greeting"]["flow"][0]["kind"], "return")
+
+
 class Modules(unittest.TestCase):
     def write(self, d, name, text):
         path = os.path.join(d, *name.split("/"))
