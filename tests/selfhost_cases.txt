@@ -1,0 +1,2504 @@
+# Programs for tests/selfhost.py: the Klar checker must report exactly the diagnostics of the Python checker.
+# `=== name` starts a case (its first file is main.klar); `--- file.klar` adds a module next to it.
+# The cases from `test-suite` are the programs of tests/test_klar.py; the others target each diagnostic.
+
+=== test-suite 0
+
+fn main() uses io {
+  var fns: List[fn() -> Int] = []
+  for i in range(0, 3) {
+    let k = i * 10
+    fns = fns.push(fn() => k + i)
+  }
+  print(fns.map(fn(f) => f()))
+}
+=== test-suite 1
+fn f(x: Int) -> Int
+  requires x > 0
+{ return x }
+fn g() -> Int { return f(0) }
+fn main() uses io { print(g()) }
+=== test-suite 2
+fn main() uses io {
+ var counter = 0
+ let bump = fn(n: Int) {
+ counter = counter + n
+ }
+ bump(5)
+}
+=== test-suite 3
+fn main() uses io {
+ var n = 1
+ let f = fn(x: Int) => x + n
+ n = 5
+ print(f(1))
+}
+=== test-suite 4
+fn main() uses io {
+ var n = 1
+ let n_now = n
+ let f = fn(x: Int) => x + n_now
+ n = 5
+ print(f(1))
+}
+=== test-suite 5
+fn main() uses io { print(2.pow(-1)) }
+=== test-suite 6
+fn main() uses io { print((-4.0).sqrt()) }
+=== test-suite 7
+fn main() uses io { print([1, 2].chunks(0)) }
+=== test-suite 8
+fn half(x: Int) -> Int
+ requires x % 2 == 0
+{ return x / 2 }
+fn main() uses io { print(half(3)) }
+=== test-suite 9
+fn half(x: Int) -> Int
+ requires x % 2 == 0
+{ return x / 2 }
+fn main() uses io { print(half(4)) }
+=== test-suite 10
+fn f(a: Int, b: Int) -> Int { return a / b }
+=== test-suite 11
+fn f(a: Int) -> Int { return a % (2 - 2) }
+=== test-suite 12
+fn f(a: Int, b: Int) -> Int
+ requires b != 0
+{ return a / b }
+=== test-suite 13
+fn f(a: Int, b: Int) -> Int { if b == 0 { return 0 }
+ return a / b }
+=== test-suite 14
+fn f(a: Int, b: Int) -> Int { if b != 0 { return a / b }
+ return 0 }
+=== test-suite 15
+fn f(a: Int, b: Int) -> Int { return match b { 0 => 0, _ => a / b } }
+=== test-suite 16
+fn f(xs: List[Int]) -> Int { if xs.is_empty() { return 0 }
+ return xs.sum() / xs.len() }
+=== test-suite 17
+fn f(n: Int) -> Int { var d = 3
+ var c = 0
+ while d < n { c = c + n % d
+ d = d + 2 }
+ return c }
+=== test-suite 18
+fn f(n: Int) -> Int { var t = 0
+ for i in range(1, n) { t = t + n / i }
+ return t }
+=== test-suite 19
+fn f(a: Int, b: Int) -> Int { var x = a
+ var y = b
+ while y != 0 { let t = x % y
+ x = y
+ y = t }
+ return x }
+=== test-suite 20
+fn f(a: Int, b: Int) -> Int { return a / (b.abs() + 1) }
+=== test-suite 21
+fn pos(x: Int) -> Int
+ ensures result > 0
+{ return x.abs() + 1 }
+fn f(a: Int) -> Int { return a / pos(a) }
+=== test-suite 22
+fn f(a: Float, b: Float) -> Float { return a / b }
+=== test-suite 23
+fn f(a: Float) -> Float { return a / 0.0 }
+=== test-suite 24
+fn f(xs: List[Int]) -> Option[Int] { return xs.get(xs.len()) }
+=== test-suite 25
+fn f(xs: List[Int]) -> Option[Int] { return xs.get(-1) }
+=== test-suite 26
+fn f(xs: List[Int]) -> Option[Int] { return xs.get(xs.len() - 1) }
+=== test-suite 27
+type P { x: Int }
+fn main() uses io { print([P { x: 1 }].sort()) }
+=== test-suite 28
+type P { x: Int }
+fn main() uses io { print([P { x: 1 }].sort_by(fn(p) => p.x)) }
+=== test-suite 29
+fn f(n: Int) -> Int { return f(n + 1) + 1 }
+=== test-suite 30
+fn f(n: Int) -> Int { let x = f(n)
+ if n > 0 { return x }
+ return 0 }
+=== test-suite 31
+fn f(n: Int) -> Int { if n <= 0 { return 0 }
+ return f(n - 1) }
+=== test-suite 32
+fn klar_eval_entry() uses io, time, rand, fs {
+  let klar_eval_value = "a,b".split(",")
+  let _ = dbg(klar_eval_value)
+}
+=== test-suite 33
+fn klar_eval_entry() uses io, time, rand, fs {
+  let xs = [3, 1]
+  let klar_eval_value = xs.sort()
+  let _ = dbg(klar_eval_value)
+}
+=== test-suite 34
+// std.math — integer and floating point helpers.  use std.math.{gcd, is_prime, mean}
+
+/// Greatest common divisor (always >= 0).
+/// >>> assert gcd(12, 18) == 6
+/// >>> assert gcd(-4, 6) == 2
+pub fn gcd(a: Int, b: Int) -> Int
+  ensures result >= 0
+{
+  var x = a.abs()
+  var y = b.abs()
+  while y != 0 {
+    let t = x % y
+    x = y
+    y = t
+  }
+  return x
+}
+
+/// Least common multiple; lcm(0, n) == 0.
+/// >>> assert lcm(4, 6) == 12
+pub fn lcm(a: Int, b: Int) -> Int {
+  let g = gcd(a, b)
+  if g == 0 {
+    return 0
+  }
+  return (a / g * b).abs()
+}
+
+/// Primality test by trial division.
+/// >>> assert is_prime(97)
+/// >>> assert not is_prime(1)
+pub fn is_prime(n: Int) -> Bool {
+  if n < 2 {
+    return false
+  }
+  if n < 4 {
+    return true
+  }
+  if n % 2 == 0 {
+    return false
+  }
+  var d = 3
+  while d * d <= n {
+    if n % d == 0 {
+      return false
+    }
+    d = d + 2
+  }
+  return true
+}
+
+/// All primes below `limit` (sieve of Eratosthenes).
+/// >>> assert primes_below(20) == [2, 3, 5, 7, 11, 13, 17, 19]
+pub fn primes_below(limit: Int) -> List[Int] {
+  var marks: List[Bool] = []
+  for _i in range(0, limit) {
+    marks = marks.push(true)
+  }
+  var out: List[Int] = []
+  for n in range(2, limit) {
+    if marks.get(n).unwrap_or(false) {
+      out = out.push(n)
+      var m = n * n
+      while m < limit {
+        marks = marks.set(m, false)
+        m = m + n
+      }
+    }
+  }
+  return out
+}
+
+/// n! for n >= 0.
+/// >>> assert factorial(5) == 120
+pub fn factorial(n: Int) -> Int
+  requires n >= 0
+{
+  var acc = 1
+  for i in range(2, n + 1) {
+    acc = acc * i
+  }
+  return acc
+}
+
+/// n-th Fibonacci number (fib(0) == 0), linear time.
+/// >>> assert fib(10) == 55
+pub fn fib(n: Int) -> Int
+  requires n >= 0
+{
+  var a = 0
+  var b = 1
+  for _i in range(0, n) {
+    let next = a + b
+    a = b
+    b = next
+  }
+  return a
+}
+
+/// Integer square root: the largest r with r * r <= n.
+/// >>> assert isqrt(17) == 4
+pub fn isqrt(n: Int) -> Int
+  requires n >= 0
+  ensures result * result <= n and (result + 1) * (result + 1) > n
+{
+  if n < 2 {
+    return n
+  }
+  var x = n
+  var y = (x + 1) / 2
+  while y < x and y > 0 {
+    x = y
+    y = (x + n / x) / 2
+  }
+  return x
+}
+
+/// Arithmetic mean; None for an empty list.
+/// >>> assert mean([1.0, 2.0, 3.0]) == Some(2.0)
+pub fn mean(xs: List[Float]) -> Option[Float] {
+  if xs.is_empty() {
+    return None
+  }
+  return Some(xs.sum_float() / xs.len().to_float())
+}
+
+/// Median; None for an empty list.
+/// >>> assert median([3.0, 1.0, 2.0]) == Some(2.0)
+/// >>> assert median([4.0, 1.0, 3.0, 2.0]) == Some(2.5)
+pub fn median(xs: List[Float]) -> Option[Float] {
+  let sorted = xs.sort()
+  let n = sorted.len()
+  if n == 0 {
+    return None
+  }
+  if n % 2 == 1 {
+    return sorted.get(n / 2)
+  }
+  let lo = sorted.get(n / 2 - 1)?
+  let hi = sorted.get(n / 2)?
+  return Some((lo + hi) / 2.0)
+}
+
+/// Population standard deviation; None for an empty list.
+pub fn std_dev(xs: List[Float]) -> Option[Float] {
+  let m = mean(xs)?
+  let squares = xs.map(fn(x) => (x - m) * (x - m))
+  return Some((squares.sum_float() / xs.len().to_float()).sqrt())
+}
+
+/// Clamps a Float into [low, high].
+/// >>> assert clamp_float(x: 5.5, low: 0.0, high: 1.0) == 1.0
+pub fn clamp_float(x: Float, low: Float, high: Float) -> Float
+  requires low <= high
+{
+  return x.max(low).min(high)
+}
+
+/// Product of all numbers (1 for an empty list).
+/// >>> assert product([2, 3, 4]) == 24
+pub fn product(xs: List[Int]) -> Int {
+  return xs.fold(1, fn(acc, x) => acc * x)
+}
+
+/// Floats are equal within an absolute tolerance.
+/// >>> assert approx_eq(a: 0.1 + 0.2, b: 0.3, tolerance: 0.000001)
+pub fn approx_eq(a: Float, b: Float, tolerance: Float) -> Bool {
+  return (a - b).abs() <= tolerance
+}
+
+/// Degrees to radians.
+pub fn to_radians(degrees: Float) -> Float {
+  return degrees * PI / 180.0
+}
+
+test "gcd and lcm" {
+  assert gcd(0, 0) == 0
+  assert gcd(17, 5) == 1
+  assert lcm(0, 5) == 0
+  assert lcm(-3, 4) == 12
+}
+
+test "primes" {
+  assert primes_below(2) == []
+  assert primes_below(30).len() == 10
+  assert primes_below(100).all(fn(p) => is_prime(p))
+}
+
+test "factorial and fib" {
+  assert factorial(0) == 1
+  assert factorial(20) == 2432902008176640000
+  assert fib(0) == 0
+  assert fib(1) == 1
+  assert fib(90) == 2880067194370816120
+}
+
+test "statistics" {
+  assert mean([]).is_none()
+  assert median([]).is_none()
+  assert std_dev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) == Some(2.0)
+}
+
+test "angles" {
+  assert approx_eq(a: to_radians(180.0), b: PI, tolerance: 0.0000001)
+  assert approx_eq(a: to_radians(90.0).sin(), b: 1.0, tolerance: 0.0000001)
+}
+
+property "gcd divides both" (a: Int, b: Int) {
+  let g = gcd(a, b)
+  if g == 0 {
+    return
+  }
+  assert a % g == 0 and b % g == 0
+}
+
+property "isqrt is the floor square root" (n: Int) {
+  let m = n.abs()
+  let r = isqrt(m)
+  assert r * r <= m
+}
+
+property "sieve agrees with is_prime" (n: Int) {
+  let limit = n.abs() % 200
+  assert primes_below(limit) == range(0, limit).filter(fn(k) => is_prime(k))
+}
+
+fn klar_eval_entry() uses io, time, rand, fs {
+  let klar_eval_value = gcd(12, 18)
+  let _ = dbg(klar_eval_value)
+}
+=== test-suite 35
+fn klar_eval_entry() uses io, time, rand, fs {
+  let klar_eval_value = nope + 1
+  let _ = dbg(klar_eval_value)
+}
+=== test-suite 36
+fn g(a: Int, b: Int, c: Int) -> Int { return a }
+fn f() -> Int { return g(1, 2, 3) }
+=== test-suite 37
+fn g(a: Int) -> Int { return a }
+fn f() -> Int { return g(1, 2) }
+=== test-suite 38
+fn g(a: Int) -> Int { return a }
+fn f() -> Int { return g(b: 1) }
+=== test-suite 39
+type P { x: Int, y: Int }
+fn f() -> P { return P { x: 1 } }
+=== test-suite 40
+fn f(xs: List[Int]) -> Int { return xs.size() }
+=== test-suite 41
+fn f(xs: List[Int]) -> Int { return xs.len }
+=== test-suite 42
+fn f() { print(1) }
+=== test-suite 43
+fn f() uses iox { }
+=== test-suite 44
+fn f(x: Int) -> Int
+ requires now_ms() > 0
+{ return x }
+=== test-suite 45
+test "t" { assert now_ms() > 0 }
+=== test-suite 46
+fn f() uses time { let g = fn() => print(1)
+ g() }
+=== test-suite 47
+fn f(a: Bool, b: Bool) -> Bool { return a && b }
+=== test-suite 48
+fn f() -> Int { return 1; }
+=== test-suite 49
+fn f(a: Bool) -> Bool { return !a }
+=== test-suite 50
+fn f() { break }
+=== test-suite 51
+fn f(m: Map[Str, Int]) { for k in m { } }
+=== test-suite 52
+fn main(x: Int) { }
+=== test-suite 53
+enum C { R, G }
+fn f(c: C) -> Int { return match c { C.R => 1 } }
+=== test-suite 54
+fn f(x: Int) -> Int { return match x { 1 => 1 } }
+=== test-suite 55
+fn f(x: Option[Int]) -> Int { return match x { Some(v) => v } }
+=== test-suite 56
+enum C { R, G }
+fn f(c: C) -> Int { return match c { C.R => 1, C.B => 2, _ => 3 } }
+=== test-suite 57
+fn f(x: Int) -> Int { return match x { _ => 1, 2 => 2 } }
+=== test-suite 58
+fn f(x: Int) -> Int { if x > 0 { return 1 } }
+=== test-suite 59
+fn f(x: Int) -> Int { if x > 0 { return 1 } else { return 2 } }
+=== test-suite 60
+fn f(x: Int) -> Int { fail("no") }
+=== test-suite 61
+fn f(n: Int) -> Int {
+ var i = 0
+ while true {
+ if i * i >= n { return i }
+ i = i + 1
+ }
+}
+=== test-suite 62
+fn f() -> Int { return y }
+=== test-suite 63
+fn f() { let x = 1
+ let x = 2 }
+=== test-suite 64
+fn f() { let x = 1
+ x = 2 }
+=== test-suite 65
+fn f() { let unused = 1 }
+=== test-suite 66
+const LIMIT: Int = 1
+fn f() { let LIMIT = 2 }
+=== test-suite 67
+fn f() -> Int { let x = "1".to_int()?
+ return x }
+=== test-suite 68
+fn g() -> Result[Int, Int] { return Ok(1) }
+fn f() -> Result[Int, Str] { let x = g()?
+ return Ok(x) }
+=== test-suite 69
+fn g() -> Result[Int, Str] { return Ok(1) }
+fn f() { g() }
+=== test-suite 70
+fn g() -> Result[Int, Str] { return Ok(1) }
+fn f() { let _ = g() }
+=== test-suite 71
+fn f() { let xs = [1]
+ xs.push(2) }
+=== test-suite 72
+type P { x: Int }
+fn f() { var p = P { x: 1 }
+ p.x = 2 }
+=== test-suite 73
+fn f(xs: List[Int]) -> Int { return xs[0] }
+=== test-suite 74
+fn f() -> Int { let x = if true { 1 } else { 2 }
+ return x }
+=== test-suite 75
+fn f() -> Int { let x = null
+ return 1 }
+=== test-suite 76
+fn f() { fn g() { } }
+=== test-suite 77
+fn f() -> Int { return -5.abs() }
+=== test-suite 78
+use std.math.*
+=== test-suite 79
+fn f() -> Int { return 1.5 }
+=== test-suite 80
+fn f() -> Float { return 1 + 2.0 }
+=== test-suite 81
+fn f(x: Strng) { }
+=== test-suite 82
+fn f(x: List) { }
+=== test-suite 83
+type point { x: Int }
+=== test-suite 84
+type Loop = Loop
+=== test-suite 85
+enum Shape {
+  Circle(r: Int),
+  Rect(w: Int, h: Int),
+}
+
+fn f(x: Option[Shape]) -> Int {
+  return match x {
+    Some(Shape.Circle(_)) => 1,
+    Some(Shape.Rect(_, _)) => 2,
+    None => 0,
+  }
+}
+=== test-suite 86
+enum Shape {
+  Circle(r: Int),
+  Rect(w: Int, h: Int),
+}
+
+fn f(x: Option[Shape]) -> Int {
+  return match x {
+    Some(Shape.Circle(_)) => 1,
+    None => 0,
+  }
+}
+=== test-suite 87
+enum Shape {
+  Circle(r: Int),
+  Rect(w: Int, h: Int),
+}
+
+fn f(x: Option[Option[Bool]]) -> Int {
+  return match x {
+    Some(Some(true)) => 1,
+    None => 2,
+  }
+}
+=== test-suite 88
+enum Shape {
+  Circle(r: Int),
+  Rect(w: Int, h: Int),
+}
+
+fn f(x: Option[Bool]) -> Int {
+  return match x {
+    Some(true) => 1,
+    Some(false) => 2,
+    Some(_) => 3,
+    None => 4,
+  }
+}
+=== test-suite 89
+fn main( {
+=== test-suite 90
+fn helper() -> Int {
+  return 1
+}
+
+fn main() uses io {
+  print(2)
+}
+=== test-suite 91
+fn helper() -> Int {
+  return 1
+}
+
+test "h" {
+  assert helper() == 1
+}
+=== test-suite 92
+
+fn fib(n: Int) -> Int { if n < 2 { return n }
+ return fib(n - 1) + fib(n - 2) }
+fn main() uses io { print(fib(10)) }
+=== test-suite 93
+
+const BASE: Int = 10
+const LIMIT: Int = BASE * 3
+fn main() uses io { print(LIMIT + 1) }
+=== test-suite 94
+const A: Int = B
+const B: Int = 1
+=== test-suite 95
+const limit: Int = 1
+=== test-suite 96
+const A: Int = 1
+fn f() { A = 2 }
+=== test-suite 97
+const T: Int = now_ms()
+=== test-suite 98
+fn main() uses io { let x = dbg(2 + 3)
+ print(x) }
+=== test-suite 99
+fn f(x: Int) -> Int { todo("later") }
+=== test-suite 100
+fn main() { todo("x") }
+=== test-suite 101
+
+fn main() uses io, fs {
+  print(file_exists("/tmp/tmpqrhbkuzv/f.txt"))
+  let _ = write_file("/tmp/tmpqrhbkuzv/f.txt", "data")
+  print(file_exists("/tmp/tmpqrhbkuzv/f.txt"))
+  print(read_file("/tmp/tmpqrhbkuzv/f.txt"))
+  print(read_file("/tmp/tmpqrhbkuzv/f.txt.missing").is_err())
+}
+=== test-suite 102
+
+fn main() uses io, fs {
+  print(file_exists("/tmp/tmpnai8t6it/f.txt"))
+  let _ = write_file("/tmp/tmpnai8t6it/f.txt", "data")
+  print(file_exists("/tmp/tmpnai8t6it/f.txt"))
+  print(read_file("/tmp/tmpnai8t6it/f.txt"))
+  print(read_file("/tmp/tmpnai8t6it/f.txt.missing").is_err())
+}
+=== test-suite 103
+fn f() -> Bool { return file_exists("x") }
+=== test-suite 104
+type Box[T] { value: T }
+fn f(b: Box[Int]) -> Str { return b.value }
+=== test-suite 105
+type Box[T] { value: T }
+fn f(b: Box) { }
+=== test-suite 106
+
+type Box[T] { value: T }
+type Ids = List[Int]
+enum Tree[T] { Leaf, Node(left: Tree[T], value: T, right: Tree[T]) }
+fn size[T](t: Tree[T]) -> Int {
+  return match t { Tree.Leaf => 0, Tree.Node(l, _, r) => size(l) + 1 + size(r) }
+}
+fn unbox[T](b: Box[T]) -> T { return b.value }
+fn main() uses io {
+  let ids: Ids = [1, 2]
+  let t = Tree.Node(left: Tree.Leaf, value: "x", right: Tree.Node(left: Tree.Leaf, value: "y", right: Tree.Leaf))
+  print(size(t))
+  print(unbox(Box { value: ids }).len())
+  print(Box { value: 1 } with { value: 2 })
+}
+=== test-suite 107
+
+fn identity[T](x: T) -> T { return x }
+fn same[T](a: T, b: T) -> Bool { return a == b }
+fn main() uses io {
+  print(identity(5))
+  print(identity("s"))
+  print(same([1], [1]))
+}
+=== test-suite 108
+
+fn main() uses io {
+  match read_line() {
+    Some(line) => print("got {line}"),
+    None => print("eof"),
+  }
+  print(read_line())
+  print(cli_args())
+}
+=== test-suite 109
+
+type Handler { name: Str, run: fn(Int) -> Int }
+fn main() uses io {
+  let h = Handler { name: "double", run: fn(x: Int) -> Int {
+    let y = x * 2
+    return y
+  } }
+  print(h.run(21))
+}
+=== test-suite 110
+
+fn main() uses io {
+  var i = 0
+  var acc: List[Int] = []
+  while true {
+    i = i + 1
+    if i % 2 == 0 { continue }
+    if i > 7 { break }
+    acc = acc.push(i)
+  }
+  print(acc)
+}
+=== test-suite 111
+
+fn main() -> Result[Unit, Str] {
+  let _n = "x".to_int().ok_or("not a number")?
+  return Ok(())
+}
+=== test-suite 112
+
+fn main() uses io {
+  let m = Map { "a": 1, "b": 2 }
+  let m2 = m.set("c", 3).remove("a")
+  print("{m2} {m2.keys()} {m.len()} \{literal\}")
+}
+=== test-suite 113
+
+fn kind(n: Int) -> Str {
+  return match n { 0 => "zero", x if x < 0 => "neg", _ => "pos" }
+}
+fn main() uses io { print([0, -1, 5].map(fn(n) => kind(n))) }
+=== test-suite 114
+fn f(b: Bool) -> Int { return match b { true => 1, false if 1 > 0 => 2 } }
+=== test-suite 115
+
+fn half(n: Int) -> Result[Int, Str] {
+  return match n % 2 == 0 { true => Ok(n / 2), false => Err("odd") }
+}
+fn quarter(n: Int) -> Result[Int, Str] {
+  let h = match half(n) {
+    Ok(x) => x,
+    Err(e) => { return Err(e) },
+  }
+  return half(h)
+}
+fn main() uses io {
+  print(quarter(8))
+  print(quarter(6))
+}
+=== test-suite 116
+
+fn main() uses io {
+  let s = [3, 1, 2]
+    .sort()
+    .map(fn(x) => x.to_str())
+    .join("-")
+  print(s)
+}
+=== test-suite 117
+
+fn first_even(xs: List[Int]) -> Option[Int] {
+  let x = xs.find(fn(n) => n % 2 == 0)?
+  return Some(x * 10)
+}
+fn main() uses io {
+  print(first_even([1, 4]))
+  print(first_even([1, 3]))
+}
+=== test-suite 118
+fn main() uses io { let z = read_line().unwrap_or("0").len().to_float() - 1.0
+ print(1.0 / z) }
+=== test-suite 119
+fn f(x: Int) -> Int
+ requires x > 0
+{ return x }
+fn main() uses io { print(f(read_line().unwrap_or("").len())) }
+=== test-suite 120
+fn main() { fail("boom") }
+=== test-suite 121
+fn f(n: Int) -> Int { if n > 100000 { return n }
+ return f(n + 1) + 1 }
+fn main() uses io { print(f(0)) }
+=== test-suite 122
+fn main() uses io { print([1].set(5, 2)) }
+=== test-suite 123
+fn main() uses io { let x = 0.0 - read_line().unwrap_or("ab").len().to_float()
+ print(x.sqrt()) }
+=== test-suite 124
+
+fn main() uses io, time, rand {
+  let t = now_ms()
+  let a = now_ns()
+  let b = now_ns()
+  let r = random_int(1, 3)
+  print(t > 0 and r >= 1 and r <= 3 and b >= a)
+}
+=== test-suite 125
+
+type Acc { balance: Int }
+fn add(a: Acc, amount: Int) -> Acc { return a with { balance: a.balance + amount } }
+fn clamp3(x: Int, low: Int, high: Int) -> Int { return x.max(low).min(high) }
+fn main() uses io {
+  print(Acc { balance: 1 }.add(2).balance)
+  print(clamp3(high: 10, x: 50, low: 0))
+}
+=== test-suite 126
+fn klar_repl_entry() uses io, time, rand, fs {
+  let n = 1
+}
+=== test-suite 127
+fn klar_repl_entry() uses io, time, rand, fs {
+  let n = 1
+  let n = 2
+}
+=== test-suite 128
+fn klar_repl_entry() uses io, time, rand, fs {
+  let n = 1
+  let klar_repl_value = "a" + n
+}
+=== test-suite 129
+fn klar_repl_entry() uses io, time, rand, fs {
+  let n = 1
+  let klar_repl_value = fail("boom")
+}
+=== test-suite 130
+fn klar_repl_entry() uses io, time, rand, fs {
+  let n = 1
+  let klar_repl_value = n
+}
+=== test-suite 131
+fn sq(n: Int) -> Int {
+  return n * n
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+}
+=== test-suite 132
+fn sq(n: Int) -> Int {
+  return n * n
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let klar_repl_value = sq(7)
+}
+=== test-suite 133
+use std.math.{gcd}
+fn sq(n: Int) -> Int {
+  return n * n
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+}
+=== test-suite 134
+use std.math.{gcd}
+fn sq(n: Int) -> Int {
+  return n * n
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let klar_repl_value = gcd(12, 18)
+}
+=== test-suite 135
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+}
+=== test-suite 136
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+  let klar_repl_value = xs.sort()
+}
+=== test-suite 137
+fn double(n: Int) -> Int {
+  return n * 2
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+}
+=== test-suite 138
+fn double(n: Int) -> Int {
+  return n * 2
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+  let klar_repl_value = xs.map(double)
+}
+=== test-suite 139
+fn double(n: Int) -> Int {
+  return n * 2
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+  var total = 0
+}
+=== test-suite 140
+fn double(n: Int) -> Int {
+  return n * 2
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+  var total = 0
+  for x in xs {
+    total = total + x
+  }
+}
+=== test-suite 141
+fn double(n: Int) -> Int {
+  return n * 2
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+  var total = 0
+  for x in xs {
+    total = total + x
+  }
+  let klar_repl_value = print("t={total}")
+}
+=== test-suite 142
+fn double(n: Int) -> Int {
+  return n * 2
+}
+
+fn klar_repl_entry() uses io, time, rand, fs {
+  let xs = [3, 1, 2]
+  var total = 0
+  for x in xs {
+    total = total + x
+  }
+  let klar_repl_value = total.to_float()
+}
+=== test-suite 143
+/// >>> assert twice(2) == 4
+/// >>> assert twice(0) == 1
+fn twice(n: Int) -> Int { return n * 2 }
+=== test-suite 144
+property "nonneg" (xs: List[Int]) { assert xs.sum() >= 0 }
+=== test-suite 145
+property "p" (f: fn(Int) -> Int) { }
+=== test-suite 146
+trait Describe {
+  fn describe(self) -> Str
+}
+
+enum Light {
+  Red,
+  Green,
+}
+
+impl Describe for Int {
+  fn describe(self) -> Str {
+    return "int {self}"
+  }
+}
+
+impl Describe for Light {
+  fn describe(self) -> Str {
+    return match self {
+      Light.Red => "stop",
+      Light.Green => "go",
+    }
+  }
+}
+
+fn all[T: Describe](xs: List[T]) -> Str {
+  return xs.map(fn(x) => x.describe()).join(", ")
+}
+
+fn main() uses io {
+  print(all([1, 2]))
+  print(all([Light.Red, Light.Green]))
+}
+=== test-suite 147
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+
+fn labels[T: Shape](xs: List[T]) -> List[Str] {
+  return xs.map(fn(s) => s.label())
+}
+
+fn main() uses io {
+  print(total([Sq { side: 2.0 }, Sq { side: 1.0 }]))
+  print(total([Circle { r: 1.0 }]))
+  print(labels([Sq { side: 3.0 }]))
+  print(labels([Circle { r: 1.0 }]))
+  print(Sq { side: 1.0 }.label())
+}
+=== test-suite 148
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+type P { x: Int }
+fn f() -> Float {
+  return total([P { x: 1 }])
+}
+=== test-suite 149
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+fn f[U](xs: List[U]) -> Float {
+  return total(xs)
+}
+=== test-suite 150
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+fn f() -> Float {
+  return total([])
+}
+=== test-suite 151
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+fn f(s: Shape) -> Int {
+  return 1
+}
+=== test-suite 152
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+fn f[T](x: T) -> Float {
+  return x.area()
+}
+=== test-suite 153
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return 0.0
+  }
+}
+=== test-suite 154
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+type P { x: Int }
+impl Shape for P {
+}
+=== test-suite 155
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+type P { x: Int }
+impl Shape for P {
+  fn area(self) -> Int {
+    return 1
+  }
+}
+=== test-suite 156
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+type P { x: Int }
+impl Shape for P {
+  fn area(self) -> Float {
+    return 1.0
+  }
+  fn extra(self) -> Int {
+    return 1
+  }
+}
+=== test-suite 157
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+impl Shape for List[Int] {
+  fn area(self) -> Float {
+    return 1.0
+  }
+}
+=== test-suite 158
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+impl Shap for Sq {
+}
+=== test-suite 159
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+trait T {
+  fn make() -> Int
+}
+=== test-suite 160
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+fn f(self) -> Int {
+  return 1
+}
+=== dup_fn
+fn f() -> Int {
+  return 1
+}
+
+fn f() -> Int {
+  return 2
+}
+
+fn print() {}
+
+fn main() uses io {
+  print(f())
+}
+=== dup_types
+type P { x: Int, x: Int }
+
+enum E {
+  A,
+  A,
+}
+
+enum Empty {}
+
+type Int = Str
+
+type List { a: Int }
+
+type my_type { a: Int }
+
+type Box[t] { v: t }
+
+enum color { Red, green }
+
+fn main() {}
+=== dup_const_test
+const N: Int = 1
+const N: Int = 2
+const lower: Int = 3
+const camelCase: Int = 4
+
+test "a" {}
+
+test "a" {}
+
+property "a" (x: Int) {}
+
+fn main() {}
+=== dup_params_and_effects
+fn f(a: Int, a: Int) -> Int uses io, network, tim {
+  return a
+}
+
+fn g[t](x: t) -> t {
+  return x
+}
+
+fn camelCase() {}
+
+fn main() {
+  let _ = f
+  let _ = g(1)
+  camelCase()
+}
+=== shadowing
+fn helper() {}
+
+const LIMIT: Int = 3
+
+fn main() {
+  let x = 1
+  let x = 2
+  var y = 1
+  let y = 3
+  let helper = 1
+  let LIMIT = 2
+  let myVar = 1
+  let _ = myVar + x + y + helper
+}
+=== unknown_types
+fn f(a: int, b: String, c: Strng, d: Vec[Int], e: Optional[Int], g: Self, h: Foo) {}
+
+type Alias = Alias
+
+type A2 = B2
+
+type B2 = A2
+
+fn main() {
+  let _ = f
+}
+=== type_arity
+type Box[T] { v: T }
+
+type Plain { v: Int }
+
+fn f(a: List, b: Map[Int], c: Option[Int, Int], d: Result[Int], e: Box, f2: Plain[Int], g: Int[Str]) {}
+
+fn h[T](x: T[Int]) {}
+
+fn main() {
+  let _ = f
+  let _ = h
+}
+=== unknown_names
+fn compute(value: Int) -> Int {
+  return value
+}
+
+fn main() uses io {
+  print(valeu)
+  print(computee(1))
+  print(null)
+  print(True)
+  print(this)
+  print(Math)
+  let _ = len([1])
+  let _ = sqrt(2.0)
+  let _ = sorted([1])
+  println("x")
+}
+=== types_not_values
+type Point { x: Int, y: Int }
+
+enum Shape {
+  Circle(r: Float),
+  Square(s: Float),
+}
+
+const MAX: Int = 3
+
+fn main() {
+  let a = Point
+  let b = Shape
+  let c = Point(1, 2)
+  let d = Shape(1)
+  let e = None(1)
+  let f = MAX(1)
+  let _ = a
+  let _ = b
+  let _ = c
+  let _ = d
+  let _ = e
+  let _ = f
+}
+=== mismatches
+fn want_float(x: Float) -> Float {
+  return x
+}
+
+fn want_int(x: Int) -> Int {
+  return x
+}
+
+fn want_str(s: Str) -> Str {
+  return s
+}
+
+fn want_opt(o: Option[Int]) -> Int {
+  return o.unwrap_or(0)
+}
+
+fn want_res(r: Result[Int, Str]) -> Int {
+  return r.unwrap_or(0)
+}
+
+fn main() {
+  let _ = want_float(1)
+  let _ = want_int(1.5)
+  let _ = want_str(1)
+  let _ = want_str(true)
+  let _ = want_opt(1)
+  let _ = want_res(2)
+  let o: Option[Int] = Some(1)
+  let _ = want_int(o)
+  let r: Result[Int, Str] = Ok(1)
+  let _ = want_int(r)
+  let xs: List[Int] = ["a"]
+  let m: Map[Str, Int] = Map { "a": "b" }
+  let _ = xs
+  let _ = m
+}
+=== map_keys
+type K { a: Int }
+
+fn main() {
+  let m = Map { K { a: 1 }: 1 }
+  let n = Map { 1.5: "x" }
+  let f = fn(x: Int) => x
+  let s = "value {f}"
+  let _ = m
+  let _ = n
+  let _ = s
+}
+=== fields
+type P { x: Int, y: Int }
+
+fn main() {
+  let p = P { x: 1, y: 2, z: 3 }
+  let q = P { x: 1 }
+  let r = P { x: 1, x: 2, y: 3 }
+  let _ = p.z
+  let _ = q.xx
+  let s = "abc"
+  let _ = s.len
+  let _ = s.length
+  let _ = s.foo
+  let _ = r with { w: 1 }
+  let n = 1
+  let _ = n with { x: 1 }
+  let _ = Q { a: 1 }
+  let _ = Pp { x: 1 }
+}
+=== records_aliases_enums
+type P { x: Int }
+
+type Alias = P
+
+enum E {
+  A,
+}
+
+fn main() {
+  let _ = E { a: 1 }
+  let _ = Alias { x: 1 }
+  let _ = P.make()
+  let _ = Option.some(1)
+  let _ = E.B
+  let _ = E.A(1)
+  let _ = E.C(1)
+}
+=== methods
+type P { x: Int, f: fn(Int) -> Int }
+
+fn by_p(p: P) -> Int {
+  return p.x
+}
+
+fn main() {
+  let p = P { x: 1, f: fn(n: Int) => n + 1 }
+  let _ = p.f(2)
+  let _ = p.x()
+  let _ = p.by_p()
+  let _ = p.nope()
+  let _ = [1, 2].length()
+  let _ = [1, 2].forEach(fn(x: Int) => x)
+  let _ = [1, 2].unwrap()
+  let _ = "a".toUpperCase()
+  let _ = "a".uppr()
+  let _ = 1.5.to_float()
+  let _ = "abc".sum()
+  let xs = []
+  let _ = xs.len()
+}
+=== returns
+fn a(x: Int) -> Int {
+  if x > 0 {
+    return 1
+  }
+}
+
+fn b(x: Int) -> Int {
+  if x > 0 {
+    return 1
+  } else {
+    return 2
+  }
+}
+
+fn c(x: Int) -> Int {
+  while true {
+    return x
+  }
+}
+
+fn d(x: Int) -> Int {
+  while true {
+    if x > 0 {
+      break
+    }
+  }
+}
+
+fn e(x: Int) -> Int {
+  match x {
+    0 => fail("zero"),
+    _ => todo("rest"),
+  }
+}
+
+fn f() -> Int {
+  return
+}
+
+fn main() {
+  let _ = a(1) + b(1) + c(1) + d(1) + e(1) + f()
+  let g = fn(x: Int) -> Int {
+    if x > 0 {
+      return 1
+    }
+  }
+  let _ = g
+}
+=== arguments
+fn two(a: Int, b: Int) -> Int {
+  return a + b
+}
+
+fn three(a: Int, b: Int, c: Int) -> Int {
+  return a + b + c
+}
+
+fn main() {
+  let _ = two(1)
+  let _ = two(1, 2, 3)
+  let _ = two(a: 1, c: 2)
+  let _ = two(a: 1, a: 2)
+  let _ = two(b: 1, 2)
+  let _ = three(1, 2, 3)
+  let _ = three(a: 1, b: 2)
+  let f = fn(x: Int) => x
+  let _ = f(1, 2)
+  let _ = f(x: 1)
+  let n = 3
+  let _ = n(1)
+  let _ = two(aa: 1, b: 2)
+}
+=== assignment
+fn helper() {}
+
+const C: Int = 1
+
+fn main() {
+  let x = 1
+  x = 2
+  helper = 3
+  C = 4
+  undefined_thing = 5
+  for i in [1] {
+    i = 2
+  }
+  let f = fn(p: Int) {
+    p = 1
+  }
+  let _ = f
+}
+=== operators
+type P { x: Int }
+
+fn main() {
+  let _ = 1 + 1.5
+  let _ = "a" + 1
+  let _ = "a" * 2
+  let _ = [1] + [2]
+  let _ = P { x: 1 } + P { x: 2 }
+  let o: Option[Int] = None
+  let _ = o + 1
+  let r: Result[Int, Str] = Ok(1)
+  let _ = r + 1
+  let _ = 1 == "a"
+  let _ = 1 < 1.5
+  let _ = true < false
+  let _ = -"a"
+  let f = fn(x: Int) => x
+  let _ = f == f
+  let _ = not 1
+}
+=== try_operator
+fn opt() -> Option[Int] {
+  return Some(1)
+}
+
+fn res() -> Result[Int, Str] {
+  return Ok(1)
+}
+
+fn res2() -> Result[Int, Int] {
+  return Ok(1)
+}
+
+fn a() -> Int {
+  let x = opt()?
+  return x
+}
+
+fn b() -> Int {
+  let x = res()?
+  return x
+}
+
+fn c() -> Result[Int, Int] {
+  let x = res()?
+  return Ok(x)
+}
+
+fn d() -> Option[Int] {
+  let x = 5?
+  return Some(x)
+}
+
+fn e(n: Int) -> Int requires res()? > 0 {
+  return n
+}
+
+fn main() {
+  let _ = a() + b() + e(1)
+  let _ = c()
+  let _ = d()
+  let _ = res2()
+}
+=== loops
+fn main() {
+  break
+  continue
+  for x in 5 {
+    let _ = x
+  }
+  for x in "abc" {
+    let _ = x
+  }
+  for x in Map { 1: 2 } {
+    let _ = x
+  }
+  let f = fn() {
+    break
+  }
+  let _ = f
+}
+=== inference
+fn main() {
+  let xs = []
+  for x in xs {
+    let _ = x
+  }
+  let n = None
+  let _ = n?
+  let _ = n.unwrap_or(1)
+}
+=== captures
+fn main() {
+  var total = 0
+  let xs = [1, 2]
+  let f = fn(x: Int) => x + total
+  let g = fn(x: Int) {
+    total = total + x
+  }
+  let _ = f
+  let _ = g
+  let _ = xs
+}
+=== traits_bounds
+trait Shape {
+  fn area(self) -> Float
+  fn name(self) -> Str {
+    return "shape"
+  }
+}
+
+type Circle { r: Float }
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return self.r * self.r
+  }
+}
+
+type Square { s: Float }
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(x) => x.area()).sum_float()
+}
+
+fn bad_call[T](x: T) -> Float {
+  return total([x])
+}
+
+fn bad_method[T](x: T) -> Float {
+  return x.area()
+}
+
+fn main() {
+  let _ = total([Circle { r: 1.0 }])
+  let _ = total([Square { s: 1.0 }])
+  let _ = total([])
+  let _ = total([1])
+  let _ = bad_call(1)
+  let _ = bad_method(1)
+  let _ = area(Circle { r: 1.0 })
+  let _ = Circle { r: 1.0 }.name()
+}
+=== impl_problems
+trait Show2 {
+  fn show2(self) -> Str
+  fn twice(self, n: Int) -> Str
+}
+
+type A { x: Int }
+
+type B { x: Int }
+
+type G[T] { v: T }
+
+impl Show2 for A {
+  fn show2(self) -> Str {
+    return "a"
+  }
+  fn twice(self, m: Int) -> Str {
+    return "aa"
+  }
+  fn extra(self) -> Int {
+    return 1
+  }
+}
+
+impl Show2 for B {
+  fn show2(self) -> Int {
+    return 1
+  }
+}
+
+impl Show2 for G[Int] {
+  fn show2(self) -> Str {
+    return "g"
+  }
+}
+
+impl Show2 for List[Int] {
+  fn show2(self) -> Str {
+    return "l"
+  }
+}
+
+impl Show2 for A {
+  fn show2(self) -> Str {
+    return "a2"
+  }
+}
+
+impl Nope for A {
+  fn x(self) -> Int {
+    return 1
+  }
+}
+
+impl A for B {
+  fn x(self) -> Int {
+    return 1
+  }
+}
+
+fn main() {}
+=== impl_signature_details
+trait T1 {
+  fn m(self, a: Int, b: Str) -> Int
+  fn e(self) -> Int
+  fn len(self) -> Int
+}
+
+type X { v: Int }
+
+impl T1 for X {
+  fn m(self, a: Int) -> Int {
+    return a
+  }
+  fn e(self) -> Int uses io {
+    print(1)
+    return 1
+  }
+  fn len(self) -> Int {
+    return 1
+  }
+}
+
+type Y { v: Int }
+
+impl T1 for Y {
+  fn m(self, a: Str, b: Str) -> Int {
+    return 1
+  }
+  fn e(self) -> Int {
+    return 1
+  }
+  fn len(self) -> Int {
+    return 1
+  }
+}
+
+impl T1 for Str {
+  fn m(self, a: Int, b: Str) -> Int {
+    return 1
+  }
+  fn e(self) -> Int {
+    return 1
+  }
+  fn len(self) -> Int {
+    return 1
+  }
+}
+
+fn main() {}
+=== trait_as_type
+trait Shape {
+  fn area(self) -> Float
+}
+
+trait Shape {
+  fn other(self) -> Int
+}
+
+trait lower_trait {
+  fn x(self) -> Int
+}
+
+trait Dup {
+  fn a(self) -> Int
+  fn a(self) -> Int
+}
+
+fn f(s: Shape) -> Float {
+  return 0.0
+}
+
+fn g[T: Circle](x: T) {}
+
+fn h[T: Shap](x: T) {}
+
+type Circle { r: Float }
+
+fn main() {
+  let _ = f
+  let _ = g
+  let _ = h
+}
+=== two_traits_same_method
+trait A1 {
+  fn go(self) -> Int
+}
+
+trait B1 {
+  fn go(self) -> Int
+}
+
+type T { v: Int }
+
+impl A1 for T {
+  fn go(self) -> Int {
+    return 1
+  }
+}
+
+impl B1 for T {
+  fn go(self) -> Int {
+    return 2
+  }
+}
+
+fn both[X: A1 + B1](x: X) -> Int {
+  return x.go()
+}
+
+fn main() {
+  let _ = both(T { v: 1 })
+}
+=== exhaustive
+enum Color {
+  Red,
+  Green,
+  Blue,
+}
+
+enum Tree {
+  Leaf,
+  Node(left: Tree, value: Int, right: Tree),
+}
+
+fn a(c: Color) -> Int {
+  return match c {
+    Color.Red => 1,
+  }
+}
+
+fn b(o: Option[Int]) -> Int {
+  return match o {
+    Some(x) => x,
+  }
+}
+
+fn c(r: Result[Int, Str]) -> Int {
+  return match r {
+    Ok(x) => x,
+  }
+}
+
+fn d(n: Int) -> Int {
+  return match n {
+    1 => 1,
+  }
+}
+
+fn e(t: Tree) -> Int {
+  return match t {
+    Tree.Leaf => 0,
+    Tree.Node(Tree.Leaf, v, _) => v,
+  }
+}
+
+fn f(b2: Bool) -> Int {
+  return match b2 {
+    true => 1,
+  }
+}
+
+fn g(c: Color) -> Int {
+  return match c {
+    _ => 1,
+    Color.Red => 2,
+  }
+}
+
+fn h(o: Option[Option[Int]]) -> Int {
+  return match o {
+    Some(Some(x)) => x,
+    None => 0,
+  }
+}
+
+fn i(c: Color) -> Int {
+  return match c {
+    Color.Red if true => 1,
+    Color.Green => 2,
+    Color.Blue => 3,
+  }
+}
+
+fn main() {
+  let _ = a(Color.Red) + b(None) + c(Ok(1)) + d(1) + e(Tree.Leaf) + f(true) + g(Color.Red) + h(None) + i(Color.Red)
+}
+=== patterns
+enum E {
+  A(x: Int),
+  B,
+}
+
+enum F {
+  C,
+}
+
+fn main() {
+  let e = E.A(x: 1)
+  let _ = match e {
+    E.A(1, 2) => 1,
+    E.B(3) => 2,
+    E.Z => 3,
+    F.C => 4,
+    G.D => 5,
+    Some(x) => x,
+    Ok(y) => y,
+    "s" => 6,
+    _ => 7,
+  }
+  let _ = match 5 {
+    true => 1,
+    _ => 2,
+  }
+  let _ = match 1 {
+    1 => "a",
+    _ => 2,
+  }
+  let _ = match 1 {
+    1 => {
+      let _ = 2
+    },
+    _ => 3,
+  }
+}
+=== effects
+fn reads() -> Str uses fs {
+  return read_file("x").unwrap_or("")
+}
+
+fn pure_fn() -> Str {
+  return reads()
+}
+
+fn timed() -> Int uses io {
+  return now_ms()
+}
+
+fn checked(x: Int) -> Int requires now_ms() > 0 {
+  return x
+}
+
+const T: Int = now_ms()
+
+test "no time" {
+  let _ = now_ms()
+}
+
+fn main() {
+  let _ = pure_fn()
+  let _ = timed()
+  let _ = checked(1)
+  let _ = T
+}
+=== discarded
+fn res() -> Result[Int, Str] {
+  return Ok(1)
+}
+
+fn main() uses io {
+  let xs = [1]
+  xs.push(2)
+  [1].map(fn(x) => x)
+  xs.len()
+  res()
+  dbg(1)
+  1 + 1
+  let p = Pair { first: 1, second: 2 }
+  p with { first: 3 }
+}
+=== main_sig
+fn main(x: Int) -> Int {
+  return x
+}
+=== main_result
+fn main() -> Result[Int, Str] {
+  return Ok(1)
+}
+=== const_order
+const A: Int = B + 1
+const B: Int = 2
+const C: List[Int] = [A, B]
+
+fn main() {
+  let _ = C
+}
+=== property_gen
+property "fns" (f: fn(Int) -> Int) {
+  assert true
+}
+
+type R { f: fn() -> Int }
+
+property "rec" (r: R) {
+  assert true
+}
+
+fn main() {}
+=== unused
+fn helper() -> Int {
+  return 1
+}
+
+fn used_once() -> Int {
+  return 2
+}
+
+pub fn exported() -> Int {
+  return used_once()
+}
+
+fn recursive(n: Int) -> Int {
+  return recursive(n - 1)
+}
+
+fn main() {
+  let unused_local = 1
+  let _ignored = 2
+  for k in [1] {}
+  let g = fn(arg: Int) => 1
+  let _ = g
+  let _ = match Some(1) {
+    Some(v) => 1,
+    None => 0,
+  }
+}
+=== todo_warning
+fn f() -> Int {
+  return todo("the rest")
+}
+
+fn g() -> Int {
+  return todo("{1}")
+}
+
+fn main() {
+  let _ = f() + g()
+}
+=== generic_records
+type Box[T] { v: T }
+
+fn unbox[T](b: Box[T]) -> T {
+  return b.v
+}
+
+fn main() {
+  let b = Box { v: 1 }
+  let s: Str = unbox(b)
+  let c: Box[Str] = Box { v: 2 }
+  let _ = s
+  let _ = c
+  let d = b with { v: "x" }
+  let _ = d
+}
+=== lambdas
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  return f(x)
+}
+
+fn main() {
+  let _ = apply(fn(a, b) => a + b, 1)
+  let _ = apply(fn(a) => "x", 1)
+  let _ = apply(fn(a: Str) => 1, 1)
+  let h = fn(x) => x
+  let _ = h(1)
+  let _ = h("a")
+}
+=== multi_module
+use geo.{Circle, area, hidden, nothing, PI2}
+use missing.{x}
+use geo.{Circle}
+
+fn main() uses io {
+  print(area(Circle { r: 1.0 }))
+  print(hidden())
+}
+--- geo.klar
+pub type Circle { r: Float }
+
+pub fn area(c: Circle) -> Float {
+  return c.r * c.r
+}
+
+fn hidden() -> Int {
+  return 1
+}
+
+pub const PI2: Float = 6.28
+=== cycle
+use a.{fa}
+
+fn main() {
+  let _ = fa()
+}
+--- a.klar
+use b.{fb}
+
+pub fn fa() -> Int {
+  return fb()
+}
+--- b.klar
+use a.{fa}
+
+pub fn fb() -> Int {
+  return fa()
+}
+=== not_imported_type
+use shapes.{make}
+
+fn main() {
+  let c = make()
+  let d: Circle = c
+  let _ = d.r
+  let _ = c.label()
+}
+--- shapes.klar
+pub trait Label {
+  fn label(self) -> Str
+}
+
+pub type Circle { r: Float }
+
+impl Label for Circle {
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+pub fn make() -> Circle {
+  return Circle { r: 1.0 }
+}
+=== impl_elsewhere
+use shapes.{Label, Circle}
+
+impl Label for Int {
+  fn label(self) -> Str {
+    return "int"
+  }
+}
+
+impl Label for Circle {
+  fn label(self) -> Str {
+    return "c"
+  }
+}
+
+fn main() {}
+--- shapes.klar
+pub trait Label {
+  fn label(self) -> Str
+}
+
+pub type Circle { r: Float }
+=== bad_module
+use broken.{f}
+
+fn main() {}
+--- broken.klar
+fn f( {
+=== std_use
+use std.json.{Json, parse_json, nope}
+use std.set.{Set, set_of}
+
+fn main() uses io {
+  let s: Set[Int] = set_of([1, 2])
+  print(parse_json("1").is_ok())
+  let _ = s
+}
+=== nested_generics
+fn first[T](xs: List[T]) -> Option[T] {
+  return xs.get(0)
+}
+
+fn main() {
+  let m: Map[Str, List[Int]] = Map {}
+  let a: Option[Str] = first(m.get("x").unwrap_or([]))
+  let _ = a
+  let e = [1, 2].enumerate().map(fn(p) => p.index + p.value)
+  let z: List[Pair[Int, Str]] = [1].zip(["a"])
+  let _ = e
+  let _ = z
+  let g = [1, 2].group_by(fn(x) => x % 2)
+  let h: Map[Int, Str] = g
+  let _ = h
+}
+=== receivers
+fn main() {
+  let _ = [1, 2].sum_float()
+  let _ = ["a"].sum()
+  let _ = [1].join(",")
+  let _ = [[1]].flatten()
+  let _ = [1].flatten()
+}
+=== word_in_user_code
+fn f(w: Word) {}
+
+fn main() {}
+=== return_unit_infer
+fn main() {
+  let f = fn() {
+    return
+  }
+  let g = fn(x: Int) {
+    if x > 0 {
+      return 1
+    }
+    return
+  }
+  let _ = f
+  let _ = g
+}
+=== deep_mismatch
+fn main() {
+  let a: List[Option[Int]] = [Some("x")]
+  let b: Map[Str, fn(Int) -> Int] = Map { "a": fn(x: Str) => 1 }
+  let c: Result[List[Int], Str] = Ok(["a"])
+  let _ = a
+  let _ = b
+  let _ = c
+}
+=== infer_before_use
+fn main() {
+  let f = fn(x) => x.len()
+  let g = fn(y) => y?
+  let _ = f
+  let _ = g
+}

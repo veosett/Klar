@@ -50,6 +50,10 @@ fn error_json(e: LexError) -> Json {
   return json_object([
     Pair { first: "error", second: Json.Text(value: e.code) },
     Pair { first: "message", second: Json.Text(value: e.message) },
+    Pair { first: "hint", second: match e.hint.is_empty() {
+      true => Json.Null,
+      false => Json.Text(value: e.hint),
+    } },
     Pair { first: "span", second: Json.Arr(items: [Json.Int(value: e.line), Json.Int(value: e.col)]) },
   ])
 }

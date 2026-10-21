@@ -82,7 +82,7 @@ pub enum Else {
 }
 
 pub enum Stmt {
-  Let(span: Span, name: Str, name_span: Span, ty: Option[TypeExpr], value: Expr, mutable: Bool),
+  Let(span: Span, name: Str, name_span: Span, kw_span: Span, ty: Option[TypeExpr], value: Expr, mutable: Bool),
   Assign(span: Span, name: Str, value: Expr),
   Return(span: Span, value: Option[Expr]),
   If(span: Span, cond: Expr, then: Block, else_: Else),
@@ -106,6 +106,10 @@ pub type FnDecl {
   params: List[Param],
   ret: Option[TypeExpr],
   effects: List[Str],
+  /// `uses io, fs` (None without effects)
+  effects_span: Option[Span],
+  /// the end of the signature (where `uses ...` would be inserted)
+  sig_end: Span,
   pre: List[Expr],
   post: List[Expr],
   body: Option[Block],
@@ -124,13 +128,15 @@ pub enum Decl {
   Fn(decl: FnDecl),
   TypeD(span: Span, name: Str, type_params: List[Str], fields: List[FieldDecl], doc: Option[Str], public: Bool),
   Alias(span: Span, name: Str, type_params: List[Str], target: TypeExpr, doc: Option[Str], public: Bool),
-  Const(span: Span, name: Str, ty: TypeExpr, value: Expr, doc: Option[Str], public: Bool),
+  Const(span: Span, name: Str, name_span: Span, ty: TypeExpr, value: Expr, doc: Option[Str], public: Bool),
   Use(span: Span, path: List[Str], items: List[Str], item_spans: List[Span]),
   Property(span: Span, name: Str, params: List[Param], body: Block),
   EnumD(span: Span, name: Str, type_params: List[Str], variants: List[VariantDecl], doc: Option[Str], public: Bool),
   Test(span: Span, name: Str, body: Block),
-  Trait(span: Span, name: Str, methods: List[FnDecl], defaults: List[Str], doc: Option[Str], public: Bool),
-  Impl(span: Span, trait_name: Str, target: TypeExpr, methods: List[Str], method_spans: List[Span], public: Bool),
+  Trait(span: Span, name: Str, name_span: Span, methods: List[FnDecl], defaults: List[Str], doc: Option[Str],
+    public: Bool),
+  Impl(span: Span, trait_name: Str, trait_span: Span, target: TypeExpr, methods: List[Str], method_spans: List[Span],
+    public: Bool),
 }
 
 pub type Program { span: Span, module_name: Option[Str], decls: List[Decl] }

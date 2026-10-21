@@ -1,0 +1,309 @@
+// The module loader, written in Klar (self-hosting, stage 4): loads the prelude, the main file and every module
+// it `use`s, in dependency order, and checks each one. Mirrors klar/loader.py (without the safety analysis,
+// which is a separate pass).
+//
+// Modules are files: `use geometry.{Point}` in `dir/main.klar` loads `dir/geometry.klar`, `use std.json.{...}`
+// loads `<lib>/std/json.klar` (`lib` is the directory of the Python package `klar/`, which holds the prelude, the
+// standard library and the runtime).
+use ast.{Decl, Program, Span}
+use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, load_builtins, new_checker}
+use checker.{private_decl}
+use parser.{parse_program}
+use similar.{closest}
+
+pub type Module {
+  name: Str,
+  path: Str,
+  display: Str,
+  failed: Bool,
+  is_sys: Bool,
+  checker: Option[Ck],
+  exports: Map[Str, Export],
+}
+
+/// The loader state.
+pub type Ld {
+  root: Str,
+  lib: Str,
+  b: Builtins,
+  uni: Universe,
+  by_path: Map[Str, Module],
+  stack: List[Str],
+  diags: List[Diag],
+  prelude: Option[Str],
+}
+
+/// The result of loading a module: the loader state and the path of the module (None: not loaded).
+pub type Loaded { ld: Ld, path: Option[Str] }
+
+fn dirname(path: Str) -> Str {
+  let parts = path.split("/")
+  if parts.len() <= 1 {
+    return "."
+  }
+  let d = parts.take(parts.len() - 1).join("/")
+  return match d.is_empty() {
+    true => "/",
+    false => d,
+  }
+}
+
+fn basename(path: Str) -> Str {
+  return path.split("/").last().unwrap_or(path)
+}
+
+/// `a/./b/../c` -> `a/c`
+fn normalize(path: Str) -> Str {
+  var out: List[Str] = []
+  for part in path.split("/") {
+    if part == ".." {
+      if not out.is_empty() and out.last() != Some("") and out.last() != Some("..") {
+        out = out.take(out.len() - 1)
+      } else {
+        out = out.push(part)
+      }
+    } else if part != "." and not (part.is_empty() and not out.is_empty()) {
+      out = out.push(part)
+    }
+  }
+  let joined = out.join("/")
+  return match joined.is_empty() {
+    true => "/",
+    false => joined,
+  }
+}
+
+fn join(dir: Str, parts: List[Str]) -> Str {
+  return normalize(dir + "/" + parts.join("/"))
+}
+
+/// `path` relative to `base` (both absolute), like Python's `os.path.relpath`.
+fn relpath(path: Str, base: Str) -> Str {
+  let p = path.split("/").filter(fn(x) => not x.is_empty())
+  let b = base.split("/").filter(fn(x) => not x.is_empty())
+  var k = 0
+  while k < p.len() and k < b.len() and p.get_or(k, "") == b.get_or(k, "") {
+    k = k + 1
+  }
+  var out: List[Str] = []
+  var i = k
+  while i < b.len() {
+    out = out.push("..")
+    i = i + 1
+  }
+  out = out.concat(p.drop(k))
+  return match out.is_empty() {
+    true => ".",
+    false => out.join("/"),
+  }
+}
+
+fn rt_dir(ld: Ld) -> Str {
+  return ld.lib + "/rt"
+}
+
+fn std_dir(ld: Ld) -> Str {
+  return ld.lib + "/std"
+}
+
+fn display_of(ld: Ld, path: Str) -> Str {
+  if path.starts_with(rt_dir(ld) + "/") {
+    return "rt/" + relpath(path, rt_dir(ld))
+  }
+  if path.starts_with(std_dir(ld) + "/") {
+    return "std/" + relpath(path, std_dir(ld))
+  }
+  return relpath(path, ld.root)
+}
+
+fn add_error(ld: Ld, file: Str, d: Diag) -> Ld {
+  return ld with { diags: ld.diags.push(d with { file: file }) }
+}
+
+fn diag(code: Str, msg: Str, span: Span, hint: Option[Str]) -> Diag {
+  return Diag { code: code, severity: "error", message: msg, file: "", span: span, hint: hint }
+}
+
+fn zero_span() -> Span {
+  return Span { line: 0, col: 0, end_line: 0, end_col: 0 }
+}
+
+/// Where a module was imported from: the importing file and the `use` declaration.
+pub type Importer { file: Str, span: Span }
+
+fn module_name_of(ld: Ld, path: Str) -> Str {
+  return match ld.by_path.get(path) {
+    Some(m) => m.name,
+    None => basename(path),
+  }
+}
+
+fn failed_module(name: Str, path: Str, display: Str, is_sys: Bool) -> Module {
+  return Module { name: name, path: path, display: display, failed: true, is_sys: is_sys, checker: None, exports: Map {} }
+}
+
+/// Loads (and checks) the module at `path`, after the modules it imports.
+pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Importer]) -> Loaded uses fs {
+  var ld = ld0
+  if ld.by_path.has(path) and not ld.stack.contains(path) {
+    return Loaded { ld: ld, path: Some(path) }
+  }
+  if ld.stack.contains(path) {
+    let from = ld.stack.index_of(path).unwrap_or(0)
+    let snap = ld
+    let chain = ld.stack.drop(from).map(fn(p) => module_name_of(snap, p)).join(" -> ") + " -> " + name
+    match importer {
+      Some(imp) => {
+        ld = add_error(ld: ld, file: imp.file, d: diag(code: "E0602", msg: "circular import: {chain}", span: imp.span,
+          hint: Some("move the shared declarations into a third module that both import")))
+      },
+      None => {},
+    }
+    return Loaded { ld: ld, path: None }
+  }
+  let is_sys = path.starts_with(rt_dir(ld) + "/")
+  let source = match read_file(path) {
+    Ok(text) => text,
+    Err(e) => {
+      let at = match importer {
+        Some(imp) => imp,
+        None => Importer { file: display, span: zero_span() },
+      }
+      ld = add_error(ld: ld, file: at.file, d: diag(code: "E0601", msg: "cannot read module `{name}`: {e}", span: at.span,
+        hint: None))
+      return Loaded { ld: ld with { by_path: ld.by_path.set(path, failed_module(name: name, path: path, display: display,
+        is_sys: is_sys)) }, path: Some(path) }
+    },
+  }
+  let prog = match parse_program(source) {
+    Ok(p) => p,
+    Err(e) => {
+      let sp = Span { line: e.line, col: e.col, end_line: e.line, end_col: e.col }
+      ld = add_error(ld: ld, file: display, d: diag(code: e.code, msg: e.message, span: sp, hint: e.hint))
+      return Loaded { ld: ld with { by_path: ld.by_path.set(path, failed_module(name: name, path: path, display: display,
+        is_sys: is_sys)) }, path: Some(path) }
+    },
+  }
+  ld = ld with {
+    by_path: ld.by_path.set(path, failed_module(name: name, path: path, display: display, is_sys: is_sys) with {
+      failed: false,
+    }),
+    stack: ld.stack.push(path),
+  }
+  var imports: Map[Str, Export] = Map {}
+  var from_prelude: Map[Str, Bool] = Map {}
+  match ld.prelude {
+    Some(pp) => {
+      match ld.by_path.get(pp) {
+        Some(pm) => {
+          for entry in pm.exports.entries() {
+            imports = imports.set(entry.key, entry.value)
+            from_prelude = from_prelude.set(entry.key, true)
+          }
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  let here = dirname(path)
+  for d in prog.decls {
+    match d {
+      Decl.Use(span, dpath, items, item_spans) => {
+        let dep_name = dpath.join(".")
+        let first = dpath.get_or(0, "")
+        let dep_path = match first == "std" {
+          true => join(std_dir(ld), dpath.drop(1)) + ".klar",
+          false => match first == "rt" and is_sys {
+            true => join(rt_dir(ld), dpath.drop(1)) + ".klar",
+            false => join(here, dpath) + ".klar",
+          },
+        }
+        if not file_exists(dep_path) {
+          ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "module `{dep_name}` not found (looked for " +
+              "`{display_of(ld, dep_path)}`)", span: span, hint: Some("create the file `{display_of(ld, dep_path)}` " +
+                "(modules are files next to the importing file)")))
+        } else {
+          let r = load(ld0: ld, path: dep_path, name: dep_name, display: display_of(ld, dep_path),
+            importer: Some(Importer { file: display, span: span }))
+          ld = r.ld
+          match r.path.map(fn(p) => r.ld.by_path.get(p)) {
+            Some(Some(dep)) => {
+              if dep.failed {
+                ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "module `{dep_name}` could not be loaded",
+                  span: span, hint: Some("fix the errors reported for that file first")))
+              } else {
+                var k = 0
+                for item in items {
+                  let sp = item_spans.get_or(k, span)
+                  k = k + 1
+                  match dep.exports.get(item) {
+                    Some(ex) => {
+                      if imports.has(item) and not from_prelude.has(item) {
+                        ld = add_error(ld: ld, file: display, d: diag(code: "E0101", msg: "`{item}` is imported twice",
+                          span: sp, hint: None))
+                      } else {
+                        imports = imports.set(item, ex)
+                        from_prelude = from_prelude.remove(item)
+                      }
+                    },
+                    None => {
+                      let private = match dep.checker {
+                        Some(dc) => private_decl(dc, item),
+                        None => None,
+                      }
+                      match private {
+                        Some(p) => {
+                          ld = add_error(ld: ld, file: display, d: diag(code: "E0606", msg: "`{item}` is private to module " +
+                              "`{dep_name}`", span: sp, hint: Some("mark it public in {dep.display}: `pub {p.first} {item}`")))
+                        },
+                        None => {
+                          let names = dep.exports.keys()
+                          let declares = match names.is_empty() {
+                            true => "(nothing)",
+                            false => names.sort().join(", "),
+                          }
+                          let hint = match closest(item, names) {
+                            Some(cm) => "did you mean `{cm}`?",
+                            None => "`{dep_name}` declares: {declares}",
+                          }
+                          ld = add_error(ld: ld, file: display, d: diag(code: "E0603", msg: "module `{dep_name}` has no item " +
+                              "`{item}`", span: sp, hint: Some(hint)))
+                        },
+                      }
+                    },
+                  }
+                }
+              }
+            },
+            _ => {},
+          }
+        }
+      },
+      _ => {},
+    }
+  }
+  ld = ld with { stack: ld.stack.take(ld.stack.len() - 1) }
+  let ck = check_module(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: display, mod_name: name, sys: is_sys,
+    imports: imports))
+  let m = Module { name: name, path: path, display: display, failed: false, is_sys: is_sys, checker: Some(ck),
+    exports: exports(ck) }
+  ld = ld with { uni: ck.uni, diags: ld.diags.concat(ck.diags), by_path: ld.by_path.set(path, m) }
+  return Loaded { ld: ld, path: Some(path) }
+}
+
+/// Loads and checks a program (its main file is `path`, absolute); `lib` is the directory of `klar/`.
+pub fn load_program(path: Str, lib: Str) -> Ld uses fs {
+  let root = dirname(path)
+  var ld = Ld { root: root, lib: lib, b: load_builtins(), uni: empty_universe(), by_path: Map {}, stack: [], diags: [],
+    prelude: None }
+  let prelude_path = lib + "/prelude.klar"
+  ld = load(ld0: ld, path: prelude_path, name: "prelude", display: "prelude.klar", importer: None).ld
+  ld = ld with { prelude: Some(prelude_path) }
+  let file = basename(path)
+  let name = match file.ends_with(".klar") {
+    true => file.slice(0, file.len() - 5),
+    false => file,
+  }
+  return load(ld0: ld, path: path, name: name, display: file, importer: None).ld
+}

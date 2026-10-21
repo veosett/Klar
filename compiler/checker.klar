@@ -1,0 +1,4267 @@
+// The semantic checker, written in Klar (self-hosting, stage 4): names, types, effects, exhaustiveness and the
+// AI-oriented lints. It mirrors klar/checker.py rule for rule — tests/selfhost.py checks that both report the
+// same diagnostics (code, message, hint, position) for every .klar file of the repository.
+//
+// Klar values are immutable, so the checker state (`Ck`: diagnostics, scopes, the type substitution, the
+// universe of declared types, ...) is passed to every function and returned updated with the result (`Res`).
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span}
+use ast.{Stmt, StrPiece, TypeExpr, expr_span, pattern_span}
+use builtin_sigs.{foreign_methods, foreign_notes, global_sigs, method_sigs, sys_sigs}
+use parser.{parse_signature}
+use similar.{closest}
+use types.{Subst, Type, args_of, con, head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify}
+
+/// A diagnostic: an error or a warning at a position of a file.
+pub type Diag { code: Str, severity: Str, message: Str, file: Str, span: Span, hint: Option[Str] }
+
+/// The signature of a function: built-in, declared, imported, or a trait/impl method.
+pub type Sig {
+  name: Str,
+  tparams: List[Str],
+  params: List[Pair[Str, Type]],
+  ret: Type,
+  effects: List[Str],
+  user: Bool,
+  mod_name: Str,
+  /// type parameter -> the traits it must implement
+  bounds: Map[Str, List[Str]],
+  /// the declaration in its module (index in the program's declarations; -1 for built-ins)
+  decl: Int,
+  name_span: Span,
+  /// `Self` of an impl method
+  self_type: Option[Type],
+}
+
+pub type RecordInfo { name: Str, tparams: List[Str], mod_name: Str, fields: Map[Str, Type] }
+
+pub type EnumInfo { name: Str, tparams: List[Str], mod_name: Str, variants: Map[Str, List[Pair[Str, Type]]] }
+
+pub type AliasInfo { name: Str, tparams: List[Str], target: TypeExpr, mod_name: Str }
+
+pub type TraitInfo { name: Str, mod_name: Str, methods: Map[Str, Sig], defaults: Map[Str, Sig] }
+
+pub type ImplInfo { trait_name: Str, type_name: Str, mod_name: Str, file: Str, span: Span, methods: Map[Str, Sig] }
+
+/// Program-wide registry of type and trait declarations (type names are unique per program).
+pub type Universe {
+  records: Map[Str, RecordInfo],
+  enums: Map[Str, EnumInfo],
+  aliases: Map[Str, AliasInfo],
+  traits: Map[Str, TraitInfo],
+  /// "Trait/Type" -> the impl
+  impls: Map[Str, ImplInfo],
+  /// type name -> method -> (trait, signature): impl methods and inherited defaults
+  type_methods: Map[Str, Map[Str, Pair[Str, Sig]]],
+}
+
+pub fn empty_universe() -> Universe {
+  return Universe { records: Map {}, enums: Map {}, aliases: Map {}, traits: Map {}, impls: Map {}, type_methods: Map {} }
+}
+
+/// What a module exports (and another one imports): a function, a constant or a type/trait name.
+pub enum Export {
+  FnE(sig: Sig),
+  ConstE(ty: Type),
+  TypeE(name: Str),
+}
+
+/// The built-in functions and methods (parsed once from compiler/builtin_sigs.klar).
+pub type Builtins {
+  globals: Map[Str, Sig],
+  sys: Map[Str, Sig],
+  methods: Map[Str, Map[Str, Sig]],
+  foreign: Map[Str, Str],
+  notes: Map[Str, Str],
+}
+
+type Var { ty: Type, mutable: Bool, span: Span, used: Bool, kind: Str, kw_span: Option[Span] }
+
+type Scope { id: Int, vars: Map[Str, Var] }
+
+type Ctx { name: Str, ret: Type, effects: List[Str], is_test: Bool, loop: Int, sig_end: Option[Span], purpose: Str }
+
+/// A call of a generic function with bounds, checked when the enclosing body is done.
+type Pending { sig: Sig, mapping: Map[Str, Type], span: Span, ctx_bounds: Map[Str, List[Str]] }
+
+/// The checker state of one module.
+pub type Ck {
+  b: Builtins,
+  uni: Universe,
+  file: Str,
+  mod_name: Str,
+  sys: Bool,
+  decls: List[Decl],
+  globals: Map[Str, Sig],
+  /// own and imported functions (None: declared, signature not resolved yet)
+  fns: Map[Str, Option[Sig]],
+  consts: Map[Str, Option[Type]],
+  /// declaration indices of the own constants, in order
+  own_consts: List[Int],
+  visible: Map[Str, Bool],
+  imported: Map[Str, Bool],
+  scopes: List[Scope],
+  ctx: Ctx,
+  tparams: Map[Str, Type],
+  bounds: Map[Str, List[Str]],
+  pending: List[Pending],
+  /// "Type.m" / "Trait.m" -> trait and impl methods (not callable by name)
+  methods: Map[Str, Sig],
+  const_allowed: Option[Map[Str, Bool]],
+  diags: List[Diag],
+  s: Subst,
+  next_var: Int,
+  next_scope: Int,
+  lambda_bounds: List[Int],
+  reported: Map[Str, Bool],
+  resolving: List[Str],
+  /// declaration index of an `impl` -> its key in `uni.impls` (impls that were registered)
+  impl_keys: Map[Int, Str],
+  /// the declaration being checked
+  cur_decl: Int,
+  /// `x.f()` calls that resolved to a function `f`: (name, declaration index of the call)
+  ufcs: List[Pair[Str, Int]],
+}
+
+/// A result together with the updated checker state.
+pub type Res[T] { c: Ck, v: T }
+
+const KNOWN_EFFECTS: List[Str] = ["io", "time", "rand", "fs", "net"]
+const PRIMS: List[Str] = ["Int", "Float", "Bool", "Str", "Bytes", "Unit", "Never"]
+const GENERICS: List[Str] = ["List", "Map", "Option", "Result"]
+
+fn generic_arity(name: Str) -> Int {
+  return match name {
+    "Map" => 2,
+    "Result" => 2,
+    _ => 1,
+  }
+}
+
+// ---- small helpers ----------------------------------------------------------------------------------------
+
+fn is_upper(c: Str) -> Bool {
+  return c >= "A" and c <= "Z"
+}
+
+fn is_lower(c: Str) -> Bool {
+  return c >= "a" and c <= "z"
+}
+
+fn is_digit(c: Str) -> Bool {
+  return c >= "0" and c <= "9"
+}
+
+fn is_pascal(name: Str) -> Bool {
+  let cs = name.chars()
+  if cs.is_empty() or not is_upper(cs.get_or(0, "")) {
+    return false
+  }
+  return cs.drop(1).all(fn(c) => is_upper(c) or is_lower(c) or is_digit(c))
+}
+
+fn is_snake(name: Str) -> Bool {
+  if name == "_" {
+    return true
+  }
+  var cs = name.chars()
+  if cs.get_or(0, "") == "_" {
+    cs = cs.drop(1)
+  }
+  if cs.is_empty() or not is_lower(cs.get_or(0, "")) {
+    return false
+  }
+  return cs.drop(1).all(fn(c) => is_lower(c) or is_digit(c) or c == "_")
+}
+
+fn is_upper_snake(name: Str) -> Bool {
+  let cs = name.chars()
+  if cs.is_empty() or not is_upper(cs.get_or(0, "")) {
+    return false
+  }
+  return cs.drop(1).all(fn(c) => is_upper(c) or is_digit(c) or c == "_")
+}
+
+/// `fooBar` -> `foo_bar` (Python: `re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower().replace("__", "_")`).
+fn to_snake(name: Str) -> Str {
+  var out = ""
+  var i = 0
+  for c in name.chars() {
+    if i > 0 and is_upper(c) {
+      out = out + "_"
+    }
+    out = out + c
+    i = i + 1
+  }
+  return out.lower().replace("__", "_")
+}
+
+/// `my_type` -> `MyType` (the hint of E0103).
+fn to_pascal(name: Str) -> Str {
+  let cs = name.chars()
+  var out = cs.get_or(0, "").upper()
+  var i = 1
+  while i < cs.len() {
+    let c = cs.get_or(i, "")
+    let nxt = cs.get_or(i + 1, "")
+    if c == "_" and nxt != "" and (is_lower(nxt) or is_upper(nxt) or is_digit(nxt) or nxt == "_") {
+      out = out + nxt.upper()
+      i = i + 2
+    } else {
+      out = out + c
+      i = i + 1
+    }
+  }
+  return out
+}
+
+fn commas(xs: List[Str]) -> Str {
+  return xs.join(", ")
+}
+
+fn or_empty(s: Option[Str]) -> Str {
+  return s.unwrap_or("")
+}
+
+/// `a` without the elements of `b`, sorted (Python: `sorted(set(a) - set(b))`).
+fn minus(a: List[Str], b: List[Str]) -> List[Str] {
+  return a.filter(fn(x) => not b.contains(x)).unique().sort()
+}
+
+fn union(a: List[Str], b: List[Str]) -> List[Str] {
+  return a.concat(b).unique()
+}
+
+fn short(file: Str, sp: Span) -> Str {
+  return "{file}:{sp.line}:{sp.col}"
+}
+
+fn no_span() -> Span {
+  return Span { line: 0, col: 0, end_line: 0, end_col: 0 }
+}
+
+fn is_any(t: Type) -> Bool {
+  return t == Type.Any
+}
+
+fn is_never(t: Type) -> Bool {
+  return t == Type.Never
+}
+
+fn is_var(t: Type) -> Bool {
+  return match t {
+    Type.Var(_) => true,
+    _ => false,
+  }
+}
+
+fn is_fn_type(t: Type) -> Bool {
+  return match t {
+    Type.Fun(_, _) => true,
+    _ => false,
+  }
+}
+
+fn param_name(t: Type) -> Option[Str] {
+  return match t {
+    Type.Param(n) => Some(n),
+    _ => None,
+  }
+}
+
+fn ticked(xs: List[Str]) -> Str {
+  return xs.map(fn(x) => "`" + x + "`").join(", ")
+}
+
+// ---- built-ins ----------------------------------------------------------------------------------------------
+
+fn builtin_type(te: TypeExpr, tps: Map[Str, Type]) -> Type {
+  return match te {
+    TypeExpr.FnType(_, ps, ret) => Type.Fun(params: ps.map(fn(p) => builtin_type(p, tps)), ret: builtin_type(ret, tps)),
+    TypeExpr.Named(_, name, args) => match tps.get(name) {
+      Some(t) => t,
+      None => match name == "Never" {
+        true => Type.Never,
+        false => Type.Con(name: name, args: args.map(fn(a) => builtin_type(a, tps))),
+      },
+    },
+  }
+}
+
+fn builtin_sig(text: Str) -> Sig {
+  let empty: Map[Str, List[Str]] = Map {}
+  let d = match parse_signature(text) {
+    Ok(f) => f,
+    Err(e) => fail("bad built-in signature `{text}`: {e.message}"),
+  }
+  let tps = tparam_map(d.type_params)
+  let params = d.params.map(fn(p) => Pair { first: p.name, second: match p.ty {
+    Some(te) => builtin_type(te, tps),
+    None => Type.Any,
+  } })
+  let ret = match d.ret {
+    Some(te) => builtin_type(te, tps),
+    None => con("Unit"),
+  }
+  return Sig {
+    name: d.name,
+    tparams: d.type_params,
+    params: params,
+    ret: ret,
+    effects: d.effects,
+    user: false,
+    mod_name: "",
+    bounds: empty,
+    decl: -1,
+    name_span: d.name_span,
+    self_type: None,
+  }
+}
+
+/// Parses the built-in signatures (once per program).
+pub fn load_builtins() -> Builtins {
+  var globals: Map[Str, Sig] = Map {}
+  for text in global_sigs() {
+    let sig = builtin_sig(text)
+    globals = globals.set(sig.name, sig)
+  }
+  var sys: Map[Str, Sig] = Map {}
+  for text in sys_sigs() {
+    let sig = builtin_sig(text)
+    sys = sys.set(sig.name, sig)
+  }
+  var methods: Map[Str, Map[Str, Sig]] = Map {}
+  for entry in method_sigs() {
+    let sig = builtin_sig(entry.second)
+    let empty: Map[Str, Sig] = Map {}
+    methods = methods.set(entry.first, methods.get(entry.first).unwrap_or(empty).set(sig.name, sig))
+  }
+  var foreign: Map[Str, Str] = Map {}
+  for f in foreign_methods() {
+    foreign = foreign.set(f.first, f.second)
+  }
+  var notes: Map[Str, Str] = Map {}
+  for f in foreign_notes() {
+    notes = notes.set(f.first, f.second)
+  }
+  return Builtins { globals: globals, sys: sys, methods: methods, foreign: foreign, notes: notes }
+}
+
+fn builtin_methods_of(c: Ck, h: Option[Str]) -> Map[Str, Sig] {
+  let empty: Map[Str, Sig] = Map {}
+  return match h {
+    Some(name) => c.b.methods.get(name).unwrap_or(empty),
+    None => empty,
+  }
+}
+
+// ---- state ----------------------------------------------------------------------------------------------
+
+fn top_ctx() -> Ctx {
+  return Ctx { name: "", ret: Type.Any, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "fn" }
+}
+
+/// A checker for one module; `imports` are the names it may use from other modules (and the prelude).
+pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mod_name: Str, sys: Bool,
+  imports: Map[Str, Export]) -> Ck {
+    var globals = b.globals
+    if sys {
+      for sig in b.sys.values() {
+        globals = globals.set(sig.name, sig)
+      }
+    }
+    var fns: Map[Str, Option[Sig]] = Map {}
+    var consts: Map[Str, Option[Type]] = Map {}
+    var visible: Map[Str, Bool] = Map {}
+    var imported: Map[Str, Bool] = Map {}
+    for entry in imports.entries() {
+      imported = imported.set(entry.key, true)
+      match entry.value {
+        Export.FnE(sig) => {
+          fns = fns.set(entry.key, Some(sig))
+        },
+        Export.ConstE(t) => {
+          consts = consts.set(entry.key, Some(t))
+        },
+        Export.TypeE(_) => {
+          visible = visible.set(entry.key, true)
+        },
+      }
+    }
+    return Ck {
+      b: b,
+      uni: universe,
+      file: file,
+      mod_name: mod_name,
+      sys: sys,
+      decls: prog.decls,
+      globals: globals,
+      fns: fns,
+      consts: consts,
+      own_consts: [],
+      visible: visible,
+      imported: imported,
+      scopes: [],
+      ctx: top_ctx(),
+      tparams: Map {},
+      bounds: Map {},
+      pending: [],
+      methods: Map {},
+      const_allowed: None,
+      diags: [],
+      s: Map {},
+      next_var: 0,
+      next_scope: 0,
+      lambda_bounds: [],
+      reported: Map {},
+      resolving: [],
+      impl_keys: Map {},
+      cur_decl: -1,
+      ufcs: [],
+    }
+  }
+
+fn error(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str]) -> Ck {
+  return c with {
+    diags: c.diags.push(Diag { code: code, severity: "error", message: msg, file: c.file, span: span, hint: hint }),
+  }
+}
+
+fn warn(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str]) -> Ck {
+  return c with {
+    diags: c.diags.push(Diag { code: code, severity: "warning", message: msg, file: c.file, span: span, hint: hint }),
+  }
+}
+
+/// `did you mean `x`?` for the closest candidate.
+fn did_you_mean(name: Str, candidates: List[Str]) -> Option[Str] {
+  return closest(name, candidates).map(fn(s) => "did you mean `{s}`?")
+}
+
+fn or_hint(h: Option[Str], other: Str) -> Option[Str] {
+  return match h {
+    Some(_) => h,
+    None => Some(other),
+  }
+}
+
+fn fresh_var(ck: Ck) -> Res[Type] {
+  return Res { c: ck with { next_var: ck.next_var + 1 }, v: Type.Var(id: ck.next_var + 1) }
+}
+
+/// A fresh type variable for each name.
+fn fresh_map(ck: Ck, names: List[Str]) -> Res[Map[Str, Type]] {
+  var c = ck
+  var m: Map[Str, Type] = Map {}
+  for n in names {
+    let v = fresh_var(c)
+    c = v.c
+    m = m.set(n, v.v)
+  }
+  return Res { c: c, v: m }
+}
+
+fn uni(ck: Ck, a: Type, b: Type) -> Res[Bool] {
+  return match unify(s: ck.s, a: a, b: b) {
+    Some(s2) => Res { c: ck with { s: s2 }, v: true },
+    None => Res { c: ck, v: false },
+  }
+}
+
+/// Unifies when possible; the outcome is not needed (it only guides inference).
+fn uni_(ck: Ck, a: Type, b: Type) -> Ck {
+  return uni(ck: ck, a: a, b: b).c
+}
+
+fn pr(c: Ck, t: Type) -> Type {
+  return prune(c.s, t)
+}
+
+fn sh(c: Ck, t: Type) -> Str {
+  return show(c.s, t)
+}
+
+fn hd(c: Ck, t: Type) -> Option[Str] {
+  return head(c.s, t)
+}
+
+fn sub(c: Ck, t: Type, m: Map[Str, Type]) -> Type {
+  return subst(s: c.s, t: t, mapping: m)
+}
+
+/// The module that declares a type or trait.
+fn owner(u: Universe, name: Str) -> Option[Str] {
+  return match u.records.get(name) {
+    Some(i) => Some(i.mod_name),
+    None => match u.enums.get(name) {
+      Some(i) => Some(i.mod_name),
+      None => match u.aliases.get(name) {
+        Some(i) => Some(i.mod_name),
+        None => u.traits.get(name).map(fn(i) => i.mod_name),
+      },
+    },
+  }
+}
+
+fn implements(u: Universe, type_name: Str, trait_name: Str) -> Bool {
+  return u.impls.has(trait_name + "/" + type_name)
+}
+
+fn type_names_visible(c: Ck) -> List[Str] {
+  return union(union(c.visible.keys(), PRIMS), GENERICS)
+}
+
+fn not_imported(c: Ck, name: Str, span: Span) -> Ck {
+  let o = owner(c.uni, name).unwrap_or("?")
+  return error(c: c, code: "E0104", msg: "type `{name}` is defined in module `{o}` but not imported here", span: span,
+    hint: Some("add `use {o}.\{{name}\}` at the top of the file"))
+}
+
+fn check_type_visible(c: Ck, name: Str, span: Span) -> Ck {
+  if c.visible.has(name) {
+    return c
+  }
+  return not_imported(c: c, name: name, span: span)
+}
+
+fn fn_sig(c: Ck, name: Str) -> Option[Sig] {
+  return match c.fns.get(name) {
+    Some(Some(s)) => Some(s),
+    _ => None,
+  }
+}
+
+/// A function or built-in callable by this name (Python: `self.fns.get(name) or self.globals.get(name)`).
+fn callable(c: Ck, name: Str) -> Option[Sig] {
+  return match fn_sig(c, name) {
+    Some(s) => Some(s),
+    None => c.globals.get(name),
+  }
+}
+
+// ---- type expressions ---------------------------------------------------------------------------------------
+
+fn te_span(te: TypeExpr) -> Span {
+  return match te {
+    TypeExpr.Named(s, _, _) => s,
+    TypeExpr.FnType(s, _, _) => s,
+  }
+}
+
+fn resolve_opt(ck: Ck, te: Option[TypeExpr], tps: Map[Str, Type]) -> Res[Type] {
+  return match te {
+    Some(t) => resolve(ck: ck, te: t, tps: tps),
+    None => Res { c: ck, v: Type.Any },
+  }
+}
+
+fn resolve_all(ck: Ck, tes: List[TypeExpr], tps: Map[Str, Type]) -> Res[List[Type]] {
+  var c = ck
+  var out: List[Type] = []
+  for te in tes {
+    let r = resolve(ck: c, te: te, tps: tps)
+    c = r.c
+    out = out.push(r.v)
+  }
+  return Res { c: c, v: out }
+}
+
+fn generic_example(name: Str) -> Str {
+  return match name {
+    "List" => "List[Int]",
+    "Option" => "Option[Str]",
+    "Map" => "Map[Str, Int]",
+    _ => "Result[Int, Str]",
+  }
+}
+
+/// Type names from other languages and the Klar name.
+fn foreign_type(name: Str) -> Option[Str] {
+  return match name {
+    "int" => Some("Int"),
+    "integer" => Some("Int"),
+    "i32" => Some("Int"),
+    "i64" => Some("Int"),
+    "number" => Some("Int"),
+    "float" => Some("Float"),
+    "f64" => Some("Float"),
+    "double" => Some("Float"),
+    "bool" => Some("Bool"),
+    "boolean" => Some("Bool"),
+    "string" => Some("Str"),
+    "String" => Some("Str"),
+    "str" => Some("Str"),
+    "void" => Some("Unit"),
+    "None" => Some("Unit"),
+    "Vec" => Some("List"),
+    "Array" => Some("List"),
+    "list" => Some("List"),
+    "dict" => Some("Map"),
+    "HashMap" => Some("Map"),
+    "Dict" => Some("Map"),
+    "Optional" => Some("Option"),
+    "Maybe" => Some("Option"),
+    "Either" => Some("Result"),
+    "Tuple" => Some("Pair"),
+    "bytes" => Some("Bytes"),
+    "bytearray" => Some("Bytes"),
+    "Buffer" => Some("Bytes"),
+    "ByteArray" => Some("Bytes"),
+    "u8" => Some("Int"),
+    "byte" => Some("Int"),
+    _ => None,
+  }
+}
+
+fn pad_any(args: List[Type], n: Int) -> List[Type] {
+  var out = args.take(n)
+  while out.len() < n {
+    out = out.push(Type.Any)
+  }
+  return out
+}
+
+/// The type a type expression denotes (`tps`: the generic parameters in scope).
+fn resolve(ck: Ck, te: TypeExpr, tps: Map[Str, Type]) -> Res[Type] {
+  var c = ck
+  let named = match te {
+    TypeExpr.FnType(_, ps, ret) => {
+      let a = resolve_all(ck: c, tes: ps, tps: tps)
+      let r = resolve(ck: a.c, te: ret, tps: tps)
+      return Res { c: r.c, v: Type.Fun(params: a.v, ret: r.v) }
+    },
+    TypeExpr.Named(sp, name, args) => Pair { first: sp, second: Pair { first: name, second: args } },
+  }
+  let span = named.first
+  let name = named.second.first
+  let targs = named.second.second
+  match tps.get(name) {
+    Some(t) => {
+      if not targs.is_empty() {
+        c = error(c: c, code: "E0105", msg: "type parameter `{name}` takes no type arguments", span: span, hint: None)
+      }
+      return Res { c: c, v: t }
+    },
+    None => {},
+  }
+  if PRIMS.contains(name) or (name == "Word" and c.sys) {
+    if not targs.is_empty() {
+      c = error(c: c, code: "E0105", msg: "`{name}` takes no type arguments", span: span, hint: None)
+    }
+    return Res { c: c, v: match name == "Never" {
+      true => Type.Never,
+      false => con(name),
+    } }
+  }
+  if GENERICS.contains(name) {
+    let n = generic_arity(name)
+    if targs.len() != n {
+      c = error(c: c, code: "E0105", msg: "`{name}` takes {n} type argument(s), got {targs.len()}", span: span,
+        hint: Some("for example `{generic_example(name)}`"))
+      return Res { c: c, v: Type.Con(name: name, args: pad_any([], n)) }
+    }
+    let a = resolve_all(ck: c, tes: targs, tps: tps)
+    return Res { c: a.c, v: Type.Con(name: name, args: a.v) }
+  }
+  if c.uni.traits.has(name) {
+    c = error(c: c, code: "E0224", msg: "`{name}` is a trait, not a type", span: span,
+      hint: Some("use a type parameter with a bound: `fn f[T: {name}](x: T)`; " +
+          "for a list of different kinds of values use an `enum` (and `impl {name}` for it)"))
+    return Res { c: c, v: Type.Any }
+  }
+  let info_tparams = match c.uni.records.get(name) {
+    Some(i) => Some(i.tparams),
+    None => match c.uni.enums.get(name) {
+      Some(i) => Some(i.tparams),
+      None => c.uni.aliases.get(name).map(fn(i) => i.tparams),
+    },
+  }
+  match info_tparams {
+    Some(itps) => {
+      if not c.visible.has(name) {
+        c = not_imported(c: c, name: name, span: span)
+      }
+      let a = resolve_all(ck: c, tes: targs, tps: tps)
+      c = a.c
+      var args = a.v
+      if args.len() != itps.len() {
+        if not itps.is_empty() {
+          let ex = "{name}[{commas(itps)}]"
+          let ints = itps.map(fn(_) => "Int").join(", ")
+          c = error(c: c, code: "E0105", msg: "`{name}` takes {itps.len()} type argument(s), got {args.len()}",
+            span: span, hint: Some("write `{ex}` with concrete types, e.g. `{name}[{ints}]`"))
+        } else {
+          c = error(c: c, code: "E0105", msg: "`{name}` is not generic", span: span, hint: None)
+        }
+        args = pad_any(args, itps.len())
+      }
+      match c.uni.aliases.get(name) {
+        Some(alias) => {
+          if c.resolving.contains(name) {
+            c = error(c: c, code: "E0104", msg: "type alias `{name}` refers to itself", span: span,
+              hint: Some("recursive types must be `enum` or `type` records, not aliases"))
+            return Res { c: c, v: Type.Any }
+          }
+          let saved_visible = c.visible
+          let saved_resolving = c.resolving
+          c = c with { resolving: c.resolving.push(name) }
+          if alias.mod_name != c.mod_name {
+            // resolve in the alias's own module context: its names are allowed there
+            var vis = c.visible
+            for n in c.uni.records.keys().concat(c.uni.enums.keys()).concat(c.uni.aliases.keys()) {
+              vis = vis.set(n, true)
+            }
+            c = c with { visible: vis }
+          }
+          var m: Map[Str, Type] = Map {}
+          var k = 0
+          for tp in alias.tparams {
+            m = m.set(tp, args.get_or(k, Type.Any))
+            k = k + 1
+          }
+          let r = resolve(ck: c, te: alias.target, tps: m)
+          return Res { c: r.c with { visible: saved_visible, resolving: saved_resolving }, v: r.v }
+        },
+        None => {
+          return Res { c: c, v: Type.Con(name: name, args: args) }
+        },
+      }
+    },
+    None => {},
+  }
+  let cands = union(type_names_visible(c), tps.keys())
+  if name == "Self" {
+    c = error(c: c, code: "E0104", msg: "`Self` is only available in `trait` and `impl` methods", span: span,
+      hint: Some("write the concrete type name"))
+    return Res { c: c, v: Type.Any }
+  }
+  let hint = match foreign_type(name) {
+    Some(k) => Some("Klar calls this type `{k}`"),
+    None => did_you_mean(name, cands),
+  }
+  c = error(c: c, code: "E0104", msg: "unknown type `{name}`", span: span, hint: hint)
+  return Res { c: c, v: Type.Any }
+}
+
+// ---- declarations -------------------------------------------------------------------------------------------
+
+fn tparam_map(names: List[Str]) -> Map[Str, Type] {
+  var m: Map[Str, Type] = Map {}
+  for n in names {
+    m = m.set(n, Type.Param(name: n))
+  }
+  return m
+}
+
+fn empty_sigs() -> Map[Str, Sig] {
+  let m: Map[Str, Sig] = Map {}
+  return m
+}
+
+fn no_bounds() -> Map[Str, List[Str]] {
+  let m: Map[Str, List[Str]] = Map {}
+  return m
+}
+
+fn type_decl_problem(ck: Ck, name: Str, tparams: List[Str], span: Span) -> Res[Bool] {
+  var c = ck
+  if not is_pascal(name) {
+    c = error(c: c, code: "E0103", msg: "type name `{name}` must be PascalCase", span: span,
+      hint: Some("rename it to `{to_pascal(name)}`"))
+  }
+  for t in tparams {
+    if not is_pascal(t) {
+      c = error(c: c, code: "E0103", msg: "type parameter `{t}` must be PascalCase (e.g. `T`)", span: span, hint: None)
+    }
+  }
+  let o = owner(c.uni, name)
+  if o != None or PRIMS.contains(name) or GENERICS.contains(name) {
+    let where = match o {
+      None => " (built-in)",
+      Some(m) => match m != c.mod_name {
+        true => " in module `{m}`",
+        false => "",
+      },
+    }
+    let hint = match o {
+      Some(m) => match m != c.mod_name {
+        true => Some("type names are unique across the whole program; pick another name"),
+        false => None,
+      },
+      None => None,
+    }
+    c = error(c: c, code: "E0101", msg: "type `{name}` is already defined{where}", span: span, hint: hint)
+    return Res { c: c, v: true }
+  }
+  return Res { c: c, v: false }
+}
+
+/// Registers the declarations of the module, then resolves their types and signatures.
+fn collect(ck: Ck) -> Ck {
+  var c = ck
+  var test_names: List[Str] = []
+  var own_types: List[Int] = []
+  var own_traits: List[Int] = []
+  var idx = 0
+  for d in c.decls {
+    match d {
+      Decl.TypeD(span, name, tparams, _, _, _) => {
+        let r = type_decl_problem(ck: c, name: name, tparams: tparams, span: span)
+        c = r.c
+        if not r.v {
+          c = c with {
+            uni: c.uni with {
+              records: c.uni.records.set(name, RecordInfo { name: name, tparams: tparams, mod_name: c.mod_name, fields: Map {} }),
+            },
+            visible: c.visible.set(name, true),
+          }
+          own_types = own_types.push(idx)
+        }
+      },
+      Decl.EnumD(span, name, tparams, _, _, _) => {
+        let r = type_decl_problem(ck: c, name: name, tparams: tparams, span: span)
+        c = r.c
+        if not r.v {
+          c = c with {
+            uni: c.uni with {
+              enums: c.uni.enums.set(name, EnumInfo { name: name, tparams: tparams, mod_name: c.mod_name, variants: Map {} }),
+            },
+            visible: c.visible.set(name, true),
+          }
+          own_types = own_types.push(idx)
+        }
+      },
+      Decl.Alias(span, name, tparams, target, _, _) => {
+        let r = type_decl_problem(ck: c, name: name, tparams: tparams, span: span)
+        c = r.c
+        if not r.v {
+          c = c with {
+            uni: c.uni with {
+              aliases: c.uni.aliases.set(name, AliasInfo { name: name, tparams: tparams, target: target, mod_name: c.mod_name }),
+            },
+            visible: c.visible.set(name, true),
+          }
+          own_types = own_types.push(idx)
+        }
+      },
+      Decl.Trait(_, name, name_span, _, _, _, _) => {
+        if not is_pascal(name) {
+          c = error(c: c, code: "E0103", msg: "trait name `{name}` must be PascalCase", span: name_span, hint: None)
+        }
+        let o = owner(c.uni, name)
+        if o != None or PRIMS.contains(name) or GENERICS.contains(name) {
+          let where = match o {
+            Some(m) => match m != c.mod_name {
+              true => " in module `{m}`",
+              false => "",
+            },
+            None => "",
+          }
+          c = error(c: c, code: "E0101", msg: "`{name}` is already defined{where}", span: name_span,
+            hint: Some("trait and type names are unique across the whole program"))
+        } else {
+          let info = TraitInfo { name: name, mod_name: c.mod_name, methods: empty_sigs(), defaults: empty_sigs() }
+          c = c with { uni: c.uni with { traits: c.uni.traits.set(name, info) }, visible: c.visible.set(name, true) }
+          own_traits = own_traits.push(idx)
+        }
+      },
+      Decl.Fn(f) => {
+        if f.owner_kind == None {
+          if c.fns.has(f.name) or c.globals.has(f.name) or c.consts.has(f.name) {
+            let what = match c.globals.has(f.name) {
+              true => "a built-in function",
+              false => match c.imported.has(f.name) {
+                true => "imported",
+                false => "already defined",
+              },
+            }
+            c = error(c: c, code: "E0101", msg: "function `{f.name}` is {what}", span: f.name_span, hint: None)
+          } else {
+            if not is_snake(f.name) {
+              c = warn(c: c, code: "W0104", msg: "function name `{f.name}` should be snake_case", span: f.name_span,
+                hint: Some("rename it to `{to_snake(f.name)}`"))
+            }
+            c = c with { fns: c.fns.set(f.name, None) }
+          }
+        }
+      },
+      Decl.Const(_, name, name_span, _, _, _, _) => {
+        if not is_upper_snake(name) {
+          c = error(c: c, code: "E0103", msg: "constant `{name}` must be UPPER_SNAKE_CASE", span: name_span,
+            hint: Some("rename it to `{to_snake(name).upper()}`"))
+        }
+        if c.consts.has(name) or c.fns.has(name) {
+          c = error(c: c, code: "E0101", msg: "`{name}` is already defined", span: name_span, hint: None)
+        } else {
+          c = c with { consts: c.consts.set(name, None), own_consts: c.own_consts.push(idx) }
+        }
+      },
+      Decl.Test(span, name, _) => {
+        if test_names.contains(name) {
+          c = error(c: c, code: "E0101", msg: "duplicate test name \"{name}\"", span: span, hint: None)
+        }
+        test_names = test_names.push(name)
+      },
+      Decl.Property(span, name, _, _) => {
+        if test_names.contains(name) {
+          c = error(c: c, code: "E0101", msg: "duplicate test name \"{name}\"", span: span, hint: None)
+        }
+        test_names = test_names.push(name)
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  // resolve the type declarations (all names are registered now, so recursion works)
+  for k in own_types {
+    c = resolve_type_decl(c, c.decls.get_or(k, Decl.Test(span: no_span(), name: "", body: Block { span: no_span(),
+      stmts: [] })))
+  }
+  for k in c.own_consts {
+    match c.decls.get(k) {
+      Some(Decl.Const(_, name, _, ty, _, _, _)) => {
+        let r = resolve(ck: c, te: ty, tps: Map {})
+        c = r.c with { consts: r.c.consts.set(name, Some(r.v)) }
+      },
+      _ => {},
+    }
+  }
+  idx = 0
+  for d in c.decls {
+    match d {
+      Decl.Fn(f) => {
+        if f.owner_kind == None and c.fns.get(f.name) == Some(None) {
+          c = resolve_fn_sig(ck: c, f: f, idx: idx)
+        }
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  return collect_traits(c, own_traits)
+}
+
+fn resolve_type_decl(ck: Ck, d: Decl) -> Ck {
+  var c = ck
+  match d {
+    Decl.TypeD(_, name, tparams, fields, _, _) => {
+      let tps = tparam_map(tparams)
+      for f in fields {
+        let info = c.uni.records.get(name).unwrap_or(RecordInfo { name: name, tparams: [], mod_name: "", fields: Map {} })
+        if info.fields.has(f.name) {
+          c = error(c: c, code: "E0101", msg: "duplicate field `{f.name}` in `{name}`", span: f.span, hint: None)
+        }
+        let r = resolve(ck: c, te: f.ty, tps: tps)
+        c = r.c
+        let now = c.uni.records.get(name).unwrap_or(info)
+        c = c with { uni: c.uni with { records: c.uni.records.set(name, now with { fields: now.fields.set(f.name, r.v) }) } }
+      }
+    },
+    Decl.EnumD(span, name, tparams, variants, _, _) => {
+      let tps = tparam_map(tparams)
+      for v in variants {
+        if not is_pascal(v.name) {
+          c = error(c: c, code: "E0103", msg: "variant name `{v.name}` must be PascalCase", span: v.span, hint: None)
+        }
+        let info = c.uni.enums.get(name).unwrap_or(EnumInfo { name: name, tparams: [], mod_name: "", variants: Map {} })
+        if info.variants.has(v.name) {
+          c = error(c: c, code: "E0101", msg: "duplicate variant `{v.name}` in `{name}`", span: v.span, hint: None)
+        }
+        var fs: List[Pair[Str, Type]] = []
+        for f in v.fields {
+          let r = resolve(ck: c, te: f.ty, tps: tps)
+          c = r.c
+          fs = fs.push(Pair { first: f.name, second: r.v })
+        }
+        let now = c.uni.enums.get(name).unwrap_or(info)
+        c = c with { uni: c.uni with { enums: c.uni.enums.set(name, now with { variants: now.variants.set(v.name, fs) }) } }
+      }
+      let done = c.uni.enums.get(name).map(fn(i) => i.variants.is_empty()).unwrap_or(false)
+      if done {
+        c = error(c: c, code: "E0302", msg: "enum `{name}` has no variants", span: span, hint: None)
+      }
+    },
+    Decl.Alias(span, name, tparams, _, _, _) => {
+      let te = TypeExpr.Named(span: span, name: name, args: tparams.map(fn(t) => TypeExpr.Named(span: span, name: t,
+        args: [])))
+      c = resolve(ck: c, te: te, tps: tparam_map(tparams)).c
+    },
+    _ => {},
+  }
+  return c
+}
+
+fn resolve_params(ck: Ck, params: List[Param], tps: Map[Str, Type], check_dups: Bool) -> Res[List[Pair[Str, Type]]] {
+  var c = ck
+  var out: List[Pair[Str, Type]] = []
+  var seen: List[Str] = []
+  for p in params {
+    if check_dups and seen.contains(p.name) {
+      c = error(c: c, code: "E0101", msg: "duplicate parameter `{p.name}`", span: p.span, hint: None)
+    }
+    seen = seen.push(p.name)
+    let r = resolve_opt(ck: c, te: p.ty, tps: tps)
+    c = r.c
+    out = out.push(Pair { first: p.name, second: r.v })
+  }
+  return Res { c: c, v: out }
+}
+
+fn resolve_ret(ck: Ck, ret: Option[TypeExpr], tps: Map[Str, Type]) -> Res[Type] {
+  return match ret {
+    Some(te) => resolve(ck: ck, te: te, tps: tps),
+    None => Res { c: ck, v: con("Unit") },
+  }
+}
+
+fn resolve_fn_sig(ck: Ck, f: FnDecl, idx: Int) -> Ck {
+  var c = ck
+  let tps = tparam_map(f.type_params)
+  for t in f.type_params {
+    if not is_pascal(t) {
+      c = error(c: c, code: "E0103", msg: "type parameter `{t}` must be PascalCase (e.g. `T`)", span: f.name_span,
+        hint: None)
+    }
+  }
+  let ps = resolve_params(ck: c, params: f.params, tps: tps, check_dups: true)
+  let ret = resolve_ret(ck: ps.c, ret: f.ret, tps: tps)
+  c = ret.c
+  let eff_span = f.effects_span.unwrap_or(f.name_span)
+  for e in f.effects {
+    if not KNOWN_EFFECTS.contains(e) {
+      c = error(c: c, code: "E0403", msg: "unknown effect `{e}`", span: eff_span,
+        hint: or_hint(did_you_mean(e, KNOWN_EFFECTS), "known effects: io, time, rand, fs, net"))
+    }
+  }
+  let b = resolve_bounds(c, f)
+  c = b.c
+  let sig = Sig {
+    name: f.name,
+    tparams: f.type_params,
+    params: ps.v,
+    ret: ret.v,
+    effects: f.effects,
+    user: true,
+    mod_name: c.mod_name,
+    bounds: b.v,
+    decl: idx,
+    name_span: f.name_span,
+    self_type: None,
+  }
+  return c with { fns: c.fns.set(f.name, Some(sig)) }
+}
+
+// ---- traits & impls -----------------------------------------------------------------------------------------
+
+fn visible_traits(c: Ck) -> List[Str] {
+  return c.uni.traits.keys().filter(fn(t) => c.visible.has(t))
+}
+
+fn resolve_bounds(ck: Ck, f: FnDecl) -> Res[Map[Str, List[Str]]] {
+  var c = ck
+  var out: Map[Str, List[Str]] = Map {}
+  for entry in f.bounds {
+    let tp = entry.first
+    if f.type_params.contains(tp) {
+      var names: List[Str] = []
+      for item in entry.second {
+        let tname = item.first
+        let sp = item.second
+        if not c.uni.traits.has(tname) {
+          var hint = did_you_mean(tname, visible_traits(c))
+          if c.uni.records.has(tname) or c.uni.enums.has(tname) or PRIMS.contains(tname) {
+            hint = Some("`{tname}` is a type; a bound names a trait (`trait Name \{ ... \}`)")
+          }
+          c = error(c: c, code: "E0104", msg: "unknown trait `{tname}`", span: sp, hint: hint)
+        } else {
+          if not c.visible.has(tname) {
+            c = not_imported(c: c, name: tname, span: sp)
+          }
+          if not names.contains(tname) {
+            names = names.push(tname)
+          }
+        }
+      }
+      out = out.set(tp, names)
+    }
+  }
+  return Res { c: c, v: out }
+}
+
+/// The signature of a trait or impl method; `Self` is `self_type`.
+fn method_sig(ck: Ck, f: FnDecl, self_type: Type, idx: Int) -> Res[Sig] {
+  var c = ck
+  let tps = tparam_map(f.type_params).set("Self", self_type)
+  let ps = resolve_params(ck: c, params: f.params, tps: tps, check_dups: false)
+  let ret = resolve_ret(ck: ps.c, ret: f.ret, tps: tps)
+  c = ret.c
+  let eff_span = f.effects_span.unwrap_or(f.name_span)
+  for e in f.effects {
+    if not KNOWN_EFFECTS.contains(e) {
+      c = error(c: c, code: "E0403", msg: "unknown effect `{e}`", span: eff_span,
+        hint: Some("known effects: io, time, rand, fs, net"))
+    }
+  }
+  let bounds = match f.owner_kind == Some("default") {
+    true => no_bounds().set("Self", [f.trait_name.unwrap_or("")]),
+    false => no_bounds(),
+  }
+  return Res { c: c, v: Sig {
+    name: f.name,
+    tparams: f.type_params,
+    params: ps.v,
+    ret: ret.v,
+    effects: f.effects,
+    user: true,
+    mod_name: c.mod_name,
+    bounds: bounds,
+    decl: idx,
+    name_span: f.name_span,
+    self_type: None,
+  } }
+}
+
+fn set_trait(c: Ck, info: TraitInfo) -> Ck {
+  return c with { uni: c.uni with { traits: c.uni.traits.set(info.name, info) } }
+}
+
+fn collect_traits(ck: Ck, own_traits: List[Int]) -> Ck {
+  var c = ck
+  for k in own_traits {
+    match c.decls.get(k) {
+      Some(Decl.Trait(_, name, _, methods, _, _, _)) => {
+        for f in methods {
+          let mname = f.method_name.unwrap_or(f.name)
+          let info = c.uni.traits.get(name).unwrap_or(TraitInfo { name: name, mod_name: c.mod_name, methods: empty_sigs(),
+            defaults: empty_sigs() })
+          if info.methods.has(mname) {
+            c = error(c: c, code: "E0101", msg: "duplicate method `{mname}` in trait `{name}`", span: f.name_span,
+              hint: None)
+          } else {
+            let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: -1)
+            c = r.c
+            let now = c.uni.traits.get(name).unwrap_or(info)
+            c = set_trait(c, now with { methods: now.methods.set(mname, r.v with { name: mname, tparams: ["Self"] }) })
+          }
+        }
+      },
+      _ => {},
+    }
+  }
+  var idx = 0
+  for d in c.decls {
+    match d {
+      Decl.Fn(f) => {
+        let tname = f.trait_name.unwrap_or("")
+        if f.owner_kind == Some("default") and c.uni.traits.has(tname) {
+          let info = c.uni.traits.get(tname).unwrap_or(TraitInfo { name: tname, mod_name: c.mod_name, methods: empty_sigs(),
+            defaults: empty_sigs() })
+          let mname = f.method_name.unwrap_or("")
+          if info.methods.has(mname) {
+            c = error(c: c, code: "E0101", msg: "duplicate method `{mname}` in trait `{tname}`", span: f.name_span,
+              hint: None)
+          } else {
+            let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: idx)
+            c = r.c with { methods: r.c.methods.set(f.name, r.v) }
+            let generic = r.v with { name: mname, decl: -1, bounds: no_bounds() }
+            let now = c.uni.traits.get(tname).unwrap_or(info)
+            c = set_trait(c, now with { defaults: now.defaults.set(mname, r.v), methods: now.methods.set(mname, generic) })
+          }
+        }
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  // impls: each `impl` is followed by its methods
+  var target = Type.Any
+  var impl_key: Option[Str] = None
+  var seen_impl = false
+  idx = 0
+  for d in c.decls {
+    match d {
+      Decl.Impl(_, _, _, _, _, _, _) => {
+        let r = collect_impl(ck: c, d: d, idx: idx)
+        c = r.c
+        target = r.v.first
+        impl_key = r.v.second
+        seen_impl = true
+      },
+      Decl.Fn(f) => {
+        if f.owner_kind == Some("impl") and seen_impl {
+          let r = method_sig(ck: c, f: f, self_type: target, idx: idx)
+          c = r.c
+          if c.methods.has(f.name) {
+            c = error(c: c, code: "E0101", msg: "`{or_empty(f.owner)}` already has a method " +
+                "`{or_empty(f.method_name)}`", span: f.name_span, hint: None)
+          } else {
+            let sig = r.v with { self_type: Some(target) }
+            c = c with { methods: c.methods.set(f.name, sig) }
+            match impl_key {
+              Some(key) => {
+                match c.uni.impls.get(key) {
+                  Some(info) => {
+                    let mname = f.method_name.unwrap_or("")
+                    c = c with { uni: c.uni with { impls: c.uni.impls.set(key, info with { methods: info.methods.set(mname,
+                      sig) }) } }
+                  },
+                  None => {},
+                }
+              },
+              None => {},
+            }
+          }
+        }
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  idx = 0
+  for d in c.decls {
+    match c.impl_keys.get(idx) {
+      Some(key) => {
+        c = finish_impl(ck: c, d: d, key: key)
+      },
+      None => {},
+    }
+    idx = idx + 1
+  }
+  return c
+}
+
+/// Registers an `impl`: the target type and the key of its ImplInfo (None when it is not valid).
+fn collect_impl(ck: Ck, d: Decl, idx: Int) -> Res[Pair[Type, Option[Str]]] {
+  var c = ck
+  let parts = match d {
+    Decl.Impl(span, trait_name, trait_span, target, _, _, _) => Pair { first: Pair { first: span, second: trait_span },
+      second: Pair { first: trait_name, second: target } },
+    _ => {
+      return Res { c: c, v: Pair { first: Type.Any, second: None } }
+    },
+  }
+  let span = parts.first.first
+  let trait_span = parts.first.second
+  let trait_name = parts.second.first
+  let target_te = parts.second.second
+  let r = resolve(ck: c, te: target_te, tps: Map {})
+  c = r.c
+  let target = r.v
+  let tname = hd(c, target).unwrap_or("")
+  let tr = match c.uni.traits.get(trait_name) {
+    Some(t) => t,
+    None => {
+      var hint = did_you_mean(trait_name, visible_traits(c))
+      if c.uni.records.has(trait_name) or c.uni.enums.has(trait_name) {
+        hint = Some("`{trait_name}` is a type; `impl` needs a trait: `impl Trait for {trait_name}`")
+      }
+      c = error(c: c, code: "E0104", msg: "unknown trait `{trait_name}`", span: trait_span, hint: hint)
+      return Res { c: c, v: Pair { first: target, second: None } }
+    },
+  }
+  if not c.visible.has(trait_name) {
+    c = not_imported(c: c, name: trait_name, span: trait_span)
+  }
+  if is_any(target) {
+    return Res { c: c, v: Pair { first: target, second: None } }
+  }
+  let generic_decl = c.uni.records.get(tname).map(fn(i) => not i.tparams.is_empty()).unwrap_or(false) or
+    c.uni.enums.get(tname).map(fn(i) => not i.tparams.is_empty()).unwrap_or(false)
+  let bad = match target {
+    Type.Con(_, args) => not args.is_empty() or ["Unit", "Never", "Word"].contains(tname) or GENERICS.contains(tname) or
+      generic_decl,
+    _ => true,
+  }
+  if bad {
+    c = error(c: c, code: "E0221", msg: "cannot implement `{trait_name}` for `{sh(c, target)}`", span: te_span(target_te),
+      hint: Some("impls are written for Int, Float, Bool, Str and non-generic `type`/`enum` declarations " +
+          "(generic impls are planned)"))
+    return Res { c: c, v: Pair { first: target, second: None } }
+  }
+  let type_owner = owner(c.uni, tname)
+  if tr.mod_name != c.mod_name and type_owner != Some(c.mod_name) {
+    let where = "module `{tr.mod_name}`" + match type_owner {
+      Some(o) => " or `{o}`",
+      None => "",
+    }
+    c = error(c: c, code: "E0222", msg: "`impl {trait_name} for {tname}` must be written in {where}", span: span,
+      hint: Some("an impl lives next to its trait or next to its type, so every program sees the same one"))
+  }
+  let key = trait_name + "/" + tname
+  match c.uni.impls.get(key) {
+    Some(prev) => {
+      c = error(c: c, code: "E0222", msg: "`{tname}` already implements `{trait_name}` (at {short(prev.file, prev.span)})",
+        span: span, hint: None)
+      return Res { c: c, v: Pair { first: target, second: None } }
+    },
+    None => {},
+  }
+  let info = ImplInfo { trait_name: trait_name, type_name: tname, mod_name: c.mod_name, file: c.file, span: span,
+    methods: empty_sigs() }
+  c = c with { uni: c.uni with { impls: c.uni.impls.set(key, info) }, impl_keys: c.impl_keys.set(idx, key) }
+  return Res { c: c, v: Pair { first: target, second: Some(key) } }
+}
+
+fn self_map(t: Type) -> Map[Str, Type] {
+  let m: Map[Str, Type] = Map {}
+  return m.set("Self", t)
+}
+
+fn last_part(name: Str) -> Str {
+  return name.split(".").last().unwrap_or(name)
+}
+
+/// How a trait method looks for a given `Self` (in hints).
+fn show_method(c: Ck, sig: Sig, self_type: Type) -> Str {
+  let m = self_map(self_type)
+  let ps = ["self"].concat(sig.params.drop(1).map(fn(p) => "{p.first}: {sh(c, sub(c: c, t: p.second, m: m))}"))
+  let ret = sub(c: c, t: sig.ret, m: m)
+  var out = "fn {last_part(sig.name)}({commas(ps)})"
+  if not is_unit(c.s, ret) {
+    out = out + " -> {sh(c, ret)}"
+  }
+  if not sig.effects.is_empty() {
+    out = out + " uses " + sig.effects.unique().sort().join(", ")
+  }
+  return out
+}
+
+fn signature_mismatch(c: Ck, want: Sig, got: Sig, target: Type) -> Option[Str] {
+  let m = self_map(target)
+  if want.params.len() != got.params.len() {
+    return Some("it takes {got.params.len() - 1} argument(s) besides `self`, the trait says {want.params.len() - 1}")
+  }
+  var i = 1
+  while i < want.params.len() {
+    let w = want.params.get_or(i, Pair { first: "", second: Type.Any })
+    let g = got.params.get_or(i, Pair { first: "", second: Type.Any })
+    if w.first != g.first {
+      return Some("parameter `{g.first}` should be named `{w.first}`")
+    }
+    let ws = sh(c, sub(c: c, t: w.second, m: m))
+    if ws != sh(c, g.second) {
+      return Some("parameter `{g.first}` has type `{sh(c, g.second)}`, the trait says `{ws}`")
+    }
+    i = i + 1
+  }
+  let wr = sh(c, sub(c: c, t: want.ret, m: m))
+  if wr != sh(c, got.ret) {
+    return Some("it returns `{sh(c, got.ret)}`, the trait says `{wr}`")
+  }
+  let extra = minus(got.effects, want.effects)
+  if not extra.is_empty() {
+    return Some("it uses `{commas(extra)}`, which the trait method does not declare")
+  }
+  return None
+}
+
+fn finish_impl(ck: Ck, d: Decl, key: Str) -> Ck {
+  var c = ck
+  let info = match c.uni.impls.get(key) {
+    Some(i) => i,
+    None => {
+      return c
+    },
+  }
+  let names_spans = match d {
+    Decl.Impl(span, _, _, _, ms, spans, _) => Pair { first: span, second: Pair { first: ms, second: spans } },
+    _ => {
+      return c
+    },
+  }
+  let dspan = names_spans.first
+  let dmethods = names_spans.second.first
+  let dspans = names_spans.second.second
+  let tr = match c.uni.traits.get(info.trait_name) {
+    Some(t) => t,
+    None => {
+      return c
+    },
+  }
+  let tname = info.type_name
+  let target = con(tname)
+  for entry in info.methods.entries() {
+    let m = entry.key
+    let sig = entry.value
+    let span = match dmethods.index_of(m) {
+      Some(k) => dspans.get_or(k, dspan),
+      None => dspan,
+    }
+    if not tr.methods.has(m) {
+      c = error(c: c, code: "E0221", msg: "`{m}` is not a method of trait `{info.trait_name}`", span: span,
+        hint: or_hint(did_you_mean(m, tr.methods.keys()), "methods of `{info.trait_name}`: {commas(tr.methods.keys())}; " +
+            "other functions go outside the impl"))
+    } else if m == "to_str" or builtin_methods_of(c, Some(tname)).has(m) {
+      c = error(c: c, code: "E0221", msg: "`{tname}` already has a built-in method `{m}`", span: span,
+        hint: Some("rename the trait method"))
+    } else if fn_first_param_is(c: c, name: m, tname: tname) {
+      c = error(c: c, code: "E0101", msg: "method `{m}` of `{tname}` conflicts with the function `{m}`", span: span,
+        hint: Some("rename one of them"))
+    } else {
+      let want = tr.methods.get(m).unwrap_or(sig)
+      match signature_mismatch(c: c, want: want, got: sig, target: target) {
+        Some(problem) => {
+          c = error(c: c, code: "E0221", msg: "`{tname}.{m}` does not match the trait: {problem}", span: span,
+            hint: Some("the trait declares `{show_method(c: c, sig: want, self_type: target)}`"))
+        },
+        None => {},
+      }
+    }
+  }
+  let missing = tr.methods.keys().filter(fn(m) => not info.methods.has(m) and not tr.defaults.has(m))
+  if not missing.is_empty() {
+    let snap = c
+    let shown = missing.map(fn(m) => "`" + show_method(c: snap, sig: tr.methods.get(m).unwrap_or(info.methods.get(m)
+        .unwrap_or(snap.globals.get("print").unwrap_or(builtin_sig("fn x()")))), self_type: target) + "`")
+    c = error(c: c, code: "E0221", msg: "`impl {info.trait_name} for {tname}` is missing {ticked(missing)}", span: dspan,
+      hint: Some("add " + shown.join(", ")))
+  }
+  let empty: Map[Str, Pair[Str, Sig]] = Map {}
+  var table = c.uni.type_methods.get(tname).unwrap_or(empty)
+  for m in tr.methods.keys() {
+    let sig = match info.methods.get(m) {
+      Some(s) => s,
+      None => match tr.defaults.get(m) {
+        Some(s) => s,
+        None => tr.methods.get(m).unwrap_or(builtin_sig("fn x()")),
+      },
+    }
+    let clash = match table.get(m) {
+      Some(prev) => match prev.first != info.trait_name {
+        true => Some(prev.first),
+        false => None,
+      },
+      None => None,
+    }
+    match clash {
+      Some(other) => {
+        c = error(c: c, code: "E0101", msg: "`{tname}` gets method `{m}` from both `{other}` and `{info.trait_name}`",
+          span: dspan, hint: Some("rename the method in one of the traits"))
+      },
+      None => {
+        table = table.set(m, Pair { first: info.trait_name, second: sig })
+      },
+    }
+  }
+  return c with { uni: c.uni with { type_methods: c.uni.type_methods.set(tname, table) } }
+}
+
+/// Whether the function `name` exists and takes a `tname` as its first parameter.
+fn fn_first_param_is(c: Ck, name: Str, tname: Str) -> Bool {
+  return match fn_sig(c, name) {
+    Some(s) => match s.params.get(0) {
+      Some(p) => hd(c, p.second) == Some(tname),
+      None => false,
+    },
+    None => false,
+  }
+}
+
+fn note_bounds(c: Ck, sig: Sig, mapping: Map[Str, Type], span: Span) -> Ck {
+  if sig.bounds.is_empty() {
+    return c
+  }
+  return c with { pending: c.pending.push(Pending { sig: sig, mapping: mapping, span: span, ctx_bounds: c.bounds }) }
+}
+
+fn check_pending(ck: Ck) -> Ck {
+  var c = ck with { pending: [] }
+  for p in ck.pending {
+    for entry in p.sig.bounds.entries() {
+      let tp = entry.key
+      let t = pr(c, p.mapping.get(tp).unwrap_or(Type.Any))
+      let name = last_part(p.sig.name)
+      var stop = false
+      for tr in entry.value {
+        if not stop and not is_any(t) and not is_never(t) {
+          match t {
+            Type.Var(_) => {
+              c = error(c: c, code: "E0223", msg: "cannot infer `{tp}` for `{name}` (it must implement `{tr}`)",
+                span: p.span, hint: Some("annotate the value, e.g. `let xs: List[Circle] = []`"))
+              stop = true
+            },
+            Type.Param(pn) => {
+              if not p.ctx_bounds.get(pn).unwrap_or([]).contains(tr) {
+                c = error(c: c, code: "E0220", msg: "type parameter `{pn}` must implement `{tr}` to call `{name}`",
+                  span: p.span, hint: Some("add the bound to the type parameter: `[{pn}: {tr}]`"))
+              }
+            },
+            _ => {
+              let h = hd(c, t)
+              let fits = match h {
+                Some(hn) => args_of(c.s, t).is_empty() and implements(u: c.uni, type_name: hn, trait_name: tr),
+                None => false,
+              }
+              if not fits {
+                let info = c.uni.traits.get(tr).unwrap_or(TraitInfo { name: tr, mod_name: "", methods: empty_sigs(),
+                  defaults: empty_sigs() })
+                let snap = c
+                let methods = info.methods.values().filter(fn(s) => not info.defaults.has(last_part(s.name)))
+                  .map(fn(s) => "`" + show_method(c: snap, sig: s, self_type: t) + "`").join(", ")
+                let with_methods = match methods.is_empty() {
+                  true => "",
+                  false => " with {methods}",
+                }
+                c = error(c: c, code: "E0220", msg: "`{sh(c, t)}` does not implement trait `{tr}` (needed by `{name}`)",
+                  span: p.span, hint: Some("add `impl {tr} for {sh(c, t)} \{ ... \}`" + with_methods))
+              }
+            },
+          }
+        }
+      }
+    }
+  }
+  return c
+}
+
+// ---- scopes -------------------------------------------------------------------------------------------------
+
+fn push_scope(c: Ck) -> Ck {
+  return c with { scopes: c.scopes.push(Scope { id: c.next_scope, vars: Map {} }), next_scope: c.next_scope + 1 }
+}
+
+fn var_word(kind: Str) -> Str {
+  return match kind {
+    "param" => "parameter",
+    "for" => "loop variable",
+    "bind" => "pattern variable",
+    _ => "variable",
+  }
+}
+
+/// Leaves a scope, warning about its unused variables.
+fn pop_scope(ck: Ck) -> Ck {
+  let sc = match ck.scopes.last() {
+    Some(s) => s,
+    None => {
+      return ck
+    },
+  }
+  var c = ck with { scopes: ck.scopes.take(ck.scopes.len() - 1) }
+  for entry in sc.vars.entries() {
+    let name = entry.key
+    let v = entry.value
+    if not v.used and not name.starts_with("_") and name != "self" and ["let", "var", "param", "for", "bind"].contains(v.kind) {
+      c = warn(c: c, code: "W0402", msg: "unused {var_word(v.kind)} `{name}`", span: v.span,
+        hint: Some("remove it or rename it to `_{name}`"))
+    }
+  }
+  return c
+}
+
+/// Drops the innermost scope without the unused-variable check (Python: `self.scopes.pop()`).
+fn drop_scope(c: Ck) -> Ck {
+  return c with { scopes: c.scopes.take(c.scopes.len() - 1) }
+}
+
+fn lookup(c: Ck, name: Str) -> Option[Var] {
+  var i = c.scopes.len() - 1
+  while i >= 0 {
+    match c.scopes.get_or(i, Scope { id: -1, vars: Map {} }).vars.get(name) {
+      Some(v) => {
+        return Some(v)
+      },
+      None => {},
+    }
+    i = i - 1
+  }
+  return None
+}
+
+/// Marks a variable as used (in the innermost scope that declares it).
+fn mark_used(c: Ck, name: Str) -> Ck {
+  var i = c.scopes.len() - 1
+  while i >= 0 {
+    let sc = c.scopes.get_or(i, Scope { id: -1, vars: Map {} })
+    match sc.vars.get(name) {
+      Some(v) => {
+        if v.used {
+          return c
+        }
+        return c with { scopes: c.scopes.set(i, sc with { vars: sc.vars.set(name, v with { used: true }) }) }
+      },
+      None => {},
+    }
+    i = i - 1
+  }
+  return c
+}
+
+fn set_var(c: Ck, name: Str, v: Var) -> Ck {
+  let k = c.scopes.len() - 1
+  let sc = c.scopes.get_or(k, Scope { id: -1, vars: Map {} })
+  return c with { scopes: c.scopes.set(k, sc with { vars: sc.vars.set(name, v) }) }
+}
+
+/// A lambda may only capture immutable bindings: a captured `var` would be ambiguous (snapshot or shared?).
+fn captured_var(ck: Ck, name: Str, span: Span, assigning: Bool) -> Ck {
+  var c = ck
+  let bound = match c.lambda_bounds.last() {
+    Some(b) => b,
+    None => {
+      return c
+    },
+  }
+  var i = c.scopes.len() - 1
+  while i >= 0 {
+    let sc = c.scopes.get_or(i, Scope { id: -1, vars: Map {} })
+    match sc.vars.get(name) {
+      Some(v) => {
+        if v.mutable and i < bound {
+          let key = name + "#" + c.scopes.get_or(bound, sc).id.to_str()
+          if c.reported.has(key) {
+            return c
+          }
+          c = c with { reported: c.reported.set(key, true) }
+          if assigning {
+            c = error(c: c, code: "E0216", msg: "a lambda cannot assign `{name}`, a `var` of the enclosing function",
+              span: span, hint: Some("lambdas cannot change outer variables: accumulate with " +
+                  "`xs.fold(start, fn(acc, x) => ...)` or use a `for` loop"))
+          } else {
+            c = error(c: c, code: "E0216", msg: "a lambda cannot capture `{name}`: it is a `var` and may change",
+              span: span, hint: Some("capture a snapshot: `let {name}_now = {name}` before the lambda, " +
+                  "and use `{name}_now` inside it"))
+          }
+        }
+        return c
+      },
+      None => {},
+    }
+    i = i - 1
+  }
+  return c
+}
+
+fn declare(ck: Ck, name: Str, t: Type, mutable: Bool, span: Span, kind: Str, kw: Option[Span]) -> Ck {
+  var c = ck
+  if name == "_" {
+    return c
+  }
+  let prev = lookup(c, name)
+  if prev != None or c.fns.has(name) or c.globals.has(name) or c.consts.has(name) {
+    let where = match prev {
+      Some(p) => " (first declared at {short(c.file, p.span)})",
+      None => match c.consts.has(name) {
+        true => " (a constant has this name)",
+        false => " (a function has this name)",
+      },
+    }
+    var hint = "choose a new descriptive name (e.g. `{name}_2`)"
+    match prev {
+      Some(p) => {
+        if p.kind == "let" or p.kind == "var" {
+          hint = hint + ", or declare the original with `var` and reassign it"
+        }
+      },
+      None => {},
+    }
+    c = error(c: c, code: "E0102", msg: "`{name}` is already defined{where}; Klar forbids shadowing", span: span,
+      hint: Some(hint))
+  } else if not is_snake(name) {
+    c = warn(c: c, code: "W0104", msg: "variable `{name}` should be snake_case", span: span,
+      hint: Some("rename it to `{to_snake(name)}`"))
+  }
+  return set_var(c: c, name: name, v: Var { ty: t, mutable: mutable, span: span, used: false, kind: kind, kw_span: kw })
+}
+
+// ---- functions, constants & tests ---------------------------------------------------------------------------
+
+/// A function starts with a fresh substitution: no type variable outlives the body it was created in.
+fn enter(c: Ck, ctx: Ctx, tparams: Map[Str, Type], bounds: Map[Str, List[Str]]) -> Ck {
+  return c with { ctx: ctx, tparams: tparams, bounds: bounds, scopes: [], s: Map {}, lambda_bounds: [] }
+}
+
+fn check_const(ck: Ck, idx: Int, name: Str, value: Expr) -> Ck {
+  if not ck.own_consts.contains(idx) {
+    // a duplicate (reported when the declarations were collected)
+    return ck
+  }
+  let t = match ck.consts.get(name) {
+    Some(Some(t)) => t,
+    _ => {
+      return ck
+    },
+  }
+  var allowed: Map[Str, Bool] = Map {}
+  for k in ck.own_consts {
+    if k < idx {
+      match ck.decls.get(k) {
+        Some(Decl.Const(_, n, _, _, _, _, _)) => {
+          allowed = allowed.set(n, true)
+        },
+        _ => {},
+      }
+    }
+  }
+  let ctx = Ctx { name: "const {name}", ret: t, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "const" }
+  var c = enter(c: ck, ctx: ctx, tparams: Map {}, bounds: Map {}) with { scopes: [Scope { id: ck.next_scope, vars: Map {} }],
+    next_scope: ck.next_scope + 1, const_allowed: Some(allowed) }
+  c = expr(ck: c, e: value, exp: Some(t)).c
+  return c with { const_allowed: None, ctx: top_ctx() }
+}
+
+fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
+  let found = match f.owner_kind {
+    Some(_) => ck.methods.get(f.name),
+    None => fn_sig(ck, f.name),
+  }
+  let sig = match found {
+    Some(s) => s,
+    None => {
+      return ck
+    },
+  }
+  if sig.decl != idx or sig.mod_name != ck.mod_name {
+    return ck
+  }
+  var tps = tparam_map(f.type_params)
+  match sig.self_type {
+    Some(st) => {
+      tps = tps.set("Self", st)
+    },
+    None => {},
+  }
+  let contract = Ctx { name: f.name, ret: sig.ret, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "contract" }
+  var c = push_scope(enter(c: ck, ctx: contract, tparams: tps, bounds: sig.bounds))
+  var k = 0
+  for p in sig.params {
+    let pspan = f.params.get(k).map(fn(x) => x.span).unwrap_or(f.name_span)
+    // a trait fixes the parameters of its methods: unused ones are not a smell there
+    let kind = match f.owner_kind {
+      Some(_) => "method_param",
+      None => "param",
+    }
+    c = declare(ck: c, name: p.first, t: p.second, mutable: false, span: pspan, kind: kind, kw: None)
+    k = k + 1
+  }
+  // contracts are pure and see the parameters (+ `result` in ensures)
+  for r in f.pre {
+    c = expr(ck: c, e: r, exp: Some(con("Bool"))).c
+  }
+  if not f.post.is_empty() {
+    c = push_scope(c)
+    c = set_var(c: c, name: "result", v: Var { ty: sig.ret, mutable: false, span: f.name_span, used: false,
+      kind: "builtin", kw_span: None })
+    for e in f.post {
+      c = expr(ck: c, e: e, exp: Some(con("Bool"))).c
+    }
+    c = drop_scope(c)
+  }
+  let effects = match c.sys {
+    true => KNOWN_EFFECTS.push("sys"),
+    false => sig.effects,
+  }
+  c = c with { ctx: Ctx { name: f.name, ret: sig.ret, effects: effects, is_test: false, loop: 0, sig_end: Some(f.sig_end),
+    purpose: "fn" } }
+  match f.body {
+    Some(body) => {
+      c = block(c, body)
+      let ret = pr(c, sig.ret)
+      if not is_unit(c.s, ret) and not is_never(ret) and not is_any(ret) and not returns(body) {
+        c = error(c: c, code: "E0205", msg: "function `{f.name}` may reach its end without returning `{sh(c, ret)}`",
+          span: f.name_span, hint: Some("add `return <value>` at the end of every path (Klar has no implicit returns)"))
+      }
+    },
+    None => {},
+  }
+  c = pop_scope(c)
+  return c with { ctx: top_ctx() }
+}
+
+fn check_test(ck: Ck, name: Str, body: Block) -> Ck {
+  let ctx = Ctx { name: "test \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
+    purpose: "test" }
+  var c = push_scope(enter(c: ck, ctx: ctx, tparams: Map {}, bounds: Map {}))
+  c = block(c, body)
+  c = pop_scope(c)
+  return c with { ctx: top_ctx() }
+}
+
+fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
+  let ctx = Ctx { name: "property \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
+    purpose: "test" }
+  var c = push_scope(enter(c: ck, ctx: top_ctx(), tparams: Map {}, bounds: Map {}))
+  for p in params {
+    let r = resolve_opt(ck: c, te: p.ty, tps: Map {})
+    c = r.c
+    if not generatable(c: c, t: r.v, seen: []) {
+      c = error(c: c, code: "E0605", msg: "cannot generate random values of type `{sh(c, r.v)}` for property input " +
+          "`{p.name}`", span: p.span, hint: Some("property inputs may be Int, Float, Bool, Str, Unit, List, Map, Option, " +
+            "Result and records/enums built from them"))
+    }
+    c = declare(ck: c, name: p.name, t: r.v, mutable: false, span: p.span, kind: "param", kw: None)
+  }
+  c = block(c with { ctx: ctx }, body)
+  c = pop_scope(c)
+  return c with { ctx: top_ctx() }
+}
+
+fn args_map(c: Ck, tparams: List[Str], t: Type) -> Map[Str, Type] {
+  let args = args_of(c.s, t)
+  var m: Map[Str, Type] = Map {}
+  let fits = match pr(c, t) {
+    Type.Con(_, a) => a.len() == tparams.len(),
+    _ => false,
+  }
+  var k = 0
+  for tp in tparams {
+    m = m.set(tp, match fits {
+      true => args.get_or(k, Type.Any),
+      false => Type.Any,
+    })
+    k = k + 1
+  }
+  return m
+}
+
+fn generatable(c: Ck, t: Type, seen: List[Str]) -> Bool {
+  return match pr(c, t) {
+    Type.Con(name, args) => {
+      if PRIMS.contains(name) or GENERICS.contains(name) {
+        return args.all(fn(a) => generatable(c: c, t: a, seen: seen))
+      }
+      if seen.contains(name) {
+        return true
+      }
+      let inner = seen.push(name)
+      match c.uni.records.get(name) {
+        Some(info) => {
+          let m = args_map(c: c, tparams: info.tparams, t: Type.Con(name: name, args: args))
+          return info.fields.values().all(fn(ft) => generatable(c: c, t: sub(c: c, t: ft, m: m), seen: inner))
+        },
+        None => {},
+      }
+      return match c.uni.enums.get(name) {
+        Some(info) => {
+          let m = args_map(c: c, tparams: info.tparams, t: Type.Con(name: name, args: args))
+          return info.variants.values().all(fn(fs) => fs.all(fn(f) => generatable(c: c, t: sub(c: c, t: f.second, m: m),
+            seen: inner)))
+        },
+        None => false,
+      }
+    },
+    _ => false,
+  }
+}
+
+// ---- statements ---------------------------------------------------------------------------------------------
+
+fn block(ck: Ck, b: Block) -> Ck {
+  var c = push_scope(ck)
+  for s in b.stmts {
+    c = stmt(c, s)
+  }
+  return pop_scope(c)
+}
+
+fn set_loop(c: Ck, delta: Int) -> Ck {
+  return c with { ctx: c.ctx with { loop: c.ctx.loop + delta } }
+}
+
+fn assign_kind(kind: Str) -> Str {
+  return match kind {
+    "param" => "parameter",
+    "method_param" => "parameter",
+    "for" => "loop variable",
+    "bind" => "pattern variable",
+    "builtin" => "contract variable",
+    _ => "immutable variable",
+  }
+}
+
+const DISCARDED: List[Str] = ["push", "set", "concat", "remove", "with", "reverse", "sort", "sort_by", "filter", "map",
+  "take", "drop", "replace", "upper", "lower", "trim", "insert", "remove_at", "update", "merge", "unique", "map_values"]
+
+fn stmt(ck: Ck, st: Stmt) -> Ck {
+  var c = ck
+  match st {
+    Stmt.Let(_, name, name_span, kw_span, ty, value, mutable) => {
+      var t = Type.Any
+      match ty {
+        Some(te) => {
+          let r = resolve(ck: c, te: te, tps: c.tparams)
+          t = r.v
+          c = expr(ck: r.c, e: value, exp: Some(t)).c
+        },
+        None => {
+          let r = expr(ck: c, e: value, exp: None)
+          c = r.c
+          t = r.v
+        },
+      }
+      if is_never(pr(c, t)) and name != "_" {
+        t = Type.Any
+      }
+      let kind = match mutable {
+        true => "var",
+        false => "let",
+      }
+      return declare(ck: c, name: name, t: t, mutable: mutable, span: name_span, kind: kind, kw: Some(kw_span))
+    },
+    Stmt.Assign(span, name, value) => {
+      let found = lookup(c, name)
+      match found {
+        Some(v) => {
+          if v.mutable {
+            c = captured_var(ck: c, name: name, span: span, assigning: true)
+          } else {
+            let what = assign_kind(v.kind)
+            let msg = match v.kind == "let" {
+              true => "cannot assign to {what} `{name}` (declared with `let`)",
+              false => "cannot assign to {what} `{name}`",
+            }
+            let hint = match v.kind == "let" {
+              true => "declare it with `var` instead of `let`",
+              false => "copy it into a new variable: `var {name}_2 = {name}`",
+            }
+            c = error(c: c, code: "E0207", msg: msg, span: span, hint: Some(hint))
+          }
+          return expr(ck: c, e: value, exp: Some(v.ty)).c
+        },
+        None => {
+          if c.fns.has(name) {
+            c = error(c: c, code: "E0207", msg: "cannot assign to function `{name}`", span: span, hint: None)
+          } else if c.consts.has(name) {
+            c = error(c: c, code: "E0207", msg: "cannot assign to constant `{name}`", span: span,
+              hint: Some("copy it into a variable: `var value = {name}`"))
+          } else {
+            c = error(c: c, code: "E0201", msg: "unknown variable `{name}`", span: span,
+              hint: Some("declare it first: `var {name} = ...`"))
+          }
+          return expr(ck: c, e: value, exp: None).c
+        },
+      }
+    },
+    Stmt.Return(span, value) => {
+      let ret = c.ctx.ret
+      match value {
+        None => {
+          let r = pr(c, ret)
+          if not is_unit(c.s, r) and not is_var(r) and not is_any(r) {
+            c = error(c: c, code: "E0202", msg: "`return` without a value in a function returning `{sh(c, r)}`", span: span,
+              hint: Some("write `return <{sh(c, r)} value>`"))
+          } else if is_var(r) {
+            c = uni_(ck: c, a: r, b: con("Unit"))
+          }
+          return c
+        },
+        Some(v) => {
+          return expr(ck: c, e: v, exp: Some(ret)).c
+        },
+      }
+    },
+    Stmt.If(_, cond, then, else_) => {
+      c = expr(ck: c, e: cond, exp: Some(con("Bool"))).c
+      c = block(c, then)
+      return match else_ {
+        Else.NoElse => c,
+        Else.ElseBlock(b) => block(c, b),
+        Else.ElseIf(s) => stmt(c, s),
+      }
+    },
+    Stmt.While(_, cond, body) => {
+      c = expr(ck: c, e: cond, exp: Some(con("Bool"))).c
+      c = block(set_loop(c, 1), body)
+      return set_loop(c, -1)
+    },
+    Stmt.For(_, var_name, var_span, iter, body) => {
+      let r = expr(ck: c, e: iter, exp: None)
+      c = r.c
+      let it = pr(c, r.v)
+      var elem = Type.Any
+      if hd(c, it) == Some("List") {
+        elem = args_of(c.s, it).get_or(0, Type.Any)
+      } else if is_var(it) {
+        let v = fresh_var(c)
+        c = uni_(ck: v.c, a: it, b: list_of(v.v))
+        elem = v.v
+      } else if not is_any(it) {
+        let hint = match hd(c, it) {
+          Some("Map") => "iterate over `m.keys()`, `m.values()` or `m.entries()`",
+          Some("Str") => "iterate over `s.chars()`",
+          Some("Int") => "iterate over `range(0, n)`",
+          _ => "only `List[T]` can be iterated",
+        }
+        c = error(c: c, code: "E0202", msg: "cannot iterate over `{sh(c, it)}`", span: expr_span(iter), hint: Some(hint))
+      }
+      c = push_scope(c)
+      c = declare(ck: c, name: var_name, t: elem, mutable: false, span: var_span, kind: "for", kw: None)
+      c = set_loop(block(set_loop(c, 1), body), -1)
+      return pop_scope(c)
+    },
+    Stmt.Break(span) => {
+      if c.ctx.loop == 0 {
+        c = error(c: c, code: "E0213", msg: "`break` outside of a loop", span: span, hint: None)
+      }
+      return c
+    },
+    Stmt.Continue(span) => {
+      if c.ctx.loop == 0 {
+        c = error(c: c, code: "E0213", msg: "`continue` outside of a loop", span: span, hint: None)
+      }
+      return c
+    },
+    Stmt.Assert(_, cond, message) => {
+      c = expr(ck: c, e: cond, exp: Some(con("Bool"))).c
+      return match message {
+        Some(m) => expr(ck: c, e: m, exp: Some(con("Str"))).c,
+        None => c,
+      }
+    },
+    Stmt.ExprStmt(_, e) => {
+      return expr_stmt(c, e)
+    },
+  }
+  return c
+}
+
+fn expr_stmt(ck: Ck, e: Expr) -> Ck {
+  let r = expr(ck: ck, e: e, exp: None)
+  var c = r.c
+  let t = pr(c, r.v)
+  if is_var(t) or is_any(t) or is_never(t) or is_unit(c.s, t) {
+    return c
+  }
+  let discarded = match e {
+    Expr.MethodCall(_, obj, m, _, _) => Some(Pair { first: obj, second: m }),
+    Expr.WithExpr(_, base, _) => Some(Pair { first: base, second: "with" }),
+    _ => None,
+  }
+  match discarded {
+    Some(d) => {
+      if DISCARDED.contains(d.second) {
+        let target = match d.first {
+          Expr.Name(_, n) => n,
+          _ => "x",
+        }
+        return error(c: c, code: "E0405", msg: "the result of `.{d.second}` is discarded — values are immutable, " +
+            "so `{target}` is NOT modified", span: expr_span(e),
+          hint: Some("assign the new value: `{target} = <this expression>` (declare `var {target}`)"))
+      }
+    },
+    None => {},
+  }
+  if hd(c, t) == Some("Result") {
+    return error(c: c, code: "E0402", msg: "this `{sh(c, t)}` is ignored; errors must be handled", span: expr_span(e),
+      hint: Some("propagate with `?`, handle with `match`, or discard explicitly with `let _ = ...`"))
+  }
+  match e {
+    Expr.Call(_, Expr.Name(_, "dbg"), _) => {
+      return c
+    },
+    _ => {},
+  }
+  return warn(c: c, code: "W0401", msg: "unused value of type `{sh(c, t)}`", span: expr_span(e),
+    hint: Some("use `let _ = ...` to discard it explicitly"))
+}
+
+// ---- control-flow analysis ----------------------------------------------------------------------------------
+
+fn returns(b: Block) -> Bool {
+  return b.stmts.any(stmt_returns)
+}
+
+fn stmt_returns(s: Stmt) -> Bool {
+  return match s {
+    Stmt.Return(_, _) => true,
+    Stmt.If(_, _, then, else_) => match else_ {
+      Else.NoElse => false,
+      Else.ElseBlock(b) => returns(then) and returns(b),
+      Else.ElseIf(other) => returns(then) and stmt_returns(other),
+    },
+    Stmt.ExprStmt(_, e) => diverges(e),
+    Stmt.While(_, Expr.BoolLit(_, true), body) => not has_break_block(body),
+    _ => false,
+  }
+}
+
+fn diverges(e: Expr) -> Bool {
+  return match e {
+    Expr.Call(_, Expr.Name(_, name), _) => name == "fail" or name == "todo",
+    Expr.Match(_, _, arms) => arms.all(fn(a) => match a.body {
+      Body.BlockBody(b) => returns(b),
+      Body.ExprBody(x) => diverges(x),
+    }),
+    _ => false,
+  }
+}
+
+// `break` anywhere inside (Python walks the whole subtree, lambdas and nested loops included)
+fn has_break_block(b: Block) -> Bool {
+  return b.stmts.any(has_break_stmt)
+}
+
+fn has_break_else(e: Else) -> Bool {
+  return match e {
+    Else.NoElse => false,
+    Else.ElseBlock(b) => has_break_block(b),
+    Else.ElseIf(s) => has_break_stmt(s),
+  }
+}
+
+fn has_break_stmt(s: Stmt) -> Bool {
+  return match s {
+    Stmt.Break(_) => true,
+    Stmt.Let(_, _, _, _, _, v, _) => has_break_expr(v),
+    Stmt.Assign(_, _, v) => has_break_expr(v),
+    Stmt.Return(_, v) => v.map(has_break_expr).unwrap_or(false),
+    Stmt.If(_, cond, then, else_) => has_break_expr(cond) or has_break_block(then) or has_break_else(else_),
+    Stmt.While(_, cond, body) => has_break_expr(cond) or has_break_block(body),
+    Stmt.For(_, _, _, it, body) => has_break_expr(it) or has_break_block(body),
+    Stmt.Continue(_) => false,
+    Stmt.Assert(_, cond, m) => has_break_expr(cond) or m.map(has_break_expr).unwrap_or(false),
+    Stmt.ExprStmt(_, e) => has_break_expr(e),
+  }
+}
+
+fn has_break_body(b: Body) -> Bool {
+  return match b {
+    Body.ExprBody(e) => has_break_expr(e),
+    Body.BlockBody(blk) => has_break_block(blk),
+  }
+}
+
+fn has_break_expr(e: Expr) -> Bool {
+  return match e {
+    Expr.StrLit(_, parts) => parts.any(fn(p) => match p {
+      StrPiece.Code(x) => has_break_expr(x),
+      _ => false,
+    }),
+    Expr.ListLit(_, items) => items.any(has_break_expr),
+    Expr.MapLit(_, entries) => entries.any(fn(m) => has_break_expr(m.key) or has_break_expr(m.value)),
+    Expr.Unary(_, _, x) => has_break_expr(x),
+    Expr.Binary(_, _, l, r) => has_break_expr(l) or has_break_expr(r),
+    Expr.Call(_, f, args) => has_break_expr(f) or args.any(fn(a) => has_break_expr(a.value)),
+    Expr.MethodCall(_, o, _, _, args) => has_break_expr(o) or args.any(fn(a) => has_break_expr(a.value)),
+    Expr.FieldAccess(_, o, _, _) => has_break_expr(o),
+    Expr.Try(_, x) => has_break_expr(x),
+    Expr.RecordLit(_, _, fs) => fs.any(fn(f) => has_break_expr(f.value)),
+    Expr.WithExpr(_, b, fs) => has_break_expr(b) or fs.any(fn(f) => has_break_expr(f.value)),
+    Expr.Match(_, subj, arms) => has_break_expr(subj) or arms.any(fn(a) => a.guard.map(has_break_expr).unwrap_or(false) or
+        has_break_body(a.body)),
+    Expr.Lambda(_, _, _, body) => has_break_body(body),
+    _ => false,
+  }
+}
+
+// ---- expressions --------------------------------------------------------------------------------------------
+
+fn ok(c: Ck, t: Type) -> Res[Type] {
+  return Res { c: c, v: t }
+}
+
+/// The type of an expression; with `exp`, the expression must have that type.
+fn expr(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  let r = expr_kind(ck: ck, e: e, exp: exp)
+  return match exp {
+    Some(want) => {
+      let u = uni(ck: r.c, a: want, b: r.v)
+      if u.v {
+        return ok(u.c, r.v)
+      }
+      return ok(mismatch(ck: u.c, expected: want, found: r.v, span: expr_span(e)), want)
+    },
+    None => r,
+  }
+}
+
+fn expr_any(ck: Ck, e: Expr) -> Ck {
+  return expr(ck: ck, e: e, exp: None).c
+}
+
+fn args_any(ck: Ck, args: List[Arg]) -> Ck {
+  var c = ck
+  for a in args {
+    c = expr_any(c, a.value)
+  }
+  return c
+}
+
+fn mismatch(ck: Ck, expected: Type, found: Type, span: Span) -> Ck {
+  var c = ck
+  let ex = pr(c, expected)
+  let fo = pr(c, found)
+  let he = hd(c, ex)
+  let hf = hd(c, fo)
+  var hint: Option[Str] = None
+  if he == Some("Float") and hf == Some("Int") {
+    hint = Some("Klar has no implicit conversions: use a float literal (`1.0`) or `.to_float()`")
+  } else if he == Some("Int") and hf == Some("Float") {
+    hint = Some("convert explicitly with `.round()`, `.floor()`, `.ceil()` or `.to_int()`")
+  } else if he == Some("Str") and (hf == Some("Int") or hf == Some("Float") or hf == Some("Bool")) {
+    hint = Some("convert with `.to_str()` or use interpolation: \"\{value\}\"")
+  } else {
+    var done = false
+    if he == Some("Option") {
+      let u = uni(ck: c, a: args_of(c.s, ex).get_or(0, Type.Any), b: fo)
+      c = u.c
+      if u.v {
+        hint = Some("wrap the value: `Some(value)`")
+        done = true
+      }
+    }
+    if not done and he == Some("Result") {
+      let u = uni(ck: c, a: args_of(c.s, ex).get_or(0, Type.Any), b: fo)
+      c = u.c
+      if u.v {
+        hint = Some("wrap the value: `Ok(value)`")
+        done = true
+      }
+    }
+    if not done and hf == Some("Option") {
+      let u = uni(ck: c, a: ex, b: args_of(c.s, fo).get_or(0, Type.Any))
+      c = u.c
+      if u.v {
+        hint = Some("the value may be missing: use `?`, `match`, or `.unwrap_or(default)`")
+        done = true
+      }
+    }
+    if not done and hf == Some("Result") {
+      let u = uni(ck: c, a: ex, b: args_of(c.s, fo).get_or(0, Type.Any))
+      c = u.c
+      if u.v {
+        hint = Some("the value may be an error: use `?`, `match`, or `.unwrap_or(default)`")
+      }
+    }
+  }
+  return error(c: c, code: "E0202", msg: "expected `{sh(c, ex)}`, found `{sh(c, fo)}`", span: span, hint: hint)
+}
+
+fn expr_kind(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  return match e {
+    Expr.IntLit(_, _) => match c.sys and exp.map(fn(t) => hd(ck, t) == Some("Word")).unwrap_or(false) {
+      true => ok(c, con("Word")),
+      false => ok(c, con("Int")),
+    },
+    Expr.FloatLit(_, _) => ok(c, con("Float")),
+    Expr.BoolLit(_, _) => ok(c, con("Bool")),
+    Expr.UnitLit(_) => ok(c, con("Unit")),
+    Expr.StrLit(_, parts) => {
+      for part in parts {
+        match part {
+          StrPiece.Code(x) => {
+            let r = expr(ck: c, e: x, exp: None)
+            c = r.c
+            if is_fn_type(pr(c, r.v)) {
+              c = error(c: c, code: "E0202", msg: "cannot interpolate a function into a string", span: expr_span(x),
+                hint: None)
+            }
+          },
+          StrPiece.Text(_) => {},
+        }
+      }
+      return ok(c, con("Str"))
+    },
+    Expr.ListLit(_, items) => {
+      var elem = Type.Any
+      match exp.map(fn(t) => pr(ck, t)) {
+        Some(Type.Con("List", args)) => {
+          elem = args.get_or(0, Type.Any)
+        },
+        _ => {
+          let v = fresh_var(c)
+          c = v.c
+          elem = v.v
+        },
+      }
+      for it in items {
+        c = expr(ck: c, e: it, exp: Some(elem)).c
+      }
+      return ok(c, list_of(elem))
+    },
+    Expr.MapLit(_, entries) => {
+      var k = Type.Any
+      var v = Type.Any
+      match exp.map(fn(t) => pr(ck, t)) {
+        Some(Type.Con("Map", args)) => {
+          k = args.get_or(0, Type.Any)
+          v = args.get_or(1, Type.Any)
+        },
+        _ => {
+          let a = fresh_var(c)
+          let b = fresh_var(a.c)
+          c = b.c
+          k = a.v
+          v = b.v
+        },
+      }
+      for en in entries {
+        let r = expr(ck: c, e: en.key, exp: Some(k))
+        c = r.c
+        let kt = pr(c, r.v)
+        let h = hd(c, kt)
+        if h != None and h != Some("Int") and h != Some("Str") and h != Some("Bool") and not is_var(kt) {
+          c = error(c: c, code: "E0202", msg: "map keys must be `Int`, `Str` or `Bool`, found `{sh(c, kt)}`",
+            span: expr_span(en.key), hint: None)
+        }
+        c = expr(ck: c, e: en.value, exp: Some(v)).c
+      }
+      return ok(c, map_of(k, v))
+    },
+    Expr.Name(span, name) => e_name(ck: c, span: span, name: name),
+    Expr.Unary(span, op, operand) => e_unary(ck: c, span: span, op: op, operand: operand),
+    Expr.Binary(_, _, _, _) => e_binary(ck: c, e: e, exp: exp),
+    Expr.Call(_, _, _) => e_call(ck: c, e: e, exp: exp),
+    Expr.MethodCall(_, _, _, _, _) => e_method_call(ck: c, e: e, exp: exp),
+    Expr.FieldAccess(_, _, _, _) => e_field_access(c, e),
+    Expr.Try(span, x) => e_try(ck: c, span: span, x: x),
+    Expr.RecordLit(_, _, _) => e_record(ck: c, e: e, exp: exp),
+    Expr.WithExpr(_, base, fields) => e_with(ck: c, base: base, fields: fields),
+    Expr.Lambda(_, _, _, _) => e_lambda(ck: c, e: e, exp: exp),
+    Expr.Match(_, _, _) => e_match(ck: c, e: e, exp: exp),
+  }
+}
+
+fn visible_names(c: Ck) -> List[Str] {
+  var names = c.fns.keys().concat(c.globals.keys()).push("None").concat(c.consts.keys())
+  for sc in c.scopes {
+    names = names.concat(sc.vars.keys())
+  }
+  return names.unique()
+}
+
+fn record_hint(c: Ck, name: Str) -> Str {
+  let fields = c.uni.records.get(name).map(fn(i) => i.fields.keys()).unwrap_or([]).map(fn(f) => "{f}: ...").join(", ")
+  return "construct a value with `{name} \{ {fields} \}`"
+}
+
+fn variants_list(c: Ck, enum_name: Str) -> List[Str] {
+  return c.uni.enums.get(enum_name).map(fn(i) => i.variants.keys()).unwrap_or([])
+}
+
+fn instantiate(ck: Ck, sig: Sig, span: Span) -> Res[Type] {
+  var c = check_effects(ck: ck, sig: sig, span: span)
+  let m = fresh_map(c, sig.tparams)
+  let done = note_bounds(c: m.c, sig: sig, mapping: m.v, span: span)
+  return ok(done, Type.Fun(params: sig.params.map(fn(p) => sub(c: done, t: p.second, m: m.v)), ret: sub(c: done, t: sig.ret,
+    m: m.v)))
+}
+
+fn e_name(ck: Ck, span: Span, name: Str) -> Res[Type] {
+  var c = ck
+  match lookup(c, name) {
+    Some(v) => {
+      c = mark_used(c, name)
+      if v.mutable {
+        c = captured_var(ck: c, name: name, span: span, assigning: false)
+      }
+      return ok(c, v.ty)
+    },
+    None => {},
+  }
+  if name == "None" {
+    let v = fresh_var(c)
+    return ok(v.c, option_of(v.v))
+  }
+  if c.consts.has(name) {
+    match c.const_allowed {
+      Some(allowed) => {
+        if not allowed.has(name) and not c.imported.has(name) {
+          c = error(c: c, code: "E0604", msg: "constant `{name}` is used before it is declared", span: span,
+            hint: Some("constants may only refer to constants declared above them"))
+        }
+      },
+      None => {},
+    }
+    return ok(c, match c.consts.get(name) {
+      Some(Some(t)) => t,
+      _ => Type.Any,
+    })
+  }
+  match callable(c, name) {
+    Some(sig) => {
+      return instantiate(ck: c, sig: sig, span: span)
+    },
+    None => {},
+  }
+  if c.uni.records.has(name) {
+    return ok(error(c: c, code: "E0201", msg: "`{name}` is a type, not a value", span: span,
+      hint: Some(record_hint(c, name))), Type.Any)
+  }
+  if c.uni.enums.has(name) {
+    let vs = variants_list(c, name).map(fn(v) => "`{name}.{v}`").join(", ")
+    return ok(error(c: c, code: "E0201", msg: "`{name}` is an enum type, not a value", span: span,
+      hint: Some("use a variant: {vs}")), Type.Any)
+  }
+  let foreign = match name {
+    "null" => Some("None"),
+    "nil" => Some("None"),
+    "True" => Some("true"),
+    "False" => Some("false"),
+    "self" => Some(""),
+    "this" => Some(""),
+    "Math" => Some(""),
+    _ => None,
+  }
+  let hint = match foreign {
+    Some(rep) => match name == "Math" {
+      true => Some("math functions are methods: `x.sqrt()`, `x.pow(2.0)`, `x.abs()`; constants `PI`, `E`"),
+      false => match rep.is_empty() {
+        true => Some("Klar has no methods with `self`; pass the value as the first parameter"),
+        false => Some("write `{rep}`"),
+      },
+    },
+    None => did_you_mean(name, visible_names(c)),
+  }
+  return ok(error(c: c, code: "E0201", msg: "unknown name `{name}`", span: span, hint: hint), Type.Any)
+}
+
+fn e_unary(ck: Ck, span: Span, op: Str, operand: Expr) -> Res[Type] {
+  var c = ck
+  if op == "not" {
+    c = expr(ck: c, e: operand, exp: Some(con("Bool"))).c
+    return ok(c, con("Bool"))
+  }
+  let r = expr(ck: c, e: operand, exp: None)
+  c = r.c
+  let t = pr(c, r.v)
+  let h = hd(c, t)
+  if h == Some("Int") or h == Some("Float") or h == Some("Word") or is_any(t) {
+    return ok(c, t)
+  }
+  if is_var(t) {
+    return ok(uni_(ck: c, a: t, b: con("Int")), con("Int"))
+  }
+  return ok(error(c: c, code: "E0211", msg: "unary `-` is not defined for `{sh(c, t)}`", span: span, hint: None), Type.Any)
+}
+
+/// Integer literal arithmetic (typed as Word or Int by context in system modules).
+fn is_lit(e: Expr) -> Bool {
+  return match e {
+    Expr.IntLit(_, _) => true,
+    Expr.Binary(_, op, l, r) => ["+", "-", "*", "/", "%"].contains(op) and is_lit(l) and is_lit(r),
+    Expr.Unary(_, "-", x) => is_lit(x),
+    _ => false,
+  }
+}
+
+fn word_if(cond: Bool) -> Option[Type] {
+  return match cond {
+    true => Some(con("Word")),
+    false => None,
+  }
+}
+
+fn e_binary(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.Binary(span, op, left, right) => Pair { first: Pair { first: span, second: op }, second: Pair { first: left,
+      second: right } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first.first
+  let op = parts.first.second
+  let left = parts.second.first
+  let right = parts.second.second
+  if op == "and" or op == "or" {
+    c = expr(ck: c, e: left, exp: Some(con("Bool"))).c
+    c = expr(ck: c, e: right, exp: Some(con("Bool"))).c
+    return ok(c, con("Bool"))
+  }
+  var lt = Type.Any
+  var rt = Type.Any
+  if c.sys and (is_lit(left) or is_lit(right)) {
+    let want_word = exp.map(fn(t) => hd(ck, t) == Some("Word")).unwrap_or(false)
+    if is_lit(left) and not is_lit(right) {
+      let r = expr(ck: c, e: right, exp: None)
+      rt = pr(r.c, r.v)
+      let l = expr(ck: r.c, e: left, exp: word_if(hd(r.c, rt) == Some("Word")))
+      c = l.c
+      lt = pr(c, l.v)
+    } else if is_lit(right) and not is_lit(left) {
+      let l = expr(ck: c, e: left, exp: None)
+      lt = pr(l.c, l.v)
+      let r = expr(ck: l.c, e: right, exp: word_if(hd(l.c, lt) == Some("Word")))
+      c = r.c
+      rt = pr(c, r.v)
+    } else {
+      let l = expr(ck: c, e: left, exp: word_if(want_word))
+      lt = pr(l.c, l.v)
+      let r = expr(ck: l.c, e: right, exp: word_if(want_word))
+      c = r.c
+      rt = pr(c, r.v)
+    }
+  } else {
+    let l = expr(ck: c, e: left, exp: None)
+    lt = pr(l.c, l.v)
+    let r = expr(ck: l.c, e: right, exp: word_if(l.c.sys and hd(l.c, lt) == Some("Word")))
+    c = r.c
+    rt = pr(c, r.v)
+  }
+  let hl = hd(c, lt)
+  let hr = hd(c, rt)
+  var num_hint: Option[Str] = None
+  if (hl == Some("Int") and hr == Some("Float")) or (hl == Some("Float") and hr == Some("Int")) {
+    num_hint = Some("Klar has no implicit conversions: use `.to_float()` on the Int side, or `.round()` on the Float side")
+  }
+  if op == "==" or op == "!=" {
+    let u = uni(ck: c, a: lt, b: rt)
+    c = u.c
+    if not u.v {
+      c = error(c: c, code: "E0211", msg: "cannot compare `{sh(c, lt)}` with `{sh(c, rt)}`", span: span, hint: num_hint)
+    } else if is_fn_type(pr(c, lt)) {
+      c = error(c: c, code: "E0211", msg: "functions cannot be compared", span: span, hint: None)
+    }
+    return ok(c, con("Bool"))
+  }
+  if ["<", ">", "<=", ">="].contains(op) {
+    let u = uni(ck: c, a: lt, b: rt)
+    c = u.c
+    if not u.v {
+      c = error(c: c, code: "E0211", msg: "cannot compare `{sh(c, lt)}` with `{sh(c, rt)}`", span: span, hint: num_hint)
+      return ok(c, con("Bool"))
+    }
+    let t = pr(c, lt)
+    let h = hd(c, t)
+    if not (h == Some("Int") or h == Some("Float") or h == Some("Str") or h == Some("Word")) and not is_var(t) and
+      not is_any(t) {
+      c = error(c: c, code: "E0211", msg: "`{op}` is not defined for `{sh(c, t)}`", span: span,
+        hint: Some("only Int, Float and Str are ordered"))
+    }
+    return ok(c, con("Bool"))
+  }
+  // arithmetic
+  let u = uni(ck: c, a: lt, b: rt)
+  c = u.c
+  if not u.v {
+    var hint = num_hint
+    if op == "+" and (hl == Some("Str") or hr == Some("Str")) {
+      hint = Some("use interpolation: \"\{a\}\{b\}\", or convert with `.to_str()`")
+    }
+    var found = false
+    for st in [lt, rt] {
+      let hs = hd(c, st)
+      if not found and (hs == Some("Option") or hs == Some("Result")) {
+        hint = match hs == Some("Option") {
+          true => Some("`{sh(c, st)}` may be missing (`None`): handle it first — `match x \{ Some(v) => ..., None => ... \}`, " +
+              "`x?`, or `x.unwrap_or(default)`"),
+          false => Some("`{sh(c, st)}` may be an error (`Err`): handle it first — `match x \{ Ok(v) => ..., Err(e) => ... \}`, " +
+              "`x?`, or `x.unwrap_or(default)`"),
+        }
+        found = true
+      }
+    }
+    c = error(c: c, code: "E0211", msg: "cannot apply `{op}` to `{sh(c, lt)}` and `{sh(c, rt)}`", span: span, hint: hint)
+    return ok(c, Type.Any)
+  }
+  let t = pr(c, lt)
+  let h = hd(c, t)
+  if h == Some("Int") or h == Some("Float") or h == Some("Word") {
+    return ok(c, t)
+  }
+  if h == Some("Str") and op == "+" {
+    return ok(c, con("Str"))
+  }
+  if is_var(t) {
+    return ok(uni_(ck: c, a: t, b: con("Int")), con("Int"))
+  }
+  if is_any(t) {
+    return ok(c, Type.Any)
+  }
+  var hint: Option[Str] = None
+  if h == Some("List") and op == "+" {
+    hint = Some("use `.concat(other)` to join lists")
+  } else if h == Some("Str") {
+    hint = Some("strings support only `+`; use `.repeat(n)` for repetition")
+  }
+  return ok(error(c: c, code: "E0211", msg: "operator `{op}` is not defined for `{sh(c, t)}`", span: span, hint: hint),
+    Type.Any)
+}
+
+// ---- calls --------------------------------------------------------------------------------------------------
+
+fn check_effects(ck: Ck, sig: Sig, span: Span) -> Ck {
+  let missing = minus(sig.effects, ck.ctx.effects)
+  if missing.is_empty() {
+    return ck
+  }
+  let effs = missing.join(", ")
+  let purpose = ck.ctx.purpose
+  if purpose == "contract" or purpose == "const" {
+    let what = match purpose == "contract" {
+      true => "contracts",
+      false => "constants",
+    }
+    return error(c: ck, code: "E0401", msg: "{what} must be pure, but `{sig.name}` uses `{effs}`", span: span, hint: None)
+  }
+  if purpose == "test" or ck.ctx.is_test {
+    return error(c: ck, code: "E0401", msg: "tests may only use `io`, but `{sig.name}` uses `{effs}`", span: span,
+      hint: Some("pass the time/random/file value as a parameter so the code under test stays deterministic"))
+  }
+  let allowed = union(ck.ctx.effects, missing).sort()
+  return error(c: ck, code: "E0401", msg: "calling `{sig.name}` requires effect `{effs}`, but `{ck.ctx.name}` " +
+      "does not declare it", span: span, hint: Some("add `uses {commas(allowed)}` to the signature of `{ck.ctx.name}`"))
+}
+
+/// A call of a function with a signature (`self_type`: the receiver of a method call).
+fn call_sig(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Type], self_type: Option[Type],
+  display: Str) -> Res[Type] {
+    var c = ck
+    let fm = fresh_map(c, sig.tparams)
+    let mapping = fm.v
+    c = note_bounds(c: fm.c, sig: sig, mapping: mapping, span: span)
+    var params = sig.params.map(fn(p) => Pair { first: p.first, second: subst(s: fm.c.s, t: p.second, mapping: mapping) })
+    let ret = sub(c: c, t: sig.ret, m: mapping)
+    match self_type {
+      Some(st) => {
+        var fits = false
+        if not params.is_empty() {
+          let u = uni(ck: c, a: params.get_or(0, Pair { first: "", second: Type.Any }).second, b: st)
+          c = u.c
+          fits = u.v
+        }
+        if not fits {
+          let need = match params.get(0) {
+            Some(p) => sh(c, p.second),
+            None => "?",
+          }
+          var alt: Option[Str] = None
+          for other in builtin_methods_of(c, hd(c, st)).values() {
+            if alt == None and other.name != display and other.name.starts_with(display) and not other.params.is_empty() {
+              let om = fresh_map(c, other.tparams)
+              c = om.c
+              let first = sub(c: c, t: other.params.get_or(0, Pair { first: "", second: Type.Any }).second, m: om.v)
+              let u = uni(ck: c, a: first, b: st)
+              c = u.c
+              if u.v {
+                alt = Some(other.name)
+              }
+            }
+          }
+          let shown = sh(c, st)
+          let hint = alt.map(fn(a) => "use `.{a}()` for `{shown}`")
+          c = error(c: c, code: "E0204", msg: "method `{display}` needs a receiver of type `{need}`, found `{sh(c, st)}`",
+            span: span, hint: hint)
+          return ok(args_any(c, args), Type.Any)
+        }
+        params = params.drop(1)
+      },
+      None => {},
+    }
+    match expected {
+      Some(t) => {
+        // guides inference (e.g. Ok(1) with an expected error type)
+        c = uni_(ck: c, a: ret, b: t)
+      },
+      None => {},
+    }
+    c = check_effects(ck: c, sig: sig, span: span)
+    let positional = args.filter(fn(a) => a.name == None)
+    let named = args.filter(fn(a) => a.name != None)
+    if not positional.is_empty() and not named.is_empty() {
+      let last_pos = args.index_of(positional.last().unwrap_or(args.get_or(0, Arg { span: span, name: None,
+        value: Expr.UnitLit(span: span) }))).unwrap_or(0)
+      let first_named = args.index_of(named.get_or(0, args.get_or(0, Arg { span: span, name: None,
+        value: Expr.UnitLit(span: span) }))).unwrap_or(0)
+      if last_pos > first_named {
+        c = error(c: c, code: "E0209", msg: "positional arguments must come before named ones", span: span, hint: None)
+      }
+    }
+    let names = params.map(fn(p) => p.first)
+    if sig.user and sig.params.len() >= 3 and not positional.is_empty() and not c.sys {
+      let example = names.map(fn(n) => "{n}: ...").join(", ")
+      c = error(c: c, code: "E0208", msg: "`{display}` has {sig.params.len()} parameters, so arguments must be named",
+        span: span, hint: Some("write `{display}({example})`"))
+    }
+    var assigned: Map[Str, Arg] = Map {}
+    var i = 0
+    for a in positional {
+      if i < params.len() {
+        assigned = assigned.set(names.get_or(i, ""), a)
+      }
+      i = i + 1
+    }
+    if positional.len() > params.len() {
+      c = error(c: c, code: "E0206", msg: "`{display}` takes {params.len()} argument(s) but {args.len()} were given",
+        span: span, hint: None)
+      for a in positional.drop(params.len()) {
+        c = expr_any(c, a.value)
+      }
+    }
+    for a in named {
+      let an = a.name.unwrap_or("")
+      if not names.contains(an) {
+        let fallback = match names.is_empty() {
+          true => "(none)",
+          false => names.join(", "),
+        }
+        c = error(c: c, code: "E0209", msg: "`{display}` has no parameter named `{an}`", span: a.span,
+          hint: or_hint(did_you_mean(an, names), "parameters: {fallback}"))
+        c = expr_any(c, a.value)
+      } else if assigned.has(an) {
+        c = error(c: c, code: "E0209", msg: "argument `{an}` given twice", span: a.span, hint: None)
+        c = expr_any(c, a.value)
+      } else {
+        assigned = assigned.set(an, a)
+      }
+    }
+    let given = assigned
+    let missing = params.filter(fn(p) => not given.has(p.first))
+    if not missing.is_empty() {
+      let snap = c
+      let lst = missing.map(fn(p) => "`{p.first}: {sh(snap, p.second)}`").join(", ")
+      c = error(c: c, code: "E0206", msg: "missing argument(s) {lst} in call to `{display}`", span: span, hint: None)
+    }
+    for p in params {
+      match assigned.get(p.first) {
+        Some(a) => {
+          c = expr(ck: c, e: a.value, exp: Some(p.second)).c
+        },
+        None => {},
+      }
+    }
+    return ok(c, ret)
+  }
+
+fn call_fn_type(ck: Ck, ft: Type, args: List[Arg], span: Span) -> Res[Type] {
+  var c = ck
+  let f = pr(c, ft)
+  return match f {
+    Type.Any => ok(args_any(c, args), Type.Any),
+    Type.Var(_) => {
+      var ps: List[Type] = []
+      for a in args {
+        let r = expr(ck: c, e: a.value, exp: None)
+        c = r.c
+        ps = ps.push(pr(c, r.v))
+      }
+      let r = fresh_var(c)
+      return ok(uni_(ck: r.c, a: f, b: Type.Fun(params: ps, ret: r.v)), r.v)
+    },
+    Type.Fun(fps, fret) => {
+      for a in args {
+        if a.name != None {
+          c = error(c: c, code: "E0209", msg: "named arguments cannot be used when calling a function value", span: a.span,
+            hint: None)
+        }
+      }
+      if args.len() != fps.len() {
+        c = error(c: c, code: "E0206", msg: "this function takes {fps.len()} argument(s) but {args.len()} were given",
+          span: span, hint: None)
+      }
+      var i = 0
+      for a in args {
+        if i < fps.len() {
+          c = expr(ck: c, e: a.value, exp: Some(fps.get_or(i, Type.Any))).c
+        } else {
+          c = expr_any(c, a.value)
+        }
+        i = i + 1
+      }
+      return ok(c, fret)
+    },
+    _ => {
+      c = error(c: c, code: "E0210", msg: "`{sh(c, f)}` is not a function and cannot be called", span: span, hint: None)
+      return ok(args_any(c, args), Type.Any)
+    },
+  }
+}
+
+fn special_hint(name: Str) -> Option[Str] {
+  return match name {
+    "len" => Some("use the method: `xs.len()`"),
+    "str" => Some("use `.to_str()`"),
+    "int" => Some("use `s.to_int()` (returns Option[Int])"),
+    "println" => Some("use `print(...)`"),
+    "console" => Some("use `print(...)`"),
+    "printf" => Some("use `print(\"... \{x\} ...\")`"),
+    "assert_eq" => Some("use `assert a == b`"),
+    "panic" => Some("use `fail(\"message\")`"),
+    "throw" => Some("return `Err(...)` instead"),
+    "raise" => Some("return `Err(...)` instead"),
+    "open" => Some("use `read_file(path)` / `write_file(path, text)` (effect `fs`)"),
+    "input" => Some("use `read_line()` (returns Option[Str], effect `io`)"),
+    "sqrt" => Some("use the method: `x.sqrt()`"),
+    "abs" => Some("use the method: `x.abs()`"),
+    "min" => Some("use the method: `a.min(b)` or `xs.min()`"),
+    "max" => Some("use the method: `a.max(b)` or `xs.max()`"),
+    "sum" => Some("use the method: `xs.sum()`"),
+    "sorted" => Some("use the method: `xs.sort()`"),
+    "enumerate" => Some("use the method: `xs.enumerate()`"),
+    "zip" => Some("use the method: `xs.zip(ys)`"),
+    _ => None,
+  }
+}
+
+fn e_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.Call(span, callee, args) => Pair { first: span, second: Pair { first: callee, second: args } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first
+  let callee = parts.second.first
+  let args = parts.second.second
+  match callee {
+    Expr.Name(cspan, name) => {
+      match lookup(c, name) {
+        Some(v) => {
+          c = mark_used(c, name)
+          return call_fn_type(ck: c, ft: v.ty, args: args, span: span)
+        },
+        None => {},
+      }
+      match callable(c, name) {
+        Some(sig) => {
+          if name == "todo" and not c.fns.has(name) {
+            let what = match args.get(0).map(fn(a) => a.value) {
+              Some(Expr.StrLit(_, sparts)) => match sparts.get(0) {
+                Some(StrPiece.Text(t)) => t,
+                _ => "...",
+              },
+              _ => "...",
+            }
+            c = warn(c: c, code: "W0404", msg: "unfinished code: todo(\"{what}\")", span: span,
+              hint: Some("replace `todo(...)` with a real implementation"))
+          }
+          return call_sig(ck: c, sig: sig, args: args, span: span, expected: exp, self_type: None, display: sig.name)
+        },
+        None => {},
+      }
+      if c.uni.records.has(name) {
+        c = error(c: c, code: "E0210", msg: "`{name}` is a record type, not a function", span: cspan,
+          hint: Some(record_hint(c, name)))
+      } else if c.uni.enums.has(name) {
+        let vs = variants_list(c, name).map(fn(x) => "`{name}.{x}`").join(", ")
+        c = error(c: c, code: "E0210", msg: "`{name}` is an enum; construct one of its variants", span: cspan, hint: Some(vs))
+      } else if name == "None" {
+        c = error(c: c, code: "E0210", msg: "`None` takes no arguments", span: cspan, hint: Some("write `None`"))
+      } else if c.consts.has(name) {
+        c = error(c: c, code: "E0210", msg: "constant `{name}` is not a function", span: cspan, hint: None)
+      } else {
+        let owners = c.uni.traits.values().filter(fn(t) => t.methods.has(name)).map(fn(t) => t.name)
+        let hint = match owners.get(0) {
+          Some(o) => Some("`{name}` is a method of trait `{o}`: call it on the value, `x.{name}(...)`"),
+          None => match special_hint(name) {
+            Some(h) => Some(h),
+            None => did_you_mean(name, visible_names(c)),
+          },
+        }
+        c = error(c: c, code: "E0201", msg: "unknown function `{name}`", span: cspan, hint: hint)
+      }
+      return ok(args_any(c, args), Type.Any)
+    },
+    _ => {},
+  }
+  let r = expr(ck: c, e: callee, exp: None)
+  return call_fn_type(ck: r.c, ft: r.v, args: args, span: span)
+}
+
+/// A fresh instance `Name[?A, ?B]` of a generic declaration and its parameter mapping.
+fn fresh_instance(ck: Ck, name: Str, tparams: List[Str]) -> Res[Pair[Type, Map[Str, Type]]] {
+  let m = fresh_map(ck, tparams)
+  return Res { c: m.c, v: Pair { first: Type.Con(name: name, args: tparams.map(fn(t) => m.v.get(t).unwrap_or(Type.Any))),
+    second: m.v } }
+}
+
+fn enum_tparams(c: Ck, name: Str) -> List[Str] {
+  return c.uni.enums.get(name).map(fn(i) => i.tparams).unwrap_or([])
+}
+
+fn variant_fields(c: Ck, enum_name: Str, variant: Str) -> Option[List[Pair[Str, Type]]] {
+  return match c.uni.enums.get(enum_name) {
+    Some(info) => info.variants.get(variant),
+    None => None,
+  }
+}
+
+fn is_type_name(c: Ck, obj: Expr) -> Option[Str] {
+  return match obj {
+    Expr.Name(_, n) => match lookup(c, n) {
+      None => Some(n),
+      Some(_) => None,
+    },
+    _ => None,
+  }
+}
+
+fn e_method_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.MethodCall(span, obj, m, mspan, args) => Pair { first: Pair { first: span, second: mspan }, second: Pair {
+      first: Pair { first: obj, second: m }, second: args } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first.first
+  let mspan = parts.first.second
+  let obj = parts.second.first.first
+  let m = parts.second.first.second
+  let args = parts.second.second
+  match is_type_name(c, obj) {
+    Some(tn) => {
+      if c.uni.enums.has(tn) {
+        c = check_type_visible(c: c, name: tn, span: expr_span(obj))
+        let variants = variants_list(c, tn)
+        match variant_fields(c: c, enum_name: tn, variant: m) {
+          None => {
+            c = error(c: c, code: "E0302", msg: "enum `{tn}` has no variant `{m}`", span: mspan,
+              hint: or_hint(did_you_mean(m, variants), "variants: {commas(variants)}"))
+            c = args_any(c, args)
+            let inst = fresh_instance(ck: c, name: tn, tparams: enum_tparams(c, tn))
+            return ok(inst.c, inst.v.first)
+          },
+          Some(fields) => {
+            if fields.is_empty() {
+              c = error(c: c, code: "E0206", msg: "variant `{tn}.{m}` has no fields; write it without parentheses",
+                span: span, hint: None)
+              let inst = fresh_instance(ck: c, name: tn, tparams: enum_tparams(c, tn))
+              return ok(inst.c, inst.v.first)
+            }
+            let inst = fresh_instance(ck: c, name: tn, tparams: enum_tparams(c, tn))
+            c = inst.c
+            let vsig = Sig {
+              name: "{tn}.{m}",
+              tparams: [],
+              params: fields.map(fn(f) => Pair { first: f.first, second: subst(s: inst.c.s, t: f.second,
+                mapping: inst.v.second) }),
+              ret: inst.v.first,
+              effects: [],
+              user: false,
+              mod_name: "",
+              bounds: no_bounds(),
+              decl: -1,
+              name_span: span,
+              self_type: None,
+            }
+            return call_sig(ck: c, sig: vsig, args: args, span: span, expected: exp, self_type: None, display: vsig.name)
+          },
+        }
+      }
+      if tn == "Option" or tn == "Result" {
+        return ok(error(c: c, code: "E0204", msg: "`{tn}.{m}` does not exist", span: span,
+          hint: Some("construct with `Some(x)` / `None` / `Ok(x)` / `Err(e)` directly")), Type.Any)
+      }
+      if c.uni.records.has(tn) {
+        return ok(error(c: c, code: "E0204", msg: "record types have no static methods (`{tn}.{m}`)", span: span,
+          hint: Some("declare a function `fn {m}(...) -> {tn}` and call it directly")), Type.Any)
+      }
+    },
+    None => {},
+  }
+  let r = expr(ck: c, e: obj, exp: None)
+  return method_call(ck: r.c, rt: pr(r.c, r.v), e: e, exp: exp)
+}
+
+fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.MethodCall(span, obj, m, mspan, args) => Pair { first: Pair { first: span, second: mspan }, second: Pair {
+      first: Pair { first: obj, second: m }, second: args } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first.first
+  let mspan = parts.first.second
+  let obj = parts.second.first.first
+  let m = parts.second.first.second
+  let args = parts.second.second
+  if is_any(rt) {
+    return ok(args_any(c, args), Type.Any)
+  }
+  if m == "to_str" and args.is_empty() {
+    return ok(c, con("Str"))
+  }
+  let h = hd(c, rt)
+  match h {
+    Some(hn) => {
+      match c.uni.records.get(hn) {
+        Some(info) => {
+          match info.fields.get(m) {
+            Some(fty) => {
+              let ft = sub(c: c, t: fty, m: args_map(c: c, tparams: info.tparams, t: rt))
+              if is_fn_type(pr(c, ft)) {
+                return call_fn_type(ck: c, ft: ft, args: args, span: span)
+              }
+            },
+            None => {},
+          }
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  if is_var(rt) {
+    c = error(c: c, code: "E0214", msg: "cannot infer the type of this value before calling `.{m}()`", span: expr_span(obj),
+      hint: Some("add a type annotation, e.g. `let xs: List[Int] = []`"))
+    return ok(args_any(c, args), Type.Any)
+  }
+  let builtins = builtin_methods_of(c, h)
+  match builtins.get(m) {
+    Some(bsig) => {
+      return call_sig(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
+    },
+    None => {},
+  }
+  let tp = param_name(rt)
+  match tp {
+    Some(pn) => {
+      let traits = c.uni.traits
+      let found = c.bounds.get(pn).unwrap_or([]).unique().sort().filter(fn(tr) => traits.get(tr).map(fn(i) =>
+        i.methods.has(m)).unwrap_or(false))
+      match found.get(0) {
+        Some(tr) => {
+          if found.len() > 1 {
+            c = error(c: c, code: "E0204", msg: "`{m}` is a method of both `{tr}` and `{or_empty(found.get(1))}`", span: mspan,
+              hint: Some("rename the method in one of the traits"))
+          }
+          let tsig = c.uni.traits.get(tr).map(fn(i) => i.methods.get(m)).unwrap_or(None)
+          match tsig {
+            Some(s) => {
+              return call_sig(ck: c, sig: s, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
+            },
+            None => {},
+          }
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  let tm = match h {
+    Some(hn) => match c.uni.type_methods.get(hn) {
+      Some(table) => table.get(m),
+      None => None,
+    },
+    None => None,
+  }
+  match tm {
+    Some(entry) => {
+      if c.visible.has(entry.first) {
+        c = c with { ufcs: c.ufcs.push(Pair { first: entry.second.name, second: c.cur_decl }) }
+        return call_sig(ck: c, sig: entry.second, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
+      }
+    },
+    None => {},
+  }
+  match fn_sig(c, m) {
+    Some(usig) => {
+      if not usig.params.is_empty() {
+        let fm = fresh_map(c, usig.tparams)
+        c = fm.c
+        let first = sub(c: c, t: usig.params.get_or(0, Pair { first: "", second: Type.Any }).second, m: fm.v)
+        let u = uni(ck: c, a: first, b: rt)
+        c = u.c
+        if u.v {
+          c = c with { ufcs: c.ufcs.push(Pair { first: usig.name, second: c.cur_decl }) }
+          return call_sig(ck: c, sig: usig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
+        }
+      }
+    },
+    None => {},
+  }
+  match tm {
+    Some(entry) => {
+      let tr = entry.first
+      let trait_mod = c.uni.traits.get(tr).map(fn(i) => i.mod_name).unwrap_or("?")
+      c = error(c: c, code: "E0104", msg: "method `{m}` of `{or_empty(h)}` comes from trait `{tr}`, which is not " +
+          "imported here", span: mspan, hint: Some("add `use {trait_mod}.\{{tr}\}` at the top of the file"))
+      return ok(args_any(c, args), Type.Any)
+    },
+    None => {},
+  }
+  // error: unknown method
+  let empty: Map[Str, Pair[Str, Sig]] = Map {}
+  let type_table = match h {
+    Some(hn) => c.uni.type_methods.get(hn).unwrap_or(empty),
+    None => empty,
+  }
+  var cands = builtins.keys().push("to_str").concat(type_table.keys()).unique()
+  match tp {
+    Some(pn) => {
+      for tr in c.bounds.get(pn).unwrap_or([]) {
+        cands = union(cands, c.uni.traits.get(tr).map(fn(i) => i.methods.keys()).unwrap_or([]))
+      }
+      let vis = c.visible
+      let having = c.uni.traits.values().filter(fn(i) => i.methods.has(m) and vis.has(i.name)).map(fn(i) => i.name)
+      match having.get(0) {
+        Some(tr) => {
+          c = error(c: c, code: "E0204", msg: "type parameter `{pn}` has no method `{m}`", span: mspan,
+            hint: Some("`{m}` belongs to trait `{tr}`: declare the bound `[{pn}: {tr}]`"))
+          return ok(args_any(c, args), Type.Any)
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  for entry in c.fns.entries() {
+    match entry.value {
+      Some(s) => {
+        if not s.params.is_empty() and hd(c, s.params.get_or(0, Pair { first: "", second: Type.Any }).second) == h {
+          cands = union(cands, [entry.key])
+        }
+      },
+      None => {},
+    }
+  }
+  var hint: Option[Str] = None
+  match c.b.foreign.get(m) {
+    Some(target) => {
+      if target != "" and cands.contains(target) {
+        hint = Some("Klar calls this method `{target}`")
+      } else {
+        hint = c.b.notes.get(m)
+      }
+    },
+    None => {},
+  }
+  if hint == None {
+    hint = did_you_mean(m, cands)
+  }
+  let is_field = match h {
+    Some(hn) => c.uni.records.get(hn).map(fn(i) => i.fields.has(m)).unwrap_or(false),
+    None => false,
+  }
+  if hint == None and is_field {
+    hint = Some("`{m}` is a field: write `.{m}` without parentheses")
+  }
+  if hint == None {
+    hint = Some("methods of `{sh(c, rt)}`: " + cands.sort().join(", "))
+  }
+  c = error(c: c, code: "E0204", msg: "type `{sh(c, rt)}` has no method `{m}`", span: mspan, hint: hint)
+  return ok(args_any(c, args), Type.Any)
+}
+
+fn e_field_access(ck: Ck, e: Expr) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.FieldAccess(span, obj, name, nspan) => Pair { first: Pair { first: span, second: nspan }, second: Pair {
+      first: obj, second: name } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first.first
+  let nspan = parts.first.second
+  let obj = parts.second.first
+  let name = parts.second.second
+  match is_type_name(c, obj) {
+    Some(tn) => {
+      if c.uni.enums.has(tn) {
+        c = check_type_visible(c: c, name: tn, span: expr_span(obj))
+        let variants = variants_list(c, tn)
+        match variant_fields(c: c, enum_name: tn, variant: name) {
+          None => {
+            c = error(c: c, code: "E0302", msg: "enum `{tn}` has no variant `{name}`", span: nspan,
+              hint: or_hint(did_you_mean(name, variants), "variants: {commas(variants)}"))
+          },
+          Some(fields) => {
+            if not fields.is_empty() {
+              let fs = fields.map(fn(f) => "{f.first}: ...").join(", ")
+              c = error(c: c, code: "E0206", msg: "variant `{tn}.{name}` needs its fields", span: span,
+                hint: Some("write `{tn}.{name}({fs})`"))
+            }
+          },
+        }
+        let inst = fresh_instance(ck: c, name: tn, tparams: enum_tparams(c, tn))
+        return ok(inst.c, inst.v.first)
+      }
+    },
+    None => {},
+  }
+  let r = expr(ck: c, e: obj, exp: None)
+  c = r.c
+  let rt = pr(c, r.v)
+  if is_any(rt) {
+    return ok(c, Type.Any)
+  }
+  let h = hd(c, rt)
+  match h {
+    Some(hn) => {
+      match c.uni.records.get(hn) {
+        Some(info) => {
+          match info.fields.get(name) {
+            Some(ft) => {
+              return ok(c, sub(c: c, t: ft, m: args_map(c: c, tparams: info.tparams, t: rt)))
+            },
+            None => {},
+          }
+          c = error(c: c, code: "E0203", msg: "record `{hn}` has no field `{name}`", span: nspan,
+            hint: or_hint(did_you_mean(name, info.fields.keys()), "fields: {commas(info.fields.keys())}"))
+          return ok(c, Type.Any)
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  var hint: Option[Str] = None
+  match h {
+    Some(_) => {
+      let ms = builtin_methods_of(c, h)
+      if ms.has(name) or name == "to_str" {
+        hint = Some("`{name}` is a method: call it with `.{name}()`")
+      } else {
+        match c.b.foreign.get(name) {
+          Some(target) => {
+            if ms.has(target) {
+              hint = Some("use the method `.{target}()`")
+            }
+          },
+          None => {},
+        }
+      }
+    },
+    None => {},
+  }
+  return ok(error(c: c, code: "E0203", msg: "type `{sh(c, rt)}` has no field `{name}`", span: nspan, hint: hint), Type.Any)
+}
+
+fn e_try(ck: Ck, span: Span, x: Expr) -> Res[Type] {
+  var c = ck
+  let r = expr(ck: c, e: x, exp: None)
+  c = r.c
+  let t = pr(c, r.v)
+  let h = hd(c, t)
+  if h != Some("Option") and h != Some("Result") {
+    if is_var(t) {
+      c = error(c: c, code: "E0214", msg: "cannot infer the type of the value before `?`", span: span,
+        hint: Some("add a type annotation"))
+    } else if not is_any(t) {
+      c = error(c: c, code: "E0212", msg: "`?` can only be applied to `Option` or `Result`, found `{sh(c, t)}`", span: span,
+        hint: None)
+    }
+    return ok(c, Type.Any)
+  }
+  let targs = args_of(c.s, t)
+  let inner = targs.get_or(0, Type.Any)
+  let ctx = c.ctx
+  if ctx.is_test and ctx.purpose == "test" {
+    return ok(c, inner)
+  }
+  if ctx.purpose == "contract" or ctx.purpose == "const" {
+    let what = match ctx.purpose == "contract" {
+      true => "contracts",
+      false => "constants",
+    }
+    return ok(error(c: c, code: "E0212", msg: "`?` is not allowed in {what}", span: span, hint: None), inner)
+  }
+  let rr = pr(c, ctx.ret)
+  if is_var(rr) {
+    let v = fresh_var(c)
+    c = v.c
+    let want = match h == Some("Option") {
+      true => option_of(v.v),
+      false => result_of(v.v, targs.get_or(1, Type.Any)),
+    }
+    return ok(uni_(ck: c, a: rr, b: want), inner)
+  }
+  if h == Some("Option") {
+    if hd(c, rr) != Some("Option") {
+      c = error(c: c, code: "E0212", msg: "`?` on an `Option` needs the enclosing function to return `Option[...]`, " +
+          "but `{ctx.name}` returns `{sh(c, rr)}`", span: span,
+        hint: Some("use `match`, `.unwrap_or(default)`, or convert with `.ok_or(error)?`"))
+    }
+    return ok(c, inner)
+  }
+  let err_t = targs.get_or(1, Type.Any)
+  if hd(c, rr) != Some("Result") {
+    c = error(c: c, code: "E0212", msg: "`?` on a `Result` needs the enclosing function to return `Result[...]`, " +
+        "but `{ctx.name}` returns `{sh(c, rr)}`", span: span,
+      hint: Some("change the return type to `Result[{sh(c, rr)}, {sh(c, err_t)}]` or handle the error with `match`"))
+    return ok(c, inner)
+  }
+  let ret_err = args_of(c.s, rr).get_or(1, Type.Any)
+  let u = uni(ck: c, a: ret_err, b: err_t)
+  c = u.c
+  if not u.v {
+    c = error(c: c, code: "E0212", msg: "`?` would propagate error type `{sh(c, err_t)}`, but `{ctx.name}` returns " +
+        "errors of type `{sh(c, ret_err)}`", span: span, hint: Some("convert the error first: `.map_err(fn(e) => ...)?`"))
+  }
+  return ok(c, inner)
+}
+
+fn visible_records(c: Ck) -> List[Str] {
+  return c.uni.records.keys().filter(fn(r) => c.visible.has(r))
+}
+
+fn e_record(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.RecordLit(span, name, fields) => Pair { first: span, second: Pair { first: name, second: fields } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first
+  let name = parts.second.first
+  let fields = parts.second.second
+  let info = match c.uni.records.get(name) {
+    Some(i) => i,
+    None => {
+      if c.uni.enums.has(name) {
+        c = error(c: c, code: "E0104", msg: "`{name}` is an enum, not a record", span: span,
+          hint: Some("construct a variant: `{name}.Variant(...)`"))
+      } else if c.uni.aliases.has(name) {
+        c = error(c: c, code: "E0104", msg: "`{name}` is a type alias; construct the underlying type instead", span: span,
+          hint: None)
+      } else {
+        c = error(c: c, code: "E0104", msg: "unknown record type `{name}`", span: span,
+          hint: did_you_mean(name, visible_records(c)))
+      }
+      for f in fields {
+        c = expr_any(c, f.value)
+      }
+      return ok(c, Type.Any)
+    },
+  }
+  c = check_type_visible(c: c, name: name, span: span)
+  let inst = fresh_instance(ck: c, name: name, tparams: info.tparams)
+  c = inst.c
+  let t = inst.v.first
+  match exp {
+    Some(x) => {
+      c = uni_(ck: c, a: t, b: x)
+    },
+    None => {},
+  }
+  var seen: List[Str] = []
+  for f in fields {
+    match info.fields.get(f.name) {
+      None => {
+        c = error(c: c, code: "E0203", msg: "record `{name}` has no field `{f.name}`", span: f.span,
+          hint: or_hint(did_you_mean(f.name, info.fields.keys()), "fields: {commas(info.fields.keys())}"))
+        c = expr_any(c, f.value)
+      },
+      Some(ft) => {
+        if seen.contains(f.name) {
+          c = error(c: c, code: "E0209", msg: "field `{f.name}` given twice", span: f.span, hint: None)
+        } else {
+          seen = seen.push(f.name)
+          c = expr(ck: c, e: f.value, exp: Some(sub(c: c, t: ft, m: inst.v.second))).c
+        }
+      },
+    }
+  }
+  let given = seen
+  let missing = info.fields.keys().filter(fn(f) => not given.contains(f))
+  if not missing.is_empty() {
+    c = error(c: c, code: "E0209", msg: "missing field(s) {ticked(missing)} in `{name}`", span: span,
+      hint: Some("every field must be given (Klar has no default values); " +
+          "to copy with changes use `old with \{ field: value \}`"))
+  }
+  return ok(c, t)
+}
+
+fn e_with(ck: Ck, base: Expr, fields: List[FieldInit]) -> Res[Type] {
+  var c = ck
+  let r = expr(ck: c, e: base, exp: None)
+  c = r.c
+  let bt = pr(c, r.v)
+  if is_any(bt) {
+    for f in fields {
+      c = expr_any(c, f.value)
+    }
+    return ok(c, Type.Any)
+  }
+  let info = match hd(c, bt) {
+    Some(hn) => c.uni.records.get(hn),
+    None => None,
+  }
+  return match info {
+    None => ok(error(c: c, code: "E0202", msg: "`with` needs a record value, found `{sh(c, bt)}`", span: expr_span(base),
+      hint: None), Type.Any),
+    Some(i) => {
+      let m = args_map(c: c, tparams: i.tparams, t: bt)
+      for f in fields {
+        match i.fields.get(f.name) {
+          None => {
+            c = error(c: c, code: "E0203", msg: "record `{i.name}` has no field `{f.name}`", span: f.span,
+              hint: did_you_mean(f.name, i.fields.keys()))
+            c = expr_any(c, f.value)
+          },
+          Some(ft) => {
+            c = expr(ck: c, e: f.value, exp: Some(sub(c: c, t: ft, m: m))).c
+          },
+        }
+      }
+      return ok(c, bt)
+    },
+  }
+}
+
+fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.Lambda(span, params, ret, body) => Pair { first: Pair { first: span, second: params }, second: Pair { first: ret,
+      second: body } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first.first
+  let params = parts.first.second
+  let ret_te = parts.second.first
+  let body = parts.second.second
+  var efn: Option[Pair[List[Type], Type]] = match exp.map(fn(t) => pr(ck, t)) {
+    Some(Type.Fun(ps, r)) => Some(Pair { first: ps, second: r }),
+    _ => None,
+  }
+  match efn {
+    Some(f) => {
+      if f.first.len() != params.len() {
+        c = error(c: c, code: "E0206", msg: "this function must take {f.first.len()} parameter(s), " +
+            "but the lambda declares {params.len()}", span: span, hint: None)
+        efn = None
+      }
+    },
+    None => {},
+  }
+  var ptypes: List[Type] = []
+  var i = 0
+  for p in params {
+    match p.ty {
+      Some(te) => {
+        let r = resolve(ck: c, te: te, tps: c.tparams)
+        c = r.c
+        ptypes = ptypes.push(r.v)
+      },
+      None => {
+        match efn {
+          Some(f) => {
+            ptypes = ptypes.push(f.first.get_or(i, Type.Any))
+          },
+          None => {
+            let v = fresh_var(c)
+            c = v.c
+            ptypes = ptypes.push(v.v)
+          },
+        }
+      },
+    }
+    i = i + 1
+  }
+  var ret = Type.Any
+  match ret_te {
+    Some(te) => {
+      let r = resolve(ck: c, te: te, tps: c.tparams)
+      c = r.c
+      ret = r.v
+    },
+    None => {
+      match efn {
+        Some(f) => {
+          ret = f.second
+        },
+        None => {
+          let v = fresh_var(c)
+          c = v.c
+          ret = v.v
+        },
+      }
+    },
+  }
+  let outer = c.ctx
+  let purpose = match outer.purpose == "test" or outer.purpose == "contract" or outer.purpose == "const" {
+    true => outer.purpose,
+    false => "lambda",
+  }
+  c = c with { ctx: Ctx { name: outer.name, ret: ret, effects: outer.effects, is_test: false, loop: 0,
+    sig_end: outer.sig_end, purpose: purpose }, lambda_bounds: c.lambda_bounds.push(c.scopes.len()) }
+  c = push_scope(c)
+  i = 0
+  for p in params {
+    c = declare(ck: c, name: p.name, t: ptypes.get_or(i, Type.Any), mutable: false, span: p.span, kind: "param", kw: None)
+    i = i + 1
+  }
+  match body {
+    Body.BlockBody(b) => {
+      c = block(c, b)
+      let r = pr(c, ret)
+      if not returns(b) {
+        if is_var(r) {
+          c = uni_(ck: c, a: r, b: con("Unit"))
+        } else if not is_unit(c.s, r) and not is_any(r) and not is_never(r) {
+          c = error(c: c, code: "E0205", msg: "lambda may reach its end without returning `{sh(c, r)}`", span: span,
+            hint: Some("add `return <value>`, or use the short form `fn(x) => expr`"))
+        }
+      }
+    },
+    Body.ExprBody(x) => {
+      c = expr(ck: c, e: x, exp: Some(ret)).c
+    },
+  }
+  c = pop_scope(c)
+  c = c with { ctx: outer, lambda_bounds: c.lambda_bounds.take(c.lambda_bounds.len() - 1) }
+  return ok(c, Type.Fun(params: ptypes, ret: ret))
+}
+
+// ---- match --------------------------------------------------------------------------------------------------
+
+/// A pattern for the usefulness check: the wildcard, or a constructor with its sub-patterns.
+enum NP {
+  Wild,
+  Ctor(name: Str, args: List[NP]),
+}
+
+fn e_match(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  let parts = match e {
+    Expr.Match(span, subject, arms) => Pair { first: span, second: Pair { first: subject, second: arms } },
+    _ => {
+      return ok(c, Type.Any)
+    },
+  }
+  let span = parts.first
+  let subject = parts.second.first
+  let arms = parts.second.second
+  let r = expr(ck: c, e: subject, exp: None)
+  c = r.c
+  let st = pr(c, r.v)
+  let rv = fresh_var(c)
+  c = rv.c
+  let result = rv.v
+  match exp {
+    Some(t) => {
+      c = uni_(ck: c, a: result, b: t)
+    },
+    None => {},
+  }
+  // unguarded arms seen so far, as pattern vectors for the usefulness check
+  var rows: List[List[NP]] = []
+  for arm in arms {
+    c = push_scope(c)
+    c = pattern(ck: c, p: arm.pattern, t: st)
+    match arm.guard {
+      Some(g) => {
+        c = expr(ck: c, e: g, exp: Some(con("Bool"))).c
+      },
+      None => {},
+    }
+    match arm.body {
+      Body.BlockBody(b) => {
+        c = block(c, b)
+        if not returns(b) {
+          let u = uni(ck: c, a: result, b: con("Unit"))
+          c = u.c
+          if not u.v {
+            c = error(c: c, code: "E0202", msg: "this block arm has type `Unit`, but other arms produce " +
+                "`{sh(c, result)}`", span: b.span, hint: Some("use an expression arm (`pattern => value`) or `return` inside the block"))
+          }
+        }
+      },
+      Body.ExprBody(x) => {
+        let at = expr(ck: c, e: x, exp: None)
+        let u = uni(ck: at.c, a: result, b: at.v)
+        c = u.c
+        if not u.v {
+          c = error(c: c, code: "E0202", msg: "match arms have different types: `{sh(c, result)}` and `{sh(c, at.v)}`",
+            span: expr_span(x), hint: None)
+        }
+      },
+    }
+    c = pop_scope(c)
+    let vec = [norm_pattern(arm.pattern)]
+    if not rows.is_empty() and useful(c: c, rows: rows, q: vec, types: [st]) == None {
+      c = warn(c: c, code: "W0303", msg: "unreachable match arm: the arms above already cover every value it matches",
+        span: pattern_span(arm.pattern), hint: Some("remove it or move it above the arm that covers it"))
+    }
+    if arm.guard == None {
+      // guarded arms never count for exhaustiveness
+      rows = rows.push(vec)
+    }
+  }
+  c = exhaustive(ck: c, st: st, rows: rows, span: span)
+  return ok(c, result)
+}
+
+fn lit_key(v: LitValue) -> NP {
+  return match v {
+    LitValue.BoolV(b) => match b {
+      true => NP.Ctor(name: "true", args: []),
+      false => NP.Ctor(name: "false", args: []),
+    },
+    LitValue.IntV(n) => NP.Ctor(name: "lit:i:{n}", args: []),
+    LitValue.FloatV(x) => NP.Ctor(name: "lit:f:{x}", args: []),
+    LitValue.StrV(s) => NP.Ctor(name: "lit:s:{s}", args: []),
+  }
+}
+
+fn norm_pattern(p: Pattern) -> NP {
+  return match p {
+    Pattern.Lit(_, v) => lit_key(v),
+    Pattern.Variant(_, _, variant, args) => NP.Ctor(name: variant, args: args.map(norm_pattern)),
+    _ => NP.Wild,
+  }
+}
+
+/// The constructors of a type with finitely many of them, with their field types; None for other types.
+fn ctors_of(c: Ck, t: Type) -> Option[List[Pair[Str, List[Type]]]] {
+  let p = pr(c, t)
+  let args = args_of(c.s, p)
+  return match hd(c, p) {
+    Some("Bool") => Some([Pair { first: "true", second: [] }, Pair { first: "false", second: [] }]),
+    Some("Option") => Some([Pair { first: "Some", second: [args.get_or(0, Type.Any)] }, Pair { first: "None",
+      second: [] }]),
+    Some("Result") => Some([Pair { first: "Ok", second: [args.get_or(0, Type.Any)] }, Pair { first: "Err",
+      second: [args.get_or(1, Type.Any)] }]),
+    Some(h) => match c.uni.enums.get(h) {
+      Some(info) => {
+        let m = args_map(c: c, tparams: info.tparams, t: p)
+        return Some(info.variants.entries().map(fn(v) => Pair { first: v.key, second: v.value.map(fn(f) => sub(c: c,
+          t: f.second, m: m)) }))
+      },
+      None => None,
+    },
+    None => None,
+  }
+}
+
+fn ctor_fields(all: Option[List[Pair[Str, List[Type]]]], name: Str) -> Option[List[Type]] {
+  return match all {
+    Some(cs) => cs.find(fn(x) => x.first == name).map(fn(x) => x.second),
+    None => None,
+  }
+}
+
+fn wilds(n: Int) -> List[NP] {
+  var out: List[NP] = []
+  while out.len() < n {
+    out = out.push(NP.Wild)
+  }
+  return out
+}
+
+fn anys(n: Int) -> List[Type] {
+  var out: List[Type] = []
+  while out.len() < n {
+    out = out.push(Type.Any)
+  }
+  return out
+}
+
+fn specialize(rows: List[List[NP]], name: Str, arity: Int) -> List[List[NP]] {
+  var out: List[List[NP]] = []
+  for r in rows {
+    match r.get(0) {
+      Some(NP.Wild) => {
+        out = out.push(wilds(arity).concat(r.drop(1)))
+      },
+      Some(NP.Ctor(n, args)) => {
+        if n == name {
+          out = out.push(args.concat(wilds(arity)).take(arity).concat(r.drop(1)))
+        }
+      },
+      None => {},
+    }
+  }
+  return out
+}
+
+/// Is pattern vector `q` useful with respect to `rows` (does it match a value no row matches)? Returns a witness
+/// vector for such a value, or None (Maranget 2007; the same algorithm as klar/checker.py `useful`).
+fn useful(c: Ck, rows: List[List[NP]], q: List[NP], types: List[Type]) -> Option[List[NP]] {
+  if q.is_empty() {
+    return match rows.is_empty() {
+      true => Some([]),
+      false => None,
+    }
+  }
+  let t = types.get_or(0, Type.Any)
+  let rest_t = types.drop(1)
+  let all = ctors_of(c, t)
+  match q.get_or(0, NP.Wild) {
+    NP.Ctor(name, args) => {
+      let k = args.len()
+      let fts = match ctor_fields(all, name) {
+        Some(fs) => match fs.len() == k {
+          true => fs,
+          false => anys(k),
+        },
+        None => anys(k),
+      }
+      return useful(c: c, rows: specialize(rows: rows, name: name, arity: k), q: args.concat(q.drop(1)),
+        types: fts.concat(rest_t)).map(fn(w) => [NP.Ctor(name: name, args: w.take(k))].concat(w.drop(k)))
+    },
+    NP.Wild => {},
+  }
+  var used: List[Str] = []
+  for r in rows {
+    match r.get(0) {
+      Some(NP.Ctor(n, _)) => {
+        if not used.contains(n) {
+          used = used.push(n)
+        }
+      },
+      _ => {},
+    }
+  }
+  let used_ctors = used
+  match all {
+    Some(cs) => {
+      if cs.all(fn(x) => used_ctors.contains(x.first)) {
+        for x in cs {
+          let k = x.second.len()
+          let w = useful(c: c, rows: specialize(rows: rows, name: x.first, arity: k), q: wilds(k).concat(q.drop(1)),
+            types: x.second.concat(rest_t))
+          match w {
+            Some(found) => {
+              return Some([NP.Ctor(name: x.first, args: found.take(k))].concat(found.drop(k)))
+            },
+            None => {},
+          }
+        }
+        return None
+      }
+    },
+    None => {},
+  }
+  let wild_rows = rows.filter(fn(r) => r.get(0) == Some(NP.Wild)).map(fn(r) => r.drop(1))
+  let w = match useful(c: c, rows: wild_rows, q: q.drop(1), types: rest_t) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  return match all {
+    Some(cs) => match used.is_empty() {
+      true => Some([NP.Wild].concat(w)),
+      false => {
+        let missing = cs.find(fn(x) => not used_ctors.contains(x.first))
+        return match missing {
+          Some(x) => Some([NP.Ctor(name: x.first, args: wilds(x.second.len()))].concat(w)),
+          None => Some([NP.Wild].concat(w)),
+        }
+      },
+    },
+    None => Some([NP.Wild].concat(w)),
+  }
+}
+
+fn render_pattern(c: Ck, p: NP, t: Type, top: Bool) -> Str {
+  let parts = match p {
+    NP.Wild => {
+      return "_"
+    },
+    NP.Ctor(name, args) => Pair { first: name, second: args },
+  }
+  let name = parts.first
+  let args = parts.second
+  let pt = pr(c, t)
+  let h = hd(c, pt)
+  if name == "true" or name == "false" or name == "None" {
+    return name
+  }
+  let fields = ctor_fields(ctors_of(c, pt), name).unwrap_or([])
+  var k = 0
+  var rendered: List[Str] = []
+  for a in args {
+    if k < fields.len() {
+      rendered = rendered.push(render_pattern(c: c, p: a, t: fields.get_or(k, Type.Any), top: false))
+    }
+    k = k + 1
+  }
+  let all_wild = args.all(fn(a) => a == NP.Wild)
+  match h {
+    Some(hn) => {
+      match c.uni.enums.get(hn) {
+        Some(info) => {
+          let names = info.variants.get(name).unwrap_or([]).map(fn(f) => f.first)
+          if args.is_empty() {
+            return "{hn}.{name}"
+          }
+          if top and all_wild {
+            return "{hn}.{name}({commas(names)})"
+          }
+          return "{hn}.{name}({commas(rendered)})"
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  if top and all_wild {
+    return match name {
+      "Some" => "Some(value)",
+      "Ok" => "Ok(value)",
+      "Err" => "Err(error)",
+      _ => name,
+    }
+  }
+  return "{name}({commas(rendered)})"
+}
+
+fn exhaustive(ck: Ck, st: Type, rows: List[List[NP]], span: Span) -> Ck {
+  var c = ck
+  let t = pr(c, st)
+  if is_any(t) or is_var(t) {
+    return c
+  }
+  var missing: List[NP] = []
+  var all_rows = rows
+  var searching = true
+  while searching and missing.len() < 6 {
+    match useful(c: c, rows: all_rows, q: [NP.Wild], types: [t]) {
+      Some(w) => {
+        let first = w.get_or(0, NP.Wild)
+        if first == NP.Wild {
+          if missing.is_empty() {
+            return error(c: c, code: "E0301", msg: "match on `{sh(c, t)}` needs a catch-all arm", span: span,
+              hint: Some("add `_ => ...` as the last arm"))
+          }
+          searching = false
+        } else {
+          missing = missing.push(first)
+          all_rows = all_rows.push([first])
+        }
+      },
+      None => {
+        searching = false
+      },
+    }
+  }
+  if not missing.is_empty() {
+    let snap = c
+    let arms = missing.map(fn(w) => "`{render_pattern(c: snap, p: w, t: t, top: true)} => ...`").join(", ")
+    c = error(c: c, code: "E0301", msg: "non-exhaustive match on `{sh(c, t)}`: missing {arms}", span: span,
+      hint: Some("add the missing arms, or a catch-all `_ => ...` (arms with `if` guards do not count)"))
+  }
+  return c
+}
+
+fn patterns_any(ck: Ck, ps: List[Pattern]) -> Ck {
+  var c = ck
+  for a in ps {
+    c = pattern(ck: c, p: a, t: Type.Any)
+  }
+  return c
+}
+
+fn pattern(ck: Ck, p: Pattern, t: Type) -> Ck {
+  var c = ck
+  let pt = pr(c, t)
+  match p {
+    Pattern.Wild(_) => {
+      return c
+    },
+    Pattern.Bind(span, name) => {
+      return declare(ck: c, name: name, t: pt, mutable: false, span: span, kind: "bind", kw: None)
+    },
+    Pattern.Lit(span, v) => {
+      let lt = match v {
+        LitValue.BoolV(_) => con("Bool"),
+        LitValue.IntV(_) => con("Int"),
+        LitValue.FloatV(_) => con("Float"),
+        LitValue.StrV(_) => con("Str"),
+      }
+      let u = uni(ck: c, a: lt, b: pt)
+      c = u.c
+      if not u.v {
+        c = error(c: c, code: "E0302", msg: "pattern of type `{sh(c, lt)}` cannot match a value of type `{sh(c, pt)}`",
+          span: span, hint: None)
+      }
+      return c
+    },
+    Pattern.Variant(span, enum_name, variant, args) => {
+      match enum_name {
+        None => {
+          if variant == "Some" or variant == "None" {
+            let v = fresh_var(c)
+            c = v.c
+            var inner = v.v
+            let u = uni(ck: c, a: option_of(inner), b: pt)
+            c = u.c
+            if not u.v {
+              c = error(c: c, code: "E0302", msg: "`{variant}` matches `Option`, but the value has type `{sh(c, pt)}`",
+                span: span, hint: None)
+              inner = Type.Any
+            }
+            for a in args {
+              c = pattern(ck: c, p: a, t: inner)
+            }
+            return c
+          }
+          let ov = fresh_var(c)
+          let ev = fresh_var(ov.c)
+          c = ev.c
+          var ok_t = ov.v
+          var err_t = ev.v
+          let u = uni(ck: c, a: result_of(ok_t, err_t), b: pt)
+          c = u.c
+          if not u.v {
+            c = error(c: c, code: "E0302", msg: "`{variant}` matches `Result`, but the value has type `{sh(c, pt)}`",
+              span: span, hint: None)
+            ok_t = Type.Any
+            err_t = Type.Any
+          }
+          for a in args {
+            c = pattern(ck: c, p: a, t: match variant == "Ok" {
+              true => ok_t,
+              false => err_t,
+            })
+          }
+          return c
+        },
+        Some(en) => {
+          let info = match c.uni.enums.get(en) {
+            Some(i) => i,
+            None => {
+              c = error(c: c, code: "E0302", msg: "unknown enum `{en}` in pattern", span: span,
+                hint: did_you_mean(en, c.uni.enums.keys()))
+              return patterns_any(c, args)
+            },
+          }
+          c = check_type_visible(c: c, name: en, span: span)
+          let inst = fresh_instance(ck: c, name: en, tparams: info.tparams)
+          c = inst.c
+          let u = uni(ck: c, a: inst.v.first, b: pt)
+          c = u.c
+          if not u.v {
+            c = error(c: c, code: "E0302", msg: "pattern `{en}.{variant}` has type `{en}`, but the value has type " +
+                "`{sh(c, pt)}`", span: span, hint: None)
+          }
+          let mapping = args_map(c: c, tparams: info.tparams, t: inst.v.first)
+          let fields = match info.variants.get(variant) {
+            Some(fs) => fs,
+            None => {
+              c = error(c: c, code: "E0302", msg: "enum `{en}` has no variant `{variant}`", span: span,
+                hint: or_hint(did_you_mean(variant, info.variants.keys()), "variants: {commas(info.variants.keys())}"))
+              return patterns_any(c, args)
+            },
+          }
+          if args.len() != fields.len() {
+            let names = fields.map(fn(f) => f.first).join(", ")
+            let listed = match names.is_empty() {
+              true => "",
+              false => " ({names})",
+            }
+            let hint = match names.is_empty() {
+              true => "write `{en}.{variant}` without parentheses",
+              false => "write `{en}.{variant}({names})`",
+            }
+            c = error(c: c, code: "E0302", msg: "`{en}.{variant}` has {fields.len()} field(s){listed}, but the pattern has " +
+                "{args.len()}", span: span, hint: Some(hint))
+          }
+          var k = 0
+          for a in args {
+            if k < fields.len() {
+              c = pattern(ck: c, p: a, t: sub(c: c, t: fields.get_or(k, Pair { first: "", second: Type.Any }).second,
+                m: mapping))
+            } else {
+              c = pattern(ck: c, p: a, t: Type.Any)
+            }
+            k = k + 1
+          }
+          return c
+        },
+      }
+    },
+  }
+  return c
+}
+
+// ---- the module ---------------------------------------------------------------------------------------------
+
+fn walk_names_block(b: Block) -> List[Str] {
+  var out: List[Str] = []
+  for s in b.stmts {
+    out = out.concat(walk_names_stmt(s))
+  }
+  return out
+}
+
+fn walk_names_else(e: Else) -> List[Str] {
+  return match e {
+    Else.NoElse => [],
+    Else.ElseBlock(b) => walk_names_block(b),
+    Else.ElseIf(s) => walk_names_stmt(s),
+  }
+}
+
+fn opt_names(e: Option[Expr]) -> List[Str] {
+  return match e {
+    Some(x) => walk_names(x),
+    None => [],
+  }
+}
+
+fn walk_names_stmt(s: Stmt) -> List[Str] {
+  return match s {
+    Stmt.Let(_, _, _, _, _, v, _) => walk_names(v),
+    Stmt.Assign(_, _, v) => walk_names(v),
+    Stmt.Return(_, v) => opt_names(v),
+    Stmt.If(_, cond, then, else_) => walk_names(cond).concat(walk_names_block(then)).concat(walk_names_else(else_)),
+    Stmt.While(_, cond, body) => walk_names(cond).concat(walk_names_block(body)),
+    Stmt.For(_, _, _, it, body) => walk_names(it).concat(walk_names_block(body)),
+    Stmt.Assert(_, cond, m) => walk_names(cond).concat(opt_names(m)),
+    Stmt.ExprStmt(_, e) => walk_names(e),
+    _ => [],
+  }
+}
+
+fn walk_names_body(b: Body) -> List[Str] {
+  return match b {
+    Body.ExprBody(e) => walk_names(e),
+    Body.BlockBody(blk) => walk_names_block(blk),
+  }
+}
+
+/// The names a declaration refers to (Python: the `N.Name` nodes of `N.walk(decl)`).
+fn walk_names(e: Expr) -> List[Str] {
+  return match e {
+    Expr.Name(_, n) => [n],
+    Expr.StrLit(_, parts) => parts.flat_map(fn(p) => match p {
+      StrPiece.Code(x) => walk_names(x),
+      _ => [],
+    }),
+    Expr.ListLit(_, items) => items.flat_map(walk_names),
+    Expr.MapLit(_, entries) => entries.flat_map(fn(m) => walk_names(m.key).concat(walk_names(m.value))),
+    Expr.Unary(_, _, x) => walk_names(x),
+    Expr.Binary(_, _, l, r) => walk_names(l).concat(walk_names(r)),
+    Expr.Call(_, f, args) => walk_names(f).concat(args.flat_map(fn(a) => walk_names(a.value))),
+    Expr.MethodCall(_, o, _, _, args) => walk_names(o).concat(args.flat_map(fn(a) => walk_names(a.value))),
+    Expr.FieldAccess(_, o, _, _) => walk_names(o),
+    Expr.Try(_, x) => walk_names(x),
+    Expr.RecordLit(_, _, fs) => fs.flat_map(fn(f) => walk_names(f.value)),
+    Expr.WithExpr(_, b, fs) => walk_names(b).concat(fs.flat_map(fn(f) => walk_names(f.value))),
+    Expr.Match(_, subj, arms) => walk_names(subj).concat(arms.flat_map(fn(a) => opt_names(a.guard)
+        .concat(walk_names_body(a.body)))),
+    Expr.Lambda(_, _, _, body) => walk_names_body(body),
+    _ => [],
+  }
+}
+
+fn decl_names(d: Decl) -> List[Str] {
+  return match d {
+    Decl.Fn(f) => f.pre.concat(f.post).flat_map(walk_names).concat(match f.body {
+      Some(b) => walk_names_block(b),
+      None => [],
+    }),
+    Decl.Const(_, _, _, _, v, _, _) => walk_names(v),
+    Decl.Test(_, _, b) => walk_names_block(b),
+    Decl.Property(_, _, _, b) => walk_names_block(b),
+    _ => [],
+  }
+}
+
+/// The prelude and the runtime export everything; other modules only their `pub` declarations.
+pub fn all_public(c: Ck) -> Bool {
+  return c.sys or c.mod_name == "prelude"
+}
+
+fn unused_private_functions(ck: Ck) -> Ck {
+  var c = ck
+  if all_public(c) {
+    return c
+  }
+  // own private functions: name -> declaration index
+  var own: Map[Str, Int] = Map {}
+  var idx = 0
+  for d in c.decls {
+    match d {
+      Decl.Fn(f) => {
+        if f.owner_kind == None and not f.public and f.name != "main" {
+          match fn_sig(c, f.name) {
+            Some(s) => {
+              if s.decl == idx and s.mod_name == c.mod_name {
+                own = own.set(f.name, idx)
+              }
+            },
+            None => {},
+          }
+        }
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  if own.is_empty() {
+    return c
+  }
+  var used: Map[Str, Bool] = Map {}
+  idx = 0
+  for d in c.decls {
+    for name in decl_names(d) {
+      match own.get(name) {
+        Some(k) => {
+          if k != idx {
+            used = used.set(name, true)
+          }
+        },
+        None => {},
+      }
+    }
+    idx = idx + 1
+  }
+  // `x.f()` calls that resolved to the function (a method call through UFCS)
+  for call in c.ufcs {
+    match own.get(call.first) {
+      Some(k) => {
+        if k != call.second {
+          used = used.set(call.first, true)
+        }
+      },
+      None => {},
+    }
+  }
+  for entry in own.entries() {
+    if not used.has(entry.key) {
+      let span = fn_sig(c, entry.key).map(fn(s) => s.name_span).unwrap_or(no_span())
+      c = warn(c: c, code: "W0406", msg: "function `{entry.key}` is never used", span: span,
+        hint: Some("remove it, call it, or mark it `pub` if other modules should use it"))
+    }
+  }
+  return c
+}
+
+/// Checks the mod_name: the diagnostics, sorted by position.
+pub fn check_module(ck: Ck) -> Ck {
+  var c = collect(ck)
+  var idx = 0
+  for d in c.decls {
+    match d {
+      Decl.Const(_, name, _, _, value, _, _) => {
+        c = check_pending(check_const(ck: c with { bounds: Map {}, cur_decl: idx }, idx: idx, name: name, value: value))
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  idx = 0
+  for d in c.decls {
+    c = c with { cur_decl: idx }
+    match d {
+      Decl.Fn(f) => {
+        c = check_pending(check_fn(ck: c, f: f, idx: idx))
+      },
+      Decl.Test(_, name, body) => {
+        c = check_pending(check_test(ck: c, name: name, body: body))
+      },
+      Decl.Property(_, name, params, body) => {
+        c = check_pending(check_property(ck: c, name: name, params: params, body: body))
+      },
+      _ => {},
+    }
+    idx = idx + 1
+  }
+  if not c.imported.has("main") {
+    match fn_sig(c, "main") {
+      Some(sig) => {
+        let ret = pr(c, sig.ret)
+        let ok_ret = is_unit(c.s, ret) or (hd(c, ret) == Some("Result") and is_unit(c.s, args_of(c.s, ret).get_or(0,
+          Type.Any)))
+        if not sig.params.is_empty() or not ok_ret {
+          c = error(c: c, code: "E0502", msg: "`main` must take no parameters and return `Unit` or `Result[Unit, E]`",
+            span: sig.name_span, hint: None)
+        }
+      },
+      None => {},
+    }
+  }
+  c = unused_private_functions(c)
+  return c
+}
+
+/// The declaration named `name` if this module declares it without `pub` (for a precise import error): its
+/// keyword and span.
+pub fn private_decl(c: Ck, name: Str) -> Option[Pair[Str, Span]] {
+  if all_public(c) {
+    return None
+  }
+  for d in c.decls {
+    let found = match d {
+      Decl.Fn(f) => match f.name == name and not f.public and f.owner_kind == None {
+        true => Some(Pair { first: "fn", second: f.span }),
+        false => None,
+      },
+      Decl.Const(sp, n, _, _, _, _, public) => match n == name and not public {
+        true => Some(Pair { first: "const", second: sp }),
+        false => None,
+      },
+      Decl.TypeD(sp, n, _, _, _, public) => match n == name and not public {
+        true => Some(Pair { first: "type", second: sp }),
+        false => None,
+      },
+      Decl.EnumD(sp, n, _, _, _, public) => match n == name and not public {
+        true => Some(Pair { first: "enum", second: sp }),
+        false => None,
+      },
+      Decl.Alias(sp, n, _, _, _, public) => match n == name and not public {
+        true => Some(Pair { first: "type", second: sp }),
+        false => None,
+      },
+      Decl.Trait(sp, n, _, _, _, _, public) => match n == name and not public {
+        true => Some(Pair { first: "trait", second: sp }),
+        false => None,
+      },
+      _ => None,
+    }
+    if found != None {
+      return found
+    }
+  }
+  return None
+}
+
+/// The importable names: `pub` declarations (everything in the prelude and the runtime).
+pub fn exports(c: Ck) -> Map[Str, Export] {
+  var out: Map[Str, Export] = Map {}
+  let everything = all_public(c)
+  var idx = 0
+  for d in c.decls {
+    let public = match d {
+      Decl.Fn(f) => f.public,
+      Decl.Const(_, _, _, _, _, _, p) => p,
+      Decl.TypeD(_, _, _, _, _, p) => p,
+      Decl.EnumD(_, _, _, _, _, p) => p,
+      Decl.Alias(_, _, _, _, _, p) => p,
+      Decl.Trait(_, _, _, _, _, _, p) => p,
+      _ => false,
+    }
+    if everything or public {
+      match d {
+        Decl.Fn(f) => {
+          match fn_sig(c, f.name) {
+            Some(s) => {
+              if s.decl == idx and s.mod_name == c.mod_name {
+                out = out.set(f.name, Export.FnE(sig: s))
+              }
+            },
+            None => {},
+          }
+        },
+        Decl.Const(_, n, _, _, _, _, _) => {
+          match c.consts.get(n) {
+            Some(Some(t)) => {
+              out = out.set(n, Export.ConstE(ty: t))
+            },
+            Some(None) => {
+              out = out.set(n, Export.ConstE(ty: Type.Any))
+            },
+            None => {},
+          }
+        },
+        Decl.TypeD(_, n, _, _, _, _) => {
+          out = export_type(c: c, out: out, name: n)
+        },
+        Decl.EnumD(_, n, _, _, _, _) => {
+          out = export_type(c: c, out: out, name: n)
+        },
+        Decl.Alias(_, n, _, _, _, _) => {
+          out = export_type(c: c, out: out, name: n)
+        },
+        Decl.Trait(_, n, _, _, _, _, _) => {
+          out = export_type(c: c, out: out, name: n)
+        },
+        _ => {},
+      }
+    }
+    idx = idx + 1
+  }
+  return out
+}
+
+fn export_type(c: Ck, out: Map[Str, Export], name: Str) -> Map[Str, Export] {
+  if owner(c.uni, name) == Some(c.mod_name) {
+    return out.set(name, Export.TypeE(name: name))
+  }
+  return out
+}

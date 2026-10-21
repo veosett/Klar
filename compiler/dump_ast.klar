@@ -119,10 +119,10 @@ fn expr_json(e: Expr) -> Json {
       value: expr_json(l)), field(name: "right", value: expr_json(r))]),
     Expr.Call(s, c, args) => node(kind: "Call", span: s, fields: [field(name: "callee", value: expr_json(c)), field(name: "args",
       value: args_json(args))]),
-    Expr.MethodCall(s, o, m, _, args) => node(kind: "MethodCall", span: s, fields: [field(name: "obj", value: expr_json(o)),
-      field(name: "method", value: text(m)), field(name: "args", value: args_json(args))]),
-    Expr.FieldAccess(s, o, n, _) => node(kind: "FieldAccess", span: s, fields: [field(name: "obj", value: expr_json(o)),
-      field(name: "name", value: text(n))]),
+    Expr.MethodCall(s, o, m, ms, args) => node(kind: "MethodCall", span: s, fields: [field(name: "obj", value: expr_json(o)),
+      field(name: "method", value: text(m)), field(name: "method_span", value: span_json(ms)), field(name: "args", value: args_json(args))]),
+    Expr.FieldAccess(s, o, n, ns) => node(kind: "FieldAccess", span: s, fields: [field(name: "obj", value: expr_json(o)),
+      field(name: "name", value: text(n)), field(name: "name_span", value: span_json(ns))]),
     Expr.Try(s, x) => node(kind: "Try", span: s, fields: [field(name: "expr", value: expr_json(x))]),
     Expr.RecordLit(s, t, fs) => node(kind: "RecordLit", span: s, fields: [field(name: "type_name", value: text(t)),
       field(name: "fields", value: inits_json(fs))]),
@@ -155,7 +155,8 @@ fn else_json(e: Else) -> Json {
 
 fn stmt_json(s: Stmt) -> Json {
   return match s {
-    Stmt.Let(sp, name, _, ty, value, mutable) => node(kind: "Let", span: sp, fields: [field(name: "name", value: text(name)),
+    Stmt.Let(sp, name, name_span, kw_span, ty, value, mutable) => node(kind: "Let", span: sp, fields: [field(name: "name", value: text(name)),
+      field(name: "name_span", value: span_json(name_span)), field(name: "kw_span", value: span_json(kw_span)),
       field(name: "type", value: opt_type(ty)), field(name: "value", value: expr_json(value)), field(name: "mutable",
         value: Json.Bool(value: mutable))]),
     Stmt.Assign(sp, name, value) => node(kind: "Assign", span: sp, fields: [field(name: "name", value: text(name)),
@@ -165,8 +166,9 @@ fn stmt_json(s: Stmt) -> Json {
       field(name: "then", value: block_json(then)), field(name: "else_", value: else_json(else_))]),
     Stmt.While(sp, cond, body) => node(kind: "While", span: sp, fields: [field(name: "cond", value: expr_json(cond)),
       field(name: "body", value: block_json(body))]),
-    Stmt.For(sp, v, _, it, body) => node(kind: "For", span: sp, fields: [field(name: "var", value: text(v)), field(name: "iter",
-      value: expr_json(it)), field(name: "body", value: block_json(body))]),
+    Stmt.For(sp, v, vs, it, body) => node(kind: "For", span: sp, fields: [field(name: "var", value: text(v)),
+      field(name: "var_span", value: span_json(vs)), field(name: "iter",
+        value: expr_json(it)), field(name: "body", value: block_json(body))]),
     Stmt.Break(sp) => node(kind: "Break", span: sp, fields: []),
     Stmt.Continue(sp) => node(kind: "Continue", span: sp, fields: []),
     Stmt.Assert(sp, cond, msg) => node(kind: "Assert", span: sp, fields: [field(name: "cond", value: expr_json(cond)),
@@ -197,6 +199,12 @@ fn opt_block(b: Option[Block]) -> Json {
 fn fn_json(f: FnDecl) -> Json {
   return node(kind: "FnDecl", span: f.span, fields: [
     field(name: "name", value: text(f.name)),
+    field(name: "name_span", value: span_json(f.name_span)),
+    field(name: "effects_span", value: match f.effects_span {
+      Some(sp) => span_json(sp),
+      None => Json.Null,
+    }),
+    field(name: "sig_end", value: span_json(f.sig_end)),
     field(name: "type_params", value: json_strings(f.type_params)),
     field(name: "params", value: Json.Arr(items: f.params.map(param_json))),
     field(name: "ret", value: opt_type(f.ret)),
@@ -224,8 +232,8 @@ fn decl_json(d: Decl) -> Json {
       value: text(name)), field(name: "type_params", value: json_strings(tps)), field(name: "target",
         value: type_json(target)), field(name: "doc", value: opt_text(doc)), field(name: "public",
           value: Json.Bool(value: public))]),
-    Decl.Const(s, name, ty, value, doc, public) => node(kind: "ConstDecl", span: s, fields: [field(name: "name",
-      value: text(name)), field(name: "type", value: type_json(ty)), field(name: "value", value: expr_json(value)),
+    Decl.Const(s, name, ns, ty, value, doc, public) => node(kind: "ConstDecl", span: s, fields: [field(name: "name",
+      value: text(name)), field(name: "name_span", value: span_json(ns)), field(name: "type", value: type_json(ty)), field(name: "value", value: expr_json(value)),
       field(name: "doc", value: opt_text(doc)), field(name: "public", value: Json.Bool(value: public))]),
     Decl.Use(s, path, items, spans) => node(kind: "UseDecl", span: s, fields: [field(name: "path", value: json_strings(path)),
       field(name: "items", value: json_strings(items)), field(name: "item_spans",
@@ -239,11 +247,12 @@ fn decl_json(d: Decl) -> Json {
             value: opt_text(doc)), field(name: "public", value: Json.Bool(value: public))]),
     Decl.Test(s, name, body) => node(kind: "TestDecl", span: s, fields: [field(name: "name", value: text(name)),
       field(name: "body", value: block_json(body))]),
-    Decl.Trait(s, name, ms, defaults, doc, public) => node(kind: "TraitDecl", span: s, fields: [field(name: "name",
-      value: text(name)), field(name: "methods", value: Json.Arr(items: ms.map(fn_json))), field(name: "defaults",
+    Decl.Trait(s, name, ns, ms, defaults, doc, public) => node(kind: "TraitDecl", span: s, fields: [field(name: "name",
+      value: text(name)), field(name: "name_span", value: span_json(ns)), field(name: "methods", value: Json.Arr(items: ms.map(fn_json))), field(name: "defaults",
         value: json_strings(defaults)), field(name: "doc", value: opt_text(doc)), field(name: "public",
           value: Json.Bool(value: public))]),
-    Decl.Impl(s, tr, target, ms, spans, _) => node(kind: "ImplDecl", span: s, fields: [field(name: "trait", value: text(tr)),
+    Decl.Impl(s, tr, ts, target, ms, spans, _) => node(kind: "ImplDecl", span: s, fields: [field(name: "trait", value: text(tr)),
+      field(name: "trait_span", value: span_json(ts)),
       field(name: "target", value: type_json(target)), field(name: "methods", value: json_strings(ms)),
       field(name: "method_spans", value: Json.Arr(items: spans.map(span_json)))]),
   }
@@ -258,6 +267,7 @@ fn error_json(e: ParseError) -> Json {
   return json_object([
     field(name: "error", value: text(e.code)),
     field(name: "message", value: text(e.message)),
+    field(name: "hint", value: opt_text(e.hint)),
     field(name: "span", value: Json.Arr(items: [Json.Int(value: e.line), Json.Int(value: e.col)])),
   ])
 }

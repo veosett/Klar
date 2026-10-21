@@ -14,10 +14,19 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   traits and impls. `tests/selfhost.py` compares its tree (every node and span, via `compiler/dump_ast.klar`) and
   its syntax errors with `klar/parser.py` on every repository file and on 100 error snippets; the parser also
   parses its own source.
+- Self-hosting, stage 4a: the checker and the module loader in Klar — `compiler/types.klar` (types and unification
+  without mutation), `compiler/checker.klar` (names, types, effects, traits and impls, exhaustiveness, lints),
+  `compiler/loader.klar` (prelude, `use`, std, cycles, private items) and `compiler/similar.klar` ("did you mean"
+  exactly like Python's `difflib`). `tests/selfhost.py` compares every diagnostic (code, message, hint, position) with
+  klar/checker.py on every repository file and on the ~210 programs of `tests/selfhost_cases.txt`.
+- The Klar parser reports the same hints as the Python one, and the parser comparison now covers every `*_span`.
 
 ### Fixed
 - Native: constants holding lists or maps corrupted the heap (they were built before the runtime's own constants
   were initialised); the runtime's constants are now initialised first.
+- Checker: a constant declared twice crashed the checker; it is now reported once (E0101) and skipped.
+- Checker: E0216 (a lambda capturing a `var`) could be lost for a second lambda, depending on Python object ids;
+  it is now reported once per variable and lambda.
 - `klar fmt` refused files where a re-indented line contained an interpolated string (the check compared the
   positions of the interpolated code, which legitimately move).
 

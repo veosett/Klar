@@ -1,0 +1,115 @@
+// "Did you mean ...?": the closest name, computed exactly like Python's `difflib.get_close_matches(word,
+// candidates, n=1, cutoff=0.6)` so that the Klar checker gives the same hints as klar/checker.py.
+
+/// Length of the longest common block of a[alo..ahi] and b[blo..bhi], and where it starts (difflib's
+/// `find_longest_match` without junk: the earliest of the longest blocks).
+type MatchBlock { i: Int, j: Int, size: Int }
+
+type MatchRange { alo: Int, ahi: Int, blo: Int, bhi: Int }
+
+fn longest_match(a: List[Str], b: List[Str], r: MatchRange) -> MatchBlock {
+  var best = MatchBlock { i: r.alo, j: r.blo, size: 0 }
+  var prev: Map[Int, Int] = Map {}
+  var i = r.alo
+  while i < r.ahi {
+    var cur: Map[Int, Int] = Map {}
+    var j = r.blo
+    while j < r.bhi {
+      if a.get_or(i, "") == b.get_or(j, "") {
+        let k = prev.get(j - 1).unwrap_or(0) + 1
+        cur = cur.set(j, k)
+        if k > best.size {
+          best = MatchBlock { i: i - k + 1, j: j - k + 1, size: k }
+        }
+      }
+      j = j + 1
+    }
+    prev = cur
+    i = i + 1
+  }
+  return best
+}
+
+/// Total size of the matching blocks (difflib's `get_matching_blocks`).
+fn matches(a: List[Str], b: List[Str]) -> Int {
+  var queue = [MatchRange { alo: 0, ahi: a.len(), blo: 0, bhi: b.len() }]
+  var total = 0
+  while not queue.is_empty() {
+    let r = queue.last().unwrap_or(MatchRange { alo: 0, ahi: 0, blo: 0, bhi: 0 })
+    queue = queue.take(queue.len() - 1)
+    let m = longest_match(a: a, b: b, r: r)
+    if m.size > 0 {
+      total = total + m.size
+      if r.alo < m.i and r.blo < m.j {
+        queue = queue.push(MatchRange { alo: r.alo, ahi: m.i, blo: r.blo, bhi: m.j })
+      }
+      if m.i + m.size < r.ahi and m.j + m.size < r.bhi {
+        queue = queue.push(MatchRange { alo: m.i + m.size, ahi: r.ahi, blo: m.j + m.size, bhi: r.bhi })
+      }
+    }
+  }
+  return total
+}
+
+fn ratio_of(m: Int, total: Int) -> Float {
+  if total == 0 {
+    return 1.0
+  }
+  return 2.0 * m.to_float() / total.to_float()
+}
+
+/// Upper bound of the ratio from the characters alone (difflib's `quick_ratio`).
+fn common_chars(a: List[Str], b: List[Str]) -> Int {
+  var avail: Map[Str, Int] = Map {}
+  for c in b {
+    avail = avail.set(c, avail.get(c).unwrap_or(0) + 1)
+  }
+  var n = 0
+  for c in a {
+    let left = avail.get(c).unwrap_or(0)
+    if left > 0 {
+      avail = avail.set(c, left - 1)
+      n = n + 1
+    }
+  }
+  return n
+}
+
+/// The similarity of two strings, 0.0 to 1.0 (difflib's `SequenceMatcher(None, a, b).ratio()`).
+pub fn similarity(a: Str, b: Str) -> Float {
+  let x = a.chars()
+  let y = b.chars()
+  return ratio_of(matches(a: x, b: y), x.len() + y.len())
+}
+
+/// The candidate most similar to `word` (similarity at least 0.6; ties go to the greater string, as with
+/// difflib), or `None`.
+pub fn closest(word: Str, candidates: List[Str]) -> Option[Str] {
+  let w = word.chars()
+  var best: Option[Str] = None
+  var best_score = 0.0
+  for cand in candidates {
+    let c = cand.chars()
+    let total = c.len() + w.len()
+    if ratio_of(c.len().min(w.len()), total) >= 0.6 and ratio_of(common_chars(a: c, b: w), total) >= 0.6 {
+      let score = ratio_of(matches(a: c, b: w), total)
+      if score >= 0.6 {
+        let better = match best {
+          None => true,
+          Some(b) => score > best_score or (score == best_score and cand > b),
+        }
+        if better {
+          best = Some(cand)
+          best_score = score
+        }
+      }
+    }
+  }
+  return best
+}
+
+test "closest names" {
+  assert closest("lenght", ["len", "length", "last"]) == Some("length")
+  assert closest("xyz", ["len", "push"]) == None
+  assert similarity("abcd", "bcde") == 0.75
+}

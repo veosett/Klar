@@ -1,0 +1,214 @@
+// Types of the checker, written in Klar (self-hosting, stage 4). Mirrors klar/types.py, but without mutation:
+// type variables are bound in a substitution (`Subst`), and `unify` returns the extended substitution or
+// `None` — a failed unification leaves nothing behind, which is what the Python trail undoes by hand.
+
+/// A static type. `Var` is an inference variable (bound in a `Subst`), `Param` a rigid generic parameter
+/// inside a generic function, `Any` the error-recovery type that unifies with everything, `Never` the type of
+/// `fail(...)`.
+pub enum Type {
+  Con(name: Str, args: List[Type]),
+  Fun(params: List[Type], ret: Type),
+  Var(id: Int),
+  Param(name: Str),
+  Any,
+  Never,
+}
+
+/// Bindings of the type variables.
+pub type Subst = Map[Int, Type]
+
+pub fn con(name: Str) -> Type {
+  return Type.Con(name: name, args: [])
+}
+
+pub fn list_of(t: Type) -> Type {
+  return Type.Con(name: "List", args: [t])
+}
+
+pub fn option_of(t: Type) -> Type {
+  return Type.Con(name: "Option", args: [t])
+}
+
+pub fn result_of(t: Type, e: Type) -> Type {
+  return Type.Con(name: "Result", args: [t, e])
+}
+
+pub fn map_of(k: Type, v: Type) -> Type {
+  return Type.Con(name: "Map", args: [k, v])
+}
+
+/// Follows the bindings of a type variable to its current value.
+pub fn prune(s: Subst, t: Type) -> Type {
+  var cur = t
+  while true {
+    let next = match cur {
+      Type.Var(id) => s.get(id),
+      _ => None,
+    }
+    match next {
+      Some(v) => {
+        cur = v
+      },
+      None => {
+        return cur
+      },
+    }
+  }
+  return cur
+}
+
+fn occurs(s: Subst, id: Int, t: Type) -> Bool {
+  return match prune(s, t) {
+    Type.Var(other) => other == id,
+    Type.Con(_, args) => args.any(fn(a) => occurs(s: s, id: id, t: a)),
+    Type.Fun(ps, ret) => ps.any(fn(p) => occurs(s: s, id: id, t: p)) or occurs(s: s, id: id, t: ret),
+    _ => false,
+  }
+}
+
+fn unify_all(s: Subst, xs: List[Type], ys: List[Type]) -> Option[Subst] {
+  var cur = s
+  var i = 0
+  while i < xs.len() {
+    match unify(s: cur, a: xs.get_or(i, Type.Any), b: ys.get_or(i, Type.Any)) {
+      Some(next) => {
+        cur = next
+      },
+      None => {
+        return None
+      },
+    }
+    i = i + 1
+  }
+  return Some(cur)
+}
+
+fn bind(s: Subst, id: Int, t: Type) -> Option[Subst] {
+  if occurs(s: s, id: id, t: t) {
+    return None
+  }
+  return Some(s.set(id, t))
+}
+
+/// Unifies `a` and `b`: the substitution that makes them equal, or `None` (nothing is bound then).
+pub fn unify(s: Subst, a: Type, b: Type) -> Option[Subst] {
+  let x = prune(s, a)
+  let y = prune(s, b)
+  return match x {
+    Type.Any => Some(s),
+    Type.Never => Some(s),
+    Type.Var(i) => match y {
+      Type.Var(j) => match i == j {
+        true => Some(s),
+        false => bind(s: s, id: i, t: y),
+      },
+      Type.Any => Some(s),
+      Type.Never => Some(s),
+      _ => bind(s: s, id: i, t: y),
+    },
+    _ => match y {
+      Type.Any => Some(s),
+      Type.Never => Some(s),
+      Type.Var(j) => bind(s: s, id: j, t: x),
+      _ => unify_rigid(s: s, x: x, y: y),
+    },
+  }
+}
+
+fn unify_rigid(s: Subst, x: Type, y: Type) -> Option[Subst] {
+  return match x {
+    Type.Con(n1, a1) => match y {
+      Type.Con(n2, a2) => match n1 == n2 and a1.len() == a2.len() {
+        true => unify_all(s: s, xs: a1, ys: a2),
+        false => None,
+      },
+      _ => None,
+    },
+    Type.Fun(p1, r1) => match y {
+      Type.Fun(p2, r2) => match p1.len() == p2.len() {
+        true => unify_all(s: s, xs: p1.push(r1), ys: p2.push(r2)),
+        false => None,
+      },
+      _ => None,
+    },
+    Type.Param(n1) => match y {
+      Type.Param(n2) => match n1 == n2 {
+        true => Some(s),
+        false => None,
+      },
+      _ => None,
+    },
+    _ => None,
+  }
+}
+
+/// Replaces the generic parameters named in `mapping`.
+pub fn subst(s: Subst, t: Type, mapping: Map[Str, Type]) -> Type {
+  return match prune(s, t) {
+    Type.Param(name) => mapping.get(name).unwrap_or(Type.Param(name: name)),
+    Type.Con(name, args) => Type.Con(name: name, args: args.map(fn(a) => subst(s: s, t: a, mapping: mapping))),
+    Type.Fun(ps, ret) => Type.Fun(params: ps.map(fn(p) => subst(s: s, t: p, mapping: mapping)),
+      ret: subst(s: s, t: ret, mapping: mapping)),
+    other => other,
+  }
+}
+
+/// The type as Klar source (`_` for a variable not inferred yet).
+pub fn show(s: Subst, t: Type) -> Str {
+  return match prune(s, t) {
+    Type.Con(name, args) => match args.is_empty() {
+      true => name,
+      false => name + "[" + args.map(fn(a) => show(s, a)).join(", ") + "]",
+    },
+    Type.Fun(ps, ret) => "fn(" + ps.map(fn(p) => show(s, p)).join(", ") + ") -> " + show(s, ret),
+    Type.Var(_) => "_",
+    Type.Param(name) => name,
+    Type.Any => "?",
+    Type.Never => "Never",
+  }
+}
+
+/// The name of a constructed type (`List` for `List[Int]`), after following variables.
+pub fn head(s: Subst, t: Type) -> Option[Str] {
+  return match prune(s, t) {
+    Type.Con(name, _) => Some(name),
+    _ => None,
+  }
+}
+
+pub fn head_is(s: Subst, t: Type, name: Str) -> Bool {
+  return head(s, t) == Some(name)
+}
+
+pub fn is_unit(s: Subst, t: Type) -> Bool {
+  return head(s, t) == Some("Unit")
+}
+
+/// The type arguments of a constructed type (empty for anything else).
+pub fn args_of(s: Subst, t: Type) -> List[Type] {
+  return match prune(s, t) {
+    Type.Con(_, args) => args,
+    _ => [],
+  }
+}
+
+/// Replaces every bound variable by its value (for types that outlive their substitution).
+pub fn resolved(s: Subst, t: Type) -> Type {
+  return match prune(s, t) {
+    Type.Con(name, args) => Type.Con(name: name, args: args.map(fn(a) => resolved(s, a))),
+    Type.Fun(ps, ret) => Type.Fun(params: ps.map(fn(p) => resolved(s, p)), ret: resolved(s, ret)),
+    other => other,
+  }
+}
+
+test "unify binds variables and fails without side effects" {
+  let s: Subst = Map {}
+  let a = Type.Var(id: 1)
+  let s2 = unify(s: s, a: list_of(a), b: list_of(con("Int"))).unwrap_or(s)
+  assert show(s2, a) == "Int"
+  assert unify(s: s2, a: a, b: con("Str")) == None
+  assert unify(s: s, a: Type.Var(id: 1), b: list_of(Type.Var(id: 1))) == None
+  assert show(s, Type.Fun(params: [a, con("Bool")], ret: Type.Var(id: 2))) == "fn(_, Bool) -> _"
+  let m = Map { "T": con("Int") }
+  assert show(s, subst(s: s, t: map_of(Type.Param(name: "T"), Type.Param(name: "U")), mapping: m)) == "Map[Int, U]"
+}

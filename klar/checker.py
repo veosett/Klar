@@ -700,8 +700,9 @@ class Checker:
         for i in range(len(self.scopes) - 1, -1, -1):
             if name in self.scopes[i]:
                 v = self.scopes[i][name]
-                if v.mutable and i < bounds[-1]:
-                    key = (name, id(self.scopes[bounds[-1]]))
+                depth, serial = bounds[-1]
+                if v.mutable and i < depth:
+                    key = (name, serial)   # once per variable and lambda
                     reported = self.__dict__.setdefault("reported_captures", set())
                     if key in reported:
                         return
@@ -739,7 +740,7 @@ class Checker:
     # ---- functions, constants & tests --------------------------------------------
     def check_const(self, d: N.ConstDecl):
         t = self.consts.get(d.name)
-        if t is None:
+        if t is None or not any(c is d for c in self.own_consts):   # (a duplicate was reported in collect)
             return
         self.tparams = {}
         self.scopes = [{}]
@@ -1666,7 +1667,9 @@ class Checker:
         self.ctx.is_test = False
         if not hasattr(self, "lambda_bounds"):
             self.lambda_bounds = []
-        self.lambda_bounds.append(len(self.scopes))
+            self.lambda_serial = 0
+        self.lambda_serial += 1
+        self.lambda_bounds.append((len(self.scopes), self.lambda_serial))
         self.push()
         for p, t in zip(e.params, ptypes):
             self.declare(p.name, t, False, p.span, "param")

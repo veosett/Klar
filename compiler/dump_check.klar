@@ -1,0 +1,31 @@
+// Checks each file given on the command line (the first argument is the directory of `klar/`: the prelude,
+// std and rt) and prints its diagnostics as JSON lines (used by tests/selfhost.py to compare the Klar checker with klar/checker.py).
+use checker.{Diag}
+use loader.{load_program}
+use std.json.{Json, json_object, json_text}
+
+fn diag_json(d: Diag) -> Json {
+  return json_object([
+    Pair { first: "severity", second: Json.Text(value: d.severity) },
+    Pair { first: "code", second: Json.Text(value: d.code) },
+    Pair { first: "message", second: Json.Text(value: d.message) },
+    Pair { first: "hint", second: match d.hint {
+      Some(h) => Json.Text(value: h),
+      None => Json.Null,
+    } },
+    Pair { first: "file", second: Json.Text(value: d.file) },
+    Pair { first: "span", second: Json.Arr(items: [Json.Int(value: d.span.line), Json.Int(value: d.span.col)]) },
+  ])
+}
+
+fn main() uses io, fs {
+  let args = cli_args()
+  let lib = args.get_or(0, "klar")
+  for path in args.drop(1) {
+    print(json_text(json_object([Pair { first: "file", second: Json.Text(value: path) }])))
+    let ld = load_program(path, lib)
+    for d in ld.diags {
+      print(json_text(diag_json(d)))
+    }
+  }
+}
