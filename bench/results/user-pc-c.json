@@ -1,0 +1,82 @@
+{
+  "machine": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "repeat": 3,
+  "versions": {
+    "klar-interp": "Klar 0.3, tree-walking interpreter (on CPython 3.10.12)",
+    "java": "openjdk version \"11.0.32.1\" 2026-08-18"
+  },
+  "results": {
+    "collections": {
+      "klar-interp": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 1218.9084,
+        "wall_ms": 1510.30119999632
+      },
+      "java": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 37.679,
+        "wall_ms": 646.212599996943
+      }
+    },
+    "fib": {
+      "klar-interp": {
+        "result": "75025",
+        "compute_ms": 1695.4339,
+        "wall_ms": 1990.9919999990962
+      },
+      "java": {
+        "result": "75025",
+        "compute_ms": 0.649,
+        "wall_ms": 543.1653999985429
+      }
+    },
+    "loop": {
+      "klar-interp": {
+        "result": "806000",
+        "compute_ms": 1843.3167,
+        "wall_ms": 2115.4521999997087
+      },
+      "java": {
+        "result": "806000",
+        "compute_ms": 4.962,
+        "wall_ms": 592.0894000009866
+      }
+    },
+    "mandelbrot": {
+      "klar-interp": {
+        "result": "1655",
+        "compute_ms": 1653.7061,
+        "wall_ms": 1930.299899999227
+      },
+      "java": {
+        "result": "1655",
+        "compute_ms": 3.745,
+        "wall_ms": 538.7038999979268
+      }
+    },
+    "primes": {
+      "klar-interp": {
+        "result": "3245",
+        "compute_ms": 2035.2152,
+        "wall_ms": 2301.5477000008104
+      },
+      "java": {
+        "result": "3245",
+        "compute_ms": 4.856,
+        "wall_ms": 525.9833000018261
+      }
+    },
+    "strings": {
+      "klar-interp": {
+        "result": "10000,988889",
+        "compute_ms": 694.9629,
+        "wall_ms": 945.0157999963267
+      },
+      "java": {
+        "result": "10000,988889",
+        "compute_ms": 72.746,
+        "wall_ms": 708.2446000058553
+      }
+    }
+  }
+}

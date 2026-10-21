@@ -1,0 +1,6 @@
+{
+  "title": "Compute 25!",
+  "mistake": "uses a fixed-size integer for a value that does not fit",
+  "expected": "15511210043330985984000000",
+  "not_applicable": []
+}

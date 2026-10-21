@@ -1,0 +1,87 @@
+// std.result — working with many Option/Result values at once.  use std.result.{collect, values}
+
+/// All Ok values, or the first Err.
+/// >>> assert collect([Ok(1), Ok(2)]) == Ok([1, 2])
+fn collect[T, E](items: List[Result[T, E]]) -> Result[List[T], E] {
+  var out: List[T] = []
+  for r in items {
+    let v = r?
+    out = out.push(v)
+  }
+  return Ok(out)
+}
+
+/// All Some values, or None if any is missing.
+/// >>> assert collect_options([Some(1), None]) == None
+fn collect_options[T](items: List[Option[T]]) -> Option[List[T]] {
+  var out: List[T] = []
+  for o in items {
+    let v = o?
+    out = out.push(v)
+  }
+  return Some(out)
+}
+
+/// Just the Ok values; errors are dropped.
+/// >>> assert oks([Ok(1), Err("x"), Ok(3)]) == [1, 3]
+fn oks[T, E](items: List[Result[T, E]]) -> List[T] {
+  return items.flat_map(fn(r) => match r {
+    Ok(v) => [v],
+    Err(_) => [],
+  })
+}
+
+/// Just the errors.
+/// >>> assert errs([Ok(1), Err("x")]) == ["x"]
+fn errs[T, E](items: List[Result[T, E]]) -> List[E] {
+  return items.flat_map(fn(r) => match r {
+    Ok(_) => [],
+    Err(e) => [e],
+  })
+}
+
+/// Just the Some values.
+/// >>> assert values([Some(1), None, Some(2)]) == [1, 2]
+fn values[T](items: List[Option[T]]) -> List[T] {
+  return items.flat_map(fn(o) => match o {
+    Some(v) => [v],
+    None => [],
+  })
+}
+
+/// First Some, if any.
+/// >>> assert first_some([None, Some(2), Some(3)]) == Some(2)
+fn first_some[T](items: List[Option[T]]) -> Option[T] {
+  for o in items {
+    if o.is_some() {
+      return o
+    }
+  }
+  return None
+}
+
+/// Turns a Bool into a Result with the given error.
+/// >>> assert ensure(1 < 2, "bad") == Ok(())
+fn ensure[E](condition: Bool, error: E) -> Result[Unit, E] {
+  return match condition {
+    true => Ok(()),
+    false => Err(error),
+  }
+}
+
+test "collect stops at first error" {
+  let r: Result[List[Int], Str] = collect([Ok(1), Err("a"), Err("b")])
+  assert r == Err("a")
+}
+
+test "collect options all present" {
+  assert collect_options([Some("a"), Some("b")]) == Some(["a", "b"])
+}
+
+property "oks and errs partition the list" (xs: List[Result[Int, Str]]) {
+  assert oks(xs).len() + errs(xs).len() == xs.len()
+}
+
+property "collect succeeds iff no errors" (xs: List[Result[Int, Bool]]) {
+  assert collect(xs).is_ok() == errs(xs).is_empty()
+}

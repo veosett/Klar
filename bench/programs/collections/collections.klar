@@ -1,0 +1,12 @@
+fn main() uses io, time {
+  let start = now_ns()
+  let ys = range(0, 200000)
+    .map(fn(x) => (x * 7919) % 10007)
+    .filter(fn(x) => x % 2 == 0)
+    .sort()
+  let total = ys.sum()
+  let median = ys.get(ys.len() / 2).unwrap_or(0)
+  let elapsed = (now_ns() - start).to_float() / 1000000.0
+  print("result={ys.len()},{total},{median}")
+  print("time_ms={elapsed}")
+}

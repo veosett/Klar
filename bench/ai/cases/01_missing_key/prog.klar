@@ -1,0 +1,8 @@
+fn next_year_age(ages: Map[Str, Int], name: Str) -> Int {
+  return ages.get(name) + 1 // BUG: the key may be missing
+}
+
+fn main() uses io {
+  let ages = Map { "ann": 31, "bob": 42 }
+  print(next_year_age(ages, "cat"))
+}

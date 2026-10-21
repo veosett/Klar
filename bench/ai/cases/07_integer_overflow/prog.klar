@@ -1,0 +1,11 @@
+fn factorial(n: Int) -> Int {
+  var r = 1
+  for i in range(2, n + 1) {
+    r = r * i // BUG?: overflows in most languages
+  }
+  return r
+}
+
+fn main() uses io {
+  print(factorial(25))
+}

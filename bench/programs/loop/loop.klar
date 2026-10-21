@@ -1,0 +1,12 @@
+fn main() uses io, time {
+  let start = now_ns()
+  var total = 0
+  var i = 0
+  while i < 300000 {
+    total = (total + i * i) % 1000007
+    i = i + 1
+  }
+  let elapsed = (now_ns() - start).to_float() / 1000000.0
+  print("result={total}")
+  print("time_ms={elapsed}")
+}

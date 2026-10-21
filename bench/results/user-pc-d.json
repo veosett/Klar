@@ -1,0 +1,144 @@
+{
+  "machine": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "repeat": 7,
+  "versions": {
+    "klar": "Klar 0.3, native compiler (own x86-64 codegen + linker, no libc)",
+    "c": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 -O2",
+    "cpp": "g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 -O2",
+    "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13) -O"
+  },
+  "results": {
+    "collections": {
+      "klar": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 20.6366,
+        "wall_ms": 31.756300006236415
+      },
+      "c": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 5.56,
+        "wall_ms": 6.799999995564576
+      },
+      "cpp": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 6.003,
+        "wall_ms": 18.43139999982668
+      },
+      "rust": {
+        "result": "100010,500348980,5004",
+        "compute_ms": 2.986,
+        "wall_ms": 4.463299999770243
+      }
+    },
+    "fib": {
+      "klar": {
+        "result": "75025",
+        "compute_ms": 0.9004,
+        "wall_ms": 1.6056999957072549
+      },
+      "c": {
+        "result": "75025",
+        "compute_ms": 0.162,
+        "wall_ms": 1.2658999985433184
+      },
+      "cpp": {
+        "result": "75025",
+        "compute_ms": 0.154,
+        "wall_ms": 2.150599997548852
+      },
+      "rust": {
+        "result": "75025",
+        "compute_ms": 0.237,
+        "wall_ms": 1.7432999957236461
+      }
+    },
+    "loop": {
+      "klar": {
+        "result": "806000",
+        "compute_ms": 1.7537,
+        "wall_ms": 2.5070999981835485
+      },
+      "c": {
+        "result": "806000",
+        "compute_ms": 1.023,
+        "wall_ms": 2.213099993241485
+      },
+      "cpp": {
+        "result": "806000",
+        "compute_ms": 0.994,
+        "wall_ms": 2.92539999645669
+      },
+      "rust": {
+        "result": "806000",
+        "compute_ms": 0.992,
+        "wall_ms": 2.487099998688791
+      }
+    },
+    "mandelbrot": {
+      "klar": {
+        "result": "1655",
+        "compute_ms": 1.1176,
+        "wall_ms": 1.8837000025087036
+      },
+      "c": {
+        "result": "1655",
+        "compute_ms": 0.392,
+        "wall_ms": 1.5459999995073304
+      },
+      "cpp": {
+        "result": "1655",
+        "compute_ms": 0.401,
+        "wall_ms": 2.4444000009680167
+      },
+      "rust": {
+        "result": "1655",
+        "compute_ms": 0.36,
+        "wall_ms": 1.8691000004764646
+      }
+    },
+    "primes": {
+      "klar": {
+        "result": "3245",
+        "compute_ms": 3.6372,
+        "wall_ms": 4.3994000006932765
+      },
+      "c": {
+        "result": "3245",
+        "compute_ms": 1.961,
+        "wall_ms": 3.2235999969998375
+      },
+      "cpp": {
+        "result": "3245",
+        "compute_ms": 1.989,
+        "wall_ms": 3.8984999991953373
+      },
+      "rust": {
+        "result": "3245",
+        "compute_ms": 0.939,
+        "wall_ms": 2.296799997566268
+      }
+    },
+    "strings": {
+      "klar": {
+        "result": "10000,988889",
+        "compute_ms": 48.6114,
+        "wall_ms": 63.76479999744333
+      },
+      "c": {
+        "result": "10000,988889",
+        "compute_ms": 15.065,
+        "wall_ms": 29.943099994852673
+      },
+      "cpp": {
+        "result": "10000,988889",
+        "compute_ms": 32.542,
+        "wall_ms": 37.93730000325013
+      },
+      "rust": {
+        "result": "10000,988889",
+        "compute_ms": 20.571,
+        "wall_ms": 32.0683999962057
+      }
+    }
+  }
+}

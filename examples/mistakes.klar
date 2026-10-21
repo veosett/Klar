@@ -1,0 +1,51 @@
+// This file is INTENTIONALLY wrong. It collects mistakes language models
+// typically make and shows how Klar reports them. Run: klar check examples/mistakes.klar
+type User {
+  name: Str
+  age: Int
+}
+
+enum Status {
+  Active
+  Banned(reason: Str)
+  Pending
+}
+
+fn greet(u: User) -> Str {
+  return "Hi " + u.name + ", age " + u.age
+}
+
+fn label(s: Status) -> Str {
+  return match s {
+    Status.Active => "active",
+    Status.Banned(r) => "banned: {r}",
+  }
+}
+
+fn average(xs: List[Int]) -> Float {
+  let total = xs.fold(0, fn(a, b) => a + b)
+  return total / xs.length()
+}
+
+fn log_user(u: User) {
+  print(u.name)
+}
+
+fn make_user(name: Str, age: Int, admin: Bool) -> User {
+  return User { name: name, age: age }
+}
+
+fn find_adult(users: List[User]) -> User {
+  let found = users.find(fn(u) => u.age >= 18)
+  return found
+}
+
+fn main() uses io {
+  let users = [User { name: "Ann", age: 30 }]
+  users.push(User { name: "Bob", age: 12 })
+  let u = make_user("Cid", 40, false)
+  let count = 1
+  count = count + 1
+  let u = users.first()
+  print(label(Status.Banned))
+}

@@ -1,0 +1,225 @@
+// std.math — integer and floating point helpers.  use std.math.{gcd, is_prime, mean}
+
+/// Greatest common divisor (always >= 0).
+/// >>> assert gcd(12, 18) == 6
+/// >>> assert gcd(-4, 6) == 2
+fn gcd(a: Int, b: Int) -> Int
+  ensures result >= 0
+{
+  var x = a.abs()
+  var y = b.abs()
+  while y != 0 {
+    let t = x % y
+    x = y
+    y = t
+  }
+  return x
+}
+
+/// Least common multiple; lcm(0, n) == 0.
+/// >>> assert lcm(4, 6) == 12
+fn lcm(a: Int, b: Int) -> Int {
+  let g = gcd(a, b)
+  if g == 0 {
+    return 0
+  }
+  return (a / g * b).abs()
+}
+
+/// Primality test by trial division.
+/// >>> assert is_prime(97)
+/// >>> assert not is_prime(1)
+fn is_prime(n: Int) -> Bool {
+  if n < 2 {
+    return false
+  }
+  if n < 4 {
+    return true
+  }
+  if n % 2 == 0 {
+    return false
+  }
+  var d = 3
+  while d * d <= n {
+    if n % d == 0 {
+      return false
+    }
+    d = d + 2
+  }
+  return true
+}
+
+/// All primes below `limit` (sieve of Eratosthenes).
+/// >>> assert primes_below(20) == [2, 3, 5, 7, 11, 13, 17, 19]
+fn primes_below(limit: Int) -> List[Int] {
+  var marks: List[Bool] = []
+  for _i in range(0, limit) {
+    marks = marks.push(true)
+  }
+  var out: List[Int] = []
+  for n in range(2, limit) {
+    if marks.get(n).unwrap_or(false) {
+      out = out.push(n)
+      var m = n * n
+      while m < limit {
+        marks = marks.set(m, false)
+        m = m + n
+      }
+    }
+  }
+  return out
+}
+
+/// n! for n >= 0.
+/// >>> assert factorial(5) == 120
+fn factorial(n: Int) -> Int
+  requires n >= 0
+{
+  var acc = 1
+  for i in range(2, n + 1) {
+    acc = acc * i
+  }
+  return acc
+}
+
+/// n-th Fibonacci number (fib(0) == 0), linear time.
+/// >>> assert fib(10) == 55
+fn fib(n: Int) -> Int
+  requires n >= 0
+{
+  var a = 0
+  var b = 1
+  for _i in range(0, n) {
+    let next = a + b
+    a = b
+    b = next
+  }
+  return a
+}
+
+/// Integer square root: the largest r with r * r <= n.
+/// >>> assert isqrt(17) == 4
+fn isqrt(n: Int) -> Int
+  requires n >= 0
+  ensures result * result <= n and (result + 1) * (result + 1) > n
+{
+  if n < 2 {
+    return n
+  }
+  var x = n
+  var y = (x + 1) / 2
+  while y < x and y > 0 {
+    x = y
+    y = (x + n / x) / 2
+  }
+  return x
+}
+
+/// Arithmetic mean; None for an empty list.
+/// >>> assert mean([1.0, 2.0, 3.0]) == Some(2.0)
+fn mean(xs: List[Float]) -> Option[Float] {
+  if xs.is_empty() {
+    return None
+  }
+  return Some(xs.sum_float() / xs.len().to_float())
+}
+
+/// Median; None for an empty list.
+/// >>> assert median([3.0, 1.0, 2.0]) == Some(2.0)
+/// >>> assert median([4.0, 1.0, 3.0, 2.0]) == Some(2.5)
+fn median(xs: List[Float]) -> Option[Float] {
+  let sorted = xs.sort()
+  let n = sorted.len()
+  if n == 0 {
+    return None
+  }
+  if n % 2 == 1 {
+    return sorted.get(n / 2)
+  }
+  let lo = sorted.get(n / 2 - 1)?
+  let hi = sorted.get(n / 2)?
+  return Some((lo + hi) / 2.0)
+}
+
+/// Population standard deviation; None for an empty list.
+fn std_dev(xs: List[Float]) -> Option[Float] {
+  let m = mean(xs)?
+  let squares = xs.map(fn(x) => (x - m) * (x - m))
+  return Some((squares.sum_float() / xs.len().to_float()).sqrt())
+}
+
+/// Clamps a Float into [low, high].
+/// >>> assert clamp_float(x: 5.5, low: 0.0, high: 1.0) == 1.0
+fn clamp_float(x: Float, low: Float, high: Float) -> Float
+  requires low <= high
+{
+  return x.max(low).min(high)
+}
+
+/// Product of all numbers (1 for an empty list).
+/// >>> assert product([2, 3, 4]) == 24
+fn product(xs: List[Int]) -> Int {
+  return xs.fold(1, fn(acc, x) => acc * x)
+}
+
+/// Floats are equal within an absolute tolerance.
+/// >>> assert approx_eq(a: 0.1 + 0.2, b: 0.3, tolerance: 0.000001)
+fn approx_eq(a: Float, b: Float, tolerance: Float) -> Bool {
+  return (a - b).abs() <= tolerance
+}
+
+/// Degrees to radians.
+fn to_radians(degrees: Float) -> Float {
+  return degrees * PI / 180.0
+}
+
+test "gcd and lcm" {
+  assert gcd(0, 0) == 0
+  assert gcd(17, 5) == 1
+  assert lcm(0, 5) == 0
+  assert lcm(-3, 4) == 12
+}
+
+test "primes" {
+  assert primes_below(2) == []
+  assert primes_below(30).len() == 10
+  assert primes_below(100).all(fn(p) => is_prime(p))
+}
+
+test "factorial and fib" {
+  assert factorial(0) == 1
+  assert factorial(20) == 2432902008176640000
+  assert fib(0) == 0
+  assert fib(1) == 1
+  assert fib(90) == 2880067194370816120
+}
+
+test "statistics" {
+  assert mean([]).is_none()
+  assert median([]).is_none()
+  assert std_dev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) == Some(2.0)
+}
+
+test "angles" {
+  assert approx_eq(a: to_radians(180.0), b: PI, tolerance: 0.0000001)
+  assert approx_eq(a: to_radians(90.0).sin(), b: 1.0, tolerance: 0.0000001)
+}
+
+property "gcd divides both" (a: Int, b: Int) {
+  let g = gcd(a, b)
+  if g == 0 {
+    return
+  }
+  assert a % g == 0 and b % g == 0
+}
+
+property "isqrt is the floor square root" (n: Int) {
+  let m = n.abs()
+  let r = isqrt(m)
+  assert r * r <= m
+}
+
+property "sieve agrees with is_prime" (n: Int) {
+  let limit = n.abs() % 200
+  assert primes_below(limit) == range(0, limit).filter(fn(k) => is_prime(k))
+}

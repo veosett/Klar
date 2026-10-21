@@ -1,0 +1,25 @@
+// Klar prelude: written in Klar itself and visible in every module.
+
+/// Two values. Returned by `List.zip` and `List.partition`.
+type Pair[A, B] {
+  first: A
+  second: B
+}
+
+/// A key and its value. Returned by `Map.entries`.
+type Entry[K, V] {
+  key: K
+  value: V
+}
+
+/// An element together with its position. Returned by `List.enumerate`.
+type Indexed[T] {
+  index: Int
+  value: T
+}
+
+/// The ratio of a circle's circumference to its diameter.
+const PI: Float = 3.141592653589793
+
+/// Euler's number.
+const E: Float = 2.718281828459045

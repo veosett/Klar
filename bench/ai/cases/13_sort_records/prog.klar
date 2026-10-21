@@ -1,0 +1,7 @@
+type Person { name: Str, age: Int }
+
+fn main() uses io {
+  let people = [Person { name: "cat", age: 3 }, Person { name: "ann", age: 1 }, Person { name: "bob", age: 2 }]
+  let sorted = people.sort() // BUG: Person has no order; meant sort by age
+  print(sorted.map(fn(p) => p.name).join(","))
+}

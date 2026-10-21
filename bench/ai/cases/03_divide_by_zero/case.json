@@ -1,0 +1,6 @@
+{
+  "title": "Average of a list that can be empty",
+  "mistake": "divides by the length without checking for an empty list",
+  "expected": "no data",
+  "not_applicable": []
+}

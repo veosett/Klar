@@ -1,0 +1,617 @@
+// Klar runtime: Float formatting/parsing (exact, via Int bignums) and math helpers.
+
+const F_HIDDEN: Word = 4503599627370496
+const F_FRAC: Word = 4503599627370495
+const F_ABS: Word = 9223372036854775807
+
+fn fneg(f: Float) -> Float {
+  return ffrom(w_xor(fbits(f), -9223372036854775808))
+}
+
+fn float_div(a: Float, b: Float, sp: Word) -> Float {
+  if b == 0.0 {
+    div_zero(sp)
+  }
+  return a / b
+}
+
+fn float_mod(a: Float, b: Float, sp: Word) -> Float {
+  if b == 0.0 {
+    div_zero(sp)
+  }
+  return a - b * float_trunc(a / b)
+}
+
+fn float_trunc(f: Float) -> Float {
+  let w = fbits(f)
+  let ex = w_and(w_shr(w, 52), 2047)
+  if ex >= 1075 {
+    return f
+  }
+  return w2f(f2w(f))
+}
+
+fn is_finite(f: Float) -> Bool {
+  return w_and(w_shr(fbits(f), 52), 2047) != 2047
+}
+
+// ---- shortest round-trip decimal (Python repr) -----------------------------
+fn float_show(b: Word, f: Float) {
+  let w = fbits(f)
+  let ex = w_and(w_shr(w, 52), 2047)
+  let frac = w_and(w, F_FRAC)
+  if ex == 2047 {
+    if frac != 0 {
+      sb_add_cstr(b, "nan")
+    } else if w < 0 {
+      sb_add_cstr(b, "-inf")
+    } else {
+      sb_add_cstr(b, "inf")
+    }
+    return
+  }
+  if w < 0 {
+    sb_add_byte(b, 45)
+  }
+  if ex == 0 and frac == 0 {
+    sb_add_cstr(b, "0.0")
+    return
+  }
+  let digits = sb_new()
+  let decpt = shortest_digits(digits, ex, frac)
+  let nd = sb_len(digits)
+  let dp = peek(digits + 32)
+  if decpt > 16 or decpt < -3 {
+    sb_add_byte(b, peek8(dp))
+    if nd > 1 {
+      sb_add_byte(b, 46)
+      sb_add_bytes(b, dp + 1, nd - 1)
+    }
+    var e10 = decpt - 1
+    sb_add_byte(b, 101)
+    if e10 < 0 {
+      sb_add_byte(b, 45)
+      e10 = 0 - e10
+    } else {
+      sb_add_byte(b, 43)
+    }
+    if e10 < 10 {
+      sb_add_byte(b, 48)
+    }
+    sb_add_word(b, e10)
+  } else if decpt <= 0 {
+    sb_add_cstr(b, "0.")
+    var z: Word = 0
+    while z < 0 - decpt {
+      sb_add_byte(b, 48)
+      z = z + 1
+    }
+    sb_add_bytes(b, dp, nd)
+  } else if decpt >= nd {
+    sb_add_bytes(b, dp, nd)
+    var z2 = nd
+    while z2 < decpt {
+      sb_add_byte(b, 48)
+      z2 = z2 + 1
+    }
+    sb_add_cstr(b, ".0")
+  } else {
+    sb_add_bytes(b, dp, decpt)
+    sb_add_byte(b, 46)
+    sb_add_bytes(b, dp + decpt, nd - decpt)
+  }
+  rc_dec(digits)
+}
+
+// Burger & Dybvig free-format digit generation; returns the decimal point position
+fn shortest_digits(out: Word, ex: Word, frac: Word) -> Word {
+  var mant: Int = 0
+  var e2: Int = 0
+  if ex == 0 {
+    mant = tag(frac)
+    e2 = -1074
+  } else {
+    mant = tag(frac + F_HIDDEN)
+    e2 = tag(ex) - 1075
+  }
+  let even = mant % 2 == 0
+  let hidden: Int = tag(F_HIDDEN)
+  var r: Int = 0
+  var s: Int = 0
+  var mp: Int = 0
+  var mm: Int = 0
+  if e2 >= 0 {
+    let be = pow2(e2)
+    if mant != hidden {
+      r = mant * be * 2
+      s = 2
+      mp = be
+      mm = be
+    } else {
+      r = mant * be * 4
+      s = 4
+      mp = be * 2
+      mm = be
+    }
+  } else {
+    if ex <= 1 or mant != hidden {
+      r = mant * 2
+      s = pow2(0 - e2) * 2
+      mp = 1
+      mm = 1
+    } else {
+      r = mant * 4
+      s = pow2(1 - e2) * 2
+      mp = 2
+      mm = 1
+    }
+  }
+  let approx = ffrom(w_or(w_shl(ex, 52), frac))
+  var k: Int = ceil_log10(approx)
+  if ex == 0 {
+    k = -307
+  }
+  if k >= 0 {
+    s = s * pow10(k)
+  } else {
+    let sc = pow10(0 - k)
+    r = r * sc
+    mp = mp * sc
+    mm = mm * sc
+  }
+  while (even and r + mp >= s) or (not even and r + mp > s) {
+    s = s * 10
+    k = k + 1
+  }
+  while (even and (r + mp) * 10 < s) or (not even and (r + mp) * 10 <= s) {
+    r = r * 10
+    mp = mp * 10
+    mm = mm * 10
+    k = k - 1
+  }
+  var done = false
+  while not done {
+    r = r * 10
+    mp = mp * 10
+    mm = mm * 10
+    let d = r / s
+    r = r % s
+    let low = (even and r <= mm) or (not even and r < mm)
+    let high = (even and r + mp >= s) or (not even and r + mp > s)
+    var digit = untag(d)
+    if low and high {
+      if r * 2 > s or (r * 2 == s and digit % 2 == 1) {
+        digit = digit + 1
+      }
+      done = true
+    } else if low {
+      done = true
+    } else if high {
+      digit = digit + 1
+      done = true
+    }
+    sb_add_byte(out, 48 + digit)
+  }
+  return untag(k)
+}
+
+fn ceil_log10(f: Float) -> Int {
+  let x = fln(f) / 2.302585092994046
+  var k = f2w(x)
+  if w2f(k) < x {
+    k = k + 1
+  }
+  return tag(k)
+}
+
+// ---- exact rational -> nearest double (round half to even) -------------------------
+fn ratio_to_double(n: Int, d: Int) -> Float {
+  if n == 0 {
+    return 0.0
+  }
+  var e = int_bitlen(n) - int_bitlen(d)
+  if e >= 0 {
+    if n < d * pow2(e) {
+      e = e - 1
+    }
+  } else {
+    if n * pow2(0 - e) < d {
+      e = e - 1
+    }
+  }
+  var t = e - 52
+  if t < -1074 {
+    t = -1074
+  }
+  let sh = 2 - t
+  var q: Int = 0
+  var rem: Int = 0
+  if sh >= 0 {
+    let num = n * pow2(sh)
+    q = num / d
+    rem = num % d
+  } else {
+    let den = d * pow2(0 - sh)
+    q = n / den
+    rem = n % den
+  }
+  var m = q / 4
+  let rb = (q / 2) % 2
+  let sticky = q % 2 == 1 or rem != 0
+  if rb == 1 and (sticky or m % 2 == 1) {
+    m = m + 1
+  }
+  if m == tag(F_HIDDEN) * 2 {
+    m = tag(F_HIDDEN)
+    t = t + 1
+  }
+  if m < tag(F_HIDDEN) {
+    return ffrom(untag(m))
+  }
+  let biased = t + 52 + 1023
+  if biased >= 2047 {
+    return ffrom(9218868437227405312)
+  }
+  return ffrom(w_or(w_shl(untag(biased), 52), untag(m) - F_HIDDEN))
+}
+
+// exact value of a finite double as (mantissa, exponent): value = mant * 2^e2
+fn float_mant(f: Float) -> Int {
+  let w = fbits(f)
+  let ex = w_and(w_shr(w, 52), 2047)
+  let frac = w_and(w, F_FRAC)
+  if ex == 0 {
+    return tag(frac)
+  }
+  return tag(frac + F_HIDDEN)
+}
+
+fn float_exp2(f: Float) -> Int {
+  let ex = w_and(w_shr(fbits(f), 52), 2047)
+  if ex == 0 {
+    return -1074
+  }
+  return tag(ex) - 1075
+}
+
+// |f| truncated to an Int (f finite)
+fn float_to_int(f: Float) -> Int {
+  let a = ffrom(w_and(fbits(f), F_ABS))
+  if a < 4611686018427387904.0 {
+    return tag(f2w(f))
+  }
+  let v = float_mant(f) * pow2(float_exp2(f))
+  if f < 0.0 {
+    return 0 - v
+  }
+  return v
+}
+
+fn int_to_float(x: Int, sp: Word) -> Float {
+  let w = bits(x)
+  if w_and(w, 1) == 1 {
+    return w2f(w_sar(w, 1))
+  }
+  var mag = x
+  if x < 0 {
+    mag = 0 - x
+  }
+  let f = ratio_to_double(mag, 1)
+  if not is_finite(f) {
+    fail_msg("R0009", "int too large to convert to float", sp)
+  }
+  if x < 0 {
+    return fneg(f)
+  }
+  return f
+}
+
+fn need_finite(f: Float, sp: Word) {
+  if not is_finite(f) {
+    fail_msg("R0009", "cannot convert infinity or NaN to an integer", sp)
+  }
+}
+
+// round(|f| * 10^digits) half-to-even, as an Int (f finite, digits >= 0)
+fn scaled_round(f: Float, digits: Int) -> Int {
+  let mant = float_mant(f)
+  let e2 = float_exp2(f)
+  if e2 >= 0 {
+    return mant * pow2(e2) * pow10(digits)
+  }
+  let num = mant * pow10(digits)
+  let den = pow2(0 - e2)
+  var q = num / den
+  let r = num % den
+  if r * 2 > den or (r * 2 == den and q % 2 == 1) {
+    q = q + 1
+  }
+  return q
+}
+
+// ---- Float methods -------------------------------------------------------------------
+fn Float_to_int(f: Float, sp: Word) -> Int {
+  need_finite(f, sp)
+  return float_to_int(f)
+}
+
+fn Float_round(f: Float, sp: Word) -> Int {
+  return Float_floor(f + 0.5, sp)
+}
+
+fn Float_floor(f: Float, sp: Word) -> Int {
+  need_finite(f, sp)
+  let t = float_trunc(f)
+  if t > f {
+    return float_to_int(t - 1.0)
+  }
+  return float_to_int(t)
+}
+
+fn Float_ceil(f: Float, sp: Word) -> Int {
+  need_finite(f, sp)
+  let t = float_trunc(f)
+  if t < f {
+    return float_to_int(t + 1.0)
+  }
+  return float_to_int(t)
+}
+
+fn Float_abs(f: Float) -> Float {
+  return ffrom(w_and(fbits(f), F_ABS))
+}
+
+fn Float_sqrt(f: Float, sp: Word) -> Float {
+  if f < 0.0 {
+    let b = sb_new()
+    sb_add_cstr(b, "Float.sqrt of negative number ")
+    float_show(b, f)
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  return fsqrt(f)
+}
+
+fn Float_min(a: Float, b: Float) -> Float {
+  if b < a {
+    return b
+  }
+  return a
+}
+
+fn Float_max(a: Float, b: Float) -> Float {
+  if b > a {
+    return b
+  }
+  return a
+}
+
+fn Float_sin(f: Float) -> Float {
+  return fsin(f)
+}
+
+fn Float_cos(f: Float) -> Float {
+  return fcos(f)
+}
+
+fn Float_ln(f: Float, sp: Word) -> Float {
+  if f <= 0.0 {
+    let b = sb_new()
+    sb_add_cstr(b, "Float.ln of non-positive number ")
+    float_show(b, f)
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  return fln(f)
+}
+
+fn Float_exp(f: Float, sp: Word) -> Float {
+  let r = fexp(f)
+  if is_finite(f) and not is_finite(r) {
+    let b = sb_new()
+    sb_add_cstr(b, "Float.exp(")
+    float_show(b, f)
+    sb_add_cstr(b, ") overflows")
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  return r
+}
+
+fn Float_pow(x: Float, y: Float, sp: Word) -> Float {
+  if y == 0.0 {
+    return 1.0
+  }
+  if x == 1.0 {
+    return 1.0
+  }
+  if x == 0.0 {
+    if y < 0.0 {
+      fail_msg("R0009", "Float.pow: 0.0 cannot be raised to a negative power", sp)
+    }
+    return 0.0
+  }
+  var r: Float = 0.0
+  if x < 0.0 {
+    if float_trunc(y) != y {
+      fail_msg("R0009", "Float.pow: negative base with fractional exponent", sp)
+    }
+    r = fpow(fneg(x), y)
+    let yi = Float_to_int(y, sp)
+    if yi % 2 != 0 {
+      r = fneg(r)
+    }
+  } else {
+    r = fpow(x, y)
+  }
+  if is_finite(x) and is_finite(y) and not is_finite(r) {
+    fail_msg("R0009", "Float.pow: numerical result out of range", sp)
+  }
+  return r
+}
+
+fn Float_round_to(f: Float, digits: Int) -> Float {
+  if not is_finite(f) {
+    return f
+  }
+  var v: Float = 0.0
+  if digits >= 0 {
+    v = ratio_to_double(scaled_round(f, digits), pow10(digits))
+  } else {
+    let p = pow10(0 - digits)
+    let mant = float_mant(f)
+    let e2 = float_exp2(f)
+    var num = mant
+    var den = p
+    if e2 >= 0 {
+      num = mant * pow2(e2)
+    } else {
+      den = p * pow2(0 - e2)
+    }
+    var q = num / den
+    let r = num % den
+    if r * 2 > den or (r * 2 == den and q % 2 == 1) {
+      q = q + 1
+    }
+    v = ratio_to_double(q * p, 1)
+  }
+  if fbits(f) < 0 {
+    return fneg(v)
+  }
+  return v
+}
+
+fn Float_fixed(f: Float, digits: Int, sp: Word) -> Word {
+  if digits < 0 {
+    let b0 = sb_new()
+    sb_add_cstr(b0, "Float.fixed: negative digits ")
+    int_show(b0, bits(digits))
+    fail_simple("R0009", sb_finish(b0), sp)
+  }
+  let b = sb_new()
+  if not is_finite(f) {
+    float_show(b, f)
+    return sb_finish(b)
+  }
+  if fbits(f) < 0 {
+    sb_add_byte(b, 45)
+  }
+  let q = scaled_round(f, digits)
+  let ds = sb_new()
+  int_show(ds, bits(q))
+  let nd = sb_len(ds)
+  let dw = untag(digits)
+  var zeros = dw + 1 - nd
+  while zeros > 0 {
+    sb_add_byte(b, 48)
+    zeros = zeros - 1
+  }
+  sb_add_bytes(b, peek(ds + 32), nd)
+  rc_dec(ds)
+  if dw > 0 {
+    // insert '.' before the last dw digits
+    let full = sb_finish(b)
+    let out = sb_new()
+    let n = peek(full + 16)
+    sb_add_bytes(out, full + 32, n - dw)
+    sb_add_byte(out, 46)
+    sb_add_bytes(out, full + 32 + n - dw, dw)
+    rc_dec(full)
+    return sb_finish(out)
+  }
+  return sb_finish(b)
+}
+
+fn Float_to_str(f: Float) -> Word {
+  let b = sb_new()
+  float_show(b, f)
+  return sb_finish(b)
+}
+
+// ---- parsing: [+-]?(digits[.digits*] | .digits)([eE][+-]?digits)?, surrounding whitespace allowed
+fn parse_float_text(s: Word, ok_flag: Word) -> Float {
+  let n = peek(s + 16)
+  let p = s + 32
+  var i: Word = 0
+  while i < n and is_space_byte(peek8(p + i)) {
+    i = i + 1
+  }
+  var end = n
+  while end > i and is_space_byte(peek8(p + end - 1)) {
+    end = end - 1
+  }
+  poke(ok_flag, 0)
+  var neg = false
+  if i < end and (peek8(p + i) == 43 or peek8(p + i) == 45) {
+    neg = peek8(p + i) == 45
+    i = i + 1
+  }
+  var digits: Int = 0
+  var nint: Word = 0
+  var nfrac: Word = 0
+  while i < end and is_digit_byte(peek8(p + i)) {
+    digits = digits * 10 + tag(peek8(p + i) - 48)
+    nint = nint + 1
+    i = i + 1
+  }
+  if i < end and peek8(p + i) == 46 {
+    i = i + 1
+    while i < end and is_digit_byte(peek8(p + i)) {
+      digits = digits * 10 + tag(peek8(p + i) - 48)
+      nfrac = nfrac + 1
+      i = i + 1
+    }
+  }
+  if nint == 0 and nfrac == 0 {
+    return 0.0
+  }
+  var exp10: Int = 0
+  if i < end and (peek8(p + i) == 101 or peek8(p + i) == 69) {
+    i = i + 1
+    var eneg = false
+    if i < end and (peek8(p + i) == 43 or peek8(p + i) == 45) {
+      eneg = peek8(p + i) == 45
+      i = i + 1
+    }
+    var ne: Word = 0
+    while i < end and is_digit_byte(peek8(p + i)) {
+      if exp10 < 100000 {
+        exp10 = exp10 * 10 + tag(peek8(p + i) - 48)
+      }
+      ne = ne + 1
+      i = i + 1
+    }
+    if ne == 0 {
+      return 0.0
+    }
+    if eneg {
+      exp10 = 0 - exp10
+    }
+  }
+  if i != end {
+    return 0.0
+  }
+  poke(ok_flag, 1)
+  exp10 = exp10 - tag(nfrac)
+  var v: Float = 0.0
+  if digits == 0 {
+    v = 0.0
+  } else if exp10 > 400 {
+    v = ffrom(9218868437227405312)
+  } else if exp10 < -800 {
+    v = 0.0
+  } else if exp10 >= 0 {
+    v = ratio_to_double(digits * pow10(exp10), 1)
+  } else {
+    v = ratio_to_double(digits, pow10(0 - exp10))
+  }
+  if neg {
+    return fneg(v)
+  }
+  return v
+}
+
+fn is_space_byte(c: Word) -> Bool {
+  return c == 32 or (c >= 9 and c <= 13) or (c >= 28 and c <= 31)
+}
+
+fn is_digit_byte(c: Word) -> Bool {
+  return c >= 48 and c <= 57
+}

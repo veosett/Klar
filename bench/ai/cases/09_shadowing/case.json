@@ -1,0 +1,8 @@
+{
+  "title": "Update a variable inside a branch",
+  "mistake": "declares a new variable instead of assigning the outer one",
+  "expected": "big",
+  "not_applicable": [
+    "python"
+  ]
+}

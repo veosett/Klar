@@ -1,0 +1,563 @@
+// Klar runtime: Str methods (UTF-8; lengths and indices count code points).
+
+fn Str_concat(a: Word, b: Word) -> Word {
+  let na = peek(a + 16)
+  let nb = peek(b + 16)
+  let s = str_new(na + nb)
+  copy_bytes(s + 32, a + 32, na)
+  copy_bytes(s + 32 + na, b + 32, nb)
+  if peek(a + 24) >= 0 and peek(b + 24) >= 0 {
+    poke(s + 24, peek(a + 24) + peek(b + 24))
+  }
+  return s
+}
+
+// `s = s + t`: appends in place when s is unique and has room
+fn Str_append_owned(a: Word, b: Word) -> Word {
+  let na = peek(a + 16)
+  let nb = peek(b + 16)
+  if peek(a) == 1 and 33 + na + nb <= block_size(a) {
+    copy_bytes(a + 32 + na, b + 32, nb)
+    poke8(a + 32 + na + nb, 0)
+    poke(a + 16, na + nb)
+    if peek(a + 24) >= 0 and peek(b + 24) >= 0 {
+      poke(a + 24, peek(a + 24) + peek(b + 24))
+    } else {
+      poke(a + 24, -1)
+    }
+    return a
+  }
+  // grow geometrically so repeated appends stay linear
+  var cap = (na + nb) * 2
+  if cap < 32 {
+    cap = 32
+  }
+  let s = obj_new(33 + cap, static_addr("td_Str"))
+  copy_bytes(s + 32, a + 32, na)
+  copy_bytes(s + 32 + na, b + 32, nb)
+  poke(s + 16, na + nb)
+  poke8(s + 32 + na + nb, 0)
+  if peek(a + 24) >= 0 and peek(b + 24) >= 0 {
+    poke(s + 24, peek(a + 24) + peek(b + 24))
+  } else {
+    poke(s + 24, -1)
+  }
+  rc_dec(a)
+  return s
+}
+
+// ---- UTF-8 helpers -------------------------------------------------------------
+fn cp_len(c: Word) -> Word {
+  if c < 128 {
+    return 1
+  }
+  if c < 224 {
+    return 2
+  }
+  if c < 240 {
+    return 3
+  }
+  return 4
+}
+
+fn cp_at(p: Word) -> Word {
+  let c = peek8(p)
+  if c < 128 {
+    return c
+  }
+  if c < 224 {
+    return w_or(w_shl(w_and(c, 31), 6), w_and(peek8(p + 1), 63))
+  }
+  if c < 240 {
+    return w_or(w_or(w_shl(w_and(c, 15), 12), w_shl(w_and(peek8(p + 1), 63), 6)), w_and(peek8(p + 2), 63))
+  }
+  return w_or(w_or(w_or(w_shl(w_and(c, 7), 18), w_shl(w_and(peek8(p + 1), 63), 12)),
+    w_shl(w_and(peek8(p + 2), 63), 6)), w_and(peek8(p + 3), 63))
+}
+
+fn sb_add_cp(b: Word, cp: Word) {
+  if cp < 128 {
+    sb_add_byte(b, cp)
+  } else if cp < 2048 {
+    sb_add_byte(b, w_or(192, w_shr(cp, 6)))
+    sb_add_byte(b, w_or(128, w_and(cp, 63)))
+  } else if cp < 65536 {
+    sb_add_byte(b, w_or(224, w_shr(cp, 12)))
+    sb_add_byte(b, w_or(128, w_and(w_shr(cp, 6), 63)))
+    sb_add_byte(b, w_or(128, w_and(cp, 63)))
+  } else {
+    sb_add_byte(b, w_or(240, w_shr(cp, 18)))
+    sb_add_byte(b, w_or(128, w_and(w_shr(cp, 12), 63)))
+    sb_add_byte(b, w_or(128, w_and(w_shr(cp, 6), 63)))
+    sb_add_byte(b, w_or(128, w_and(cp, 63)))
+  }
+}
+
+// byte offset of code point index i (clamped to the end)
+fn cp_offset(s: Word, i: Word) -> Word {
+  let n = peek(s + 16)
+  if str_nchars(s) == n {
+    if i > n {
+      return n
+    }
+    return i
+  }
+  var off: Word = 0
+  var k: Word = 0
+  while k < i and off < n {
+    off = off + cp_len(peek8(s + 32 + off))
+    k = k + 1
+  }
+  return off
+}
+
+fn is_space_cp(c: Word) -> Bool {
+  if c == 32 or (c >= 9 and c <= 13) or (c >= 28 and c <= 31) {
+    return true
+  }
+  if c < 128 {
+    return false
+  }
+  return c == 133 or c == 160 or c == 5760 or (c >= 8192 and c <= 8202) or c == 8232 or c == 8233 or
+    c == 8239 or c == 8287 or c == 12288
+}
+
+fn upper_cp(c: Word) -> Word {
+  if c >= 97 and c <= 122 {
+    return c - 32
+  }
+  if c < 128 {
+    return c
+  }
+  if (c >= 224 and c <= 254 and c != 247) {
+    return c - 32
+  }
+  if c == 255 {
+    return 376
+  }
+  if c >= 1072 and c <= 1103 {
+    return c - 32
+  }
+  if c >= 1104 and c <= 1119 {
+    return c - 80
+  }
+  if c >= 945 and c <= 969 and c != 962 {
+    return c - 32
+  }
+  if c == 962 {
+    return 931
+  }
+  return c
+}
+
+fn lower_cp(c: Word) -> Word {
+  if c >= 65 and c <= 90 {
+    return c + 32
+  }
+  if c < 128 {
+    return c
+  }
+  if c >= 192 and c <= 222 and c != 215 {
+    return c + 32
+  }
+  if c == 376 {
+    return 255
+  }
+  if c >= 1040 and c <= 1071 {
+    return c + 32
+  }
+  if c >= 1024 and c <= 1039 {
+    return c + 80
+  }
+  if c >= 913 and c <= 937 and c != 930 {
+    return c + 32
+  }
+  return c
+}
+
+fn map_case(s: Word, up: Bool) -> Word {
+  let b = sb_new()
+  let n = peek(s + 16)
+  var i: Word = 0
+  while i < n {
+    let c = cp_at(s + 32 + i)
+    if up and c == 223 {
+      sb_add_cstr(b, "SS")
+    } else if up {
+      sb_add_cp(b, upper_cp(c))
+    } else {
+      sb_add_cp(b, lower_cp(c))
+    }
+    i = i + cp_len(peek8(s + 32 + i))
+  }
+  return sb_finish(b)
+}
+
+// byte index of `needle` in s at or after byte `from`, or -1
+// first index >= from of byte c in p[0..n), or n; scans 8 bytes at a time (SWAR zero-byte test)
+fn find_byte(p: Word, from: Word, n: Word, c: Word) -> Word {
+  let ones: Word = 72340172838076673           // 0x0101010101010101
+  let highs: Word = -9187201950435737472       // 0x8080808080808080
+  let pat = c * ones
+  var i = from
+  while i + 8 <= n {
+    let x = w_xor(peek(p + i), pat)
+    if w_and(w_and(x - ones, w_xor(x, -1)), highs) != 0 {
+      var k = i
+      while peek8(p + k) != c {
+        k = k + 1
+      }
+      return k
+    }
+    i = i + 8
+  }
+  while i < n {
+    if peek8(p + i) == c {
+      return i
+    }
+    i = i + 1
+  }
+  return n
+}
+
+fn find_bytes(s: Word, needle: Word, from: Word) -> Word {
+  let n = peek(s + 16)
+  let m = peek(needle + 16)
+  if m == 0 {
+    return from
+  }
+  var i = from
+  while i + m <= n {
+    if peek8(s + 32 + i) == peek8(needle + 32) and bytes_eq(s + 32 + i, needle + 32, m) {
+      return i
+    }
+    i = i + 1
+  }
+  return -1
+}
+
+fn cp_count_bytes(p: Word, nbytes: Word) -> Word {
+  var i: Word = 0
+  var count: Word = 0
+  while i < nbytes {
+    if w_and(peek8(p + i), 192) != 128 {
+      count = count + 1
+    }
+    i = i + 1
+  }
+  return count
+}
+
+// ---- methods ------------------------------------------------------------------------
+fn Str_len(s: Word) -> Int {
+  return tag(str_nchars(s))
+}
+
+fn Str_is_empty(s: Word) -> Bool {
+  return peek(s + 16) == 0
+}
+
+fn Str_upper(s: Word) -> Word {
+  return map_case(s, true)
+}
+
+fn Str_lower(s: Word) -> Word {
+  return map_case(s, false)
+}
+
+fn trim_range(s: Word, left: Bool, right: Bool) -> Word {
+  let n = peek(s + 16)
+  var a: Word = 0
+  var z = n
+  if left {
+    while a < n and is_space_cp(cp_at(s + 32 + a)) {
+      a = a + cp_len(peek8(s + 32 + a))
+    }
+  }
+  if right {
+    var moving = true
+    while moving and z > a {
+      var st = z - 1
+      while st > a and w_and(peek8(s + 32 + st), 192) == 128 {
+        st = st - 1
+      }
+      if is_space_cp(cp_at(s + 32 + st)) {
+        z = st
+      } else {
+        moving = false
+      }
+    }
+  }
+  return str_from(s + 32 + a, z - a)
+}
+
+fn Str_trim(s: Word) -> Word {
+  return trim_range(s, true, true)
+}
+
+fn Str_trim_start(s: Word) -> Word {
+  return trim_range(s, true, false)
+}
+
+fn Str_trim_end(s: Word) -> Word {
+  return trim_range(s, false, true)
+}
+
+fn Str_chars(s: Word, rtd: Word) -> Word {
+  let out = list_with_cap(rtd, str_nchars(s))
+  let n = peek(s + 16)
+  var i: Word = 0
+  var k: Word = 0
+  while i < n {
+    let l = cp_len(peek8(s + 32 + i))
+    let c = str_from(s + 32 + i, l)
+    poke(c + 24, 1)
+    poke(peek(out + 32) + k * 8, c)
+    k = k + 1
+    i = i + l
+  }
+  poke(out + 16, k)
+  return out
+}
+
+fn Str_split(s: Word, sep: Word, rtd: Word) -> Word {
+  if peek(sep + 16) == 0 {
+    return Str_chars(s, rtd)
+  }
+  var out = list_with_cap(rtd, 4)
+  var start: Word = 0
+  if peek(sep + 16) == 1 {
+    let c = peek8(sep + 32)
+    let n = peek(s + 16)
+    let p = s + 32
+    var i = find_byte(p, 0, n, c)
+    while i < n {
+      out = list_push_owned_raw(out, str_from(p + start, i - start))
+      start = i + 1
+      i = find_byte(p, start, n, c)
+    }
+    return list_push_owned_raw(out, str_from(p + start, n - start))
+  }
+  var pos = find_bytes(s, sep, 0)
+  while pos >= 0 {
+    out = list_push_owned_raw(out, str_from(s + 32 + start, pos - start))
+    start = pos + peek(sep + 16)
+    pos = find_bytes(s, sep, start)
+  }
+  return list_push_owned_raw(out, str_from(s + 32 + start, peek(s + 16) - start))
+}
+
+fn Str_contains(s: Word, part: Word) -> Bool {
+  return find_bytes(s, part, 0) >= 0
+}
+
+fn Str_starts_with(s: Word, prefix: Word) -> Bool {
+  let m = peek(prefix + 16)
+  return m <= peek(s + 16) and bytes_eq(s + 32, prefix + 32, m)
+}
+
+fn Str_ends_with(s: Word, suffix: Word) -> Bool {
+  let m = peek(suffix + 16)
+  let n = peek(s + 16)
+  return m <= n and bytes_eq(s + 32 + n - m, suffix + 32, m)
+}
+
+fn Str_replace(s: Word, old: Word, new: Word) -> Word {
+  let b = sb_new()
+  let n = peek(s + 16)
+  if peek(old + 16) == 0 {
+    var i: Word = 0
+    sb_add_str(b, new)
+    while i < n {
+      let l = cp_len(peek8(s + 32 + i))
+      sb_add_bytes(b, s + 32 + i, l)
+      sb_add_str(b, new)
+      i = i + l
+    }
+    return sb_finish(b)
+  }
+  var start: Word = 0
+  var pos = find_bytes(s, old, 0)
+  while pos >= 0 {
+    sb_add_bytes(b, s + 32 + start, pos - start)
+    sb_add_str(b, new)
+    start = pos + peek(old + 16)
+    pos = find_bytes(s, old, start)
+  }
+  sb_add_bytes(b, s + 32 + start, n - start)
+  return sb_finish(b)
+}
+
+fn Str_index_of(s: Word, part: Word, rtd: Word) -> Word {
+  let pos = find_bytes(s, part, 0)
+  if pos < 0 {
+    return none()
+  }
+  return some_new(rtd, bits(tag(cp_count_bytes(s + 32, pos))))
+}
+
+fn clamp_index(i: Int) -> Word {
+  if i <= 0 {
+    return 0
+  }
+  if not is_small(i) {
+    return 4611686018427387903
+  }
+  return untag(i)
+}
+
+fn Str_slice(s: Word, start: Int, end: Int) -> Word {
+  let a = cp_offset(s, clamp_index(start))
+  let z = cp_offset(s, clamp_index(end))
+  if z <= a {
+    return str_new(0)
+  }
+  return str_from(s + 32 + a, z - a)
+}
+
+fn Str_repeat(s: Word, times: Int) -> Word {
+  if times <= 0 {
+    return str_new(0)
+  }
+  let k = untag(times)
+  let n = peek(s + 16)
+  let r = str_new(n * k)
+  var i: Word = 0
+  while i < k {
+    copy_bytes(r + 32 + i * n, s + 32, n)
+    i = i + 1
+  }
+  return r
+}
+
+fn Str_to_int(s: Word, rtd: Word) -> Word {
+  let t = Str_trim(s)
+  let n = peek(t + 16)
+  var i: Word = 0
+  if n > 0 and (peek8(t + 32) == 43 or peek8(t + 32) == 45) {
+    i = 1
+  }
+  if i >= n {
+    rc_dec(t)
+    return none()
+  }
+  while i < n {
+    if not is_digit_byte(peek8(t + 32 + i)) {
+      rc_dec(t)
+      return none()
+    }
+    i = i + 1
+  }
+  let v = int_parse_dec(t)
+  rc_dec(t)
+  let w = bits(v)
+  retain_t(v)
+  return some_new(rtd, w)
+}
+
+fn Str_to_float(s: Word, rtd: Word) -> Word {
+  let flag = static_addr("g_scratch") + 64
+  let f = parse_float_text(s, flag)
+  if peek(flag) == 0 {
+    return none()
+  }
+  return some_new(rtd, fbits(f))
+}
+
+fn Str_lines(s: Word, rtd: Word) -> Word {
+  var out = list_with_cap(rtd, 4)
+  let n = peek(s + 16)
+  var start: Word = 0
+  var i: Word = 0
+  while i < n {
+    let c = cp_at(s + 32 + i)
+    let l = cp_len(peek8(s + 32 + i))
+    if c == 10 or c == 13 or c == 11 or c == 12 or c == 28 or c == 29 or c == 30 or c == 133 or
+        c == 8232 or c == 8233 {
+      out = list_push_owned_raw(out, str_from(s + 32 + start, i - start))
+      if c == 13 and i + 1 < n and peek8(s + 33 + i) == 10 {
+        i = i + 1
+      }
+      start = i + l
+    }
+    i = i + l
+  }
+  if start < n {
+    out = list_push_owned_raw(out, str_from(s + 32 + start, n - start))
+  }
+  return out
+}
+
+fn fill_char(fill: Word, sp: Word) -> Word {
+  if str_nchars(fill) != 1 {
+    let b = sb_new()
+    sb_add_cstr(b, "fill must be exactly one character, got ")
+    show_quoted(b, fill)
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  return fill
+}
+
+fn Str_pad_left(s: Word, width: Int, fill: Word, sp: Word) -> Word {
+  fill_char(fill, sp)
+  let b = sb_new()
+  var k = clamp_index(width) - str_nchars(s)
+  while k > 0 {
+    sb_add_str(b, fill)
+    k = k - 1
+  }
+  sb_add_str(b, s)
+  return sb_finish(b)
+}
+
+fn Str_pad_right(s: Word, width: Int, fill: Word, sp: Word) -> Word {
+  fill_char(fill, sp)
+  let b = sb_new()
+  sb_add_str(b, s)
+  var k = clamp_index(width) - str_nchars(s)
+  while k > 0 {
+    sb_add_str(b, fill)
+    k = k - 1
+  }
+  return sb_finish(b)
+}
+
+fn Str_count(s: Word, part: Word, sp: Word) -> Int {
+  if peek(part + 16) == 0 {
+    fail_msg("R0009", "Str.count: empty part", sp)
+  }
+  var count: Word = 0
+  var pos = find_bytes(s, part, 0)
+  while pos >= 0 {
+    count = count + 1
+    pos = find_bytes(s, part, pos + peek(part + 16))
+  }
+  return tag(count)
+}
+
+fn Str_reverse(s: Word) -> Word {
+  let n = peek(s + 16)
+  let r = str_new(n)
+  var i: Word = 0
+  while i < n {
+    let l = cp_len(peek8(s + 32 + i))
+    copy_bytes(r + 32 + n - i - l, s + 32 + i, l)
+    i = i + l
+  }
+  return r
+}
+
+fn Str_is_numeric(s: Word) -> Bool {
+  let n = peek(s + 16)
+  if n == 0 {
+    return false
+  }
+  var i: Word = 0
+  while i < n {
+    if not is_digit_byte(peek8(s + 32 + i)) {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}

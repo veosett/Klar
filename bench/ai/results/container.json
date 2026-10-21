@@ -1,0 +1,814 @@
+{
+  "01_missing_key": {
+    "meta": {
+      "title": "Look up a key that may be missing",
+      "mistake": "uses the result of a map lookup as if the key were always present",
+      "expected": "unknown",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 88
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 102,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 34
+      },
+      "typescript": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 15
+      },
+      "java": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 255,
+        "output": ""
+      },
+      "go": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "1"
+      },
+      "rust": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 229,
+        "output": ""
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "1"
+      }
+    }
+  },
+  "02_parse_error": {
+    "meta": {
+      "title": "Parse a number from text",
+      "mistake": "assumes the text is a valid number",
+      "expected": "invalid",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 84
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 80,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 80,
+        "output": ""
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "24"
+      },
+      "java": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 287,
+        "output": ""
+      },
+      "go": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "0"
+      },
+      "rust": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 184,
+        "output": ""
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "24"
+      }
+    }
+  },
+  "03_divide_by_zero": {
+    "meta": {
+      "title": "Average of a list that can be empty",
+      "mistake": "divides by the length without checking for an empty list",
+      "expected": "no data",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 129
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 89,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 89,
+        "output": ""
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "NaN"
+      },
+      "java": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 228,
+        "output": ""
+      },
+      "go": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 46,
+        "output": ""
+      },
+      "rust": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 175,
+        "output": ""
+      },
+      "cpp": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 3,
+        "output": ""
+      }
+    }
+  },
+  "04_discarded_update": {
+    "meta": {
+      "title": "Normalize a string",
+      "mistake": "calls trim/strip expecting it to modify the string in place",
+      "expected": "[ann]",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 97
+      },
+      "python": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "[  ann  ]"
+      },
+      "python+mypy": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "[  ann  ]"
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "[  ann  ]"
+      },
+      "java": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "[  ann  ]"
+      },
+      "go": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "[  ann  ]"
+      },
+      "rust": {
+        "outcome": "warning",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 130,
+        "output": "[  ann  ]"
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "[  ann  ]"
+      }
+    }
+  },
+  "05_missing_case": {
+    "meta": {
+      "title": "Handle every variant of an enum",
+      "mistake": "forgets a newly added variant",
+      "expected": "6.0",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 88
+      },
+      "python": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "None"
+      },
+      "python+mypy": {
+        "outcome": "compile",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 14
+      },
+      "typescript": {
+        "outcome": "compile",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 28
+      },
+      "java": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 239
+      },
+      "go": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "0.0"
+      },
+      "rust": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 197
+      },
+      "cpp": {
+        "outcome": "warning",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 80,
+        "output": ""
+      }
+    }
+  },
+  "06_argument_order": {
+    "meta": {
+      "title": "Call a function with several same-typed parameters",
+      "mistake": "passes two arguments in the wrong order",
+      "expected": "216",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 128
+      },
+      "python": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      },
+      "python+mypy": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      },
+      "java": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      },
+      "go": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      },
+      "rust": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "176"
+      }
+    }
+  },
+  "07_integer_overflow": {
+    "meta": {
+      "title": "Compute 25!",
+      "mistake": "uses a fixed-size integer for a value that does not fit",
+      "expected": "15511210043330985984000000",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "design",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "15511210043330985984000000"
+      },
+      "python": {
+        "outcome": "design",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "15511210043330985984000000"
+      },
+      "python+mypy": {
+        "outcome": "design",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "15511210043330985984000000"
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "1.5511210043330986e+25"
+      },
+      "java": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "7034535277573963776"
+      },
+      "go": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "7034535277573963776"
+      },
+      "rust": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 178,
+        "output": ""
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "7034535277573963776"
+      }
+    }
+  },
+  "08_off_by_one": {
+    "meta": {
+      "title": "Take the last element of a list",
+      "mistake": "indexes one past the end",
+      "expected": "last=30",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 75
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 55,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 55,
+        "output": ""
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "last=undefined"
+      },
+      "java": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 230,
+        "output": ""
+      },
+      "go": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 35,
+        "output": ""
+      },
+      "rust": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 205,
+        "output": ""
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "last=0"
+      }
+    }
+  },
+  "09_shadowing": {
+    "meta": {
+      "title": "Update a variable inside a branch",
+      "mistake": "declares a new variable instead of assigning the outer one",
+      "expected": "big",
+      "not_applicable": [
+        "python"
+      ]
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 142
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "small"
+      },
+      "java": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 246
+      },
+      "go": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 17
+      },
+      "rust": {
+        "outcome": "warning",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 86,
+        "output": "small"
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "small"
+      }
+    }
+  },
+  "10_foreign_method": {
+    "meta": {
+      "title": "Get the length of a list",
+      "mistake": "uses the method name from another language",
+      "expected": "3",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 80
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 60,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 18
+      },
+      "typescript": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 20
+      },
+      "java": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 256
+      },
+      "go": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 26
+      },
+      "rust": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 133
+      },
+      "cpp": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 66
+      }
+    }
+  },
+  "11_string_plus_number": {
+    "meta": {
+      "title": "Build a message with a number",
+      "mistake": "adds a number to a string",
+      "expected": "total: 7",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 60
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 56,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 20
+      },
+      "typescript": {
+        "outcome": "design",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "total: 7"
+      },
+      "java": {
+        "outcome": "design",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "total: 7"
+      },
+      "go": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 29
+      },
+      "rust": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 84
+      },
+      "cpp": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": ""
+      }
+    }
+  },
+  "12_no_base_case": {
+    "meta": {
+      "title": "Recursive factorial",
+      "mistake": "forgets the base case of the recursion",
+      "expected": "120",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 95
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 161,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 161,
+        "output": ""
+      },
+      "typescript": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 179,
+        "output": ""
+      },
+      "java": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 7123,
+        "output": ""
+      },
+      "go": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 3034,
+        "output": ""
+      },
+      "rust": {
+        "outcome": "warning",
+        "points_to_line": false,
+        "hint": true,
+        "tokens": 102,
+        "output": ""
+      },
+      "cpp": {
+        "outcome": "runtime",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 3,
+        "output": ""
+      }
+    }
+  },
+  "13_sort_records": {
+    "meta": {
+      "title": "Sort records",
+      "mistake": "sorts records that have no order (forgets the key)",
+      "expected": "ann,bob,cat",
+      "not_applicable": []
+    },
+    "langs": {
+      "klar": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 89
+      },
+      "python": {
+        "outcome": "runtime",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 63,
+        "output": ""
+      },
+      "python+mypy": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 28
+      },
+      "typescript": {
+        "outcome": "silent",
+        "points_to_line": false,
+        "hint": false,
+        "tokens": 0,
+        "output": "cat,ann,bob"
+      },
+      "java": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 390
+      },
+      "go": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 57
+      },
+      "rust": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": true,
+        "tokens": 145
+      },
+      "cpp": {
+        "outcome": "compile",
+        "points_to_line": true,
+        "hint": false,
+        "tokens": 2565
+      }
+    }
+  }
+}

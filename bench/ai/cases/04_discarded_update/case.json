@@ -1,0 +1,6 @@
+{
+  "title": "Normalize a string",
+  "mistake": "calls trim/strip expecting it to modify the string in place",
+  "expected": "[ann]",
+  "not_applicable": []
+}

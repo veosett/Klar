@@ -1,0 +1,4 @@
+fn main() uses io {
+  let names = ["ann", "bob", "cat"]
+  print(names.length()) // BUG: name from another language
+}

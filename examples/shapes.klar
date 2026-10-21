@@ -1,0 +1,79 @@
+module examples.shapes
+
+enum Shape {
+  Circle(radius: Float)
+  Rect(width: Float, height: Float)
+  Triangle(a: Float, b: Float, c: Float)
+}
+
+fn pi() -> Float {
+  return 3.141592653589793
+}
+
+fn area(s: Shape) -> Float
+  ensures result >= 0.0
+{
+  return match s {
+    Shape.Circle(r) => pi() * r * r,
+    Shape.Rect(w, h) => w * h,
+    Shape.Triangle(a, b, c) => heron(a: a, b: b, c: c),
+  }
+}
+
+/// Heron's formula. 3 parameters, so callers must name the arguments.
+fn heron(a: Float, b: Float, c: Float) -> Float
+  requires a > 0.0 and b > 0.0 and c > 0.0
+  requires a + b > c and a + c > b and b + c > a
+{
+  let s = (a + b + c) / 2.0
+  return (s * (s - a) * (s - b) * (s - c)).sqrt()
+}
+
+fn name(s: Shape) -> Str {
+  return match s {
+    Shape.Circle(_) => "circle",
+    Shape.Rect(w, h) => match w == h {
+      true => "square",
+      false => "rectangle",
+    },
+    Shape.Triangle(_, _, _) => "triangle",
+  }
+}
+
+fn factorial(n: Int) -> Int
+  requires n >= 0
+{
+  if n == 0 {
+    return 1
+  }
+  return n * factorial(n - 1)
+}
+
+fn main() uses io {
+  let shapes = [
+    Shape.Circle(radius: 1.0),
+    Shape.Rect(width: 2.0, height: 3.0),
+    Shape.Rect(width: 2.0, height: 2.0),
+    Shape.Triangle(a: 3.0, b: 4.0, c: 5.0),
+  ]
+  for s in shapes {
+    print("{name(s)}: area = {area(s).round_to(3)}")
+  }
+  let biggest = shapes.sort_by(fn(s) => area(s)).last()
+  print("biggest: {biggest}")
+  print("30! = {factorial(30)}")
+}
+
+test "areas" {
+  assert area(Shape.Rect(width: 2.0, height: 3.0)) == 6.0
+  assert area(Shape.Triangle(a: 3.0, b: 4.0, c: 5.0)) == 6.0
+}
+
+test "names" {
+  assert name(Shape.Rect(width: 1.0, height: 1.0)) == "square"
+  assert name(Shape.Circle(radius: 2.0)) == "circle"
+}
+
+test "big integers do not overflow" {
+  assert factorial(25) == 15511210043330985984000000
+}

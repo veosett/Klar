@@ -1,0 +1,316 @@
+// Klar runtime: Map[K, V] = [rc][td][len][cap][keys][vals][index][icap]
+// insertion-ordered entries + open-addressing index of (entry + 1), 0 = empty slot.
+
+fn map_new(td: Word) -> Word {
+  let m = obj_new(64, td)
+  poke(m + 16, 0)
+  poke(m + 24, 0)
+  poke(m + 32, 0)
+  poke(m + 40, 0)
+  poke(m + 48, 0)
+  poke(m + 56, 0)
+  return m
+}
+
+fn map_key_td(m: Word) -> Word {
+  return peek(peek(m + 8) + 16)
+}
+
+fn map_val_td(m: Word) -> Word {
+  return peek(peek(m + 8) + 24)
+}
+
+// entry index of key, or -1
+fn map_find(m: Word, key: Word) -> Word {
+  let icap = peek(m + 56)
+  if icap == 0 {
+    return -1
+  }
+  let kt = map_key_td(m)
+  let idx = peek(m + 48)
+  var slot = w_and(hash_v(key, kt), icap - 1)
+  var probing = true
+  while probing {
+    let e = peek(idx + slot * 8)
+    if e == 0 {
+      return -1
+    }
+    if eq_v(peek(peek(m + 32) + (e - 1) * 8), key, kt) {
+      return e - 1
+    }
+    slot = w_and(slot + 1, icap - 1)
+  }
+  return -1
+}
+
+fn map_rebuild_index(m: Word, icap: Word) {
+  if peek(m + 48) != 0 {
+    block_free(peek(m + 48))
+  }
+  let idx = alloc(icap * 8)
+  var i: Word = 0
+  while i < icap {
+    poke(idx + i * 8, 0)
+    i = i + 1
+  }
+  poke(m + 48, idx)
+  poke(m + 56, icap)
+  let kt = map_key_td(m)
+  var e: Word = 0
+  while e < peek(m + 16) {
+    var slot = w_and(hash_v(peek(peek(m + 32) + e * 8), kt), icap - 1)
+    while peek(idx + slot * 8) != 0 {
+      slot = w_and(slot + 1, icap - 1)
+    }
+    poke(idx + slot * 8, e + 1)
+    e = e + 1
+  }
+}
+
+fn map_reserve(m: Word, need: Word) {
+  let cap = peek(m + 24)
+  if need > cap {
+    var nc = cap * 2
+    if nc < 8 {
+      nc = 8
+    }
+    while nc < need {
+      nc = nc * 2
+    }
+    let nk = alloc(nc * 8)
+    let nv = alloc(nc * 8)
+    if cap > 0 {
+      copy_words(nk, peek(m + 32), peek(m + 16))
+      copy_words(nv, peek(m + 40), peek(m + 16))
+      block_free(peek(m + 32))
+      block_free(peek(m + 40))
+    }
+    poke(m + 32, nk)
+    poke(m + 40, nv)
+    poke(m + 24, nc)
+  }
+  if need * 2 > peek(m + 56) {
+    var ic: Word = 16
+    while ic < need * 2 {
+      ic = ic * 2
+    }
+    map_rebuild_index(m, ic)
+  }
+}
+
+fn map_copy(m: Word) -> Word {
+  let r = map_new(peek(m + 8))
+  let n = peek(m + 16)
+  map_reserve(r, n)
+  copy_words(peek(r + 32), peek(m + 32), n)
+  copy_words(peek(r + 40), peek(m + 40), n)
+  let kt = map_key_td(m)
+  let vt = map_val_td(m)
+  var i: Word = 0
+  while i < n {
+    retain_v(peek(peek(m + 32) + i * 8), kt)
+    retain_v(peek(peek(m + 40) + i * 8), vt)
+    i = i + 1
+  }
+  poke(r + 16, n)
+  map_rebuild_index(r, peek(r + 56))
+  return r
+}
+
+fn map_unique(m: Word) -> Word {
+  if peek(m) == 1 {
+    return m
+  }
+  let c = map_copy(m)
+  rc_dec(m)
+  return c
+}
+
+// insert/replace with owned key and value into an owned map
+fn Map_set_owned(m: Word, key: Word, value: Word) -> Word {
+  let u = map_unique(m)
+  let found = map_find(u, key)
+  if found >= 0 {
+    release_v(peek(peek(u + 40) + found * 8), map_val_td(u))
+    poke(peek(u + 40) + found * 8, value)
+    release_v(key, map_key_td(u))
+    return u
+  }
+  let n = peek(u + 16)
+  map_reserve(u, n + 1)
+  poke(peek(u + 32) + n * 8, key)
+  poke(peek(u + 40) + n * 8, value)
+  poke(u + 16, n + 1)
+  let icap = peek(u + 56)
+  let idx = peek(u + 48)
+  var slot = w_and(hash_v(key, map_key_td(u)), icap - 1)
+  while peek(idx + slot * 8) != 0 {
+    slot = w_and(slot + 1, icap - 1)
+  }
+  poke(idx + slot * 8, n + 1)
+  return u
+}
+
+// ---- Map methods ---------------------------------------------------------------------
+fn Map_len(m: Word) -> Int {
+  return tag(peek(m + 16))
+}
+
+fn Map_is_empty(m: Word) -> Bool {
+  return peek(m + 16) == 0
+}
+
+fn Map_get(m: Word, key: Word, rtd: Word) -> Word {
+  let i = map_find(m, key)
+  if i < 0 {
+    return none()
+  }
+  let v = peek(peek(m + 40) + i * 8)
+  retain_v(v, map_val_td(m))
+  return some_new(rtd, v)
+}
+
+fn Map_has(m: Word, key: Word) -> Bool {
+  return map_find(m, key) >= 0
+}
+
+fn Map_set(m: Word, key: Word, value: Word) -> Word {
+  rc_inc(m)
+  retain_v(key, map_key_td(m))
+  retain_v(value, map_val_td(m))
+  return Map_set_owned(m, key, value)
+}
+
+fn Map_remove_owned(m: Word, key: Word) -> Word {
+  let i = map_find(m, key)
+  release_v(key, map_key_td(m))
+  if i < 0 {
+    return m
+  }
+  let u = map_unique(m)
+  let n = peek(u + 16)
+  let ks = peek(u + 32)
+  let vs = peek(u + 40)
+  release_v(peek(ks + i * 8), map_key_td(u))
+  release_v(peek(vs + i * 8), map_val_td(u))
+  var j = i
+  while j < n - 1 {
+    poke(ks + j * 8, peek(ks + (j + 1) * 8))
+    poke(vs + j * 8, peek(vs + (j + 1) * 8))
+    j = j + 1
+  }
+  poke(u + 16, n - 1)
+  map_rebuild_index(u, peek(u + 56))
+  return u
+}
+
+fn Map_remove(m: Word, key: Word) -> Word {
+  rc_inc(m)
+  retain_v(key, map_key_td(m))
+  return Map_remove_owned(m, key)
+}
+
+fn Map_keys(m: Word, rtd: Word) -> Word {
+  let n = peek(m + 16)
+  let out = list_with_cap(rtd, n)
+  var i: Word = 0
+  while i < n {
+    let k = peek(peek(m + 32) + i * 8)
+    retain_v(k, map_key_td(m))
+    poke(peek(out + 32) + i * 8, k)
+    i = i + 1
+  }
+  poke(out + 16, n)
+  return out
+}
+
+fn Map_values(m: Word, rtd: Word) -> Word {
+  let n = peek(m + 16)
+  let out = list_with_cap(rtd, n)
+  var i: Word = 0
+  while i < n {
+    let v = peek(peek(m + 40) + i * 8)
+    retain_v(v, map_val_td(m))
+    poke(peek(out + 32) + i * 8, v)
+    i = i + 1
+  }
+  poke(out + 16, n)
+  return out
+}
+
+fn Map_entries(m: Word, rtd: Word) -> Word {
+  let n = peek(m + 16)
+  let out = list_with_cap(rtd, n)
+  let etd = peek(rtd + 16)
+  var i: Word = 0
+  while i < n {
+    let k = peek(peek(m + 32) + i * 8)
+    let v = peek(peek(m + 40) + i * 8)
+    retain_v(k, map_key_td(m))
+    retain_v(v, map_val_td(m))
+    poke(peek(out + 32) + i * 8, record2(etd, k, v))
+    i = i + 1
+  }
+  poke(out + 16, n)
+  return out
+}
+
+fn Map_map_values(m: Word, f: Word, rtd: Word) -> Word {
+  var out = map_new(rtd)
+  var i: Word = 0
+  while i < peek(m + 16) {
+    let k = peek(peek(m + 32) + i * 8)
+    retain_v(k, map_key_td(m))
+    out = Map_set_owned(out, k, call1(f, peek(peek(m + 40) + i * 8)))
+    i = i + 1
+  }
+  return out
+}
+
+fn Map_update_owned(m: Word, key: Word, default: Word, f: Word) -> Word {
+  let i = map_find(m, key)
+  var cur = default
+  if i >= 0 {
+    cur = peek(peek(m + 40) + i * 8)
+  }
+  let nv = call1(f, cur)
+  release_v(default, map_val_td(m))
+  return Map_set_owned(m, key, nv)
+}
+
+fn Map_update(m: Word, key: Word, default: Word, f: Word) -> Word {
+  rc_inc(m)
+  retain_v(key, map_key_td(m))
+  retain_v(default, map_val_td(m))
+  return Map_update_owned(m, key, default, f)
+}
+
+fn Map_filter(m: Word, keep: Word) -> Word {
+  var out = map_new(peek(m + 8))
+  var i: Word = 0
+  while i < peek(m + 16) {
+    let k = peek(peek(m + 32) + i * 8)
+    let v = peek(peek(m + 40) + i * 8)
+    if call2(keep, k, v) != 0 {
+      retain_v(k, map_key_td(m))
+      retain_v(v, map_val_td(m))
+      out = Map_set_owned(out, k, v)
+    }
+    i = i + 1
+  }
+  return out
+}
+
+fn Map_merge(m: Word, other: Word) -> Word {
+  var out = map_copy(m)
+  var i: Word = 0
+  while i < peek(other + 16) {
+    let k = peek(peek(other + 32) + i * 8)
+    let v = peek(peek(other + 40) + i * 8)
+    retain_v(k, map_key_td(m))
+    retain_v(v, map_val_td(m))
+    out = Map_set_owned(out, k, v)
+    i = i + 1
+  }
+  return out
+}

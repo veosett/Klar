@@ -1,0 +1,6 @@
+{
+  "title": "Build a message with a number",
+  "mistake": "adds a number to a string",
+  "expected": "total: 7",
+  "not_applicable": []
+}

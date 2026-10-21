@@ -1,0 +1,6 @@
+{
+  "title": "Handle every variant of an enum",
+  "mistake": "forgets a newly added variant",
+  "expected": "6.0",
+  "not_applicable": []
+}

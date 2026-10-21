@@ -1,0 +1,88 @@
+module examples.collections
+
+type Product {
+  name: Str
+  price: Float
+  tags: List[Str]
+}
+
+/// Generic helper: works for any element type.
+fn second[T](xs: List[T]) -> Option[T] {
+  return xs.get(1)
+}
+
+fn word_counts(text: Str) -> Map[Str, Int] {
+  var counts: Map[Str, Int] = Map {}
+  for word in text.lower().split(" ") {
+    if word.is_empty() {
+      continue
+    }
+    counts = counts.set(word, counts.get(word).unwrap_or(0) + 1)
+  }
+  return counts
+}
+
+fn total_price(items: List[Product]) -> Float {
+  return items.map(fn(p) => p.price).sum_float()
+}
+
+fn parse_numbers(line: Str) -> Result[List[Int], Str] {
+  var out: List[Int] = []
+  for part in line.split(",") {
+    match part.trim().to_int() {
+      Some(n) => { out = out.push(n) },
+      None => { return Err("not a number: \"{part.trim()}\"") },
+    }
+  }
+  return Ok(out)
+}
+
+fn main() uses io {
+  let nums = [5, 3, 8, 1, 9, 2]
+  let evens = nums.filter(fn(n) => n % 2 == 0)
+  let squares = nums.map(fn(n) => n * n)
+  let total = nums.fold(0, fn(acc, n) => acc + n)
+  print("evens={evens} squares={squares} total={total}")
+  print("sorted={nums.sort()} max={nums.fold(0, fn(a, b) => a.max(b))}")
+  let no_words: List[Str] = []
+  print("second={second(nums)} second of empty={second(no_words)}")
+
+  let items = [
+    Product { name: "pen", price: 1.5, tags: ["office"] },
+    Product { name: "lamp", price: 24.0, tags: ["home", "light"] },
+  ]
+  print("total price: {total_price(items)}")
+  let names = items
+    .filter(fn(p) => p.price > 2.0)
+    .map(fn(p) => p.name.upper())
+    .join(", ")
+  print("expensive: {names}")
+
+  let counts = word_counts("the cat and the hat and the bat")
+  for key in counts.keys() {
+    print("{key}: {counts.get(key).unwrap_or(0)}")
+  }
+
+  match parse_numbers("1, 2, x3") {
+    Ok(list) => print("parsed {list}"),
+    Err(msg) => print("error: {msg}"),
+  }
+}
+
+test "word counts" {
+  let c = word_counts("a b a")
+  assert c.get("a") == Some(2)
+  assert c.get("b") == Some(1)
+  assert c.get("zzz") == None
+}
+
+test "parse numbers" {
+  let xs = parse_numbers("4, 5,6")?
+  assert xs == [4, 5, 6]
+  assert parse_numbers("1,two").is_err()
+}
+
+test "generic second" {
+  assert second(["a", "b"]) == Some("b")
+  assert second([1]).is_none()
+}

@@ -1,0 +1,7 @@
+fn main() uses io {
+  let xs = [10, 20, 30]
+  match xs.get(xs.len()) { // BUG: off by one
+    Some(v) => print("last={v}"),
+    None => print("empty"),
+  }
+}

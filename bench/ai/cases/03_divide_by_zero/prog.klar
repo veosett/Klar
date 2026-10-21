@@ -1,0 +1,8 @@
+fn average(xs: List[Int]) -> Int {
+  return xs.sum() / xs.len() // BUG: the list may be empty
+}
+
+fn main() uses io {
+  let empty: List[Int] = []
+  print(average(empty))
+}

@@ -1,0 +1,562 @@
+// Klar runtime: arbitrary-precision Int (slow paths; the compiler inlines 63-bit fast paths).
+// Int word: odd = small ((v << 1) | 1); even = pointer to a bignum
+// bignum: [rc][td_Big][sign -1|1][n][limbs base 2^30, least significant first]
+
+const LIMB_MASK: Word = 1073741823
+const LIMB_BASE: Word = 1073741824
+
+fn big_alloc(n: Word) -> Word {
+  let b = obj_new(32 + n * 8, static_addr("td_Big"))
+  poke(b + 16, 1)
+  poke(b + 24, n)
+  var i: Word = 0
+  while i < n {
+    poke(b + 32 + i * 8, 0)
+    i = i + 1
+  }
+  return b
+}
+
+fn limb(b: Word, i: Word) -> Word {
+  return peek(b + 32 + i * 8)
+}
+
+fn set_limb(b: Word, i: Word, v: Word) {
+  poke(b + 32 + i * 8, v)
+}
+
+fn nlimbs(b: Word) -> Word {
+  return peek(b + 24)
+}
+
+fn big_trim(b: Word) {
+  var n = peek(b + 24)
+  while n > 0 and limb(b, n - 1) == 0 {
+    n = n - 1
+  }
+  poke(b + 24, n)
+}
+
+// a new reference to a bignum holding the value of Int word x
+fn to_big(x: Word) -> Word {
+  if w_and(x, 1) == 0 {
+    rc_inc(x)
+    return x
+  }
+  let v = w_sar(x, 1)
+  var mag = v
+  let b = big_alloc(3)
+  if v < 0 {
+    poke(b + 16, -1)
+    mag = 0 - v
+  }
+  set_limb(b, 0, w_and(mag, LIMB_MASK))
+  set_limb(b, 1, w_and(w_shr(mag, 30), LIMB_MASK))
+  set_limb(b, 2, w_shr(mag, 60))
+  big_trim(b)
+  return b
+}
+
+// owned bignum -> canonical Int word (small when it fits in 61 bits)
+fn normalize(b: Word) -> Word {
+  big_trim(b)
+  let n = nlimbs(b)
+  if n == 0 {
+    rc_dec(b)
+    return 1
+  }
+  if n <= 3 {
+    var top: Word = 0
+    if n == 3 {
+      top = limb(b, 2)
+    }
+    if top < 2 {
+      var v = limb(b, 0)
+      if n >= 2 {
+        v = v + w_shl(limb(b, 1), 30)
+      }
+      if n == 3 {
+        v = v + w_shl(top, 60)
+      }
+      if peek(b + 16) < 0 {
+        v = 0 - v
+      }
+      rc_dec(b)
+      return w_or(w_shl(v, 1), 1)
+    }
+  }
+  return b
+}
+
+fn mag_cmp(a: Word, b: Word) -> Word {
+  let na = nlimbs(a)
+  let nb = nlimbs(b)
+  if na != nb {
+    if na < nb {
+      return -1
+    }
+    return 1
+  }
+  var i = na - 1
+  while i >= 0 {
+    let x = limb(a, i)
+    let y = limb(b, i)
+    if x != y {
+      if x < y {
+        return -1
+      }
+      return 1
+    }
+    i = i - 1
+  }
+  return 0
+}
+
+fn mag_add(a: Word, b: Word) -> Word {
+  let na = nlimbs(a)
+  let nb = nlimbs(b)
+  var n = na
+  if nb > n {
+    n = nb
+  }
+  let r = big_alloc(n + 1)
+  var carry: Word = 0
+  var i: Word = 0
+  while i < n {
+    var t = carry
+    if i < na {
+      t = t + limb(a, i)
+    }
+    if i < nb {
+      t = t + limb(b, i)
+    }
+    set_limb(r, i, w_and(t, LIMB_MASK))
+    carry = w_shr(t, 30)
+    i = i + 1
+  }
+  set_limb(r, n, carry)
+  return r
+}
+
+// |a| >= |b|
+fn mag_sub(a: Word, b: Word) -> Word {
+  let na = nlimbs(a)
+  let nb = nlimbs(b)
+  let r = big_alloc(na)
+  var borrow: Word = 0
+  var i: Word = 0
+  while i < na {
+    var t = limb(a, i) - borrow
+    if i < nb {
+      t = t - limb(b, i)
+    }
+    if t < 0 {
+      t = t + LIMB_BASE
+      borrow = 1
+    } else {
+      borrow = 0
+    }
+    set_limb(r, i, t)
+    i = i + 1
+  }
+  return r
+}
+
+fn mag_mul(a: Word, b: Word) -> Word {
+  let na = nlimbs(a)
+  let nb = nlimbs(b)
+  let r = big_alloc(na + nb + 1)
+  var i: Word = 0
+  while i < na {
+    let x = limb(a, i)
+    var carry: Word = 0
+    var j: Word = 0
+    while j < nb {
+      let t = limb(r, i + j) + x * limb(b, j) + carry
+      set_limb(r, i + j, w_and(t, LIMB_MASK))
+      carry = w_shr(t, 30)
+      j = j + 1
+    }
+    var k = i + nb
+    while carry != 0 {
+      let t2 = limb(r, k) + carry
+      set_limb(r, k, w_and(t2, LIMB_MASK))
+      carry = w_shr(t2, 30)
+      k = k + 1
+    }
+    i = i + 1
+  }
+  return r
+}
+
+fn bitlen30(x: Word) -> Word {
+  var n: Word = 0
+  var v = x
+  while v != 0 {
+    v = w_shr(v, 1)
+    n = n + 1
+  }
+  return n
+}
+
+// magnitude division (Knuth, algorithm D); quotient -> G_DIVQ, remainder -> G_DIVR (owned bignums)
+fn mag_divmod(a: Word, b: Word) {
+  let gp = g()
+  let na = nlimbs(a)
+  let nb = nlimbs(b)
+  if mag_cmp(a, b) < 0 {
+    poke(gp + G_DIVQ, big_alloc(0))
+    let r0 = big_alloc(na)
+    copy_words(r0 + 32, a + 32, na)
+    poke(gp + G_DIVR, r0)
+    return
+  }
+  if nb == 1 {
+    let d = limb(b, 0)
+    let q1 = big_alloc(na)
+    var rem: Word = 0
+    var i = na - 1
+    while i >= 0 {
+      let cur = rem * LIMB_BASE + limb(a, i)
+      set_limb(q1, i, cur / d)
+      rem = cur % d
+      i = i - 1
+    }
+    let r1 = big_alloc(1)
+    set_limb(r1, 0, rem)
+    poke(gp + G_DIVQ, q1)
+    poke(gp + G_DIVR, r1)
+    return
+  }
+  let s = 30 - bitlen30(limb(b, nb - 1))
+  let vn = big_alloc(nb)
+  let un = big_alloc(na + 1)
+  var i2: Word = nb - 1
+  while i2 > 0 {
+    set_limb(vn, i2, w_and(w_or(w_shl(limb(b, i2), s), w_shr(limb(b, i2 - 1), 30 - s)), LIMB_MASK))
+    i2 = i2 - 1
+  }
+  set_limb(vn, 0, w_and(w_shl(limb(b, 0), s), LIMB_MASK))
+  set_limb(un, na, w_shr(limb(a, na - 1), 30 - s))
+  var i3: Word = na - 1
+  while i3 > 0 {
+    set_limb(un, i3, w_and(w_or(w_shl(limb(a, i3), s), w_shr(limb(a, i3 - 1), 30 - s)), LIMB_MASK))
+    i3 = i3 - 1
+  }
+  set_limb(un, 0, w_and(w_shl(limb(a, 0), s), LIMB_MASK))
+  if s == 0 {
+    set_limb(un, na, 0)
+  }
+  let q = big_alloc(na - nb + 1)
+  let vtop = limb(vn, nb - 1)
+  let vsec = limb(vn, nb - 2)
+  var j = na - nb
+  while j >= 0 {
+    let num = limb(un, j + nb) * LIMB_BASE + limb(un, j + nb - 1)
+    var qhat = num / vtop
+    var rhat = num - qhat * vtop
+    var adjusting = true
+    while adjusting {
+      if qhat >= LIMB_BASE or qhat * vsec > rhat * LIMB_BASE + limb(un, j + nb - 2) {
+        qhat = qhat - 1
+        rhat = rhat + vtop
+        if rhat >= LIMB_BASE {
+          adjusting = false
+        }
+      } else {
+        adjusting = false
+      }
+    }
+    var k: Word = 0
+    var t: Word = 0
+    var m: Word = 0
+    while m < nb {
+      let p = qhat * limb(vn, m)
+      t = limb(un, m + j) - k - w_and(p, LIMB_MASK)
+      set_limb(un, m + j, w_and(t, LIMB_MASK))
+      k = w_sar(p, 30) - w_sar(t, 30)
+      m = m + 1
+    }
+    t = limb(un, j + nb) - k
+    set_limb(un, j + nb, t)
+    if t < 0 {
+      qhat = qhat - 1
+      k = 0
+      var m2: Word = 0
+      while m2 < nb {
+        let t3 = limb(un, m2 + j) + limb(vn, m2) + k
+        set_limb(un, m2 + j, w_and(t3, LIMB_MASK))
+        k = w_sar(t3, 30)
+        m2 = m2 + 1
+      }
+      set_limb(un, j + nb, limb(un, j + nb) + k)
+    }
+    set_limb(q, j, qhat)
+    j = j - 1
+  }
+  let r = big_alloc(nb)
+  var i4: Word = 0
+  while i4 < nb {
+    if s == 0 {
+      set_limb(r, i4, limb(un, i4))
+    } else {
+      set_limb(r, i4, w_and(w_or(w_shr(limb(un, i4), s), w_shl(limb(un, i4 + 1), 30 - s)), LIMB_MASK))
+    }
+    i4 = i4 + 1
+  }
+  rc_dec(un)
+  rc_dec(vn)
+  poke(gp + G_DIVQ, q)
+  poke(gp + G_DIVR, r)
+}
+
+fn big_sign(b: Word) -> Word {
+  if nlimbs(b) == 0 {
+    return 0
+  }
+  return peek(b + 16)
+}
+
+fn signed_add(a: Word, sa: Word, b: Word, sb: Word) -> Word {
+  if sa == sb or nlimbs(b) == 0 {
+    let r = mag_add(a, b)
+    poke(r + 16, sa)
+    return r
+  }
+  if nlimbs(a) == 0 {
+    let r2 = mag_add(a, b)
+    poke(r2 + 16, sb)
+    return r2
+  }
+  let c = mag_cmp(a, b)
+  if c == 0 {
+    return big_alloc(0)
+  }
+  if c > 0 {
+    let r3 = mag_sub(a, b)
+    poke(r3 + 16, sa)
+    return r3
+  }
+  let r4 = mag_sub(b, a)
+  poke(r4 + 16, sb)
+  return r4
+}
+
+fn int_add(x: Word, y: Word) -> Word {
+  let a = to_big(x)
+  let b = to_big(y)
+  let r = signed_add(a, peek(a + 16), b, peek(b + 16))
+  rc_dec(a)
+  rc_dec(b)
+  return normalize(r)
+}
+
+fn int_sub(x: Word, y: Word) -> Word {
+  let a = to_big(x)
+  let b = to_big(y)
+  let r = signed_add(a, peek(a + 16), b, 0 - peek(b + 16))
+  rc_dec(a)
+  rc_dec(b)
+  return normalize(r)
+}
+
+fn int_mul(x: Word, y: Word) -> Word {
+  let a = to_big(x)
+  let b = to_big(y)
+  let r = mag_mul(a, b)
+  poke(r + 16, peek(a + 16) * peek(b + 16))
+  rc_dec(a)
+  rc_dec(b)
+  return normalize(r)
+}
+
+fn int_divmod(x: Word, y: Word) {
+  let a = to_big(x)
+  let b = to_big(y)
+  mag_divmod(a, b)
+  let gp = g()
+  poke(peek(gp + G_DIVQ) + 16, peek(a + 16) * peek(b + 16))
+  poke(peek(gp + G_DIVR) + 16, peek(a + 16))
+  rc_dec(a)
+  rc_dec(b)
+}
+
+fn int_div(x: Word, y: Word) -> Word {
+  int_divmod(x, y)
+  let gp = g()
+  rc_dec(peek(gp + G_DIVR))
+  return normalize(peek(gp + G_DIVQ))
+}
+
+fn int_mod(x: Word, y: Word) -> Word {
+  int_divmod(x, y)
+  let gp = g()
+  rc_dec(peek(gp + G_DIVQ))
+  return normalize(peek(gp + G_DIVR))
+}
+
+fn int_neg(x: Word) -> Word {
+  let a = to_big(x)
+  let r = big_alloc(nlimbs(a))
+  copy_words(r + 32, a + 32, nlimbs(a))
+  poke(r + 16, 0 - peek(a + 16))
+  rc_dec(a)
+  return normalize(r)
+}
+
+// raw -1 / 0 / 1
+fn int_cmp(x: Word, y: Word) -> Word {
+  if w_and(w_and(x, y), 1) == 1 {
+    if x < y {
+      return -1
+    }
+    if x > y {
+      return 1
+    }
+    return 0
+  }
+  let a = to_big(x)
+  let b = to_big(y)
+  let sa = big_sign(a)
+  let sb = big_sign(b)
+  var r: Word = 0
+  if sa != sb {
+    if sa < sb {
+      r = -1
+    } else {
+      r = 1
+    }
+  } else {
+    r = mag_cmp(a, b) * sa
+  }
+  rc_dec(a)
+  rc_dec(b)
+  return r
+}
+
+fn int_eq(x: Word, y: Word) -> Bool {
+  return int_cmp(x, y) == 0
+}
+
+// decimal text of an Int word
+fn int_show(sb: Word, x: Word) {
+  if w_and(x, 1) == 1 {
+    sb_add_word(sb, w_sar(x, 1))
+    return
+  }
+  if peek(x + 16) < 0 {
+    sb_add_byte(sb, 45)
+  }
+  let n = nlimbs(x)
+  let work = big_alloc(n)
+  copy_words(work + 32, x + 32, n)
+  let chunks = alloc(8 * (n * 30 / 29 + 2))
+  var nc: Word = 0
+  var len = n
+  while len > 0 {
+    var rem: Word = 0
+    var i = len - 1
+    while i >= 0 {
+      let cur = rem * LIMB_BASE + limb(work, i)
+      set_limb(work, i, cur / 1000000000)
+      rem = cur % 1000000000
+      i = i - 1
+    }
+    poke(chunks + nc * 8, rem)
+    nc = nc + 1
+    while len > 0 and limb(work, len - 1) == 0 {
+      len = len - 1
+    }
+  }
+  nc = nc - 1
+  sb_add_word(sb, peek(chunks + nc * 8))
+  while nc > 0 {
+    nc = nc - 1
+    let c = peek(chunks + nc * 8)
+    var p: Word = 100000000
+    while p > 0 {
+      sb_add_byte(sb, 48 + (c / p) % 10)
+      p = p / 10
+    }
+  }
+  block_free(chunks)
+  rc_dec(work)
+}
+
+fn int_hash(x: Word) -> Word {
+  if w_and(x, 1) == 1 {
+    return x
+  }
+  var h: Word = 1469598103934665603
+  var i: Word = 0
+  while i < nlimbs(x) {
+    h = w_xor(h, limb(x, i)) * 1099511628211
+    i = i + 1
+  }
+  return h
+}
+
+// number of bits of |x|
+fn int_bitlen(x: Int) -> Int {
+  let w = bits(x)
+  if w_and(w, 1) == 1 {
+    var v = w_sar(w, 1)
+    if v < 0 {
+      v = 0 - v
+    }
+    var n: Word = 0
+    while v != 0 {
+      v = w_shr(v, 1)
+      n = n + 1
+    }
+    return tag(n)
+  }
+  let nl = nlimbs(w)
+  return tag((nl - 1) * 30 + bitlen30(limb(w, nl - 1)))
+}
+
+fn int_parse_dec(s: Word) -> Int {
+  let n = peek(s + 16)
+  var i: Word = 0
+  var neg = false
+  if n > 0 and (peek8(s + 32) == 45 or peek8(s + 32) == 43) {
+    neg = peek8(s + 32) == 45
+    i = 1
+  }
+  var acc: Int = 0
+  while i < n {
+    let c = peek8(s + 32 + i)
+    if c >= 48 and c <= 57 {
+      acc = acc * 10 + tag(c - 48)
+    }
+    i = i + 1
+  }
+  if neg {
+    return 0 - acc
+  }
+  return acc
+}
+
+fn pow_int(base: Int, e: Int) -> Int {
+  var result: Int = 1
+  var b = base
+  var k = e
+  while k > 0 {
+    if k % 2 == 1 {
+      result = result * b
+    }
+    k = k / 2
+    if k > 0 {
+      b = b * b
+    }
+  }
+  return result
+}
+
+fn pow2(e: Int) -> Int {
+  return pow_int(2, e)
+}
+
+fn pow10(e: Int) -> Int {
+  return pow_int(10, e)
+}

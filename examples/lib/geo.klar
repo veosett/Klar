@@ -1,0 +1,12 @@
+/// A 2D point.
+type Point { x: Float, y: Float }
+
+const ORIGIN_X: Float = 0.0
+
+fn helper(v: Float) -> Float { return v * v }
+
+/// Distance from the origin.
+/// >>> assert dist(Point { x: 3.0, y: 4.0 }) == 5.0
+fn dist(p: Point) -> Float {
+  return (helper(p.x - ORIGIN_X) + helper(p.y)).sqrt()
+}

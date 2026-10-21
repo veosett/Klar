@@ -1,0 +1,6 @@
+{
+  "title": "Get the length of a list",
+  "mistake": "uses the method name from another language",
+  "expected": "3",
+  "not_applicable": []
+}

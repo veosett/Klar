@@ -1,0 +1,6 @@
+{
+  "title": "Call a function with several same-typed parameters",
+  "mistake": "passes two arguments in the wrong order",
+  "expected": "216",
+  "not_applicable": []
+}

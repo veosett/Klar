@@ -1,0 +1,192 @@
+// Klar runtime: Int / Option / Result methods and object helpers.
+
+fn none() -> Word {
+  return static_addr("obj_None")
+}
+
+fn some_new(rtd: Word, v: Word) -> Word {
+  let o = obj_new(32, rtd)
+  poke(o + 16, 1)
+  poke(o + 24, v)
+  return o
+}
+
+fn ok_new(rtd: Word, v: Word) -> Word {
+  let o = obj_new(32, rtd)
+  poke(o + 16, 0)
+  poke(o + 24, v)
+  return o
+}
+
+fn err_new(rtd: Word, v: Word) -> Word {
+  let o = obj_new(32, rtd)
+  poke(o + 16, 1)
+  poke(o + 24, v)
+  return o
+}
+
+fn record2(td: Word, a: Word, b: Word) -> Word {
+  let o = obj_new(32, td)
+  poke(o + 16, a)
+  poke(o + 24, b)
+  return o
+}
+
+fn small_or_fail(i: Int, what: Str, sp: Word) -> Word {
+  if not is_small(i) {
+    fail_msg("R0009", "index too large", sp)
+  }
+  return untag(i)
+}
+
+// ---- Int ----------------------------------------------------------------------
+fn Int_to_float(x: Int, sp: Word) -> Float {
+  if is_small(x) {
+    return w2f(untag(x))
+  }
+  return int_to_float(x, sp)
+}
+
+fn Int_abs(x: Int) -> Int {
+  if x < 0 {
+    return 0 - x
+  }
+  return x
+}
+
+fn Int_min(a: Int, b: Int) -> Int {
+  if b < a {
+    return b
+  }
+  return a
+}
+
+fn Int_max(a: Int, b: Int) -> Int {
+  if b > a {
+    return b
+  }
+  return a
+}
+
+fn Int_clamp(x: Int, low: Int, high: Int) -> Int {
+  var m = x
+  if high < x {
+    m = high
+  }
+  if m > low {
+    return m
+  }
+  return low
+}
+
+fn Int_is_even(x: Int) -> Bool {
+  return x % 2 == 0
+}
+
+fn Int_sign(x: Int) -> Int {
+  if x > 0 {
+    return 1
+  }
+  if x < 0 {
+    return -1
+  }
+  return 0
+}
+
+fn Int_pow(x: Int, e: Int, sp: Word) -> Int {
+  if e < 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "Int.pow: negative exponent ")
+    int_show(b, bits(e))
+    sb_add_cstr(b, " (use Float for fractions)")
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  return pow_int(x, e)
+}
+
+// ---- Option -----------------------------------------------------------------------
+fn Option_is_some(o: Word) -> Bool {
+  return peek(o + 16) == 1
+}
+
+fn Option_is_none(o: Word) -> Bool {
+  return peek(o + 16) == 0
+}
+
+fn Option_unwrap_or(o: Word, d: Word, td_T: Word) -> Word {
+  if peek(o + 16) == 1 {
+    let v = peek(o + 24)
+    retain_v(v, td_T)
+    return v
+  }
+  retain_v(d, td_T)
+  return d
+}
+
+fn Option_map(o: Word, f: Word, rtd: Word) -> Word {
+  if peek(o + 16) == 0 {
+    return none()
+  }
+  return some_new(rtd, call1(f, peek(o + 24)))
+}
+
+fn Option_and_then(o: Word, f: Word) -> Word {
+  if peek(o + 16) == 0 {
+    return none()
+  }
+  return call1(f, peek(o + 24))
+}
+
+fn Option_ok_or(o: Word, e: Word, rtd: Word, td_T: Word, td_E: Word) -> Word {
+  if peek(o + 16) == 1 {
+    let v = peek(o + 24)
+    retain_v(v, td_T)
+    return ok_new(rtd, v)
+  }
+  retain_v(e, td_E)
+  return err_new(rtd, e)
+}
+
+// ---- Result -----------------------------------------------------------------------
+fn Result_is_ok(r: Word) -> Bool {
+  return peek(r + 16) == 0
+}
+
+fn Result_is_err(r: Word) -> Bool {
+  return peek(r + 16) == 1
+}
+
+fn Result_unwrap_or(r: Word, d: Word, td_T: Word) -> Word {
+  if peek(r + 16) == 0 {
+    let v = peek(r + 24)
+    retain_v(v, td_T)
+    return v
+  }
+  retain_v(d, td_T)
+  return d
+}
+
+fn Result_map(r: Word, f: Word, rtd: Word) -> Word {
+  if peek(r + 16) == 0 {
+    return ok_new(rtd, call1(f, peek(r + 24)))
+  }
+  rc_inc(r)
+  return r
+}
+
+fn Result_map_err(r: Word, f: Word, rtd: Word) -> Word {
+  if peek(r + 16) == 1 {
+    return err_new(rtd, call1(f, peek(r + 24)))
+  }
+  rc_inc(r)
+  return r
+}
+
+fn Result_ok(r: Word, rtd: Word, td_T: Word) -> Word {
+  if peek(r + 16) == 0 {
+    let v = peek(r + 24)
+    retain_v(v, td_T)
+    return some_new(rtd, v)
+  }
+  return none()
+}

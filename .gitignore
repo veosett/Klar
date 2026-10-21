@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.mypy_cache/
+build/
+*.exe
+*.map
+bench/ai/results/*.tmp

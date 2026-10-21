@@ -1,0 +1,6 @@
+{
+  "title": "Recursive factorial",
+  "mistake": "forgets the base case of the recursion",
+  "expected": "120",
+  "not_applicable": []
+}

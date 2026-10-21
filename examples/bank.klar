@@ -1,0 +1,95 @@
+module examples.bank
+
+/// A bank account. Values are immutable: updates create new records.
+type Account {
+  id: Int
+  owner: Str
+  balance: Int
+}
+
+enum BankError {
+  InsufficientFunds(need: Int, have: Int)
+  SameAccount
+  InvalidAmount(amount: Int)
+}
+
+type Transfer {
+  from: Account
+  to: Account
+}
+
+/// Withdraws `amount` from `acc`.
+fn withdraw(acc: Account, amount: Int) -> Result[Account, BankError]
+  ensures result.is_err() or amount > 0
+{
+  if amount <= 0 {
+    return Err(BankError.InvalidAmount(amount: amount))
+  }
+  if acc.balance < amount {
+    return Err(BankError.InsufficientFunds(need: amount, have: acc.balance))
+  }
+  return Ok(acc with { balance: acc.balance - amount })
+}
+
+fn deposit(acc: Account, amount: Int) -> Account
+  requires amount > 0
+  ensures result.balance == acc.balance + amount
+{
+  return acc with { balance: acc.balance + amount }
+}
+
+/// Moves money between two different accounts. 3 params => named arguments.
+fn transfer(from: Account, to: Account, amount: Int) -> Result[Transfer, BankError] {
+  if from.id == to.id {
+    return Err(BankError.SameAccount)
+  }
+  let new_from = withdraw(from, amount)?
+  let new_to = deposit(to, amount)
+  return Ok(Transfer { from: new_from, to: new_to })
+}
+
+fn describe(e: BankError) -> Str {
+  return match e {
+    BankError.InsufficientFunds(need, have) => "need {need}, have only {have}",
+    BankError.SameAccount => "cannot transfer to the same account",
+    BankError.InvalidAmount(amount) => "invalid amount {amount}",
+  }
+}
+
+fn main() uses io {
+  let alice = Account { id: 1, owner: "Alice", balance: 100 }
+  let bob = Account { id: 2, owner: "Bob", balance: 20 }
+
+  match transfer(from: alice, to: bob, amount: 30) {
+    Ok(t) => print("ok: {t.from.owner}={t.from.balance}, {t.to.owner}={t.to.balance}"),
+    Err(e) => print("error: {describe(e)}"),
+  }
+  match transfer(from: bob, to: alice, amount: 500) {
+    Ok(_) => print("unexpected"),
+    Err(e) => print("error: {describe(e)}"),
+  }
+}
+
+test "withdraw reduces balance" {
+  let acc = Account { id: 1, owner: "A", balance: 100 }
+  let after = withdraw(acc, 30)?
+  assert after.balance == 70
+}
+
+test "withdraw rejects overdraft" {
+  let acc = Account { id: 1, owner: "A", balance: 10 }
+  let r = withdraw(acc, 30)
+  assert r == Err(BankError.InsufficientFunds(need: 30, have: 10))
+}
+
+test "transfer keeps total money" {
+  let a = Account { id: 1, owner: "A", balance: 100 }
+  let b = Account { id: 2, owner: "B", balance: 5 }
+  let t = transfer(from: a, to: b, amount: 40)?
+  assert t.from.balance + t.to.balance == 105
+}
+
+test "transfer to self fails" {
+  let a = Account { id: 1, owner: "A", balance: 100 }
+  assert transfer(from: a, to: a, amount: 1).is_err()
+}

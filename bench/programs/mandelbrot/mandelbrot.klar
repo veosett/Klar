@@ -1,0 +1,25 @@
+fn main() uses io, time {
+  let start = now_ns()
+  var inside = 0
+  for y in range(0, 60) {
+    for x in range(0, 120) {
+      let cr = x.to_float() / 120.0 * 3.5 - 2.5
+      let ci = y.to_float() / 60.0 * 2.0 - 1.0
+      var zr = 0.0
+      var zi = 0.0
+      var k = 0
+      while k < 50 and zr * zr + zi * zi <= 4.0 {
+        let t = zr * zr - zi * zi + cr
+        zi = 2.0 * zr * zi + ci
+        zr = t
+        k = k + 1
+      }
+      if k == 50 {
+        inside = inside + 1
+      }
+    }
+  }
+  let elapsed = (now_ns() - start).to_float() / 1000000.0
+  print("result={inside}")
+  print("time_ms={elapsed}")
+}

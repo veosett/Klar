@@ -1,0 +1,10 @@
+fn main() uses io, time {
+  let start = now_ns()
+  let parts = range(0, 100000).map(fn(i) => "item{i}")
+  let joined = parts.join(",")
+  let back = joined.split(",")
+  let sevens = back.filter(fn(s) => s.ends_with("7")).len()
+  let elapsed = (now_ns() - start).to_float() / 1000000.0
+  print("result={sevens},{joined.len()}")
+  print("time_ms={elapsed}")
+}

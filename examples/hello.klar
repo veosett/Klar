@@ -1,0 +1,5 @@
+// The smallest Klar program. `uses io` declares that main prints.
+fn main() uses io {
+  let name = "world"
+  print("Hello, {name}!")
+}

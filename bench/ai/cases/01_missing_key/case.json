@@ -1,0 +1,6 @@
+{
+  "title": "Look up a key that may be missing",
+  "mistake": "uses the result of a map lookup as if the key were always present",
+  "expected": "unknown",
+  "not_applicable": []
+}

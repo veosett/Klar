@@ -1,0 +1,8 @@
+fn double_quantity(text: Str) -> Int {
+  let qty = text.to_int()
+  return qty * 2 // BUG: the text may not be a number
+}
+
+fn main() uses io {
+  print(double_quantity("12a"))
+}

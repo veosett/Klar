@@ -1,0 +1,334 @@
+// Klar runtime: generic operations driven by type descriptors (show, ==, hash, ordering).
+
+fn show_into(b: Word, v: Word, td: Word, top: Bool) {
+  let k = peek(td)
+  if k == K_INT {
+    int_show(b, v)
+  } else if k == K_STR {
+    if top {
+      sb_add_str(b, v)
+    } else {
+      show_quoted(b, v)
+    }
+  } else if k == K_FLOAT {
+    float_show(b, ffrom(v))
+  } else if k == K_BOOL {
+    if v != 0 {
+      sb_add_cstr(b, "true")
+    } else {
+      sb_add_cstr(b, "false")
+    }
+  } else if k == K_UNIT {
+    sb_add_cstr(b, "()")
+  } else if k == K_WORD {
+    sb_add_word(b, v)
+  } else if k == K_LIST {
+    let et = peek(td + 16)
+    sb_add_byte(b, 91)
+    let n = peek(v + 16)
+    let data = peek(v + 32)
+    var i: Word = 0
+    while i < n {
+      if i > 0 {
+        sb_add_cstr(b, ", ")
+      }
+      show_into(b, peek(data + i * 8), et, false)
+      i = i + 1
+    }
+    sb_add_byte(b, 93)
+  } else if k == K_MAP {
+    let n2 = peek(v + 16)
+    if n2 == 0 {
+      sb_add_cstr(b, "Map \{\}")
+      return
+    }
+    sb_add_cstr(b, "Map \{ ")
+    var j: Word = 0
+    while j < n2 {
+      if j > 0 {
+        sb_add_cstr(b, ", ")
+      }
+      show_into(b, peek(peek(v + 32) + j * 8), peek(td + 16), false)
+      sb_add_cstr(b, ": ")
+      show_into(b, peek(peek(v + 40) + j * 8), peek(td + 24), false)
+      j = j + 1
+    }
+    sb_add_cstr(b, " \}")
+  } else if k == K_RECORD {
+    sb_add_str(b, peek(td + 8))
+    sb_add_cstr(b, " \{ ")
+    let nf = peek(td + 16)
+    var f: Word = 0
+    while f < nf {
+      if f > 0 {
+        sb_add_cstr(b, ", ")
+      }
+      sb_add_str(b, peek(peek(td + 32) + f * 8))
+      sb_add_cstr(b, ": ")
+      show_into(b, peek(v + 16 + f * 8), peek(peek(td + 24) + f * 8), false)
+      f = f + 1
+    }
+    sb_add_cstr(b, " \}")
+  } else if k == K_ENUM {
+    let row = peek(td + 24) + peek(v + 16) * 32
+    let nv = peek(row + 8)
+    let style = peek(td + 32)
+    if style == 0 {
+      sb_add_str(b, peek(td + 8))
+      sb_add_byte(b, 46)
+    }
+    sb_add_str(b, peek(row))
+    if nv > 0 {
+      sb_add_byte(b, 40)
+      var a: Word = 0
+      while a < nv {
+        if a > 0 {
+          sb_add_cstr(b, ", ")
+        }
+        if style == 0 {
+          sb_add_str(b, peek(peek(row + 24) + a * 8))
+          sb_add_cstr(b, ": ")
+        }
+        show_into(b, peek(v + 24 + a * 8), peek(peek(row + 16) + a * 8), false)
+        a = a + 1
+      }
+      sb_add_byte(b, 41)
+    }
+  } else if k == K_FN {
+    sb_add_cstr(b, "<fn <lambda>>")
+  }
+}
+
+fn show_quoted(b: Word, s: Word) {
+  sb_add_byte(b, 34)
+  let n = peek(s + 16)
+  var i: Word = 0
+  while i < n {
+    let c = peek8(s + 32 + i)
+    if c == 92 {
+      sb_add_cstr(b, "\\\\")
+    } else if c == 34 {
+      sb_add_cstr(b, "\\\"")
+    } else if c == 10 {
+      sb_add_cstr(b, "\\n")
+    } else if c == 9 {
+      sb_add_cstr(b, "\\t")
+    } else if c == 123 {
+      sb_add_cstr(b, "\\\{")
+    } else if c == 125 {
+      sb_add_cstr(b, "\\\}")
+    } else {
+      sb_add_byte(b, c)
+    }
+    i = i + 1
+  }
+  sb_add_byte(b, 34)
+}
+
+fn show_to_str(v: Word, td: Word) -> Word {
+  if peek(td) == K_STR {
+    rc_inc(v)
+    return v
+  }
+  let b = sb_new()
+  show_into(b, v, td, true)
+  return sb_finish(b)
+}
+
+fn Str_eq(a: Word, b: Word) -> Bool {
+  if a == b {
+    return true
+  }
+  let n = peek(a + 16)
+  if n != peek(b + 16) {
+    return false
+  }
+  return bytes_eq(a + 32, b + 32, n)
+}
+
+// raw -1 / 0 / 1, byte order (= code point order for UTF-8)
+fn Str_cmp(a: Word, b: Word) -> Word {
+  let na = peek(a + 16)
+  let nb = peek(b + 16)
+  var n = na
+  if nb < n {
+    n = nb
+  }
+  var i: Word = 0
+  while i < n {
+    let x = peek8(a + 32 + i)
+    let y = peek8(b + 32 + i)
+    if x != y {
+      if x < y {
+        return -1
+      }
+      return 1
+    }
+    i = i + 1
+  }
+  if na < nb {
+    return -1
+  }
+  if na > nb {
+    return 1
+  }
+  return 0
+}
+
+fn eq_v(a: Word, b: Word, td: Word) -> Bool {
+  let k = peek(td)
+  if k == K_INT {
+    if w_and(w_and(a, b), 1) == 1 {
+      return a == b
+    }
+    return int_cmp(a, b) == 0
+  }
+  if k == K_FLOAT {
+    return ffrom(a) == ffrom(b)
+  }
+  if k < K_STR {
+    return a == b
+  }
+  if a == b {
+    return true
+  }
+  if k == K_STR {
+    return Str_eq(a, b)
+  }
+  if k == K_LIST {
+    let n = peek(a + 16)
+    if n != peek(b + 16) {
+      return false
+    }
+    let et = peek(td + 16)
+    var i: Word = 0
+    while i < n {
+      if not eq_v(peek(peek(a + 32) + i * 8), peek(peek(b + 32) + i * 8), et) {
+        return false
+      }
+      i = i + 1
+    }
+    return true
+  }
+  if k == K_MAP {
+    let n2 = peek(a + 16)
+    if n2 != peek(b + 16) {
+      return false
+    }
+    var j: Word = 0
+    while j < n2 {
+      let idx = map_find(b, peek(peek(a + 32) + j * 8))
+      if idx < 0 {
+        return false
+      }
+      if not eq_v(peek(peek(a + 40) + j * 8), peek(peek(b + 40) + idx * 8), peek(td + 24)) {
+        return false
+      }
+      j = j + 1
+    }
+    return true
+  }
+  if k == K_RECORD {
+    let nf = peek(td + 16)
+    var f: Word = 0
+    while f < nf {
+      if not eq_v(peek(a + 16 + f * 8), peek(b + 16 + f * 8), peek(peek(td + 24) + f * 8)) {
+        return false
+      }
+      f = f + 1
+    }
+    return true
+  }
+  if k == K_ENUM {
+    if peek(a + 16) != peek(b + 16) {
+      return false
+    }
+    let row = peek(td + 24) + peek(a + 16) * 32
+    let nv = peek(row + 8)
+    var x: Word = 0
+    while x < nv {
+      if not eq_v(peek(a + 24 + x * 8), peek(b + 24 + x * 8), peek(peek(row + 16) + x * 8)) {
+        return false
+      }
+      x = x + 1
+    }
+    return true
+  }
+  return false
+}
+
+fn hash_bytes(p: Word, n: Word) -> Word {
+  var h: Word = -3750763034362895579
+  var i: Word = 0
+  while i < n {
+    h = w_xor(h, peek8(p + i)) * 1099511628211
+    i = i + 1
+  }
+  return h
+}
+
+fn hash_v(v: Word, td: Word) -> Word {
+  let k = peek(td)
+  if k == K_INT {
+    return int_hash(v)
+  }
+  if k == K_STR {
+    return hash_bytes(v + 32, peek(v + 16))
+  }
+  if k < K_STR {
+    return v * 1099511628211
+  }
+  var h: Word = 7
+  if k == K_LIST {
+    var i: Word = 0
+    while i < peek(v + 16) {
+      h = h * 31 + hash_v(peek(peek(v + 32) + i * 8), peek(td + 16))
+      i = i + 1
+    }
+    return h
+  }
+  if k == K_RECORD {
+    var f: Word = 0
+    while f < peek(td + 16) {
+      h = h * 31 + hash_v(peek(v + 16 + f * 8), peek(peek(td + 24) + f * 8))
+      f = f + 1
+    }
+    return h
+  }
+  if k == K_ENUM {
+    let row = peek(td + 24) + peek(v + 16) * 32
+    h = peek(v + 16) + 1
+    var x: Word = 0
+    while x < peek(row + 8) {
+      h = h * 31 + hash_v(peek(v + 24 + x * 8), peek(peek(row + 16) + x * 8))
+      x = x + 1
+    }
+    return h
+  }
+  return h + peek(v + 16)
+}
+
+// ordering for sort/min/max: raw -1 / 0 / 1; -2 when the type is not ordered
+fn cmp_v(a: Word, b: Word, td: Word) -> Word {
+  let k = peek(td)
+  if k == K_INT {
+    return int_cmp(a, b)
+  }
+  if k == K_FLOAT {
+    if ffrom(a) < ffrom(b) {
+      return -1
+    }
+    if ffrom(a) > ffrom(b) {
+      return 1
+    }
+    return 0
+  }
+  if k == K_STR {
+    return Str_cmp(a, b)
+  }
+  return -2
+}
+
+fn not_comparable(sp: Word) -> Word {
+  return fail_msg("R0009", "sort: values are not comparable (only Int, Float, Str can be sorted)", sp)
+}

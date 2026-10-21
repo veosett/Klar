@@ -1,0 +1,14 @@
+fn fib(n: Int) -> Int {
+  if n < 2 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+
+fn main() uses io, time {
+  let start = now_ns()
+  let r = fib(25)
+  let elapsed = (now_ns() - start).to_float() / 1000000.0
+  print("result={r}")
+  print("time_ms={elapsed}")
+}

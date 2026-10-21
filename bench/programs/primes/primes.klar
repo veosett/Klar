@@ -1,0 +1,31 @@
+fn is_prime(n: Int) -> Bool {
+  if n < 2 {
+    return false
+  }
+  if n % 2 == 0 {
+    return n == 2
+  }
+  var d = 3
+  while d * d <= n {
+    if n % d == 0 {
+      return false
+    }
+    d = d + 2
+  }
+  return true
+}
+
+fn main() uses io, time {
+  let start = now_ns()
+  var count = 0
+  var n = 0
+  while n < 30000 {
+    if is_prime(n) {
+      count = count + 1
+    }
+    n = n + 1
+  }
+  let elapsed = (now_ns() - start).to_float() / 1000000.0
+  print("result={count}")
+  print("time_ms={elapsed}")
+}

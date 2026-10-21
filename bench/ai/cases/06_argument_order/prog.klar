@@ -1,0 +1,7 @@
+fn final_price(price: Int, discount_percent: Int, tax_percent: Int) -> Int {
+  return price * (100 - discount_percent) / 100 * (100 + tax_percent) / 100
+}
+
+fn main() uses io {
+  print(final_price(200, 20, 10)) // BUG: tax and discount swapped (should be discount 10, tax 20)
+}

@@ -1,0 +1,7 @@
+fn fact(n: Int) -> Int {
+  return n * fact(n - 1) // BUG: no base case
+}
+
+fn main() uses io {
+  print(fact(5))
+}

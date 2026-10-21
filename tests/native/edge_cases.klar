@@ -1,0 +1,141 @@
+// Edge cases for the native backend: Int overflow into bignums on every fast path,
+// branches on bignum compares, many live values across calls (register pressure),
+// x87 float functions on register-held values, closures and recursion.
+
+fn grow(n: Int) -> Int {
+  var x = 1
+  var i = 0
+  while i < n {
+    x = x * 3 + 1
+    i = i + 1
+  }
+  return x
+}
+
+fn many(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int {
+  let s1 = a + b
+  let s2 = c + d
+  let s3 = e + f
+  let s4 = g + h
+  let t = grow(a % 5)
+  let u = s1 * s2 - s3 * s4 + t
+  return u + a - b + c - d + e - f + g - h
+}
+
+fn fact(n: Int) -> Int {
+  if n <= 1 {
+    return 1
+  }
+  return n * fact(n - 1)
+}
+
+test "overflow on every fast path" {
+  let big = 4611686018427387903
+  assert big + 1 == 4611686018427387904
+  assert big + big == 9223372036854775806
+  assert (0 - big) - 2 == -4611686018427387905
+  assert big * 2 == 9223372036854775806
+  assert big * big > big
+  assert (big + 1) - 1 == big
+  assert (big + 1) / 2 == 2305843009213693952
+  assert (big + 1) % 10 == 4
+  assert -(0 - big - 1) == 4611686018427387904
+  assert grow(50) > 1000000000000000000000
+  assert grow(50) % 7 == grow(50) - grow(50) / 7 * 7
+}
+
+test "division semantics" {
+  assert 7 / 2 == 3
+  assert -7 / 2 == -3
+  assert 7 % -2 == 1
+  assert -7 % 2 == -1
+  let m = -4611686018427387904
+  assert m / -1 == 4611686018427387904
+  assert m * -1 == 4611686018427387904
+}
+
+test "branches on bignums" {
+  var hits = 0
+  let x = fact(25)
+  if x > 1000 {
+    hits = hits + 1
+  }
+  if x < fact(26) {
+    hits = hits + 1
+  }
+  if x == fact(25) {
+    hits = hits + 1
+  }
+  if 3 < x {
+    hits = hits + 1
+  }
+  var n = 0
+  var y = fact(22)
+  while y > 1 {
+    y = y / 1000
+    n = n + 1
+  }
+  assert hits == 4
+  assert n == 7
+}
+
+test "register pressure across calls" {
+  assert many(a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8) == -144
+  assert many(a: 9, b: 8, c: 7, d: 6, e: 5, f: 4, g: 3, h: 2) == 301
+  var acc = 0
+  for i in range(0, 100) {
+    acc = acc + many(a: i, b: i + 1, c: i + 2, d: i + 3, e: i + 4, f: i + 5, g: i + 6, h: i + 7)
+  }
+  assert acc == -166420
+}
+
+test "float functions" {
+  var s = 0.0
+  for i in range(1, 20) {
+    let x = i.to_float() / 7.0
+    s = s + x.sin() * x.cos() + x.exp() / 100.0 + x.ln() + x.pow(1.5) + x.sqrt()
+  }
+  assert s > 20.0 and s < 200.0
+  assert (2.0).pow(10.0) == 1024.0
+  assert (1.0).exp() > 2.718 and (1.0).exp() < 2.719
+}
+
+test "closures and lists" {
+  let k = 7
+  let xs = range(0, 1000).map(fn(x) => x * k).filter(fn(x) => x % 3 == 0)
+  assert xs.len() == 334
+  assert xs.sum() == 1167831
+  let words = ["b", "a", "c"].sort()
+  assert words == ["a", "b", "c"]
+  let neg = [3, -1, 2, -5].sort()
+  assert neg == [-5, -1, 2, 3]
+  let mixed = [fact(21), 3, -fact(22), 0].sort()
+  assert mixed.get(0).unwrap_or(0) == -fact(22)
+  assert mixed.get(3).unwrap_or(0) == fact(21)
+}
+
+fn divs(x: Int) -> Int {
+  return x / 2 + x / 3 + x / 7 + x / 8 + x / -3 + x / -16 + x / 10 + x / 1000000007 + x % 2 + x % 3 + x % 7 +
+    x % 8 + x % -3 + x % -16 + x % 10 + x % 1000000007
+}
+
+test "division by constants (reciprocal multiply)" {
+  let xs = [0, 1, -1, 2, -2, 7, -7, 9, -9, 15, -15, 16, -16, 17, -17, 99, -99, 1000000, -1000000,
+    4611686018427387903, -4611686018427387904, 123456789012345, -123456789012345, 4611686018427387904]
+  var total = 0
+  for x in xs {
+    total = total + divs(x)
+  }
+  assert total == 3714054280312186201
+}
+
+test "fact" {
+  assert fact(30) == 265252859812191058636308480000000
+}
+
+fn main() uses io {
+  print(grow(60))
+  print(many(a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8))
+  print(fact(40))
+  print((0.5).sin() + (0.5).cos())
+}

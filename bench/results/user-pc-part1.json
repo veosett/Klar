@@ -1,0 +1,110 @@
+{
+  "machine": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "repeat": 2,
+  "versions": {
+    "klar": "Klar 0.2, compiled backend (Klar -> Python bytecode, runs on CPython 3.10.12)",
+    "klar-interp": "Klar 0.2, tree-walking interpreter (on CPython 3.10.12)",
+    "python": "CPython 3.10.12",
+    "javascript": "Node.js v22.23.2",
+    "c": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 -O2",
+    "java": "openjdk version \"11.0.32.1\" 2026-08-18"
+  },
+  "results": {
+    "fib": {
+      "klar": {
+        "result": "75025",
+        "compute_ms": 18.7874,
+        "wall_ms": 280.63810000458034
+      },
+      "klar-interp": {
+        "result": "75025",
+        "compute_ms": 1700.4807,
+        "wall_ms": 1979.1839999961667
+      },
+      "python": {
+        "result": "75025",
+        "compute_ms": 18.572,
+        "wall_ms": 47.986600002332125
+      },
+      "javascript": {
+        "result": "75025",
+        "compute_ms": 2.178,
+        "wall_ms": 62.85800000478048
+      },
+      "c": {
+        "result": "75025",
+        "compute_ms": 0.158,
+        "wall_ms": 1.0001999980886467
+      },
+      "java": {
+        "result": "75025",
+        "compute_ms": 1.792,
+        "wall_ms": 740.9439000039129
+      }
+    },
+    "loop": {
+      "klar": {
+        "result": "806000",
+        "compute_ms": 47.1043,
+        "wall_ms": 327.3107000059099
+      },
+      "klar-interp": {
+        "result": "806000",
+        "compute_ms": 1894.9395,
+        "wall_ms": 2182.629499999166
+      },
+      "python": {
+        "result": "806000",
+        "compute_ms": 41.788,
+        "wall_ms": 75.87349999812432
+      },
+      "javascript": {
+        "result": "806000",
+        "compute_ms": 5.573,
+        "wall_ms": 62.37200000032317
+      },
+      "c": {
+        "result": "806000",
+        "compute_ms": 0.984,
+        "wall_ms": 1.8254999959026463
+      },
+      "java": {
+        "result": "806000",
+        "compute_ms": 4.697,
+        "wall_ms": 579.5132000057492
+      }
+    },
+    "primes": {
+      "klar": {
+        "result": "3245",
+        "compute_ms": 36.5082,
+        "wall_ms": 299.4939999989583
+      },
+      "klar-interp": {
+        "result": "3245",
+        "compute_ms": 2063.8625,
+        "wall_ms": 2343.5591000015847
+      },
+      "python": {
+        "result": "3245",
+        "compute_ms": 24.086,
+        "wall_ms": 55.92220000107773
+      },
+      "javascript": {
+        "result": "3245",
+        "compute_ms": 3.36,
+        "wall_ms": 57.85959999775514
+      },
+      "c": {
+        "result": "3245",
+        "compute_ms": 1.933,
+        "wall_ms": 2.8151000005891547
+      },
+      "java": {
+        "result": "3245",
+        "compute_ms": 4.737,
+        "wall_ms": 557.951700000558
+      }
+    }
+  }
+}

@@ -1,0 +1,812 @@
+// Klar runtime: core (system Klar). Compiled into every native executable.
+// Values are 64-bit words. Heap objects: [rc][type descriptor][payload...]; rc < 0 = immortal.
+// Type descriptor: [kind][name][a][b][c][d] (see klar/native/lower.py).
+
+const K_UNIT: Word = 0
+const K_BOOL: Word = 1
+const K_INT: Word = 2
+const K_FLOAT: Word = 3
+const K_WORD: Word = 4
+const K_STR: Word = 10
+const K_LIST: Word = 11
+const K_MAP: Word = 12
+const K_RECORD: Word = 13
+const K_ENUM: Word = 14
+const K_FN: Word = 15
+const K_BIG: Word = 16
+const K_BUF: Word = 17
+
+// global area (g_rt) offsets
+const G_HEAP: Word = 0
+const G_HEAP_END: Word = 8
+const G_SMALL: Word = 16
+const G_LARGE: Word = 536
+const G_OUTLEN: Word = 920
+const G_INPOS: Word = 928
+const G_INLEN: Word = 936
+const G_INEOF: Word = 944
+const G_RAND: Word = 952
+const G_DIVQ: Word = 960
+const G_DIVR: Word = 968
+const G_DECPT: Word = 976
+const G_CHUNK: Word = 984
+
+const OUT_CAP: Word = 65536
+
+fn g() -> Word {
+  return static_addr("g_rt")
+}
+
+// ---------------------------------------------------------------------------
+// memory
+// ---------------------------------------------------------------------------
+fn fatal(msg: Word) -> Word {
+  flush_out()
+  err_str(msg)
+  err_byte(10)
+  os_exit(2)
+  return 0
+}
+
+fn bump(bytes: Word, cls: Word) -> Word {
+  let gp = g()
+  var p = peek(gp + G_HEAP)
+  if p == 0 or p + bytes > peek(gp + G_HEAP_END) {
+    // heap chunks start at 1 MB and double up to 64 MB
+    var size = peek(gp + G_CHUNK)
+    if size == 0 {
+      size = 1048576
+    }
+    if size < 67108864 {
+      poke(gp + G_CHUNK, size * 2)
+    }
+    if bytes + 64 > size {
+      size = bytes + 64
+    }
+    p = os_alloc(size)
+    if p == 0 or (p < 0 and p > -4096) {
+      fatal(bits("out of memory"))
+    }
+    poke(gp + G_HEAP_END, p + size)
+  }
+  poke(gp + G_HEAP, p + bytes)
+  poke(p, cls)
+  return p + 8
+}
+
+fn alloc(size: Word) -> Word {
+  let need = size + 8
+  let gp = g()
+  if need <= 1024 {
+    let cls = (need + 15) / 16
+    let head = gp + G_SMALL + cls * 8
+    let p = peek(head)
+    if p != 0 {
+      poke(head, peek(p))
+      return p
+    }
+    return bump(cls * 16, cls)
+  }
+  var big_cls: Word = 11
+  while w_shl(1, big_cls) < need {
+    big_cls = big_cls + 1
+  }
+  let lhead = gp + G_LARGE + (big_cls - 11) * 8
+  let lp = peek(lhead)
+  if lp != 0 {
+    poke(lhead, peek(lp))
+    return lp
+  }
+  return bump(w_shl(1, big_cls), big_cls + 1000)
+}
+
+fn block_free(p: Word) {
+  let cls = peek(p - 8)
+  let gp = g()
+  var head: Word = 0
+  if cls < 1000 {
+    head = gp + G_SMALL + cls * 8
+  } else {
+    head = gp + G_LARGE + (cls - 1011) * 8
+  }
+  poke(p, peek(head))
+  poke(head, p)
+}
+
+fn block_size(p: Word) -> Word {
+  let cls = peek(p - 8)
+  if cls < 1000 {
+    return cls * 16 - 8
+  }
+  return w_shl(1, cls - 1000) - 8
+}
+
+fn copy_words(dst: Word, src: Word, n: Word) {
+  var i: Word = 0
+  while i < n {
+    poke(dst + i * 8, peek(src + i * 8))
+    i = i + 1
+  }
+}
+
+// non-overlapping copy; short tails use overlapping word / dword moves
+fn copy_bytes(dst: Word, src: Word, n: Word) {
+  if n >= 8 {
+    var i: Word = 0
+    while i + 8 < n {
+      poke(dst + i, peek(src + i))
+      i = i + 8
+    }
+    poke(dst + n - 8, peek(src + n - 8))
+    return
+  }
+  if n >= 4 {
+    poke32(dst, peek32(src))
+    poke32(dst + n - 4, peek32(src + n - 4))
+    return
+  }
+  var j: Word = 0
+  while j < n {
+    poke8(dst + j, peek8(src + j))
+    j = j + 1
+  }
+}
+
+fn bytes_eq(a: Word, b: Word, n: Word) -> Bool {
+  var i: Word = 0
+  while i + 8 <= n {
+    if peek(a + i) != peek(b + i) {
+      return false
+    }
+    i = i + 8
+  }
+  while i < n {
+    if peek8(a + i) != peek8(b + i) {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn obj_new(size: Word, td: Word) -> Word {
+  let o = alloc(size)
+  poke(o, 1)
+  poke(o + 8, td)
+  return o
+}
+
+// ---------------------------------------------------------------------------
+// reference counting (the compiler inlines the fast paths)
+// ---------------------------------------------------------------------------
+fn rc_inc(o: Word) {
+  let r = peek(o)
+  if r >= 0 {
+    poke(o, r + 1)
+  }
+}
+
+fn rc_dec(o: Word) {
+  let r = peek(o)
+  if r > 1 {
+    poke(o, r - 1)
+  } else if r == 1 {
+    poke(o, 0)
+    free(o)
+  }
+}
+
+fn is_rc_kind(td: Word) -> Bool {
+  let k = peek(td)
+  return k == K_INT or k >= K_STR
+}
+
+fn retain_v(v: Word, td: Word) {
+  let k = peek(td)
+  if k == K_INT {
+    if w_and(v, 1) == 0 {
+      rc_inc(v)
+    }
+  } else if k >= K_STR {
+    rc_inc(v)
+  }
+}
+
+fn release_v(v: Word, td: Word) {
+  let k = peek(td)
+  if k == K_INT {
+    if w_and(v, 1) == 0 {
+      rc_dec(v)
+    }
+  } else if k >= K_STR {
+    rc_dec(v)
+  }
+}
+
+fn release_words(base: Word, n: Word, td: Word) {
+  let k = peek(td)
+  if k < K_STR and k != K_INT {
+    return
+  }
+  let ints = k == K_INT
+  var i: Word = 0
+  while i < n {
+    let o = peek(base + i * 8)
+    if not ints or w_and(o, 1) == 0 {
+      let r = peek(o)
+      if r > 1 {
+        poke(o, r - 1)
+      } else if r == 1 {
+        poke(o, 0)
+        free(o)
+      }
+    }
+    i = i + 1
+  }
+}
+
+// Called when an object's count reaches zero: release children (by descriptor), then the block.
+fn free(o: Word) {
+  let td = peek(o + 8)
+  let k = peek(td)
+  if k == K_STR or k == K_BIG {
+    block_free(o)
+    return
+  }
+  if k == K_LIST {
+    let data = peek(o + 32)
+    release_words(data, peek(o + 16), peek(td + 16))
+    if data != 0 {
+      block_free(data)
+    }
+  } else if k == K_MAP {
+    let n = peek(o + 16)
+    release_words(peek(o + 32), n, peek(td + 16))
+    release_words(peek(o + 40), n, peek(td + 24))
+    if peek(o + 32) != 0 {
+      block_free(peek(o + 32))
+      block_free(peek(o + 40))
+      block_free(peek(o + 48))
+    }
+  } else if k == K_RECORD {
+    let nf = peek(td + 16)
+    let fts = peek(td + 24)
+    var i: Word = 0
+    while i < nf {
+      release_v(peek(o + 16 + i * 8), peek(fts + i * 8))
+      i = i + 1
+    }
+  } else if k == K_ENUM {
+    let row = peek(td + 24) + peek(o + 16) * 32
+    let vn = peek(row + 8)
+    let vts = peek(row + 16)
+    var j: Word = 0
+    while j < vn {
+      release_v(peek(o + 24 + j * 8), peek(vts + j * 8))
+      j = j + 1
+    }
+  } else if k == K_FN {
+    let nc = peek(td + 16)
+    let cts = peek(td + 24)
+    var c: Word = 0
+    while c < nc {
+      release_v(peek(o + 24 + c * 8), peek(cts + c * 8))
+      c = c + 1
+    }
+  } else if k == K_BUF {
+    if peek(o + 32) != 0 {
+      block_free(peek(o + 32) - 32)
+    }
+  }
+  block_free(o)
+}
+
+// ---------------------------------------------------------------------------
+// strings: [rc][td_Str][nbytes][nchars or -1][utf-8 bytes...][0]
+// ---------------------------------------------------------------------------
+fn str_new(nbytes: Word) -> Word {
+  let s = obj_new(33 + nbytes, static_addr("td_Str"))
+  poke(s + 16, nbytes)
+  poke(s + 24, -1)
+  poke8(s + 32 + nbytes, 0)
+  return s
+}
+
+fn str_from(p: Word, n: Word) -> Word {
+  let s = str_new(n)
+  copy_bytes(s + 32, p, n)
+  return s
+}
+
+fn str_nchars(s: Word) -> Word {
+  let c = peek(s + 24)
+  if c >= 0 {
+    return c
+  }
+  let n = peek(s + 16)
+  var i: Word = 0
+  var count: Word = 0
+  while i < n {
+    if i + 8 <= n and w_and(peek(s + 32 + i), -9187201950435737472) == 0 {
+      count = count + 8                  // 8 ASCII bytes
+      i = i + 8
+    } else {
+      if w_and(peek8(s + 32 + i), 192) != 128 {
+        count = count + 1
+      }
+      i = i + 1
+    }
+  }
+  poke(s + 24, count)
+  return count
+}
+
+// ---------------------------------------------------------------------------
+// string builder: [rc][td_Buf][len][cap][bytes]
+// `bytes` points 32 bytes into a block shaped like a Str ([rc][td][nbytes][nchars][bytes][0]),
+// so sb_finish turns the buffer into the result string without copying.
+// ---------------------------------------------------------------------------
+fn sb_new() -> Word {
+  return sb_with_cap(55)
+}
+
+fn sb_with_cap(cap: Word) -> Word {
+  let b = obj_new(40, static_addr("td_Buf"))
+  poke(b + 16, 0)
+  poke(b + 24, cap)
+  poke(b + 32, alloc(33 + cap) + 32)
+  return b
+}
+
+fn sb_reserve(b: Word, extra: Word) {
+  let len = peek(b + 16)
+  let cap = peek(b + 24)
+  if len + extra <= cap {
+    return
+  }
+  var ncap = cap * 2 + 33
+  while ncap < len + extra {
+    ncap = ncap * 2
+  }
+  let nd = alloc(33 + ncap) + 32
+  copy_bytes(nd, peek(b + 32), len)
+  block_free(peek(b + 32) - 32)
+  poke(b + 32, nd)
+  poke(b + 24, ncap)
+}
+
+fn sb_add_bytes(b: Word, p: Word, n: Word) {
+  let len = peek(b + 16)
+  if len + n > peek(b + 24) {
+    sb_reserve(b, n)
+  }
+  copy_bytes(peek(b + 32) + len, p, n)
+  poke(b + 16, len + n)
+}
+
+fn sb_add_byte(b: Word, c: Word) {
+  let len = peek(b + 16)
+  if len >= peek(b + 24) {
+    sb_reserve(b, 1)
+  }
+  poke8(peek(b + 32) + len, c)
+  poke(b + 16, len + 1)
+}
+
+fn sb_add_str(b: Word, s: Word) {
+  sb_add_bytes(b, s + 32, peek(s + 16))
+}
+
+fn sb_add_cstr(b: Word, s: Str) {
+  sb_add_str(b, bits(s))
+}
+
+fn sb_add_word(b: Word, v: Word) {
+  // decimal of a raw signed word
+  if v < 0 {
+    sb_add_byte(b, 45)
+    if v == -9223372036854775807 - 1 {
+      sb_add_cstr(b, "9223372036854775808")
+      return
+    }
+    sb_add_uword(b, 0 - v)
+    return
+  }
+  sb_add_uword(b, v)
+}
+
+fn sb_add_uword(b: Word, v: Word) {
+  // count the digits, then write them straight into the buffer from the right
+  var n: Word = 1
+  var p: Word = 10
+  while n < 20 and not w_ult(v, p) {
+    n = n + 1
+    p = p * 10
+  }
+  let len = peek(b + 16)
+  if len + n > peek(b + 24) {
+    sb_reserve(b, n)
+  }
+  let dst = peek(b + 32) + len
+  var x = v
+  var i = n - 1
+  while i >= 0 {
+    let q = w_udiv(x, 10)
+    poke8(dst + i, 48 + x - q * 10)
+    x = q
+    i = i - 1
+  }
+  poke(b + 16, len + n)
+}
+
+fn sb_len(b: Word) -> Word {
+  return peek(b + 16)
+}
+
+fn sb_finish(b: Word) -> Word {
+  let n = peek(b + 16)
+  let cap = peek(b + 24)
+  if cap - n >= 16 and (n < 1024 or n * 2 < cap) {
+    // much smaller than the buffer: copy into an exact-size string (the buffer is reused hot)
+    let r = str_from(peek(b + 32), n)
+    rc_dec(b)
+    return r
+  }
+  let s = peek(b + 32) - 32
+  poke(s, 1)
+  poke(s + 8, static_addr("td_Str"))
+  poke(s + 16, n)
+  poke(s + 24, -1)
+  poke8(s + 32 + n, 0)
+  poke(b + 32, 0)
+  rc_dec(b)
+  return s
+}
+
+// ---------------------------------------------------------------------------
+// output (buffered stdout, unbuffered stderr)
+// ---------------------------------------------------------------------------
+fn flush_out() {
+  let gp = g()
+  let buf = static_addr("g_outbuf")
+  let n = peek(gp + G_OUTLEN)
+  var done: Word = 0
+  while done < n {
+    let w = os_write(1, buf + done, n - done)
+    if w <= 0 {
+      done = n
+    } else {
+      done = done + w
+    }
+  }
+  poke(gp + G_OUTLEN, 0)
+}
+
+fn out_bytes(p: Word, n: Word) {
+  let gp = g()
+  if peek(gp + G_OUTLEN) + n > OUT_CAP {
+    flush_out()
+  }
+  if n > OUT_CAP {
+    var done: Word = 0
+    while done < n {
+      let w = os_write(1, p + done, n - done)
+      if w <= 0 {
+        return
+      }
+      done = done + w
+    }
+    return
+  }
+  let len = peek(gp + G_OUTLEN)
+  copy_bytes(static_addr("g_outbuf") + len, p, n)
+  poke(gp + G_OUTLEN, len + n)
+}
+
+fn out_byte(c: Word) {
+  let gp = g()
+  if peek(gp + G_OUTLEN) + 1 > OUT_CAP {
+    flush_out()
+  }
+  let len = peek(gp + G_OUTLEN)
+  poke8(static_addr("g_outbuf") + len, c)
+  poke(gp + G_OUTLEN, len + 1)
+}
+
+fn err_bytes(p: Word, n: Word) {
+  var done: Word = 0
+  while done < n {
+    let w = os_write(2, p + done, n - done)
+    if w <= 0 {
+      return
+    }
+    done = done + w
+  }
+}
+
+fn err_str(s: Word) {
+  err_bytes(s + 32, peek(s + 16))
+}
+
+fn err_byte(c: Word) {
+  let tmp = static_addr("g_scratch")
+  poke8(tmp, c)
+  err_bytes(tmp, 1)
+}
+
+// ---------------------------------------------------------------------------
+// errors: same text format as the Klar interpreter
+// span data: [file][line][col][end_line][end_col][source line]
+// ---------------------------------------------------------------------------
+fn span_short(b: Word, sp: Word) {
+  sb_add_str(b, peek(sp))
+  sb_add_byte(b, 58)
+  sb_add_word(b, peek(sp + 8))
+  sb_add_byte(b, 58)
+  sb_add_word(b, peek(sp + 16))
+}
+
+fn list_new_str() -> Word {
+  return list_with_cap(static_addr("td_ListStr"), 4)
+}
+
+fn detail_add(lst: Word, name: Word, value: Word) -> Word {
+  let b = sb_new()
+  sb_add_str(b, name)
+  sb_add_cstr(b, " = ")
+  sb_add_str(b, value)
+  rc_dec(value)
+  return list_push_owned_raw(lst, sb_finish(b))
+}
+
+fn fail_with(code: Word, msg: Word, sp: Word, details: Word, hint: Word) -> Word {
+  flush_out()
+  let b = sb_new()
+  sb_add_cstr(b, "runtime error[")
+  sb_add_str(b, code)
+  sb_add_cstr(b, "]: ")
+  sb_add_str(b, msg)
+  sb_add_byte(b, 10)
+  if sp != 0 {
+    sb_add_cstr(b, "  --> ")
+    span_short(b, sp)
+    sb_add_byte(b, 10)
+    code_frame(b, sp)
+  }
+  if details != 0 {
+    let n = peek(details + 16)
+    if n > 0 {
+      sb_add_cstr(b, "  note: values: ")
+      var i: Word = 0
+      while i < n {
+        if i > 0 {
+          sb_add_cstr(b, ", ")
+        }
+        sb_add_str(b, peek(peek(details + 32) + i * 8))
+        i = i + 1
+      }
+      sb_add_byte(b, 10)
+    }
+  }
+  stack_note(b)
+  if peek(hint + 16) > 0 {
+    sb_add_cstr(b, "  hint: ")
+    sb_add_str(b, hint)
+    sb_add_byte(b, 10)
+  }
+  err_bytes(peek(b + 32), peek(b + 16))
+  os_exit(1)
+  return 0
+}
+
+fn code_frame(b: Word, sp: Word) {
+  let line = peek(sp + 8)
+  if line <= 0 {
+    return
+  }
+  let num = sb_new()
+  sb_add_word(num, line)
+  let w = sb_len(num)
+  let text = peek(sp + 40)
+  sb_add_cstr(b, "  ")
+  pad_spaces(b, w)
+  sb_add_cstr(b, " |\n  ")
+  sb_add_bytes(b, peek(num + 32), w)
+  rc_dec(num)
+  sb_add_cstr(b, " | ")
+  sb_add_str(b, text)
+  sb_add_cstr(b, "\n  ")
+  pad_spaces(b, w)
+  sb_add_cstr(b, " | ")
+  let col = peek(sp + 16)
+  pad_spaces(b, col - 1)
+  var width: Word = 1
+  if peek(sp + 24) == line {
+    width = peek(sp + 32) - col
+  } else {
+    width = str_nchars(text) - (col - 1)
+  }
+  if width < 1 {
+    width = 1
+  }
+  var i: Word = 0
+  while i < width {
+    sb_add_byte(b, 94)
+    i = i + 1
+  }
+  sb_add_byte(b, 10)
+}
+
+fn pad_spaces(b: Word, n: Word) {
+  var i: Word = 0
+  while i < n {
+    sb_add_byte(b, 32)
+    i = i + 1
+  }
+}
+
+// ---- call stack reconstruction ----------------------------------------------------------
+// Every function keeps a standard RBP frame: [rbp] = caller's rbp, [rbp + 8] = return address.
+// The compiler writes g_fn_table (address ranges + names of Klar functions) and g_site_table
+// (return address -> call-site span). Walking the chain rebuilds g_frames[1..depth] =
+// (function name, span of the call it is making), innermost last — the layout stack_note prints.
+
+// index of the Klar function containing code address pc, or -1
+fn fn_index(pc: Word) -> Word {
+  let t = static_addr("g_fn_table")
+  var lo: Word = 0
+  var hi = peek(t)
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    let row = t + 8 + mid * 24
+    if pc < peek(row) {
+      hi = mid
+    } else if pc >= peek(row + 8) {
+      lo = mid + 1
+    } else {
+      return mid
+    }
+  }
+  return -1
+}
+
+fn site_of(ret: Word) -> Word {
+  let t = static_addr("g_site_table")
+  var lo: Word = 0
+  var hi = peek(t)
+  while lo < hi {
+    let mid = (lo + hi) / 2
+    let a = peek(t + 8 + mid * 16)
+    if ret < a {
+      hi = mid
+    } else if ret > a {
+      lo = mid + 1
+    } else {
+      return peek(t + 16 + mid * 16)
+    }
+  }
+  return 0
+}
+
+fn rebuild_frames() {
+  let frames = static_addr("g_frames")
+  var depth: Word = 0
+  var fp = frame_ptr()
+  while fp != 0 {
+    if fn_index(peek(fp + 8)) >= 0 {
+      depth = depth + 1
+    }
+    let next = peek(fp)
+    if w_ult(fp, next) {
+      fp = next
+    } else {
+      fp = 0
+    }
+  }
+  if depth > 10001 {
+    depth = 10001
+  }
+  poke(static_addr("g_depth"), depth)
+  var i = depth
+  fp = frame_ptr()
+  while fp != 0 and i >= 1 {
+    let ret = peek(fp + 8)
+    let k = fn_index(ret)
+    if k >= 0 {
+      poke(frames + i * 16, peek(static_addr("g_fn_table") + 8 + k * 24 + 16))
+      poke(frames + i * 16 + 8, site_of(ret))
+      i = i - 1
+    }
+    let next = peek(fp)
+    if w_ult(fp, next) {
+      fp = next
+    } else {
+      fp = 0
+    }
+  }
+}
+
+fn stack_note(b: Word) {
+  rebuild_frames()
+  let depth = peek(static_addr("g_depth"))
+  if depth <= 0 {
+    return
+  }
+  let frames = static_addr("g_frames")
+  sb_add_cstr(b, "  note: call stack (innermost first): ")
+  var i = depth
+  var shown: Word = 0
+  while i >= 1 {
+    if depth > 8 and shown == 5 and i > 2 {
+      sb_add_cstr(b, " <- ... ")
+      sb_add_word(b, depth - 7)
+      sb_add_cstr(b, " more frames ...")
+      i = 2
+    }
+    if shown > 0 {
+      sb_add_cstr(b, " <- ")
+    }
+    sb_add_str(b, peek(frames + i * 16))
+    sb_add_cstr(b, " (")
+    let call_span = peek(frames + (i - 1) * 16 + 8)
+    if call_span != 0 {
+      span_short(b, call_span)
+    } else {
+      sb_add_cstr(b, "?")
+    }
+    sb_add_byte(b, 41)
+    shown = shown + 1
+    i = i - 1
+  }
+  sb_add_byte(b, 10)
+}
+
+fn fail_simple(code: Str, msg: Word, sp: Word) -> Word {
+  return fail_with(bits(code), msg, sp, 0, bits(""))
+}
+
+fn fail_msg(code: Str, msg: Str, sp: Word) -> Word {
+  return fail_with(bits(code), bits(msg), sp, 0, bits(""))
+}
+
+fn current_span() -> Word {
+  rebuild_frames()
+  let depth = peek(static_addr("g_depth"))
+  if depth <= 0 {
+    return 0
+  }
+  return peek(static_addr("g_frames") + (depth - 1) * 16 + 8)
+}
+
+fn div_zero(sp: Word) -> Word {
+  return fail_with(bits("R0001"), bits("division by zero"), sp, 0, bits("check the divisor before dividing"))
+}
+
+fn stack_overflow() -> Word {
+  return fail_with(bits("R0006"), bits("stack overflow: more than 10000 nested calls"), current_span(), 0,
+    bits("check the base case of the recursion"))
+}
+
+fn unreachable() -> Word {
+  return fail_msg("R0099", "internal: no match arm matched", current_span())
+}
+
+// ---------------------------------------------------------------------------
+// entry point
+// ---------------------------------------------------------------------------
+fn main_entry() -> Word {
+  init_consts()
+  poke(static_addr("g_frames") + 8, static_addr("main_span"))
+  let r = user_main()
+  if peek(static_addr("main_kind")) == 1 {
+    if peek(r + 16) == 1 {
+      let b = sb_new()
+      sb_add_cstr(b, "main returned ")
+      show_into(b, r, peek(r + 8), false)
+      poke(static_addr("g_depth"), 0)
+      fail_with(bits("R0007"), sb_finish(b), static_addr("main_span"), 0, bits(""))
+    }
+  }
+  flush_out()
+  return 0
+}

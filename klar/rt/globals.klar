@@ -1,0 +1,281 @@
+// Klar runtime: global built-in functions (print, range, time, ...). Names: b_<builtin>.
+
+fn b_print(v: Word, td_T: Word) {
+  if peek(td_T) == K_STR {
+    out_bytes(v + 32, peek(v + 16))
+  } else {
+    let b = sb_new()
+    show_into(b, v, td_T, true)
+    out_bytes(peek(b + 32), peek(b + 16))
+    rc_dec(b)
+  }
+  out_byte(10)
+}
+
+fn b_range(lo: Int, hi: Int, rtd: Word) -> Word {
+  if not is_small(lo) or not is_small(hi) {
+    fail_msg("R0009", "range: bounds too large", current_span())
+  }
+  return list_from_range(rtd, untag(lo), untag(hi))
+}
+
+fn b_now_ns() -> Int {
+  return tag(os_time_ns())
+}
+
+fn b_now_ms() -> Int {
+  return tag(os_time_ns() / 1000000)
+}
+
+fn b_fail(msg: Word, sp: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "fail: ")
+  sb_add_str(b, msg)
+  return fail_with(bits("R0004"), sb_finish(b), sp, 0, bits(""))
+}
+
+fn b_todo(what: Word, sp: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "reached unfinished code: todo(\"")
+  sb_add_str(b, what)
+  sb_add_cstr(b, "\")")
+  return fail_with(bits("R0012"), sb_finish(b), sp, 0, bits(""))
+}
+
+fn b_random_int(lo: Int, hi: Int, sp: Word) -> Int {
+  if lo > hi {
+    let b = sb_new()
+    sb_add_cstr(b, "random_int: min (")
+    int_show(b, bits(lo))
+    sb_add_cstr(b, ") > max (")
+    int_show(b, bits(hi))
+    sb_add_cstr(b, ")")
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  let gp = g()
+  var x = peek(gp + G_RAND)
+  if x == 0 {
+    x = w_or(os_time_ns(), 1)
+  }
+  x = w_xor(x, w_shl(x, 13))
+  x = w_xor(x, w_shr(x, 7))
+  x = w_xor(x, w_shl(x, 17))
+  poke(gp + G_RAND, x)
+  let r: Int = tag(w_shr(x, 3))
+  return lo + r % (hi - lo + 1)
+}
+
+fn b_read_line(rtd: Word) -> Word {
+  let gp = g()
+  let buf = static_addr("g_inbuf")
+  let b = sb_new()
+  var got = false
+  var reading = true
+  while reading {
+    if peek(gp + G_INPOS) >= peek(gp + G_INLEN) {
+      if peek(gp + G_INEOF) == 1 {
+        reading = false
+      } else {
+        flush_out()
+        let n = os_read(0, buf, 65536)
+        if n <= 0 {
+          poke(gp + G_INEOF, 1)
+          reading = false
+        } else {
+          poke(gp + G_INPOS, 0)
+          poke(gp + G_INLEN, n)
+        }
+      }
+    }
+    if reading {
+      let pos = peek(gp + G_INPOS)
+      let c = peek8(buf + pos)
+      poke(gp + G_INPOS, pos + 1)
+      got = true
+      if c == 10 {
+        reading = false
+      } else {
+        sb_add_byte(b, c)
+      }
+    }
+  }
+  if not got {
+    rc_dec(b)
+    return none()
+  }
+  var n2 = sb_len(b)
+  if n2 > 0 and peek8(peek(b + 32) + n2 - 1) == 13 {
+    poke(b + 16, n2 - 1)
+  }
+  return some_new(rtd, sb_finish(b))
+}
+
+fn cstr_len(p: Word) -> Word {
+  var n: Word = 0
+  while peek8(p + n) != 0 {
+    n = n + 1
+  }
+  return n
+}
+
+fn b_cli_args(rtd: Word) -> Word {
+  var out = list_with_cap(rtd, 4)
+  if os_platform() == 0 {
+    let argc = os_argc()
+    var i: Word = 1
+    while i < argc {
+      let p = os_argv(i)
+      out = list_push_owned_raw(out, str_from(p, cstr_len(p)))
+      i = i + 1
+    }
+    return out
+  }
+  // Windows: split GetCommandLineA, honouring double quotes; skip the program name
+  let cl = os_cmdline()
+  let n = cstr_len(cl)
+  var i2: Word = 0
+  var index: Word = 0
+  while i2 < n {
+    while i2 < n and peek8(cl + i2) == 32 {
+      i2 = i2 + 1
+    }
+    if i2 < n {
+      let b = sb_new()
+      var quoted = false
+      while i2 < n and (quoted or peek8(cl + i2) != 32) {
+        let c = peek8(cl + i2)
+        if c == 34 {
+          quoted = not quoted
+        } else {
+          sb_add_byte(b, c)
+        }
+        i2 = i2 + 1
+      }
+      if index > 0 {
+        out = list_push_owned_raw(out, sb_finish(b))
+      } else {
+        rc_dec(b)
+      }
+      index = index + 1
+    }
+  }
+  return out
+}
+
+fn io_error_text(b: Word, code: Word) {
+  if code == -2 or os_platform() == 1 {
+    sb_add_cstr(b, "No such file or directory")
+  } else if code == -13 {
+    sb_add_cstr(b, "Permission denied")
+  } else if code == -21 {
+    sb_add_cstr(b, "Is a directory")
+  } else {
+    sb_add_cstr(b, "I/O error")
+  }
+}
+
+fn b_read_file(path: Word, rtd: Word) -> Word {
+  let fd = os_open(path + 32, 0)
+  if fd < 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "cannot read '")
+    sb_add_str(b, path)
+    sb_add_cstr(b, "': ")
+    io_error_text(b, fd)
+    return err_new(rtd, sb_finish(b))
+  }
+  let content = sb_new()
+  let chunk = alloc(65536)
+  var reading = true
+  while reading {
+    let n = os_read(fd, chunk, 65536)
+    if n <= 0 {
+      reading = false
+    } else {
+      sb_add_bytes(content, chunk, n)
+    }
+  }
+  block_free(chunk)
+  os_close(fd)
+  let s = sb_finish(content)
+  if not valid_utf8(s) {
+    rc_dec(s)
+    let b2 = sb_new()
+    sb_add_cstr(b2, "cannot read '")
+    sb_add_str(b2, path)
+    sb_add_cstr(b2, "': not valid UTF-8 text")
+    return err_new(rtd, sb_finish(b2))
+  }
+  return ok_new(rtd, s)
+}
+
+fn valid_utf8(s: Word) -> Bool {
+  let n = peek(s + 16)
+  var i: Word = 0
+  while i < n {
+    let c = peek8(s + 32 + i)
+    var need: Word = 0
+    if c < 128 {
+      need = 0
+    } else if c >= 194 and c < 224 {
+      need = 1
+    } else if c >= 224 and c < 240 {
+      need = 2
+    } else if c >= 240 and c < 245 {
+      need = 3
+    } else {
+      return false
+    }
+    var k: Word = 1
+    while k <= need {
+      if i + k >= n or w_and(peek8(s + 32 + i + k), 192) != 128 {
+        return false
+      }
+      k = k + 1
+    }
+    i = i + 1 + need
+  }
+  return true
+}
+
+fn b_write_file(path: Word, content: Word, rtd: Word) -> Word {
+  let fd = os_open(path + 32, 1)
+  if fd < 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "cannot write '")
+    sb_add_str(b, path)
+    sb_add_cstr(b, "': ")
+    io_error_text(b, fd)
+    return err_new(rtd, sb_finish(b))
+  }
+  var done: Word = 0
+  let n = peek(content + 16)
+  while done < n {
+    let w = os_write(fd, content + 32 + done, n - done)
+    if w <= 0 {
+      done = n
+    } else {
+      done = done + w
+    }
+  }
+  os_close(fd)
+  return ok_new(rtd, 0)
+}
+
+fn b_file_exists(path: Word) -> Bool {
+  return os_file_exists(path + 32)
+}
+
+fn b_dbg(v: Word, td: Word, text: Word, sp: Word) {
+  flush_out()
+  let b = sb_new()
+  sb_add_cstr(b, "[dbg ")
+  span_short(b, sp)
+  sb_add_cstr(b, "] ")
+  sb_add_str(b, text)
+  sb_add_cstr(b, " = ")
+  show_into(b, v, td, false)
+  sb_add_byte(b, 10)
+  err_bytes(peek(b + 32), peek(b + 16))
+  rc_dec(b)
+}

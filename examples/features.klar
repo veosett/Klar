@@ -1,0 +1,81 @@
+// Klar 0.2 features: modules, generic types, aliases, constants, guards,
+// prelude types, doc-tests, property tests, dbg.
+use lib.geo.{Point, dist}
+use std.math.{gcd, mean}
+use std.text.{title_case}
+
+type UserId = Int
+type Grid[T] = List[List[T]]
+
+/// A binary search tree.
+enum Tree[T] {
+  Leaf
+  Node(left: Tree[T], value: T, right: Tree[T])
+}
+
+const LIMIT: Int = 3
+const DOUBLE_LIMIT: Int = LIMIT * 2
+
+/// Inserts a value, keeping the tree ordered.
+/// >>> assert to_list(add(add(Tree.Leaf, 2), 1)) == [1, 2]
+fn add(t: Tree[Int], v: Int) -> Tree[Int] {
+  return match t {
+    Tree.Leaf => Tree.Node(left: Tree.Leaf, value: v, right: Tree.Leaf),
+    Tree.Node(l, x, r) if v < x => Tree.Node(left: add(l, v), value: x, right: r),
+    Tree.Node(l, x, r) => Tree.Node(left: l, value: x, right: add(r, v)),
+  }
+}
+
+fn to_list(t: Tree[Int]) -> List[Int] {
+  return match t {
+    Tree.Leaf => [],
+    Tree.Node(l, x, r) => to_list(l).push(x).concat(to_list(r)),
+  }
+}
+
+/// >>> assert classify(-5) == "negative"
+fn classify(n: Int) -> Str {
+  return match n {
+    0 => "zero",
+    x if x < 0 => "negative",
+    x if x > LIMIT => "big",
+    _ => "small",
+  }
+}
+
+/// >>> assert sum_grid([[1, 2], [3]]) == 6
+fn sum_grid(g: Grid[Int]) -> Int {
+  return g.flatten().sum()
+}
+
+fn main() uses io, fs {
+  let id: UserId = 42
+  let p = Point { x: 3.0, y: 4.0 }
+  print("id={id} dist={dist(p)} PI={PI.fixed(3)} limit={DOUBLE_LIMIT} gcd={gcd(84, 36)}")
+  var t: Tree[Int] = Tree.Leaf
+  for v in [5, 2, 8, 1, 9, 3] {
+    t = add(t, v)
+  }
+  print("sorted by tree: {to_list(t)}")
+  print([0, -4, 2, 10].map(fn(n) => classify(n)))
+  print(["x", "y"].enumerate().map(fn(e) => "{e.index}:{e.value}").join(", "))
+  print([1, 2, 3, 4, 5, 6].group_by(fn(n) => n % 3))
+  print([1, 2, 3, 4].partition(fn(n) => n.is_even()))
+  print(title_case("klar is clear"))
+  print(mean([1.0, 2.0, 4.5]))
+  let total = dbg([1, 2, 3].sum())
+  print(total)
+  match read_file("does-not-exist.txt") {
+    Ok(text) => print(text),
+    Err(e) => print("expected error: {e}"),
+  }
+}
+
+property "tree sorts like List.sort" (xs: List[Int]) {
+  let tree = xs.fold(Tree.Leaf, fn(acc, v) => add(acc, v))
+  assert to_list(tree) == xs.sort()
+}
+
+property "classify covers every integer" (n: Int) {
+  assert ["zero", "negative", "small", "big"].contains(classify(n))
+}

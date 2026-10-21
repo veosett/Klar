@@ -1,0 +1,963 @@
+// Klar runtime: List[T] = [rc][td][len][cap][data] ; data = block of cap words.
+// Parameters are borrowed, results owned. `*_owned` functions consume their first argument
+// and update it in place when it is uniquely referenced (rc == 1).
+
+fn list_with_cap(td: Word, cap: Word) -> Word {
+  let l = obj_new(40, td)
+  poke(l + 16, 0)
+  var c = cap
+  if c < 4 {
+    c = 4
+  }
+  poke(l + 24, c)
+  poke(l + 32, alloc(c * 8))
+  return l
+}
+
+fn list_elem_td(l: Word) -> Word {
+  return peek(peek(l + 8) + 16)
+}
+
+fn list_data(l: Word) -> Word {
+  return peek(l + 32)
+}
+
+fn list_len_raw(l: Word) -> Word {
+  return peek(l + 16)
+}
+
+fn list_at(l: Word, i: Word) -> Word {
+  return peek(peek(l + 32) + i * 8)
+}
+
+// unique copy of l with room for `extra` more elements (elements retained)
+fn list_copy(l: Word, extra: Word) -> Word {
+  let n = peek(l + 16)
+  let r = list_with_cap(peek(l + 8), n + extra)
+  copy_words(peek(r + 32), peek(l + 32), n)
+  let et = list_elem_td(l)
+  if is_rc_kind(et) {
+    var i: Word = 0
+    while i < n {
+      retain_v(list_at(l, i), et)
+      i = i + 1
+    }
+  }
+  poke(r + 16, n)
+  return r
+}
+
+fn list_grow(l: Word, need: Word) {
+  let cap = peek(l + 24)
+  if need <= cap {
+    return
+  }
+  var nc = cap * 2
+  while nc < need {
+    nc = nc * 2
+  }
+  let nd = alloc(nc * 8)
+  copy_words(nd, peek(l + 32), peek(l + 16))
+  block_free(peek(l + 32))
+  poke(l + 32, nd)
+  poke(l + 24, nc)
+}
+
+// make l (owned) uniquely referenced: returns l itself or a fresh copy
+fn list_unique(l: Word, extra: Word) -> Word {
+  if peek(l) == 1 {
+    list_grow(l, peek(l + 16) + extra)
+    return l
+  }
+  let c = list_copy(l, extra)
+  rc_dec(l)
+  return c
+}
+
+// append an owned value to an owned list
+fn list_push_owned_raw(l: Word, v: Word) -> Word {
+  let n0 = peek(l + 16)
+  if peek(l) == 1 and n0 < peek(l + 24) {
+    poke(peek(l + 32) + n0 * 8, v)
+    poke(l + 16, n0 + 1)
+    return l
+  }
+  let u = list_unique(l, 1)
+  let n = peek(u + 16)
+  list_grow(u, n + 1)
+  poke(peek(u + 32) + n * 8, v)
+  poke(u + 16, n + 1)
+  return u
+}
+
+fn list_from_range(td: Word, lo: Word, hi: Word) -> Word {
+  var n = hi - lo
+  if n < 0 {
+    n = 0
+  }
+  let l = list_with_cap(td, n)
+  var i: Word = 0
+  while i < n {
+    poke(peek(l + 32) + i * 8, w_or(w_shl(lo + i, 1), 1))
+    i = i + 1
+  }
+  poke(l + 16, n)
+  return l
+}
+
+// ---- List methods --------------------------------------------------------------------
+fn index_or_fail(i: Int, n: Word, what: Str, sp: Word, upper_inclusive: Bool) -> Word {
+  var ok = is_small(i)
+  var k: Word = 0
+  if ok {
+    k = untag(i)
+    if upper_inclusive {
+      ok = k >= 0 and k <= n
+    } else {
+      ok = k >= 0 and k < n
+    }
+  }
+  if not ok {
+    let b = sb_new()
+    sb_add_str(b, bits(what))
+    sb_add_cstr(b, ": index ")
+    int_show(b, bits(i))
+    sb_add_cstr(b, " out of bounds for length ")
+    sb_add_word(b, n)
+    fail_simple("R0011", sb_finish(b), sp)
+  }
+  return k
+}
+
+fn List_len(xs: Word) -> Int {
+  return tag(peek(xs + 16))
+}
+
+fn List_is_empty(xs: Word) -> Bool {
+  return peek(xs + 16) == 0
+}
+
+fn some_elem(xs: Word, k: Word, rtd: Word) -> Word {
+  let v = list_at(xs, k)
+  retain_v(v, list_elem_td(xs))
+  return some_new(rtd, v)
+}
+
+fn List_get(xs: Word, i: Int, rtd: Word) -> Word {
+  if not is_small(i) {
+    return none()
+  }
+  let k = untag(i)
+  if k < 0 or k >= peek(xs + 16) {
+    return none()
+  }
+  return some_elem(xs, k, rtd)
+}
+
+fn List_first(xs: Word, rtd: Word) -> Word {
+  if peek(xs + 16) == 0 {
+    return none()
+  }
+  return some_elem(xs, 0, rtd)
+}
+
+fn List_last(xs: Word, rtd: Word) -> Word {
+  let n = peek(xs + 16)
+  if n == 0 {
+    return none()
+  }
+  return some_elem(xs, n - 1, rtd)
+}
+
+fn List_push(xs: Word, item: Word) -> Word {
+  let r = list_copy(xs, 1)
+  retain_v(item, list_elem_td(xs))
+  return list_push_owned_raw(r, item)
+}
+
+fn List_push_owned(xs: Word, item: Word) -> Word {
+  return list_push_owned_raw(xs, item)
+}
+
+fn List_set_owned(xs: Word, i: Int, item: Word, sp: Word) -> Word {
+  let k = index_or_fail(i, peek(xs + 16), "List.set", sp, false)
+  let u = list_unique(xs, 0)
+  release_v(list_at(u, k), list_elem_td(u))
+  poke(peek(u + 32) + k * 8, item)
+  return u
+}
+
+fn List_set(xs: Word, i: Int, item: Word, sp: Word) -> Word {
+  index_or_fail(i, peek(xs + 16), "List.set", sp, false)
+  rc_inc(xs)
+  retain_v(item, list_elem_td(xs))
+  return List_set_owned(xs, i, item, sp)
+}
+
+fn List_insert_owned(xs: Word, i: Int, item: Word, sp: Word) -> Word {
+  let n = peek(xs + 16)
+  let k = index_or_fail(i, n, "List.insert", sp, true)
+  let u = list_unique(xs, 1)
+  let d = peek(u + 32)
+  var j = n
+  while j > k {
+    poke(d + j * 8, peek(d + (j - 1) * 8))
+    j = j - 1
+  }
+  poke(d + k * 8, item)
+  poke(u + 16, n + 1)
+  return u
+}
+
+fn List_insert(xs: Word, i: Int, item: Word, sp: Word) -> Word {
+  index_or_fail(i, peek(xs + 16), "List.insert", sp, true)
+  rc_inc(xs)
+  retain_v(item, list_elem_td(xs))
+  return List_insert_owned(xs, i, item, sp)
+}
+
+fn List_remove_at_owned(xs: Word, i: Int, sp: Word) -> Word {
+  let n = peek(xs + 16)
+  let k = index_or_fail(i, n, "List.remove_at", sp, false)
+  let u = list_unique(xs, 0)
+  let d = peek(u + 32)
+  release_v(peek(d + k * 8), list_elem_td(u))
+  var j = k
+  while j < n - 1 {
+    poke(d + j * 8, peek(d + (j + 1) * 8))
+    j = j + 1
+  }
+  poke(u + 16, n - 1)
+  return u
+}
+
+fn List_remove_at(xs: Word, i: Int, sp: Word) -> Word {
+  index_or_fail(i, peek(xs + 16), "List.remove_at", sp, false)
+  rc_inc(xs)
+  return List_remove_at_owned(xs, i, sp)
+}
+
+fn List_concat_owned(xs: Word, other: Word) -> Word {
+  let n = peek(xs + 16)
+  let m = peek(other + 16)
+  let u = list_unique(xs, m)
+  list_grow(u, n + m)
+  copy_words(peek(u + 32) + n * 8, peek(other + 32), m)
+  let et = list_elem_td(u)
+  if is_rc_kind(et) {
+    var i: Word = 0
+    while i < m {
+      retain_v(list_at(other, i), et)
+      i = i + 1
+    }
+  }
+  poke(u + 16, n + m)
+  return u
+}
+
+fn List_concat(xs: Word, other: Word) -> Word {
+  rc_inc(xs)
+  return List_concat_owned(xs, other)
+}
+
+fn List_map(xs: Word, f: Word, rtd: Word) -> Word {
+  let n = peek(xs + 16)
+  let out = list_with_cap(rtd, n)
+  var i: Word = 0
+  while i < n {
+    poke(peek(out + 32) + i * 8, call1(f, list_at(xs, i)))
+    poke(out + 16, i + 1)
+    i = i + 1
+  }
+  return out
+}
+
+fn List_filter(xs: Word, keep: Word) -> Word {
+  let n = peek(xs + 16)
+  let out = list_with_cap(peek(xs + 8), n)
+  let et = list_elem_td(xs)
+  let rc = is_rc_kind(et)
+  let src = peek(xs + 32)
+  let dst = peek(out + 32)
+  var m: Word = 0
+  var i: Word = 0
+  while i < n {
+    let v = peek(src + i * 8)
+    if call1(keep, v) != 0 {
+      if rc {
+        retain_v(v, et)
+      }
+      poke(dst + m * 8, v)
+      m = m + 1
+      poke(out + 16, m)
+    }
+    i = i + 1
+  }
+  return out
+}
+
+fn List_fold(xs: Word, init: Word, f: Word, td_A: Word) -> Word {
+  var acc = init
+  retain_v(acc, td_A)
+  let n = peek(xs + 16)
+  var i: Word = 0
+  while i < n {
+    let next = call2(f, acc, list_at(xs, i))
+    release_v(acc, td_A)
+    acc = next
+    i = i + 1
+  }
+  return acc
+}
+
+fn List_any(xs: Word, pred: Word) -> Bool {
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    if call1(pred, list_at(xs, i)) != 0 {
+      return true
+    }
+    i = i + 1
+  }
+  return false
+}
+
+fn List_all(xs: Word, pred: Word) -> Bool {
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    if call1(pred, list_at(xs, i)) == 0 {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn List_find(xs: Word, pred: Word, rtd: Word) -> Word {
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    if call1(pred, list_at(xs, i)) != 0 {
+      return some_elem(xs, i, rtd)
+    }
+    i = i + 1
+  }
+  return none()
+}
+
+fn List_count(xs: Word, pred: Word) -> Int {
+  var c: Word = 0
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    if call1(pred, list_at(xs, i)) != 0 {
+      c = c + 1
+    }
+    i = i + 1
+  }
+  return tag(c)
+}
+
+fn List_contains(xs: Word, item: Word) -> Bool {
+  let et = list_elem_td(xs)
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    if eq_v(list_at(xs, i), item, et) {
+      return true
+    }
+    i = i + 1
+  }
+  return false
+}
+
+fn List_index_of(xs: Word, item: Word, rtd: Word) -> Word {
+  let et = list_elem_td(xs)
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    if eq_v(list_at(xs, i), item, et) {
+      return some_new(rtd, bits(tag(i)))
+    }
+    i = i + 1
+  }
+  return none()
+}
+
+fn List_reverse(xs: Word) -> Word {
+  let n = peek(xs + 16)
+  let r = list_copy(xs, 0)
+  var i: Word = 0
+  while i < n {
+    poke(peek(r + 32) + i * 8, list_at(xs, n - 1 - i))
+    i = i + 1
+  }
+  return r
+}
+
+// stable merge sort of `n` words at `a` by keys at `keys` (same positions) with descriptor kt
+fn merge_sort(a: Word, keys: Word, n: Word, kt: Word, sp: Word) {
+  if n < 2 {
+    return
+  }
+  let ta = alloc(n * 8)
+  let tk = alloc(n * 8)
+  var width: Word = 1
+  while width < n {
+    var lo: Word = 0
+    while lo < n {
+      var mid = lo + width
+      if mid > n {
+        mid = n
+      }
+      var hi = lo + 2 * width
+      if hi > n {
+        hi = n
+      }
+      var i = lo
+      var j = mid
+      var k = lo
+      while k < hi {
+        var take_left = false
+        if i < mid and j < hi {
+          let c = cmp_v(peek(keys + j * 8), peek(keys + i * 8), kt)
+          if c == -2 {
+            not_comparable(sp)
+          }
+          take_left = c >= 0
+        } else {
+          take_left = i < mid
+        }
+        if take_left {
+          poke(ta + k * 8, peek(a + i * 8))
+          poke(tk + k * 8, peek(keys + i * 8))
+          i = i + 1
+        } else {
+          poke(ta + k * 8, peek(a + j * 8))
+          poke(tk + k * 8, peek(keys + j * 8))
+          j = j + 1
+        }
+        k = k + 1
+      }
+      lo = hi
+    }
+    copy_words(a, ta, n)
+    copy_words(keys, tk, n)
+    width = width * 2
+  }
+  block_free(ta)
+  block_free(tk)
+}
+
+// ---- specialized sorts: raw words (small Ints) and strings, stable merge sort ----------------
+fn isort_words(a: Word, lo: Word, hi: Word) {
+  var i = lo + 1
+  while i < hi {
+    let v = peek(a + i * 8)
+    var j = i - 1
+    while j >= lo and peek(a + j * 8) > v {
+      poke(a + (j + 1) * 8, peek(a + j * 8))
+      j = j - 1
+    }
+    poke(a + (j + 1) * 8, v)
+    i = i + 1
+  }
+}
+
+fn merge_words(src: Word, dst: Word, lo: Word, mid: Word, hi: Word) {
+  var i = lo
+  var j = mid
+  var k = lo
+  while i < mid and j < hi {
+    let x = peek(src + i * 8)
+    let y = peek(src + j * 8)
+    if y < x {
+      poke(dst + k * 8, y)
+      j = j + 1
+    } else {
+      poke(dst + k * 8, x)
+      i = i + 1
+    }
+    k = k + 1
+  }
+  copy_words(dst + k * 8, src + i * 8, mid - i)
+  copy_words(dst + (k + mid - i) * 8, src + j * 8, hi - j)
+}
+
+fn isort_strs(a: Word, lo: Word, hi: Word) {
+  var i = lo + 1
+  while i < hi {
+    let v = peek(a + i * 8)
+    var j = i - 1
+    while j >= lo and Str_cmp(peek(a + j * 8), v) > 0 {
+      poke(a + (j + 1) * 8, peek(a + j * 8))
+      j = j - 1
+    }
+    poke(a + (j + 1) * 8, v)
+    i = i + 1
+  }
+}
+
+fn merge_strs(src: Word, dst: Word, lo: Word, mid: Word, hi: Word) {
+  var i = lo
+  var j = mid
+  var k = lo
+  while i < mid and j < hi {
+    let x = peek(src + i * 8)
+    let y = peek(src + j * 8)
+    if Str_cmp(y, x) < 0 {
+      poke(dst + k * 8, y)
+      j = j + 1
+    } else {
+      poke(dst + k * 8, x)
+      i = i + 1
+    }
+    k = k + 1
+  }
+  copy_words(dst + k * 8, src + i * 8, mid - i)
+  copy_words(dst + (k + mid - i) * 8, src + j * 8, hi - j)
+}
+
+// strs: false = raw signed words, true = Str objects
+fn sort_fast(a: Word, n: Word, strs: Bool) {
+  var lo: Word = 0
+  while lo < n {
+    var hi = lo + 16
+    if hi > n {
+      hi = n
+    }
+    if strs {
+      isort_strs(a, lo, hi)
+    } else {
+      isort_words(a, lo, hi)
+    }
+    lo = hi
+  }
+  if n <= 16 {
+    return
+  }
+  let tmp = alloc(n * 8)
+  var src = a
+  var dst = tmp
+  var width: Word = 16
+  while width < n {
+    lo = 0
+    while lo < n {
+      var mid = lo + width
+      if mid > n {
+        mid = n
+      }
+      var hi2 = lo + 2 * width
+      if hi2 > n {
+        hi2 = n
+      }
+      if strs {
+        merge_strs(src, dst, lo, mid, hi2)
+      } else {
+        merge_words(src, dst, lo, mid, hi2)
+      }
+      lo = hi2
+    }
+    let t = src
+    src = dst
+    dst = t
+    width = width * 2
+  }
+  if src != a {
+    copy_words(a, src, n)
+  }
+  block_free(tmp)
+}
+
+fn all_small(p: Word, n: Word) -> Bool {
+  var i: Word = 0
+  while i < n {
+    if w_and(peek(p + i * 8), 1) == 0 {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}
+
+fn List_sort(xs: Word, sp: Word) -> Word {
+  let r = list_copy(xs, 0)
+  let n = peek(r + 16)
+  let k = peek(list_elem_td(r))
+  if k == K_STR or (k == K_INT and all_small(peek(r + 32), n)) {
+    sort_fast(peek(r + 32), n, k == K_STR)
+    return r
+  }
+  if n > 1 and cmp_v(list_at(r, 0), list_at(r, 0), list_elem_td(r)) == -2 {
+    not_comparable(sp)
+  }
+  let keys = alloc(n * 8 + 8)
+  copy_words(keys, peek(r + 32), n)
+  merge_sort(peek(r + 32), keys, n, list_elem_td(r), sp)
+  block_free(keys)
+  return r
+}
+
+fn List_sort_by(xs: Word, key: Word, td_K: Word, sp: Word) -> Word {
+  let r = list_copy(xs, 0)
+  let n = peek(r + 16)
+  let keys = alloc(n * 8 + 8)
+  var i: Word = 0
+  while i < n {
+    poke(keys + i * 8, call1(key, list_at(r, i)))
+    i = i + 1
+  }
+  merge_sort(peek(r + 32), keys, n, td_K, sp)
+  release_words(keys, n, td_K)
+  block_free(keys)
+  return r
+}
+
+fn sub_list(xs: Word, a: Word, z: Word) -> Word {
+  let n = peek(xs + 16)
+  var lo = a
+  var hi = z
+  if hi > n {
+    hi = n
+  }
+  if lo > hi {
+    lo = hi
+  }
+  let r = list_with_cap(peek(xs + 8), hi - lo)
+  copy_words(peek(r + 32), peek(xs + 32) + lo * 8, hi - lo)
+  let et = list_elem_td(xs)
+  if is_rc_kind(et) {
+    var i = lo
+    while i < hi {
+      retain_v(list_at(xs, i), et)
+      i = i + 1
+    }
+  }
+  poke(r + 16, hi - lo)
+  return r
+}
+
+fn List_slice(xs: Word, start: Int, end: Int) -> Word {
+  return sub_list(xs, clamp_index(start), clamp_index(end))
+}
+
+fn List_take(xs: Word, n: Int) -> Word {
+  return sub_list(xs, 0, clamp_index(n))
+}
+
+fn List_drop(xs: Word, n: Int) -> Word {
+  return sub_list(xs, clamp_index(n), peek(xs + 16))
+}
+
+fn List_join(xs: Word, sep: Word) -> Word {
+  let n = peek(xs + 16)
+  let ns = peek(sep + 16)
+  var total: Word = 0
+  var i: Word = 0
+  while i < n {
+    total = total + peek(list_at(xs, i) + 16)
+    i = i + 1
+  }
+  if n > 1 {
+    total = total + ns * (n - 1)
+  }
+  let s = str_new(total)
+  var p = s + 32
+  i = 0
+  while i < n {
+    if i > 0 {
+      if ns == 1 {
+        poke8(p, peek8(sep + 32))
+      } else {
+        copy_bytes(p, sep + 32, ns)
+      }
+      p = p + ns
+    }
+    let part = list_at(xs, i)
+    let np = peek(part + 16)
+    copy_bytes(p, part + 32, np)
+    p = p + np
+    i = i + 1
+  }
+  return s
+}
+
+fn List_sum(xs: Word) -> Int {
+  var total: Int = 0
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    let x: Int = unbits(list_at(xs, i))
+    total = total + x
+    i = i + 1
+  }
+  return total
+}
+
+// math.fsum-style exact summation (Shewchuk partials), like Python's sum_float
+fn List_sum_float(xs: Word) -> Float {
+  let n = peek(xs + 16)
+  let partials = alloc(n * 8 + 16)
+  var np: Word = 0
+  var i: Word = 0
+  while i < n {
+    var x = ffrom(list_at(xs, i))
+    var j: Word = 0
+    var k: Word = 0
+    while j < np {
+      var y = ffrom(peek(partials + j * 8))
+      if Float_abs(x) < Float_abs(y) {
+        let t = x
+        x = y
+        y = t
+      }
+      let hi = x + y
+      let lo = y - (hi - x)
+      if lo != 0.0 {
+        poke(partials + k * 8, fbits(lo))
+        k = k + 1
+      }
+      x = hi
+      j = j + 1
+    }
+    poke(partials + k * 8, fbits(x))
+    np = k + 1
+    i = i + 1
+  }
+  var total: Float = 0.0
+  if np > 0 {
+    total = ffrom(peek(partials + (np - 1) * 8))
+    var m = np - 1
+    var done = false
+    while m > 0 and not done {
+      let x2 = total
+      let y2 = ffrom(peek(partials + (m - 1) * 8))
+      total = x2 + y2
+      let yr = total - x2
+      let lo2 = y2 - yr
+      if lo2 != 0.0 {
+        done = true
+        if m >= 2 {
+          let nxt = ffrom(peek(partials + (m - 2) * 8))
+          if (lo2 < 0.0 and nxt < 0.0) or (lo2 > 0.0 and nxt > 0.0) {
+            let y3 = lo2 * 2.0
+            let x3 = total + y3
+            if y3 == x3 - total {
+              total = x3
+            }
+          }
+        }
+      }
+      m = m - 1
+    }
+  }
+  block_free(partials)
+  return total
+}
+
+fn List_enumerate(xs: Word, rtd: Word) -> Word {
+  let n = peek(xs + 16)
+  let out = list_with_cap(rtd, n)
+  let itd = peek(rtd + 16)
+  let et = list_elem_td(xs)
+  var i: Word = 0
+  while i < n {
+    let v = list_at(xs, i)
+    retain_v(v, et)
+    poke(peek(out + 32) + i * 8, record2(itd, bits(tag(i)), v))
+    i = i + 1
+  }
+  poke(out + 16, n)
+  return out
+}
+
+fn List_zip(xs: Word, other: Word, rtd: Word) -> Word {
+  var n = peek(xs + 16)
+  if peek(other + 16) < n {
+    n = peek(other + 16)
+  }
+  let out = list_with_cap(rtd, n)
+  let ptd = peek(rtd + 16)
+  var i: Word = 0
+  while i < n {
+    let a = list_at(xs, i)
+    let b = list_at(other, i)
+    retain_v(a, list_elem_td(xs))
+    retain_v(b, list_elem_td(other))
+    poke(peek(out + 32) + i * 8, record2(ptd, a, b))
+    i = i + 1
+  }
+  poke(out + 16, n)
+  return out
+}
+
+fn List_flat_map(xs: Word, f: Word, rtd: Word) -> Word {
+  var out = list_with_cap(rtd, 4)
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    let part = call1(f, list_at(xs, i))
+    out = List_concat_owned(out, part)
+    rc_dec(part)
+    i = i + 1
+  }
+  return out
+}
+
+fn List_flatten(xs: Word, rtd: Word) -> Word {
+  var out = list_with_cap(rtd, 4)
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    out = List_concat_owned(out, list_at(xs, i))
+    i = i + 1
+  }
+  return out
+}
+
+fn List_unique(xs: Word) -> Word {
+  let n = peek(xs + 16)
+  var out = list_with_cap(peek(xs + 8), n)
+  let et = list_elem_td(xs)
+  var icap: Word = 16
+  while icap < n * 2 {
+    icap = icap * 2
+  }
+  let idx = alloc(icap * 8)
+  var z: Word = 0
+  while z < icap {
+    poke(idx + z * 8, 0)
+    z = z + 1
+  }
+  var i: Word = 0
+  while i < n {
+    let v = list_at(xs, i)
+    var slot = w_and(hash_v(v, et), icap - 1)
+    var found = false
+    var probing = true
+    while probing {
+      let e = peek(idx + slot * 8)
+      if e == 0 {
+        probing = false
+      } else if eq_v(list_at(out, e - 1), v, et) {
+        found = true
+        probing = false
+      } else {
+        slot = w_and(slot + 1, icap - 1)
+      }
+    }
+    if not found {
+      retain_v(v, et)
+      out = list_push_owned_raw(out, v)
+      poke(idx + slot * 8, peek(out + 16))
+    }
+    i = i + 1
+  }
+  block_free(idx)
+  return out
+}
+
+fn List_partition(xs: Word, pred: Word, rtd: Word) -> Word {
+  let ltd = peek(peek(rtd + 24))
+  var yes = list_with_cap(ltd, 4)
+  var no = list_with_cap(ltd, 4)
+  let et = list_elem_td(xs)
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    let v = list_at(xs, i)
+    retain_v(v, et)
+    if call1(pred, v) != 0 {
+      yes = list_push_owned_raw(yes, v)
+    } else {
+      no = list_push_owned_raw(no, v)
+    }
+    i = i + 1
+  }
+  return record2(rtd, yes, no)
+}
+
+fn List_group_by(xs: Word, key: Word, rtd: Word) -> Word {
+  var m = map_new(rtd)
+  let ltd = peek(rtd + 24)
+  let et = list_elem_td(xs)
+  var i: Word = 0
+  while i < peek(xs + 16) {
+    let v = list_at(xs, i)
+    let k = call1(key, v)
+    retain_v(v, et)
+    let pos = map_find(m, k)
+    if pos >= 0 {
+      let slot = peek(m + 40) + pos * 8
+      poke(slot, list_push_owned_raw(peek(slot), v))
+      release_v(k, peek(rtd + 16))
+    } else {
+      let fresh = list_push_owned_raw(list_with_cap(ltd, 4), v)
+      m = Map_set_owned(m, k, fresh)
+    }
+    i = i + 1
+  }
+  return m
+}
+
+fn List_chunks(xs: Word, size: Int, rtd: Word, sp: Word) -> Word {
+  if size <= 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "List.chunks: size must be positive, got ")
+    int_show(b, bits(size))
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  let k = clamp_index(size)
+  var out = list_with_cap(rtd, 4)
+  var i: Word = 0
+  let n = peek(xs + 16)
+  while i < n {
+    out = list_push_owned_raw(out, sub_list(xs, i, i + k))
+    i = i + k
+  }
+  return out
+}
+
+fn extreme(xs: Word, keys: Word, kt: Word, want: Word, rtd: Word, sp: Word) -> Word {
+  let n = peek(xs + 16)
+  if n == 0 {
+    return none()
+  }
+  var best: Word = 0
+  var i: Word = 1
+  while i < n {
+    let c = cmp_v(peek(keys + i * 8), peek(keys + best * 8), kt)
+    if c == -2 {
+      fail_msg("R0009", "values are not comparable (only Int, Float, Str)", sp)
+    }
+    if c == want {
+      best = i
+    }
+    i = i + 1
+  }
+  if n == 1 and cmp_v(peek(keys), peek(keys), kt) == -2 {
+    fail_msg("R0009", "values are not comparable (only Int, Float, Str)", sp)
+  }
+  return some_elem(xs, best, rtd)
+}
+
+fn List_min(xs: Word, rtd: Word, sp: Word) -> Word {
+  return extreme(xs, peek(xs + 32), list_elem_td(xs), -1, rtd, sp)
+}
+
+fn List_max(xs: Word, rtd: Word, sp: Word) -> Word {
+  return extreme(xs, peek(xs + 32), list_elem_td(xs), 1, rtd, sp)
+}
+
+fn by_key(xs: Word, key: Word, td_K: Word, want: Word, rtd: Word, sp: Word) -> Word {
+  let n = peek(xs + 16)
+  let keys = alloc(n * 8 + 8)
+  var i: Word = 0
+  while i < n {
+    poke(keys + i * 8, call1(key, list_at(xs, i)))
+    i = i + 1
+  }
+  let r = extreme(xs, keys, td_K, want, rtd, sp)
+  release_words(keys, n, td_K)
+  block_free(keys)
+  return r
+}
+
+fn List_min_by(xs: Word, key: Word, rtd: Word, td_K: Word, sp: Word) -> Word {
+  return by_key(xs, key, td_K, -1, rtd, sp)
+}
+
+fn List_max_by(xs: Word, key: Word, rtd: Word, td_K: Word, sp: Word) -> Word {
+  return by_key(xs, key, td_K, 1, rtd, sp)
+}

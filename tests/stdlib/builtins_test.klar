@@ -1,0 +1,280 @@
+// Tests for every built-in function and method.
+// tests/test_klar.py fails if a built-in is added without being exercised here
+// (effectful globals like read_file/now_ms are tested from Python).
+
+type Item {
+  name: Str
+  price: Int
+}
+
+test "globals" {
+  assert range(0, 4) == [0, 1, 2, 3]
+  assert range(3, 1) == []
+  assert Some(1) == Some(1)
+  assert Ok(2) == Ok(2)
+  let e: Result[Int, Str] = Err("x")
+  assert e.is_err()
+  print("print works in tests")
+}
+
+test "Int methods" {
+  assert 3.to_float() == 3.0
+  assert (-5).abs() == 5
+  assert 3.min(7) == 3
+  assert 3.max(7) == 7
+  assert 15.clamp(0, 10) == 10
+  assert (-3).clamp(0, 10) == 0
+  assert 4.is_even()
+  assert not 7.is_even()
+  assert (-9).sign() == -1
+  assert 0.sign() == 0
+  assert 2.pow(10) == 1024
+  assert 2.pow(100) == 1267650600228229401496703205376
+  assert 42.to_str() == "42"
+}
+
+test "Int arithmetic semantics" {
+  assert 7 / 2 == 3
+  assert -7 / 2 == -3
+  assert -7 % 2 == -1
+  assert 7 % -2 == 1
+  assert 10_000 * 10_000 == 100000000
+}
+
+test "Float methods" {
+  assert 3.9.to_int() == 3
+  assert (-3.9).to_int() == -3
+  assert 2.5.round() == 3
+  assert 2.4.round() == 2
+  assert 2.7.floor() == 2
+  assert 2.1.ceil() == 3
+  assert (-1.5).abs() == 1.5
+  assert 9.0.sqrt() == 3.0
+  assert 1.5.min(0.5) == 0.5
+  assert 1.5.max(0.5) == 1.5
+  assert 3.14159.round_to(2) == 3.14
+  assert 2.0.pow(0.5) == 2.0.sqrt()
+  assert 3.14159.fixed(2) == "3.14"
+  assert 1.0.fixed(0) == "1"
+  assert 0.0.sin() == 0.0
+  assert 0.0.cos() == 1.0
+  assert E.ln() == 1.0
+  assert 0.0.exp() == 1.0
+  assert 1.5.to_str() == "1.5"
+}
+
+test "Str methods" {
+  assert "héllo".len() == 5
+  assert "".is_empty()
+  assert "Ab".upper() == "AB"
+  assert "Ab".lower() == "ab"
+  assert "  x  ".trim() == "x"
+  assert "  x  ".trim_start() == "x  "
+  assert "  x  ".trim_end() == "  x"
+  assert "a,b,,c".split(",") == ["a", "b", "", "c"]
+  assert "abc".split("") == ["a", "b", "c"]
+  assert "hello".contains("ell")
+  assert "hello".starts_with("he")
+  assert "hello".ends_with("lo")
+  assert "aaa".replace("a", "b") == "bbb"
+  assert "hello".index_of("l") == Some(2)
+  assert "hello".index_of("z") == None
+  assert "hello".slice(1, 3) == "el"
+  assert "hello".slice(3, 100) == "lo"
+  assert "abc".chars() == ["a", "b", "c"]
+  assert "ab".repeat(3) == "ababab"
+  assert "ab".repeat(-1) == ""
+  assert " 42 ".to_int() == Some(42)
+  assert "-7".to_int() == Some(-7)
+  assert "4.2".to_int() == None
+  assert "4.5".to_float() == Some(4.5)
+  assert "x".to_float() == None
+  assert "a\nb\r\nc".lines() == ["a", "b", "c"]
+  assert "7".pad_left(3, "0") == "007"
+  assert "7".pad_right(3, ".") == "7.."
+  assert "banana".count("an") == 2
+  assert "abc".reverse() == "cba"
+  assert "123".is_numeric()
+  assert not "12a".is_numeric()
+  assert not "".is_numeric()
+  assert "s".to_str() == "s"
+}
+
+test "List basics" {
+  let xs = [3, 1, 2]
+  assert xs.len() == 3
+  assert not xs.is_empty()
+  assert xs.get(0) == Some(3)
+  assert xs.get(3) == None
+  assert xs.get(-1) == None
+  assert xs.first() == Some(3)
+  assert xs.last() == Some(2)
+  assert xs.push(4) == [3, 1, 2, 4]
+  assert xs == [3, 1, 2]
+  assert xs.set(1, 9) == [3, 9, 2]
+  assert xs.concat([5]) == [3, 1, 2, 5]
+  assert xs.insert(0, 0) == [0, 3, 1, 2]
+  assert xs.insert(3, 0) == [3, 1, 2, 0]
+  assert xs.remove_at(1) == [3, 2]
+  assert xs.reverse() == [2, 1, 3]
+  assert xs.sort() == [1, 2, 3]
+  assert ["b", "a"].sort() == ["a", "b"]
+  assert xs.slice(1, 2) == [1]
+  assert xs.take(2) == [3, 1]
+  assert xs.take(10) == xs
+  assert xs.drop(2) == [2]
+  assert xs.contains(1)
+  assert xs.index_of(2) == Some(2)
+  assert xs.index_of(7) == None
+  assert xs.sum() == 6
+  assert [0.5, 0.25].sum_float() == 0.75
+  assert ["a", "b"].join("-") == "a-b"
+  assert xs.to_str() == "[3, 1, 2]"
+}
+
+test "List higher-order" {
+  let xs = [1, 2, 3, 4]
+  assert xs.map(fn(x) => x * 10) == [10, 20, 30, 40]
+  assert xs.filter(fn(x) => x % 2 == 0) == [2, 4]
+  assert xs.fold(0, fn(acc, x) => acc + x) == 10
+  assert xs.fold("", fn(acc, x) => acc + x.to_str()) == "1234"
+  assert xs.any(fn(x) => x > 3)
+  assert not xs.all(fn(x) => x > 3)
+  assert xs.find(fn(x) => x > 2) == Some(3)
+  assert xs.find(fn(x) => x > 9) == None
+  assert xs.count(fn(x) => x > 1) == 3
+  assert xs.sort_by(fn(x) => -x) == [4, 3, 2, 1]
+  assert xs.flat_map(fn(x) => [x, x]) == [1, 1, 2, 2, 3, 3, 4, 4]
+  assert [[1], [], [2, 3]].flatten() == [1, 2, 3]
+  assert [1, 2, 1, 3, 2].unique() == [1, 2, 3]
+  assert xs.chunks(3) == [[1, 2, 3], [4]]
+  assert xs.min() == Some(1)
+  assert xs.max() == Some(4)
+  let empty: List[Int] = []
+  assert empty.min() == None
+  assert ["ccc", "a", "bb"].min_by(fn(s) => s.len()) == Some("a")
+  assert ["ccc", "a", "bb"].max_by(fn(s) => s.len()) == Some("ccc")
+}
+
+test "List structured results" {
+  let e = ["a", "b"].enumerate()
+  assert e == [Indexed { index: 0, value: "a" }, Indexed { index: 1, value: "b" }]
+  assert [1, 2, 3].zip(["x", "y"]) == [Pair { first: 1, second: "x" }, Pair { first: 2, second: "y" }]
+  let parts = [1, 2, 3, 4].partition(fn(x) => x > 2)
+  assert parts.first == [3, 4]
+  assert parts.second == [1, 2]
+  let groups = ["apple", "avocado", "banana"].group_by(fn(s) => s.slice(0, 1))
+  assert groups.get("a") == Some(["apple", "avocado"])
+  assert groups.keys() == ["a", "b"]
+  let items = [Item { name: "pen", price: 2 }, Item { name: "cup", price: 5 }]
+  assert items.max_by(fn(i) => i.price).map(fn(i) => i.name) == Some("cup")
+}
+
+test "Map methods" {
+  let m = Map { "a": 1, "b": 2 }
+  assert m.len() == 2
+  assert not m.is_empty()
+  let empty: Map[Str, Int] = Map {}
+  assert empty.is_empty()
+  assert m.get("a") == Some(1)
+  assert m.get("z") == None
+  assert m.has("b")
+  assert m.set("c", 3).len() == 3
+  assert m.set("a", 9).get("a") == Some(9)
+  assert m.remove("a").keys() == ["b"]
+  assert m.remove("zz") == m
+  assert m.keys() == ["a", "b"]
+  assert m.values() == [1, 2]
+  assert m.entries() == [Entry { key: "a", value: 1 }, Entry { key: "b", value: 2 }]
+  assert m.map_values(fn(v) => v * 10) == Map { "a": 10, "b": 20 }
+  assert m.update("a", 0, fn(v) => v + 1).get("a") == Some(2)
+  assert m.update("n", 0, fn(v) => v + 1).get("n") == Some(1)
+  assert m.filter(fn(_k, v) => v > 1) == Map { "b": 2 }
+  assert m.merge(Map { "b": 5, "c": 6 }) == Map { "a": 1, "b": 5, "c": 6 }
+  assert Map { 1: true }.get(1) == Some(true)
+}
+
+test "Option methods" {
+  let s = Some(5)
+  let n: Option[Int] = None
+  assert s.is_some()
+  assert n.is_none()
+  assert s.unwrap_or(0) == 5
+  assert n.unwrap_or(0) == 0
+  assert s.map(fn(x) => x + 1) == Some(6)
+  assert n.map(fn(x) => x + 1) == None
+  assert s.and_then(fn(x) => match x > 3 { true => Some(x), false => None }) == Some(5)
+  assert s.ok_or("missing") == Ok(5)
+  assert n.ok_or("missing") == Err("missing")
+}
+
+test "Result methods" {
+  let good: Result[Int, Str] = Ok(2)
+  let bad: Result[Int, Str] = Err("boom")
+  assert good.is_ok()
+  assert bad.is_err()
+  assert good.unwrap_or(0) == 2
+  assert bad.unwrap_or(0) == 0
+  assert good.map(fn(x) => x * 2) == Ok(4)
+  assert bad.map(fn(x) => x * 2) == Err("boom")
+  assert bad.map_err(fn(e) => e.len()) == Err(4)
+  assert good.ok() == Some(2)
+  assert bad.ok() == None
+}
+
+test "prelude" {
+  assert PI > 3.14 and PI < 3.15
+  assert E > 2.71 and E < 2.72
+  let p = Pair { first: 1, second: "one" }
+  assert p.second == "one"
+}
+
+property "push then last" (xs: List[Int], x: Int) {
+  assert xs.push(x).last() == Some(x)
+  assert xs.push(x).len() == xs.len() + 1
+}
+
+property "sort is ordered and a permutation" (xs: List[Int]) {
+  let s = xs.sort()
+  assert s.len() == xs.len()
+  for i in range(1, s.len()) {
+    assert s.get(i - 1).unwrap_or(0) <= s.get(i).unwrap_or(0)
+  }
+  assert s.all(fn(v) => xs.contains(v))
+}
+
+property "split and join roundtrip" (s: Str) {
+  assert s.split(",").join(",") == s
+}
+
+property "map preserves length" (xs: List[Str]) {
+  assert xs.map(fn(s) => s.len()).len() == xs.len()
+}
+
+property "set then get" (m: Map[Str, Int], k: Str, v: Int) {
+  assert m.set(k, v).get(k) == Some(v)
+  assert not m.remove(k).has(k)
+}
+
+property "chunks flatten back" (xs: List[Int], n: Int) {
+  let size = n.abs() % 5 + 1
+  assert xs.chunks(size).flatten() == xs
+}
+
+property "unique has no duplicates" (xs: List[Int]) {
+  let u = xs.unique()
+  assert u.len() == u.sort().unique().len()
+  assert u.all(fn(v) => xs.contains(v))
+}
+
+property "pad_left reaches width" (s: Str, n: Int) {
+  let w = n.abs() % 20
+  assert s.pad_left(w, "*").len() == s.len().max(w)
+}
+
+property "Int division identity" (a: Int, b: Int) {
+  if b == 0 {
+    return
+  }
+  assert (a / b) * b + a % b == a
+}

@@ -1,0 +1,6 @@
+{
+  "title": "Sort records",
+  "mistake": "sorts records that have no order (forgets the key)",
+  "expected": "ann,bob,cat",
+  "not_applicable": []
+}

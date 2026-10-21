@@ -1,0 +1,94 @@
+{
+  "machine": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+  "repeat": 5,
+  "versions": {
+    "klar": "Klar 0.3, native compiler (own x86-64 codegen + linker, no libc)",
+    "klar-py": "Klar 0.3, Python-bytecode backend (on CPython 3.10.12)",
+    "python": "CPython 3.10.12",
+    "javascript": "Node.js v22.23.2",
+    "c": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 -O2"
+  },
+  "results": {
+    "fib": {
+      "klar": {
+        "result": "75025",
+        "compute_ms": 1.0619,
+        "wall_ms": 1.556499999423977
+      },
+      "klar-py": {
+        "result": "75025",
+        "compute_ms": 18.5383,
+        "wall_ms": 281.2506000045687
+      },
+      "python": {
+        "result": "75025",
+        "compute_ms": 18.6,
+        "wall_ms": 51.04120000032708
+      },
+      "javascript": {
+        "result": "75025",
+        "compute_ms": 2.264,
+        "wall_ms": 59.4688999990467
+      },
+      "c": {
+        "result": "75025",
+        "compute_ms": 0.157,
+        "wall_ms": 0.9722999966470525
+      }
+    },
+    "loop": {
+      "klar": {
+        "result": "806000",
+        "compute_ms": 1.3199,
+        "wall_ms": 1.8309000006411225
+      },
+      "klar-py": {
+        "result": "806000",
+        "compute_ms": 46.4146,
+        "wall_ms": 318.59979999717325
+      },
+      "python": {
+        "result": "806000",
+        "compute_ms": 41.574,
+        "wall_ms": 76.39790000393987
+      },
+      "javascript": {
+        "result": "806000",
+        "compute_ms": 6.391,
+        "wall_ms": 64.83139999909326
+      },
+      "c": {
+        "result": "806000",
+        "compute_ms": 0.984,
+        "wall_ms": 1.9242000053054653
+      }
+    },
+    "mandelbrot": {
+      "klar": {
+        "result": "1655",
+        "compute_ms": 1.0829,
+        "wall_ms": 1.581899996381253
+      },
+      "klar-py": {
+        "result": "1655",
+        "compute_ms": 23.5791,
+        "wall_ms": 293.7314000009792
+      },
+      "python": {
+        "result": "1655",
+        "compute_ms": 21.929,
+        "wall_ms": 55.4755000048317
+      },
+      "javascript": {
+        "result": "1655",
+        "compute_ms": 5.165,
+        "wall_ms": 63.3873000042513
+      },
+      "c": {
+        "result": "1655",
+        "compute_ms": 0.384,
+        "wall_ms": 1.2310000020079315
+      }
+    }
+  }
+}
