@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "klar-lang"
-version = "0.4.0"
+version = "0.5.0"
 description = "Klar: a fast, compile-time-safe programming language designed for AI authors, with its own native x86-64 compiler"
 readme = "README.md"
 license = { text = "MIT" }

@@ -2,9 +2,9 @@
   "machine": "Linux-6.18.44-fc-v139-x86_64-with-glibc2.39",
   "repeat": 5,
   "versions": {
-    "klar": "Klar 0.4, native compiler (own x86-64 codegen + linker, no libc)",
-    "klar-py": "Klar 0.4, Python-bytecode backend (on CPython 3.13.16)",
-    "klar-interp": "Klar 0.4, tree-walking interpreter (on CPython 3.13.16)",
+    "klar": "Klar 0.5, native compiler (own x86-64 codegen + linker, no libc)",
+    "klar-py": "Klar 0.5, Python-bytecode backend (on CPython 3.13.16)",
+    "klar-interp": "Klar 0.5, tree-walking interpreter (on CPython 3.13.16)",
     "python": "CPython 3.13.16",
     "javascript": "Node.js v22.22.0",
     "c": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 -O2",
@@ -17,313 +17,313 @@
     "collections": {
       "klar": {
         "result": "100010,500348980,5004",
-        "compute_ms": 7.004321,
-        "wall_ms": 8.221698999477667
+        "compute_ms": 7.085533,
+        "wall_ms": 8.627376999811531
       },
       "klar-py": {
         "result": "100010,500348980,5004",
-        "compute_ms": 46.187254,
-        "wall_ms": 163.46135000003414
+        "compute_ms": 52.043314,
+        "wall_ms": 213.24378400004207
       },
       "klar-interp": {
         "result": "100010,500348980,5004",
-        "compute_ms": 751.896187,
-        "wall_ms": 870.5828310003199
+        "compute_ms": 839.565907,
+        "wall_ms": 1020.5356199999187
       },
       "python": {
         "result": "100010,500348980,5004",
-        "compute_ms": 21.447,
-        "wall_ms": 36.93269599989435
+        "compute_ms": 26.518,
+        "wall_ms": 45.2710230001685
       },
       "javascript": {
         "result": "100010,500348980,5004",
-        "compute_ms": 28.815,
-        "wall_ms": 66.58391199925973
+        "compute_ms": 33.877,
+        "wall_ms": 77.84055199999784
       },
       "c": {
         "result": "100010,500348980,5004",
-        "compute_ms": 4.019,
-        "wall_ms": 5.484500999955344
+        "compute_ms": 4.954,
+        "wall_ms": 6.701981000333035
       },
       "cpp": {
         "result": "100010,500348980,5004",
-        "compute_ms": 4.522,
-        "wall_ms": 7.290432999980112
+        "compute_ms": 4.108,
+        "wall_ms": 6.793897000079596
       },
       "java": {
         "result": "100010,500348980,5004",
-        "compute_ms": 36.273,
-        "wall_ms": 737.798064999879
+        "compute_ms": 40.199,
+        "wall_ms": 819.8098719999507
       },
       "go": {
         "result": "100010,500348980,5004",
-        "compute_ms": 13.537,
-        "wall_ms": 17.21459300006245
+        "compute_ms": 12.468,
+        "wall_ms": 14.618963999964762
       },
       "rust": {
         "result": "100010,500348980,5004",
-        "compute_ms": 2.077,
-        "wall_ms": 4.54316299965285
+        "compute_ms": 2.184,
+        "wall_ms": 4.3757920002462924
       }
     },
     "fib": {
       "klar": {
         "result": "75025",
-        "compute_ms": 1.002299,
-        "wall_ms": 1.8507419999878039
+        "compute_ms": 0.711181,
+        "wall_ms": 1.2812769996344286
       },
       "klar-py": {
         "result": "75025",
-        "compute_ms": 7.278478,
-        "wall_ms": 117.38457399951585
+        "compute_ms": 6.962506,
+        "wall_ms": 122.22389699991254
       },
       "klar-interp": {
         "result": "75025",
-        "compute_ms": 1066.077938,
-        "wall_ms": 1217.952867999884
+        "compute_ms": 1141.210784,
+        "wall_ms": 1266.993783000089
       },
       "python": {
         "result": "75025",
-        "compute_ms": 7.779,
-        "wall_ms": 22.90046500002063
+        "compute_ms": 8.065,
+        "wall_ms": 24.727351999899838
       },
       "javascript": {
         "result": "75025",
-        "compute_ms": 1.999,
-        "wall_ms": 36.72214000016538
+        "compute_ms": 2.237,
+        "wall_ms": 37.724922000052175
       },
       "c": {
         "result": "75025",
-        "compute_ms": 0.131,
-        "wall_ms": 1.6567390002819593
+        "compute_ms": 0.112,
+        "wall_ms": 1.46769699995275
       },
       "cpp": {
         "result": "75025",
-        "compute_ms": 0.109,
-        "wall_ms": 2.1454769994306844
+        "compute_ms": 0.113,
+        "wall_ms": 2.1772449999843957
       },
       "java": {
         "result": "75025",
-        "compute_ms": 0.975,
-        "wall_ms": 691.3517190005223
+        "compute_ms": 1.018,
+        "wall_ms": 640.710972999841
       },
       "go": {
         "result": "75025",
         "compute_ms": 0.336,
-        "wall_ms": 1.9022440001208452
+        "wall_ms": 2.1546779998971033
       },
       "rust": {
         "result": "75025",
-        "compute_ms": 0.213,
-        "wall_ms": 2.329007999833266
+        "compute_ms": 0.164,
+        "wall_ms": 1.951948000169068
       }
     },
     "loop": {
       "klar": {
         "result": "806000",
-        "compute_ms": 1.419054,
-        "wall_ms": 2.191667000261077
+        "compute_ms": 1.45443,
+        "wall_ms": 2.503188999980921
       },
       "klar-py": {
         "result": "806000",
-        "compute_ms": 29.726139,
-        "wall_ms": 159.2103409993797
+        "compute_ms": 29.599982,
+        "wall_ms": 201.7566770000485
       },
       "klar-interp": {
         "result": "806000",
-        "compute_ms": 1047.929819,
-        "wall_ms": 1177.1967620006762
+        "compute_ms": 1193.681827,
+        "wall_ms": 1355.199649000042
       },
       "python": {
         "result": "806000",
-        "compute_ms": 30.2,
-        "wall_ms": 51.5269259994966
+        "compute_ms": 24.352,
+        "wall_ms": 40.12561600029585
       },
       "javascript": {
         "result": "806000",
-        "compute_ms": 5.788,
-        "wall_ms": 49.856309999995574
+        "compute_ms": 6.917,
+        "wall_ms": 43.16060099972674
       },
       "c": {
         "result": "806000",
-        "compute_ms": 1.123,
-        "wall_ms": 2.8968639999220613
+        "compute_ms": 1.035,
+        "wall_ms": 2.6068500001201755
       },
       "cpp": {
         "result": "806000",
-        "compute_ms": 1.135,
-        "wall_ms": 3.8115750003271387
+        "compute_ms": 1.004,
+        "wall_ms": 2.793526000004931
       },
       "java": {
         "result": "806000",
-        "compute_ms": 3.309,
-        "wall_ms": 615.8729849994415
+        "compute_ms": 3.318,
+        "wall_ms": 709.5190550003281
       },
       "go": {
         "result": "806000",
-        "compute_ms": 0.941,
-        "wall_ms": 2.5707129998409073
+        "compute_ms": 1.005,
+        "wall_ms": 2.7795099999821105
       },
       "rust": {
         "result": "806000",
-        "compute_ms": 1.177,
-        "wall_ms": 3.0346209996423568
+        "compute_ms": 1.137,
+        "wall_ms": 3.844632999971509
       }
     },
     "mandelbrot": {
       "klar": {
         "result": "1655",
-        "compute_ms": 0.329832,
-        "wall_ms": 0.9611220002625487
+        "compute_ms": 0.370826,
+        "wall_ms": 0.9836330000325688
       },
       "klar-py": {
         "result": "1655",
-        "compute_ms": 12.789012,
-        "wall_ms": 118.79096200027561
+        "compute_ms": 13.69867,
+        "wall_ms": 150.1203739999255
       },
       "klar-interp": {
         "result": "1655",
-        "compute_ms": 983.232217,
-        "wall_ms": 1118.9670559997467
+        "compute_ms": 1011.689046,
+        "wall_ms": 1162.4703019997469
       },
       "python": {
         "result": "1655",
-        "compute_ms": 11.655,
-        "wall_ms": 29.676754000320216
+        "compute_ms": 10.539,
+        "wall_ms": 25.62871099962649
       },
       "javascript": {
         "result": "1655",
-        "compute_ms": 4.306,
-        "wall_ms": 34.55064700028743
+        "compute_ms": 5.309,
+        "wall_ms": 46.739806000005046
       },
       "c": {
         "result": "1655",
-        "compute_ms": 0.269,
-        "wall_ms": 1.637289999962377
+        "compute_ms": 0.27,
+        "wall_ms": 1.9783210000241525
       },
       "cpp": {
         "result": "1655",
-        "compute_ms": 0.302,
-        "wall_ms": 3.035147000446159
+        "compute_ms": 0.288,
+        "wall_ms": 2.624796999953105
       },
       "java": {
         "result": "1655",
-        "compute_ms": 2.894,
-        "wall_ms": 640.3150280002592
+        "compute_ms": 3.395,
+        "wall_ms": 695.7922410001629
       },
       "go": {
         "result": "1655",
-        "compute_ms": 0.25,
-        "wall_ms": 1.876809999885154
+        "compute_ms": 0.279,
+        "wall_ms": 2.504678999684984
       },
       "rust": {
         "result": "1655",
-        "compute_ms": 0.244,
-        "wall_ms": 1.8530450006437604
+        "compute_ms": 0.254,
+        "wall_ms": 2.0250180000402906
       }
     },
     "primes": {
       "klar": {
         "result": "3245",
-        "compute_ms": 1.089046,
-        "wall_ms": 1.7580749999979162
+        "compute_ms": 1.038783,
+        "wall_ms": 1.8729429998529668
       },
       "klar-py": {
         "result": "3245",
-        "compute_ms": 23.830562,
-        "wall_ms": 145.31492799960688
+        "compute_ms": 25.124906,
+        "wall_ms": 156.62089700026627
       },
       "klar-interp": {
         "result": "3245",
-        "compute_ms": 1249.647073,
-        "wall_ms": 1349.3241890000718
+        "compute_ms": 1261.023501,
+        "wall_ms": 1395.1132239999424
       },
       "python": {
         "result": "3245",
-        "compute_ms": 16.741,
-        "wall_ms": 32.79642099914781
+        "compute_ms": 15.702,
+        "wall_ms": 31.982950999918103
       },
       "javascript": {
         "result": "3245",
-        "compute_ms": 2.938,
-        "wall_ms": 38.476489999993646
+        "compute_ms": 2.585,
+        "wall_ms": 38.79580200009514
       },
       "c": {
         "result": "3245",
-        "compute_ms": 0.795,
-        "wall_ms": 2.278436999404221
+        "compute_ms": 0.84,
+        "wall_ms": 2.3410919998241297
       },
       "cpp": {
         "result": "3245",
-        "compute_ms": 0.77,
-        "wall_ms": 2.56004099992424
+        "compute_ms": 0.839,
+        "wall_ms": 3.1811120002203097
       },
       "java": {
         "result": "3245",
-        "compute_ms": 1.924,
-        "wall_ms": 601.2880140006018
+        "compute_ms": 2.93,
+        "wall_ms": 681.2015310001698
       },
       "go": {
         "result": "3245",
-        "compute_ms": 0.808,
-        "wall_ms": 2.5629629999457393
+        "compute_ms": 0.85,
+        "wall_ms": 2.657640000052197
       },
       "rust": {
         "result": "3245",
-        "compute_ms": 0.463,
-        "wall_ms": 1.8603759999678005
+        "compute_ms": 0.601,
+        "wall_ms": 2.8101500001866953
       }
     },
     "strings": {
       "klar": {
         "result": "10000,988889",
-        "compute_ms": 12.531699,
-        "wall_ms": 15.375109000160592
+        "compute_ms": 13.345695,
+        "wall_ms": 16.367823999644315
       },
       "klar-py": {
         "result": "10000,988889",
-        "compute_ms": 31.423393,
-        "wall_ms": 142.7464719999989
+        "compute_ms": 32.653169,
+        "wall_ms": 165.2073109999037
       },
       "klar-interp": {
         "result": "10000,988889",
-        "compute_ms": 476.406329,
-        "wall_ms": 613.5293229999661
+        "compute_ms": 528.831025,
+        "wall_ms": 657.1872469999107
       },
       "python": {
         "result": "10000,988889",
-        "compute_ms": 16.024,
-        "wall_ms": 33.446321000155876
+        "compute_ms": 17.881,
+        "wall_ms": 37.37532600007398
       },
       "javascript": {
         "result": "10000,988889",
-        "compute_ms": 29.336,
-        "wall_ms": 66.11197599977459
+        "compute_ms": 32.999,
+        "wall_ms": 83.29344799994942
       },
       "c": {
         "result": "10000,988889",
-        "compute_ms": 7.591,
-        "wall_ms": 9.33111300037126
+        "compute_ms": 8.19,
+        "wall_ms": 10.52598299975216
       },
       "cpp": {
         "result": "10000,988889",
-        "compute_ms": 8.806,
-        "wall_ms": 11.672542000269459
+        "compute_ms": 9.851,
+        "wall_ms": 13.348720999601937
       },
       "java": {
         "result": "10000,988889",
-        "compute_ms": 45.671,
-        "wall_ms": 759.9904320004498
+        "compute_ms": 40.2,
+        "wall_ms": 797.5663140000506
       },
       "go": {
         "result": "10000,988889",
-        "compute_ms": 14.106,
-        "wall_ms": 16.68724800038035
+        "compute_ms": 15.475,
+        "wall_ms": 17.859814000075858
       },
       "rust": {
         "result": "10000,988889",
-        "compute_ms": 7.502,
-        "wall_ms": 10.381154999777209
+        "compute_ms": 9.448,
+        "wall_ms": 12.812223999844718
       }
     }
   }

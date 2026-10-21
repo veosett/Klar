@@ -5,7 +5,11 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-10-21
+
 ### Added
+- Windows is a first-class CI target: the whole test-suite and the native/interpreter comparison pass with
+  Windows Python (checked with Python 3.12 for Windows), so the Windows jobs are no longer allowed to fail.
 - `Bytes`: an immutable byte sequence (`bytes_of`, `Str.to_bytes`, `len`, `get`, `get_or`, `slice`, `concat`, `push`,
   `push_le`, `set`, `to_list`, `decode`, `hex`) with `read_bytes` / `write_bytes`. `b = b.push(x)` appends in place in
   native code when `b` is the only reference. Constant bytes out of 0..255 and bad `push_le` sizes are compile-time

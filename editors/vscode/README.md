@@ -13,8 +13,8 @@
 ```sh
 cd editors/vscode
 npm install
-npx @vscode/vsce package          # -> klar-lang-0.4.0.vsix
-code --install-extension klar-lang-0.4.0.vsix
+npx @vscode/vsce package          # -> klar-lang-0.5.0.vsix
+code --install-extension klar-lang-0.5.0.vsix
 ```
 
 The extension runs `python3 -m klar lsp` (`python` on Windows). If Klar is not installed with pip, set

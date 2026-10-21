@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.4.0-informational)
+![Version](https://img.shields.io/badge/version-0.5.0-informational)
 ![Targets](https://img.shields.io/badge/targets-x86--64%20Linux%20%7C%20Windows-lightgrey)
 
 [Русская версия](README.ru.md) · [**Guide in pictures**](docs/GUIDE.en.md) · [Tools](docs/TOOLS.md) ·
@@ -111,15 +111,15 @@ machines in [bench/README.md](bench/README.md)):
 
 | benchmark | C -O2 | C++ -O2 | Rust -O | Go | **Klar** | Java 21 | Node.js 22 | Python 3.13 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `fib(25)` — function calls | 0.13 | 0.11 | 0.21 | 0.34 | **1.0** | 0.98 | 2.0 | 7.8 |
-| `loop` — integer arithmetic | 1.1 | 1.1 | 1.2 | 0.94 | **1.4** | 3.3 | 5.8 | 30.2 |
-| `primes` — division, branches | 0.80 | 0.77 | 0.46 | 0.81 | **1.1** | 1.9 | 2.9 | 16.7 |
-| `mandelbrot` — floating point | 0.27 | 0.30 | 0.24 | 0.25 | **0.33** | 2.9 | 4.3 | 11.7 |
-| `collections` — map/filter/sort 200k | 4.0 | 4.5 | 2.1 | 13.5 | **7.0** | 36.3 | 28.8 | 21.4 |
-| `strings` — 100k strings, join/split | 7.6 | 8.8 | 7.5 | 14.1 | **12.5** | 45.7 | 29.3 | 16.0 |
+| `fib(25)` — function calls | 0.11 | 0.11 | 0.16 | 0.34 | **0.71** | 1.0 | 2.2 | 8.1 |
+| `loop` — integer arithmetic | 1.0 | 1.0 | 1.1 | 1.0 | **1.5** | 3.3 | 6.9 | 24.4 |
+| `primes` — division, branches | 0.84 | 0.84 | 0.60 | 0.85 | **1.0** | 2.9 | 2.6 | 15.7 |
+| `mandelbrot` — floating point | 0.27 | 0.29 | 0.25 | 0.28 | **0.37** | 3.4 | 5.3 | 10.5 |
+| `collections` — map/filter/sort 200k | 5.0 | 4.1 | 2.2 | 12.5 | **7.1** | 40.2 | 33.9 | 26.5 |
+| `strings` — 100k strings, join/split | 8.2 | 9.9 | 9.4 | 15.5 | **13.3** | 40.2 | 33.0 | 17.9 |
 
-Klar is 1.3–35× faster than CPython, faster than Node.js on all six and than Java on five, close to C on integer and
-floating-point code (1.2–1.4×; floats live in XMM registers) and faster than Go on collections — while `Int` never overflows, values are immutable and every error
+Klar is 1.3–28× faster than CPython, faster than Node.js and Java on all six, close to C on integer and
+floating-point code (1.2–1.4×; floats live in XMM registers) and faster than Go on collections and strings — while `Int` never overflows, values are immutable and every error
 shows a Klar stack trace. An executable starts in 1–2 ms.
 
 ## How it works
@@ -161,19 +161,19 @@ flowchart TB
         v02["0.2 — modules, generics, doc &amp; property tests,<br/>dev / fix / profile, std library"]
         v03["0.3 — native x86-64 compiler + linker,<br/>runtime in Klar, compile-time safety,<br/>dev tools (fmt, view, refs…), benchmarks"]
         v04["0.4 — traits, pub, nested-pattern exhaustiveness,<br/>floats in XMM registers, std.json, std.time"]
-        v01 --> v02 --> v03 --> v04
+        v05["0.5 — language server + VS Code, REPL,<br/>faster calls, Bytes, Windows CI"]
+        v01 --> v02 --> v03 --> v04 --> v05
     end
     subgraph now["🚧 In progress"]
-        v05["0.5 — ✅ language server (klar lsp) + VS Code,<br/>✅ REPL, ✅ faster calls, ✅ Bytes, Windows CI"]
+        v06["0.6 — self-hosting: the compiler rewritten in Klar"]
     end
     subgraph next["🔜 Planned"]
         direction TB
-        v06["0.6 — self-hosting: the compiler rewritten in Klar"]
         v07["0.7 — generic impls, newtype, AI patch protocol,<br/>static contract checking"]
         v10["1.0 — ARM64 / macOS, package manager, concurrency,<br/>stable specification"]
-        v06 --> v07 --> v10
+        v07 --> v10
     end
-    v04 --> v05 --> v06
+    v05 --> v06 --> v07
 ```
 
 | area | status |
