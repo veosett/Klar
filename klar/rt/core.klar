@@ -15,6 +15,7 @@ const K_ENUM: Word = 14
 const K_FN: Word = 15
 const K_BIG: Word = 16
 const K_BUF: Word = 17
+const K_BYTES: Word = 18
 
 // global area (g_rt) offsets
 const G_HEAP: Word = 0
@@ -250,6 +251,11 @@ fn free(o: Word) {
   let td = peek(o + 8)
   let k = peek(td)
   if k == K_STR or k == K_BIG {
+    block_free(o)
+    return
+  }
+  if k == K_BYTES {
+    block_free(peek(o + 32))
     block_free(o)
     return
   }

@@ -1,0 +1,396 @@
+// Klar runtime: Bytes = [rc][td][len][cap][data] ; data = block of cap bytes.
+// Values are immutable; `*_owned` functions consume their first argument and write in place when it is
+// uniquely referenced (rc == 1), so `b = b.push(x)` in a loop appends in amortized O(1).
+
+fn bytes_with_cap(cap: Word) -> Word {
+  let o = obj_new(40, static_addr("td_Bytes"))
+  var c = cap
+  if c < 16 {
+    c = 16
+  }
+  poke(o + 16, 0)
+  poke(o + 24, c)
+  poke(o + 32, alloc(c))
+  return o
+}
+
+fn bytes_from(p: Word, n: Word) -> Word {
+  let o = bytes_with_cap(n)
+  copy_bytes(peek(o + 32), p, n)
+  poke(o + 16, n)
+  return o
+}
+
+fn bytes_grow(o: Word, need: Word) {
+  let cap = peek(o + 24)
+  if need <= cap {
+    return
+  }
+  var nc = cap * 2
+  while nc < need {
+    nc = nc * 2
+  }
+  let nd = alloc(nc)
+  copy_bytes(nd, peek(o + 32), peek(o + 16))
+  block_free(peek(o + 32))
+  poke(o + 32, nd)
+  poke(o + 24, nc)
+}
+
+// an owned Bytes that may be written: the object itself when unique, else a copy (the original released)
+fn bytes_unique(o: Word, extra: Word) -> Word {
+  let n = peek(o + 16)
+  if peek(o) == 1 {
+    bytes_grow(o, n + extra)
+    return o
+  }
+  let c = bytes_with_cap(n + extra)
+  copy_bytes(peek(c + 32), peek(o + 32), n)
+  poke(c + 16, n)
+  rc_dec(o)
+  return c
+}
+
+fn byte_or_fail(v: Int, what: Str, sp: Word) -> Word {
+  if is_small(v) {
+    let k = untag(v)
+    if k >= 0 and k <= 255 {
+      return k
+    }
+  }
+  let b = sb_new()
+  sb_add_str(b, bits(what))
+  sb_add_cstr(b, ": ")
+  int_show(b, bits(v))
+  sb_add_cstr(b, " is not a byte (0..255)")
+  return fail_simple("R0009", sb_finish(b), sp)
+}
+
+fn b_bytes_of(xs: Word, sp: Word) -> Word {
+  let n = peek(xs + 16)
+  let o = bytes_with_cap(n)
+  let d = peek(o + 32)
+  var i: Word = 0
+  while i < n {
+    poke8(d + i, byte_or_fail(unbits(list_at(xs, i)), "bytes_of", sp))
+    i = i + 1
+  }
+  poke(o + 16, n)
+  return o
+}
+
+fn Str_to_bytes(s: Word) -> Word {
+  return bytes_from(s + 32, peek(s + 16))
+}
+
+fn Bytes_len(o: Word) -> Int {
+  return tag(peek(o + 16))
+}
+
+fn Bytes_is_empty(o: Word) -> Bool {
+  return peek(o + 16) == 0
+}
+
+fn Bytes_get(o: Word, i: Int, rtd: Word) -> Word {
+  if is_small(i) {
+    let k = untag(i)
+    if k >= 0 and k < peek(o + 16) {
+      return some_new(rtd, w_or(w_shl(peek8(peek(o + 32) + k), 1), 1))
+    }
+  }
+  return none()
+}
+
+fn Bytes_get_or(o: Word, i: Int, d: Int) -> Int {
+  if is_small(i) {
+    let k = untag(i)
+    if k >= 0 and k < peek(o + 16) {
+      return tag(peek8(peek(o + 32) + k))
+    }
+  }
+  return d
+}
+
+fn bytes_clamp(i: Int, n: Word) -> Word {
+  let k = clamp_index(i)
+  if k > n {
+    return n
+  }
+  return k
+}
+
+fn Bytes_slice(o: Word, start: Int, end: Int) -> Word {
+  let n = peek(o + 16)
+  let a = bytes_clamp(start, n)
+  let b = bytes_clamp(end, n)
+  if b <= a {
+    return bytes_with_cap(0)
+  }
+  return bytes_from(peek(o + 32) + a, b - a)
+}
+
+fn Bytes_concat(o: Word, other: Word) -> Word {
+  let n = peek(o + 16)
+  let m = peek(other + 16)
+  let r = bytes_with_cap(n + m)
+  copy_bytes(peek(r + 32), peek(o + 32), n)
+  copy_bytes(peek(r + 32) + n, peek(other + 32), m)
+  poke(r + 16, n + m)
+  return r
+}
+
+fn bytes_push_raw(o: Word, k: Word) -> Word {
+  let n = peek(o + 16)
+  if peek(o) == 1 and n < peek(o + 24) {
+    poke8(peek(o + 32) + n, k)
+    poke(o + 16, n + 1)
+    return o
+  }
+  let u = bytes_unique(o, 1)
+  poke8(peek(u + 32) + n, k)
+  poke(u + 16, n + 1)
+  return u
+}
+
+fn Bytes_push(o: Word, v: Int, sp: Word) -> Word {
+  let k = byte_or_fail(v, "Bytes.push", sp)
+  rc_inc(o)
+  return bytes_push_raw(o, k)
+}
+
+fn Bytes_push_owned(o: Word, v: Int, sp: Word) -> Word {
+  let k = byte_or_fail(v, "Bytes.push", sp)
+  return bytes_push_raw(o, k)
+}
+
+fn le_fail(v: Int, size: Int, sp: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "Bytes.push_le: ")
+  int_show(b, bits(v))
+  sb_add_cstr(b, " does not fit in ")
+  int_show(b, bits(size))
+  sb_add_cstr(b, " byte(s)")
+  return fail_simple("R0009", sb_finish(b), sp)
+}
+
+fn bytes_push_le_raw(o: Word, v: Int, size: Int, sp: Word) -> Word {
+  if size != 1 and size != 2 and size != 4 and size != 8 {
+    let b = sb_new()
+    sb_add_cstr(b, "Bytes.push_le: size must be 1, 2, 4 or 8, got ")
+    int_show(b, bits(size))
+    return fail_simple("R0009", sb_finish(b), sp)
+  }
+  let hi = pow2(size * 8)
+  let lo = 0 - pow2(size * 8 - 1)
+  if v < lo or v >= hi {
+    return le_fail(v, size, sp)
+  }
+  var x = v
+  if x < 0 {
+    x = x + hi            // two's complement
+  }
+  let n = untag(size)
+  let u = bytes_unique(o, n)
+  let len = peek(u + 16)
+  let d = peek(u + 32) + len
+  var i: Word = 0
+  while i < n {
+    poke8(d + i, untag(x % 256))
+    x = x / 256
+    i = i + 1
+  }
+  poke(u + 16, len + n)
+  return u
+}
+
+fn Bytes_push_le(o: Word, v: Int, size: Int, sp: Word) -> Word {
+  rc_inc(o)
+  return bytes_push_le_raw(o, v, size, sp)
+}
+
+fn Bytes_push_le_owned(o: Word, v: Int, size: Int, sp: Word) -> Word {
+  return bytes_push_le_raw(o, v, size, sp)
+}
+
+fn bytes_set_raw(o: Word, i: Int, v: Int, sp: Word) -> Word {
+  let k = index_or_fail(i, peek(o + 16), "Bytes.set", sp, false)
+  let b = byte_or_fail(v, "Bytes.set", sp)
+  let u = bytes_unique(o, 0)
+  poke8(peek(u + 32) + k, b)
+  return u
+}
+
+fn Bytes_set(o: Word, i: Int, v: Int, sp: Word) -> Word {
+  rc_inc(o)
+  return bytes_set_raw(o, i, v, sp)
+}
+
+fn Bytes_set_owned(o: Word, i: Int, v: Int, sp: Word) -> Word {
+  return bytes_set_raw(o, i, v, sp)
+}
+
+fn Bytes_to_list(o: Word, rtd: Word) -> Word {
+  let n = peek(o + 16)
+  let out = list_with_cap(rtd, n)
+  let d = peek(o + 32)
+  var i: Word = 0
+  while i < n {
+    poke(peek(out + 32) + i * 8, w_or(w_shl(peek8(d + i), 1), 1))
+    i = i + 1
+  }
+  poke(out + 16, n)
+  return out
+}
+
+// index of the first byte that breaks UTF-8, or -1
+fn utf8_error_at(p: Word, n: Word) -> Word {
+  var i: Word = 0
+  while i < n {
+    let c = peek8(p + i)
+    var need: Word = 0
+    if c < 128 {
+      need = 0
+    } else if c >= 194 and c <= 223 {
+      need = 1
+    } else if c >= 224 and c <= 239 {
+      need = 2
+    } else if c >= 240 and c <= 244 {
+      need = 3
+    } else {
+      return i
+    }
+    var k: Word = 1
+    while k <= need {
+      if i + k >= n {
+        return i
+      }
+      let cc = peek8(p + i + k)
+      if cc < 128 or cc > 191 {
+        return i
+      }
+      k = k + 1
+    }
+    if need == 2 {
+      let c1 = peek8(p + i + 1)
+      if (c == 224 and c1 < 160) or (c == 237 and c1 > 159) {
+        return i
+      }
+    }
+    if need == 3 {
+      let c1 = peek8(p + i + 1)
+      if (c == 240 and c1 < 144) or (c == 244 and c1 > 143) {
+        return i
+      }
+    }
+    i = i + need + 1
+  }
+  return -1
+}
+
+fn Bytes_decode(o: Word, rtd: Word) -> Word {
+  let n = peek(o + 16)
+  let p = peek(o + 32)
+  let bad = utf8_error_at(p, n)
+  if bad >= 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "not valid UTF-8 at byte ")
+    sb_add_word(b, bad)
+    return err_new(rtd, sb_finish(b))
+  }
+  return ok_new(rtd, str_from(p, n))
+}
+
+fn Bytes_hex(o: Word) -> Word {
+  let n = peek(o + 16)
+  let d = peek(o + 32)
+  let b = sb_new()
+  var i: Word = 0
+  while i < n {
+    let c = peek8(d + i)
+    sb_add_byte(b, hex_char(w_shr(c, 4)))
+    sb_add_byte(b, hex_char(w_and(c, 15)))
+    i = i + 1
+  }
+  return sb_finish(b)
+}
+
+fn hex_char(v: Word) -> Word {
+  if v < 10 {
+    return 48 + v
+  }
+  return 87 + v
+}
+
+fn bytes_show(b: Word, o: Word) {
+  sb_add_cstr(b, "bytes_of([")
+  let n = peek(o + 16)
+  let d = peek(o + 32)
+  var i: Word = 0
+  while i < n {
+    if i > 0 {
+      sb_add_cstr(b, ", ")
+    }
+    sb_add_word(b, peek8(d + i))
+    i = i + 1
+  }
+  sb_add_cstr(b, "])")
+}
+
+fn bytes_equal(a: Word, b: Word) -> Bool {
+  let n = peek(a + 16)
+  if n != peek(b + 16) {
+    return false
+  }
+  return bytes_eq(peek(a + 32), peek(b + 32), n)
+}
+
+fn b_read_bytes(path: Word, rtd: Word) -> Word {
+  let fd = os_open(path + 32, 0)
+  if fd < 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "cannot read '")
+    sb_add_str(b, path)
+    sb_add_cstr(b, "': ")
+    io_error_text(b, fd)
+    return err_new(rtd, sb_finish(b))
+  }
+  let out = bytes_with_cap(65536)
+  var reading = true
+  while reading {
+    let len = peek(out + 16)
+    bytes_grow(out, len + 65536)
+    let n = os_read(fd, peek(out + 32) + len, 65536)
+    if n <= 0 {
+      reading = false
+    } else {
+      poke(out + 16, len + n)
+    }
+  }
+  os_close(fd)
+  return ok_new(rtd, out)
+}
+
+fn b_write_bytes(path: Word, data: Word, rtd: Word) -> Word {
+  let fd = os_open(path + 32, 1)
+  if fd < 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "cannot write '")
+    sb_add_str(b, path)
+    sb_add_cstr(b, "': ")
+    io_error_text(b, fd)
+    return err_new(rtd, sb_finish(b))
+  }
+  var done: Word = 0
+  let n = peek(data + 16)
+  let p = peek(data + 32)
+  while done < n {
+    let w = os_write(fd, p + done, n - done)
+    if w <= 0 {
+      done = n
+    } else {
+      done = done + w
+    }
+  }
+  os_close(fd)
+  return ok_new(rtd, 0)
+}

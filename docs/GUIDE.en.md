@@ -51,6 +51,7 @@ flowchart TB
     P --> P2["Float"]
     P --> P3["Bool — true / false"]
     P --> P4["Str — Unicode string"]
+    P --> P5["Bytes — raw bytes (files, protocols)"]
     C --> C1["List[T]"]
     C --> C2["Map[K, V] — insertion ordered"]
     M --> M1["Option[T] — Some(v) or None"]
@@ -414,6 +415,7 @@ sequenceDiagram
 | bit operations | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (there are no `&`, `\|`, `<<` operators) |
 | character codes | `"hé".codes()` → `[104, 233]`, `65.to_char()` → `Some("A")` |
 | a set | `use std.set.{set_of}`, `set_of([1, 2]).has(1)` |
+| bytes, binary files | `var b = bytes_of([])`, `b = b.push_le(n, 4)`, `write_bytes(path, b)` |
 | JSON | `use std.json.{parse_json, lookup, json_text}`, `lookup(parse_json(text)?, "users.0.name")` |
 | date and time (UTC) | `use std.time.{now_utc, format_iso, parse_iso}`, `format_iso(now_utc())` |
 | an element or a default | `xs.get_or(i, 0)` |

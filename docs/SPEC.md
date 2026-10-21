@@ -98,6 +98,7 @@ pattern     = "_" | ident | int | float | string | "true" | "false" | "-" int
 | `Float` | IEEE-754 double | деление на 0.0 → R0001 |
 | `Bool` | `true`, `false` | |
 | `Str` | строки Unicode | неизменяемые |
+| `Bytes` | `bytes_of([1, 255])`, `s.to_bytes()` | неизменяемые байты 0..255; `push`/`set` в цикле `b = b.push(x)` пишут на месте; `read_bytes`/`write_bytes` |
 | `Unit` | `()` | результат функций без `->` |
 | `Never` | — | тип `fail(...)`; совместим с любым типом |
 | `List[T]` | `[a, b]` | неизменяемый |

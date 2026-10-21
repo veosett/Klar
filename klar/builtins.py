@@ -373,6 +373,102 @@ def _(it, a, sp): return a[0][max(a[1], 0):max(a[2], 0)]
 def _(it, a, sp): return tuple(a[0])
 
 
+@method("Str", "fn to_bytes(self: Str) -> Bytes")
+def _(it, a, sp): return a[0].encode("utf-8")
+
+
+# ---- Bytes: an immutable sequence of bytes (0..255) ------------------------------------------------
+def _byte(b, what, sp):
+    if not 0 <= b <= 255:
+        raise rt_error("R0009", f"{what}: {b} is not a byte (0..255)", sp)
+    return b
+
+
+@glob("fn bytes_of(xs: List[Int]) -> Bytes")
+def _bytes_of(it, a, sp): return bytes(_byte(b, "bytes_of", sp) for b in a[0])
+
+
+@glob("fn read_bytes(path: Str) -> Result[Bytes, Str] uses fs")
+def _read_bytes(it, a, sp):
+    try:
+        with open(a[0], "rb") as f:
+            return ok(f.read())
+    except OSError as ex:
+        return err(f"cannot read '{a[0]}': {ex.strerror}")
+
+
+@glob("fn write_bytes(path: Str, data: Bytes) -> Result[Unit, Str] uses fs")
+def _write_bytes(it, a, sp):
+    try:
+        with open(a[0], "wb") as f:
+            f.write(a[1])
+        return ok(UNIT)
+    except OSError as ex:
+        return err(f"cannot write '{a[0]}': {ex.strerror}")
+
+
+@method("Bytes", "fn len(self: Bytes) -> Int")
+def _(it, a, sp): return len(a[0])
+
+
+@method("Bytes", "fn is_empty(self: Bytes) -> Bool")
+def _(it, a, sp): return len(a[0]) == 0
+
+
+@method("Bytes", "fn get(self: Bytes, index: Int) -> Option[Int]")
+def _(it, a, sp): return some(a[0][a[1]]) if 0 <= a[1] < len(a[0]) else NONE
+
+
+@method("Bytes", "fn get_or(self: Bytes, index: Int, default: Int) -> Int")
+def _(it, a, sp): return a[0][a[1]] if 0 <= a[1] < len(a[0]) else a[2]
+
+
+@method("Bytes", "fn slice(self: Bytes, start: Int, end: Int) -> Bytes")
+def _(it, a, sp): return a[0][max(a[1], 0):max(a[2], 0)]
+
+
+@method("Bytes", "fn concat(self: Bytes, other: Bytes) -> Bytes")
+def _(it, a, sp): return a[0] + a[1]
+
+
+@method("Bytes", "fn push(self: Bytes, byte: Int) -> Bytes")
+def _(it, a, sp): return a[0] + bytes((_byte(a[1], "Bytes.push", sp),))
+
+
+@method("Bytes", "fn push_le(self: Bytes, value: Int, size: Int) -> Bytes")
+def _(it, a, sp):
+    data, v, n = a
+    if n not in (1, 2, 4, 8):
+        raise rt_error("R0009", f"Bytes.push_le: size must be 1, 2, 4 or 8, got {n}", sp)
+    if not -(1 << (8 * n - 1)) <= v < (1 << (8 * n)):
+        raise rt_error("R0009", f"Bytes.push_le: {v} does not fit in {n} byte(s)", sp)
+    return data + (v & ((1 << (8 * n)) - 1)).to_bytes(n, "little")
+
+
+@method("Bytes", "fn set(self: Bytes, index: Int, byte: Int) -> Bytes")
+def _(it, a, sp):
+    data, i, b = a
+    if not 0 <= i < len(data):
+        raise rt_error("R0011", f"Bytes.set: index {i} out of bounds for length {len(data)}", sp)
+    return data[:i] + bytes((_byte(b, "Bytes.set", sp),)) + data[i + 1:]
+
+
+@method("Bytes", "fn to_list(self: Bytes) -> List[Int]")
+def _(it, a, sp): return tuple(a[0])
+
+
+@method("Bytes", "fn decode(self: Bytes) -> Result[Str, Str]")
+def _(it, a, sp):
+    try:
+        return ok(a[0].decode("utf-8"))
+    except UnicodeDecodeError as ex:
+        return err(f"not valid UTF-8 at byte {ex.start}")
+
+
+@method("Bytes", "fn hex(self: Bytes) -> Str")
+def _(it, a, sp): return a[0].hex()
+
+
 @method("Str", "fn codes(self: Str) -> List[Int]")
 def _(it, a, sp): return tuple(ord(c) for c in a[0])
 

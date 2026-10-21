@@ -438,6 +438,7 @@ class Safety:
                 self.expr(a.value, facts)
             self.expr(e.callee, facts)
             self.check_contract(e)
+            self.check_builtin_call(e)
             return
         if isinstance(e, N.MethodCall):
             self.expr(e.obj, facts)
@@ -524,6 +525,8 @@ class Safety:
             bad = "`fixed` needs a non-negative number of digits"
         elif recv_t == "Str" and m == "count" and args and isinstance(args[0], N.StrLit) and args[0].parts in ([], [""]):
             bad = "`count` of the empty string"
+        elif recv_t == "Bytes" and not any(a.name for a in e.args):
+            bad = self.bytes_problem(m, args)
         if bad:
             self.error("E0704", f"invalid argument: {bad}", e.span,
                        hint="the call would always fail at run time (R0009)")
@@ -538,6 +541,44 @@ class Safety:
             if isinstance(decl, N.FnDecl):
                 return decl, [e.obj] + [a.value for a in e.args if a.name is None]
         return None, []
+
+    def constant(self, ex):
+        try:
+            v = self.const_value(ex, {})
+        except NotConst:
+            return None
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+    def bytes_problem(self, m, args):
+        """A Bytes call whose constant arguments always fail at run time (R0009)."""
+        if m == "push" and args:
+            b = self.constant(args[0])
+            if b is not None and not 0 <= b <= 255:
+                return f"{b} is not a byte (0..255)"
+        if m == "set" and len(args) >= 2:
+            b = self.constant(args[1])
+            if b is not None and not 0 <= b <= 255:
+                return f"{b} is not a byte (0..255)"
+        if m == "push_le" and len(args) >= 2:
+            size = self.constant(args[1])
+            if size is not None and size not in (1, 2, 4, 8):
+                return f"`push_le` size must be 1, 2, 4 or 8, got {size}"
+            v = self.constant(args[0])
+            if size in (1, 2, 4, 8) and v is not None and not -(1 << (8 * size - 1)) <= v < (1 << (8 * size)):
+                return f"{v} does not fit in {size} byte(s)"
+        return None
+
+    def check_builtin_call(self, e):
+        if not (isinstance(e.callee, N.Name) and e.callee.name == "bytes_of" and e.args):
+            return
+        lst = e.args[0].value
+        if isinstance(lst, N.ListLit):
+            for item in lst.items:
+                b = self.constant(item)
+                if b is not None and not 0 <= b <= 255:
+                    self.error("E0704", f"invalid argument: {b} is not a byte (0..255)", item.span,
+                               hint="the call would always fail at run time (R0009)")
+                    return
 
     def check_contract(self, e):
         callee, positional = self.callee_of(e)

@@ -592,6 +592,8 @@ class Interpreter:
         if name == "Str":
             alphabet = "abcxyzAB01 -_é"
             return "".join(rng.choice(alphabet) for _ in range(rng.randint(0, size)))
+        if name == "Bytes":
+            return bytes(rng.choice([0, 1, 127, 128, 255, rng.randint(0, 255)]) for _ in range(rng.randint(0, size)))
         if name == "Unit":
             return UNIT
         if name == "List":
@@ -655,9 +657,9 @@ class Interpreter:
         elif isinstance(v, float):
             if v != 0.0:
                 out += [0.0, float(int(v)), v / 2]
-        elif isinstance(v, str):
+        elif isinstance(v, (str, bytes)):
             if v:
-                out += ["", v[:len(v) // 2], v[1:], v[:-1]]
+                out += [v[:0], v[:len(v) // 2], v[1:], v[:-1]]
         elif isinstance(v, tuple):
             if v:
                 out += [(), v[:len(v) // 2], v[len(v) // 2:]]

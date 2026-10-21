@@ -34,7 +34,7 @@ def evaluate(parts, context_file=None):
     header = (base.rstrip("\n") + "\n\n") if base else ""
     offset = header.count("\n") + 1          # input line k is source line offset + k
     body = "".join("  " + s + "\n" for s in stmts)
-    src = header + f"fn {ENTRY}() uses io, time, rand, fs {{\n{body}  let {VALUE} = {expr}\n  dbg({VALUE})\n}}\n"
+    src = header + f"fn {ENTRY}() uses io, time, rand, fs {{\n{body}  let {VALUE} = {expr}\n  let _ = dbg({VALUE})\n}}\n"
     loaded = load_source(src, fname, root=root)
     errors = [d for d in loaded.diags if d.severity == "error" and d.span.file == fname]
     if errors:

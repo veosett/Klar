@@ -6,6 +6,10 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 ## [Unreleased]
 
 ### Added
+- `Bytes`: an immutable byte sequence (`bytes_of`, `Str.to_bytes`, `len`, `get`, `get_or`, `slice`, `concat`, `push`,
+  `push_le`, `set`, `to_list`, `decode`, `hex`) with `read_bytes` / `write_bytes`. `b = b.push(x)` appends in place in
+  native code when `b` is the only reference. Constant bytes out of 0..255 and bad `push_le` sizes are compile-time
+  errors (E0704). Property tests generate and shrink `Bytes`.
 - Faster calls in native code: the call depth (R0006 above 10000, exactly as in the interpreter) lives in the
   reserved register R15 instead of a global (`fib` 1.0 → 0.68 ms); values may stay in caller-saved registers
   across calls (saved around them); calls inside inlined runtime accessors are cold, so floats stay in XMM

@@ -76,6 +76,8 @@ assert x > 0, "message"
 - No bit operators: `a.bit_and(b)`, `bit_or`, `bit_xor`, `a.bit_not()`, `a.shift_left(n)`, `a.shift_right(n)`
   (two's complement on arbitrary-precision Int, shift_right floors). Characters: `s.codes()` → `List[Int]`,
   `n.to_char()` → `Option[Str]`.
+- Bytes: `bytes_of([1, 2])`, `s.to_bytes()`, `b.push(255)`, `b.push_le(value, 4)` (little-endian, size 1/2/4/8),
+  `b.get(i)`, `b.slice(a, z)`, `b.decode()` → `Result[Str, Str]`, `b.hex()`; files: `read_bytes`/`write_bytes` (fs).
 - Comparison `== != < > <= >=` (no chaining). `==` is structural for all values.
 - Records: `Point { x: 1, y: 2 }`, field `p.x`, copy-with-changes `p with { x: 3 }`. Fields are never assigned.
 - Enum values: `Shape.Circle(radius: 1.0)`, `Shape.Empty` — always qualified.
@@ -136,7 +138,7 @@ for a list of different kinds use an `enum` and `impl Shape for ThatEnum` (one `
 `klar fix` adds `todo(...)` stubs for missing impl methods.
 
 ## Types
-`Int` (arbitrary precision), `Float`, `Bool`, `Str`, `Unit`, `Never`, `List[T]`, `Map[K, V]` (K: Int/Str/Bool,
+`Int` (arbitrary precision), `Float`, `Bool`, `Str`, `Bytes`, `Unit`, `Never`, `List[T]`, `Map[K, V]` (K: Int/Str/Bool,
 insertion-ordered), `Option[T]`, `Result[T, E]`, `fn(A, B) -> R`, user `type`/`enum`. Annotate empty
 collections: `let xs: List[Int] = []`.
 

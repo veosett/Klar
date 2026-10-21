@@ -1,0 +1,43 @@
+// Bytes: building in place, slicing, UTF-8, little-endian integers, equality, show.
+
+fn main() uses io {
+  var b = "hé".to_bytes()
+  for i in range(0, 5) {
+    b = b.push(i * 50)
+  }
+  b = b.push_le(-2, 2).push_le(258, 4)
+  b = b.set(0, 72)
+  print(b)
+  print(b.len())
+  print(b.get(1))
+  print(b.get(100))
+  print(b.get_or(-1, 7))
+  print(b.slice(0, 3).decode())
+  print(b.slice(3, 5).decode())
+  print(b.hex())
+  print(b.to_list().sum())
+  print(b == bytes_of(b.to_list()))
+  print(bytes_of([1, 2]).concat(bytes_of([3])))
+  print([bytes_of([1]), bytes_of([])])
+  var big = bytes_of([])
+  for i in range(0, 100000) {
+    big = big.push(i % 256)
+  }
+  print(big.len())
+  print(big.get_or(99999, -1))
+  print(bytes_of([]).push_le(9223372036854775807, 8).hex())
+  print(bytes_of([]).push_le(-1, 8).hex())
+  print(bytes_of([]).push_le(18446744073709551615, 8).hex())
+}
+
+test "push in a loop builds in place" {
+  var b = bytes_of([])
+  for i in range(0, 1000) {
+    b = b.push(i % 7)
+  }
+  let copy = b
+  let changed = b.set(0, 9)
+  assert copy.get(0) == Some(0)
+  assert changed.get(0) == Some(9)
+  assert b.len() == 1000
+}

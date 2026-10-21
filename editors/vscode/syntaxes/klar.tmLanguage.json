@@ -77,7 +77,7 @@
         { "name": "keyword.operator.logical.klar", "match": "\\b(and|or|not)\\b" },
         { "name": "constant.language.klar", "match": "\\b(true|false|None|Some|Ok|Err|result)\\b" },
         { "name": "variable.language.self.klar", "match": "\\b(self|Self)\\b" },
-        { "name": "support.function.builtin.klar", "match": "\\b(print|read_line|fail|todo|dbg|range|now_ms|now_ns|random_int|read_file|write_file|file_exists|cli_args)\\b(?=\\()" }
+        { "name": "support.function.builtin.klar", "match": "\\b(print|read_line|fail|todo|dbg|range|now_ms|now_ns|random_int|read_file|write_file|file_exists|cli_args|read_bytes|write_bytes|bytes_of|env_var|exit)\\b(?=\\()" }
       ]
     },
     "numbers": {

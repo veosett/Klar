@@ -14,7 +14,7 @@ from .types import (ANY, BOOL, FLOAT, INT, NEVER, STR, UNIT, TCon, TFn, TParam, 
                     head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify)
 
 KNOWN_EFFECTS = {"io", "time", "rand", "fs", "net"}
-PRIMS = {"Int", "Float", "Bool", "Str", "Unit", "Never"}
+PRIMS = {"Int", "Float", "Bool", "Str", "Bytes", "Unit", "Never"}
 GENERIC_ARITY = {"List": 1, "Map": 2, "Option": 1, "Result": 2}
 PASCAL = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 SNAKE = re.compile(r"^_?[a-z][a-z0-9_]*$|^_$")
@@ -643,7 +643,8 @@ class Checker:
                    "f64": "Float", "double": "Float", "bool": "Bool", "boolean": "Bool", "string": "Str",
                    "String": "Str", "str": "Str", "void": "Unit", "None": "Unit", "Vec": "List", "Array": "List",
                    "list": "List", "dict": "Map", "HashMap": "Map", "Dict": "Map", "Optional": "Option",
-                   "Maybe": "Option", "Either": "Result", "Tuple": "Pair"}
+                   "Maybe": "Option", "Either": "Result", "Tuple": "Pair", "bytes": "Bytes", "bytearray": "Bytes",
+                   "Buffer": "Bytes", "ByteArray": "Bytes", "u8": "Int", "byte": "Int"}
         cands = self.type_names_visible() | set(tps)
         if name == "Self":
             self.error("E0104", "`Self` is only available in `trait` and `impl` methods", te.span,

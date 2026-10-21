@@ -6,7 +6,7 @@ every back-end. Read `CONTRIBUTING.md` for the full rules; the essentials:
 ## Before you finish any change
 ```sh
 python -m unittest discover -s tests        # front-end, 3 back-ends, tools, compile-time safety
-python tests/native_diff.py                 # native back-end == reference interpreter (24 files)
+python tests/native_diff.py                 # native back-end == reference interpreter (25 files)
 python -m klar fmt --check .                # Klar code in canonical form
 ruff check klar tests bench                 # lint
 ```

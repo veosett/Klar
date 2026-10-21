@@ -50,6 +50,7 @@ flowchart TB
     P --> P2["Float — дробное"]
     P --> P3["Bool — true / false"]
     P --> P4["Str — строка Unicode"]
+    P --> P5["Bytes — байты (файлы, протоколы)"]
     C --> C1["List[T] — список"]
     C --> C2["Map[K, V] — словарь (порядок вставки)"]
     M --> M1["Option[T] — Some(v) или None"]
@@ -415,6 +416,7 @@ sequenceDiagram
 | битовые операции | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (операторов `&`, `\|`, `<<` нет) |
 | коды символов | `"hé".codes()` → `[104, 233]`, `65.to_char()` → `Some("A")` |
 | множество | `use std.set.{set_of}`, `set_of([1, 2]).has(1)` |
+| байты, двоичные файлы | `var b = bytes_of([])`, `b = b.push_le(n, 4)`, `write_bytes(path, b)` |
 | JSON | `use std.json.{parse_json, lookup, json_text}`, `lookup(parse_json(text)?, "users.0.name")` |
 | дата и время (UTC) | `use std.time.{now_utc, format_iso, parse_iso}`, `format_iso(now_utc())` |
 | элемент или значение по умолчанию | `xs.get_or(i, 0)` |

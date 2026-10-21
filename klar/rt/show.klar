@@ -22,6 +22,8 @@ fn show_into(b: Word, v: Word, td: Word, top: Bool) {
     sb_add_cstr(b, "()")
   } else if k == K_WORD {
     sb_add_word(b, v)
+  } else if k == K_BYTES {
+    bytes_show(b, v)
   } else if k == K_LIST {
     let et = peek(td + 16)
     sb_add_byte(b, 91)
@@ -195,6 +197,9 @@ fn eq_v(a: Word, b: Word, td: Word) -> Bool {
   if k == K_STR {
     return Str_eq(a, b)
   }
+  if k == K_BYTES {
+    return bytes_equal(a, b)
+  }
   if k == K_LIST {
     let n = peek(a + 16)
     if n != peek(b + 16) {
@@ -274,6 +279,9 @@ fn hash_v(v: Word, td: Word) -> Word {
   }
   if k == K_STR {
     return hash_bytes(v + 32, peek(v + 16))
+  }
+  if k == K_BYTES {
+    return hash_bytes(peek(v + 32), peek(v + 16))
   }
   if k < K_STR {
     return v * 1099511628211

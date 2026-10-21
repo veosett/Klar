@@ -170,6 +170,22 @@ fn main() uses io {
                 code, out, err = cli("run", *flag, path)
                 self.assertEqual((code, out), (3, "before\n"), (flag, err))
 
+    def test_bytes_files_on_every_backend(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "b.klar")
+            data = os.path.join(d, "data.bin").replace("\\", "/")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('fn main() uses io, fs {\n  var b = bytes_of([0, 255])\n  for i in range(0, 300) {\n'
+                        '    b = b.push(i % 256)\n  }\n'
+                        f'  match write_bytes("{data}", b) {{\n    Ok(_) => print("ok"),\n    Err(e) => print(e),\n  }}\n'
+                        f'  let back = read_bytes("{data}")\n  print(back.map(fn(x) => x.len()))\n'
+                        '  print(back == Ok(b))\n  print(read_bytes("/klar/missing/file").is_err())\n}\n')
+            for flag in (["--interp"], ["--py"], []):
+                code, out, err = cli("run", *flag, path)
+                self.assertEqual((code, out), (0, "ok\nOk(302)\ntrue\ntrue\n"), (flag, err))
+                with open(os.path.join(d, "data.bin"), "rb") as f:
+                    self.assertEqual(f.read()[:4], bytes([0, 255, 0, 1]))
+
     def test_lambdas_cannot_capture_vars(self):
         assign = "fn main() uses io {\n var counter = 0\n let bump = fn(n: Int) {\n counter = counter + n\n }\n bump(5)\n}"
         self.assertEqual(errors(assign), ["E0216"])

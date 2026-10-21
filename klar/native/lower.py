@@ -20,7 +20,7 @@ from .intrinsics import SYS_NAMES
 from .kir import Fn
 
 K_UNIT, K_BOOL, K_INT, K_FLOAT, K_WORD = 0, 1, 2, 3, 4
-K_STR, K_LIST, K_MAP, K_RECORD, K_ENUM, K_FN, K_BIG, K_BUF = 10, 11, 12, 13, 14, 15, 16, 17
+K_STR, K_LIST, K_MAP, K_RECORD, K_ENUM, K_FN, K_BIG, K_BUF, K_BYTES = 10, 11, 12, 13, 14, 15, 16, 17, 18
 
 UNIT_T = TCon("Unit")
 INT_T = TCon("Int")
@@ -31,6 +31,7 @@ WORD_T = TCon("Word")
 
 # methods whose `x = x.m(...)` form may update x in place (runtime function <Owner>_<m>_owned)
 REUSE = {("List", "push"), ("List", "set"), ("List", "insert"), ("List", "remove_at"), ("List", "concat"),
+         ("Bytes", "push"), ("Bytes", "push_le"), ("Bytes", "set"),
          ("Map", "set"), ("Map", "remove"), ("Map", "update")}
 
 
@@ -165,7 +166,8 @@ class Program:
         name = f"td{len(self.tds)}"
         self.tds[key] = name
         h = t.name if isinstance(t, TCon) else None
-        prim = {"Unit": K_UNIT, "Bool": K_BOOL, "Int": K_INT, "Float": K_FLOAT, "Word": K_WORD, "Str": K_STR}
+        prim = {"Unit": K_UNIT, "Bool": K_BOOL, "Int": K_INT, "Float": K_FLOAT, "Word": K_WORD, "Str": K_STR,
+                "Bytes": K_BYTES}
         if isinstance(t, TFn):
             self.words(name, [K_FN, (self.str_obj("fn"), 0), 0, 0, 0, 0])
         elif h in prim:
@@ -1469,7 +1471,7 @@ def lower_program(loaded, image, tests=None):
     prog.run()
     # static descriptors the runtime refers to by name
     for nm, t in (("td_Str", STR_T), ("td_Int", INT_T), ("td_Float", FLOAT_T), ("td_Bool", BOOL_T),
-                  ("td_Unit", UNIT_T)):
+                  ("td_Unit", UNIT_T), ("td_Bytes", TCon("Bytes"))):
         sym = prog.td(t)
         image.data_syms[nm] = image.data_syms[sym]
     prog.words("td_Big", [K_BIG, (prog.str_obj("Int"), 0), 0, 0, 0, 0])

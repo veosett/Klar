@@ -316,3 +316,25 @@ test "List.get_or" {
   assert xs.get_or(-1, 7) == 7
   assert ["a"].get_or(0, "z") == "a"
 }
+
+test "Bytes" {
+  let b = "hé".to_bytes()
+  assert b.len() == 3
+  assert not b.is_empty()
+  assert bytes_of([]).is_empty()
+  assert b.get(1) == Some(195)
+  assert b.get(3) == None
+  assert b.get_or(-1, 0) == 0
+  assert b.slice(1, 99) == bytes_of([195, 169])
+  assert b.concat(bytes_of([33])).decode() == Ok("hé!")
+  assert bytes_of([255]).decode().is_err()
+  assert b.push(10).to_list() == [104, 195, 169, 10]
+  assert bytes_of([]).push_le(258, 2).push_le(-1, 1) == bytes_of([2, 1, 255])
+  assert b.set(0, 72).decode() == Ok("Hé")
+  assert bytes_of([0, 171, 255]).hex() == "00abff"
+}
+
+property "Bytes survive a list round trip" (b: Bytes) {
+  assert bytes_of(b.to_list()) == b
+  assert b.concat(b).len() == 2 * b.len()
+}

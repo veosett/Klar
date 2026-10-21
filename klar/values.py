@@ -106,6 +106,8 @@ def type_head(v):
         return "Float"
     if isinstance(v, str):
         return "Str"
+    if isinstance(v, bytes):
+        return "Bytes"
     if isinstance(v, tuple):
         return "List"
     if isinstance(v, KMap):
@@ -136,6 +138,8 @@ def show(v, top=True):
         return r
     if isinstance(v, str):
         return v if top else _quote(v)
+    if isinstance(v, bytes):
+        return "bytes_of([" + ", ".join(str(b) for b in v) + "])"
     if v is UNIT:
         return "()"
     if isinstance(v, tuple):
