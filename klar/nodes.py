@@ -1,7 +1,7 @@
 """AST nodes. Every node carries a span and a stable numeric id
 (useful for AI tools that want to address a node instead of a text range)."""
-from dataclasses import dataclass, fields
-from typing import Any, List, Optional
+from dataclasses import dataclass, field, fields
+from typing import Any, Dict, List, Optional
 
 from .diagnostics import Span
 
@@ -51,6 +51,35 @@ class FnDecl(Node):
     ensures: list
     body: Any
     doc: Optional[str] = None
+    # type parameter -> [(trait name, span)], from `[T: Shape + Show]`
+    bounds: Dict[str, list] = field(default_factory=dict)
+    # methods: "impl" (inside `impl Trait for Type`) or "default" (a trait method with a body);
+    # their name is qualified ("Circle.area", "Shape.describe") so it never clashes with functions
+    owner_kind: Optional[str] = None
+    owner: Optional[str] = None       # the implementing type (impl) / the trait (default)
+    trait: Optional[str] = None
+    method: Optional[str] = None      # the unqualified method name
+
+
+@dataclass(eq=False)
+class TraitDecl(Node):
+    """`trait Name { fn m(self, ...) -> T ... }`. Methods with a body are defaults; they are
+    emitted as separate FnDecls named `Name.m` (generic in `Self`)."""
+    name: str
+    name_span: Span
+    methods: List[FnDecl]            # required methods (no body)
+    defaults: List[str]              # methods with a default body (FnDecls `Name.m` after the trait)
+    doc: Optional[str] = None
+
+
+@dataclass(eq=False)
+class ImplDecl(Node):
+    """`impl Trait for Type { ... }`; the methods follow as FnDecls named `Type.m`."""
+    trait: str
+    trait_span: Span
+    target: Any                       # TypeName
+    methods: List[str]
+    method_spans: List[Span]
 
 
 @dataclass(eq=False)

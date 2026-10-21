@@ -526,6 +526,166 @@ class DeveloperTools(unittest.TestCase):
             self.assertEqual(data["functions"]["make_greeting"]["flow"][0]["kind"], "return")
 
 
+class Traits(unittest.TestCase):
+    BASE = """trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {
+    return "area {self.area()}"
+  }
+}
+
+type Sq { side: Float }
+
+type Circle { r: Float }
+
+impl Shape for Sq {
+  fn area(self) -> Float {
+    return self.side * self.side
+  }
+}
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.0 * self.r * self.r
+  }
+  fn label(self) -> Str {
+    return "circle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+"""
+
+    def test_static_dispatch_defaults_and_overrides(self):
+        src = self.BASE + """
+fn labels[T: Shape](xs: List[T]) -> List[Str] {
+  return xs.map(fn(s) => s.label())
+}
+
+fn main() uses io {
+  print(total([Sq { side: 2.0 }, Sq { side: 1.0 }]))
+  print(total([Circle { r: 1.0 }]))
+  print(labels([Sq { side: 3.0 }]))
+  print(labels([Circle { r: 1.0 }]))
+  print(Sq { side: 1.0 }.label())
+}
+"""
+        self.assertEqual(run(src), "5.0\n3.0\n[\"area 9.0\"]\n[\"circle\"]\narea 1.0\n")
+
+    def test_impls_for_builtin_types_and_enums(self):
+        src = """trait Describe {
+  fn describe(self) -> Str
+}
+
+enum Light {
+  Red,
+  Green,
+}
+
+impl Describe for Int {
+  fn describe(self) -> Str {
+    return "int {self}"
+  }
+}
+
+impl Describe for Light {
+  fn describe(self) -> Str {
+    return match self {
+      Light.Red => "stop",
+      Light.Green => "go",
+    }
+  }
+}
+
+fn all[T: Describe](xs: List[T]) -> Str {
+  return xs.map(fn(x) => x.describe()).join(", ")
+}
+
+fn main() uses io {
+  print(all([1, 2]))
+  print(all([Light.Red, Light.Green]))
+}
+"""
+        self.assertEqual(run(src), "int 1, int 2\nstop, go\n")
+
+    def test_trait_errors(self):
+        def errs(extra):
+            return errors(self.BASE + extra)
+        self.assertIn("E0220", errs("type P { x: Int }\nfn f() -> Float {\n  return total([P { x: 1 }])\n}\n"))
+        self.assertIn("E0220", errs("fn f[U](xs: List[U]) -> Float {\n  return total(xs)\n}\n"))
+        self.assertIn("E0223", errs("fn f() -> Float {\n  return total([])\n}\n"))
+        self.assertIn("E0224", errs("fn f(s: Shape) -> Int {\n  return 1\n}\n"))
+        self.assertIn("E0204", errs("fn f[T](x: T) -> Float {\n  return x.area()\n}\n"))
+        self.assertIn("E0222", errs("impl Shape for Sq {\n  fn area(self) -> Float {\n    return 0.0\n  }\n}\n"))
+        self.assertIn("E0221", errs("type P { x: Int }\nimpl Shape for P {\n}\n"))
+        self.assertIn("E0221", errs("type P { x: Int }\nimpl Shape for P {\n  fn area(self) -> Int {\n"
+                                    "    return 1\n  }\n}\n"))
+        self.assertIn("E0221", errs("type P { x: Int }\nimpl Shape for P {\n  fn area(self) -> Float {\n"
+                                    "    return 1.0\n  }\n  fn extra(self) -> Int {\n    return 1\n  }\n}\n"))
+        self.assertIn("E0221", errs("impl Shape for List[Int] {\n  fn area(self) -> Float {\n    return 1.0\n  }\n}\n"))
+        self.assertIn("E0104", errs("impl Shap for Sq {\n}\n"))
+        self.assertIn("E0003", errs("trait T {\n  fn make() -> Int\n}\n"))
+        self.assertIn("E0003", errs("fn f(self) -> Int {\n  return 1\n}\n"))
+
+    def test_missing_methods_are_stubbed_by_fix(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("trait Pet {\n  fn name(self) -> Str\n}\n\ntype Dog { n: Str }\n\nimpl Pet for Dog {\n}\n\n"
+                        "fn main() uses io {\n  print(Dog { n: \"rex\" }.name())\n}\n")
+            cli("fix", path)
+            self.assertEqual([x.code for x in load_path(path).diags if x.severity == "error"], [])
+            with open(path, encoding="utf-8") as f:
+                self.assertIn('return todo("name")', f.read())
+
+    def test_traits_across_modules(self):
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in {
+                "geo.klar": "trait Area {\n  fn area(self) -> Int\n}\n\ntype Sq { s: Int }\n\nimpl Area for Sq {\n"
+                            "  fn area(self) -> Int {\n    return self.s * self.s\n  }\n}\n\n"
+                            "fn make() -> Sq {\n  return Sq { s: 3 }\n}\n",
+                "main.klar": "use geo.{Area, make}\n\ntype Rect { w: Int, h: Int }\n\nimpl Area for Rect {\n"
+                             "  fn area(self) -> Int {\n    return self.w * self.h\n  }\n}\n\n"
+                             "fn sum_area[T: Area](xs: List[T]) -> Int {\n  return xs.map(fn(x) => x.area()).sum()\n}"
+                             "\n\nfn main() uses io {\n  print(make().area())\n  print(sum_area([Rect { w: 2, h: 5 }]))\n"
+                             "}\n",
+                "bad.klar": "use geo.{make}\n\nfn main() uses io {\n  print(make().area())\n}\n",
+            }.items():
+                with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                    f.write(text)
+            for flag in (["--interp"], ["--py"]):
+                code, out, err = cli("run", *flag, os.path.join(d, "main.klar"))
+                self.assertEqual((code, out), (0, "9\n10\n"), err)
+            self.assertIn("E0104", [x.code for x in load_path(os.path.join(d, "bad.klar")).diags])
+
+    def test_own_function_wins_when_the_trait_is_not_imported(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "a.klar"), "w", encoding="utf-8") as f:
+                f.write("trait Describe {\n  fn describe(self) -> Str\n}\n\ntype C { x: Int }\n\n"
+                        "impl Describe for C {\n  fn describe(self) -> Str {\n    return \"impl\"\n  }\n}\n")
+            main = os.path.join(d, "main.klar")
+            with open(main, "w", encoding="utf-8") as f:
+                f.write("use a.{C}\n\nfn describe(c: C) -> Str {\n  return \"free {c.x}\"\n}\n\n"
+                        "fn main() uses io {\n  print(C { x: 1 }.describe())\n}\n")
+            for flag in (["--interp"], ["--py"]):
+                self.assertEqual(cli("run", *flag, main)[1], "free 1\n")
+
+    def test_tools_know_traits(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.BASE + "\nfn main() uses io {\n  print(total([Sq { side: 1.0 }]))\n}\n")
+            out = cli("outline", path)[1]
+            self.assertIn("trait Shape", out)
+            self.assertIn("impl Shape for Circle", out)
+            refs = cli("refs", path, "area")[1]
+            self.assertEqual(refs.count("method definition"), 3)
+            self.assertIn("method call", refs)
+            self.assertIn("default method of trait `Shape`", cli("doc", "label", "--in", path)[1])
+
+
 class Modules(unittest.TestCase):
     def write(self, d, name, text):
         path = os.path.join(d, *name.split("/"))

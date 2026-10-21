@@ -5,5 +5,7 @@
   "property": { "prefix": "property", "body": ["property \"${1:description}\" (${2:xs: List[Int]}) {", "  assert $0", "}"], "description": "property test" },
   "match": { "prefix": "match", "body": ["match ${1:value} {", "  ${2:Some(v)} => ${3},", "  ${4:None} => ${5},", "}"], "description": "match" },
   "record": { "prefix": "type", "body": ["type ${1:Name} {", "  ${2:field}: ${3:Int},", "}"], "description": "record type" },
+  "trait": { "prefix": "trait", "body": ["trait ${1:Name} {", "  fn ${2:method}(self) -> ${3:Str}", "}"], "description": "trait" },
+  "impl": { "prefix": "impl", "body": ["impl ${1:Trait} for ${2:Type} {", "  fn ${3:method}(self) -> ${4:Str} {", "    $0", "  }", "}"], "description": "impl Trait for Type" },
   "enum": { "prefix": "enum", "body": ["enum ${1:Name} {", "  ${2:Variant}(${3:field}: ${4:Int}),", "  ${5:Other},", "}"], "description": "enum" }
 }

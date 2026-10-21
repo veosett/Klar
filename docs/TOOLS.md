@@ -102,7 +102,7 @@ coverage of bank.klar: 83.3% of statements (10/12), 4 tests
 
 `editors/vscode/` — расширение для VS Code. Оно даёт:
 * подсветку синтаксиса, включая интерполяцию строк и doc-тесты;
-* сниппеты `fn`, `main`, `test`, `property`, `match`, `type`, `enum`;
+* сниппеты `fn`, `main`, `test`, `property`, `match`, `type`, `enum`, `trait`, `impl`;
 * разбор вывода `klar check` в список ошибок (`$klar`).
 
 LSP запланирован в 0.5.

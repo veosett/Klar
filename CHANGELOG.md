@@ -6,6 +6,13 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 ## [Unreleased]
 
 ### Added
+- Traits: `trait Name { fn m(self, ...) -> T }` with default methods, `impl Name for Type` (Int, Float, Bool, Str
+  and non-generic records/enums), bounds on generic functions `fn f[T: A + B](x: T)` and the `Self` type.
+  Checked statically (E0220 not implemented, E0221 impl does not match, E0222 impl misplaced/duplicated,
+  E0223 type not inferable, E0224 trait used as a type); `klar fix` inserts `todo(...)` stubs for missing
+  methods. The native compiler dispatches statically (one instance per type); the interpreter and the
+  Python back-end dispatch on the runtime type. Tools (`outline`, `doc`, `refs`/`rename`, `view`) know traits.
+- The compile-time contract check (E0703) also covers method-syntax calls (`x.f(...)`, impl methods).
 - Bit operations on Int (`bit_and`, `bit_or`, `bit_xor`, `bit_not`, `shift_left`, `shift_right`; two's complement,
   arbitrary precision), `Str.codes` / `Int.to_char`, `exit(code)`, `env_var(name)`, and `std.set` (`Set[T]`).
   The lexer points `& | ^ ~ << >>` at the methods. All back-ends agree (native on Linux and Windows).

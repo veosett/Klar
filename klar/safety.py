@@ -239,8 +239,8 @@ class Safety:
                 if recv <= NONNEG or other <= NONNEG:
                     return NONNEG
             return ANY
-        if isinstance(e, N.Call) and isinstance(e.callee, N.Name) and e.callee.name in self.fn_decls:
-            callee = self.fn_decls[e.callee.name]
+        callee, _ = self.callee_of(e) if isinstance(e, (N.Call, N.MethodCall)) else (None, [])
+        if callee is not None:
             if callee.ensures:
                 fx = {}
                 for en in callee.ensures:
@@ -444,6 +444,7 @@ class Safety:
             for a in e.args:
                 self.expr(a.value, facts)
             self.check_builtin(e, facts)
+            self.check_contract(e)
             return
         for child in children(e):
             self.expr(child, facts)
@@ -527,16 +528,24 @@ class Safety:
             self.error("E0704", f"invalid argument: {bad}", e.span,
                        hint="the call would always fail at run time (R0009)")
 
+    def callee_of(self, e):
+        """(FnDecl, positional argument expressions) of a call to a user function: `f(a, b)`, `a.f(b)` or a
+        trait/impl method `a.m(b)` resolved to a concrete implementation."""
+        if isinstance(e, N.Call) and isinstance(e.callee, N.Name) and e.callee.name in self.fn_decls:
+            return self.fn_decls[e.callee.name], [a.value for a in e.args if a.name is None]
+        if isinstance(e, N.MethodCall) and getattr(e, "resolved", (None,))[0] == "ufcs":
+            decl = getattr(getattr(e, "sig", None), "decl", None)
+            if isinstance(decl, N.FnDecl):
+                return decl, [e.obj] + [a.value for a in e.args if a.name is None]
+        return None, []
+
     def check_contract(self, e):
-        if not isinstance(e.callee, N.Name) or e.callee.name not in self.fn_decls:
-            return
-        callee = self.fn_decls[e.callee.name]
-        if not callee.requires:
+        callee, positional = self.callee_of(e)
+        if callee is None or not callee.requires:
             return
         env = {}
-        positional = [a for a in e.args if a.name is None]
         for p, a in zip(callee.params, positional):
-            env[p.name] = a.value
+            env[p.name] = a
         for a in e.args:
             if a.name is not None:
                 env[a.name] = a.value
@@ -553,7 +562,8 @@ class Safety:
                 continue
             if ok is False:
                 shown = ", ".join(f"{k} = {show_value(v)}" for k, v in values.items() if k in names_in(r))
-                self.error("E0703", f"this call always violates `requires {source_text(r)}` of `{callee.name}`",
+                shown_name = callee.name.split(".")[-1] if callee.owner_kind else callee.name
+                self.error("E0703", f"this call always violates `requires {source_text(r)}` of `{shown_name}`",
                            e.span, hint="pass arguments that satisfy the precondition",
                            notes=[f"values: {shown}"] if shown else None)
                 return

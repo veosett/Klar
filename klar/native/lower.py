@@ -391,7 +391,7 @@ class FnLowering:
 
     # ---- function ------------------------------------------------------------------
     def function(self, name, d: N.FnDecl):
-        sig = self.m.checker.fns.get(d.name)
+        sig = self.m.checker.methods.get(d.name) if d.owner_kind else self.m.checker.fns.get(d.name)
         if self.is_rt and sig is None:
             sig = self.m.checker.fns[d.name]
         self.fn = Fn(name, len(d.params), d.name)
@@ -1036,6 +1036,15 @@ class FnLowering:
             return out
         if kind == "ufcs":
             out = self.user_call(e, e.sig, e.args, recv=recv)
+            self.drop(recv)
+            return out
+        if kind == "trait":
+            # static dispatch: inside an instance every type parameter is a concrete type
+            concrete = zonk(e.inst["Self"], self.env)
+            entry = self.p.universe.type_methods.get(getattr(concrete, "name", None), {}).get(e.method)
+            if entry is None:
+                raise NativeUnsupported(f"no impl of `{res[1]}.{e.method}` for {show(concrete)}")
+            out = self.user_call(e, entry[1], e.args, recv=recv)
             self.drop(recv)
             return out
         raise NativeUnsupported(kind)

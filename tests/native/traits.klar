@@ -1,0 +1,211 @@
+// Traits on every back-end: impls for records, enums and built-in types, default methods,
+// bounded generics calling each other, function values, effects, contracts and recursion.
+
+trait Describe {
+  fn describe(self) -> Str
+  fn loud(self) -> Str {
+    return self.describe().upper() + "!"
+  }
+  fn twice(self) -> Str {
+    return self.loud() + " " + self.loud()
+  }
+}
+
+trait Measure {
+  fn size(self) -> Int
+  fn bigger(self, other: Self) -> Bool {
+    return self.size() > other.size()
+  }
+}
+
+trait Grow {
+  fn grow(self, by: Int) -> Self
+}
+
+type Bag { items: List[Str] }
+
+enum Tree {
+  Leaf(value: Int),
+  Node(left: Tree, right: Tree),
+}
+
+impl Describe for Bag {
+  fn describe(self) -> Str {
+    return "bag of {self.items.len()}"
+  }
+}
+
+impl Measure for Bag {
+  fn size(self) -> Int {
+    return self.items.len()
+  }
+}
+
+impl Grow for Bag {
+  fn grow(self, by: Int) -> Bag
+    requires by >= 0
+  {
+    var out = self.items
+    for i in range(0, by) {
+      out = out.push("x{i}")
+    }
+    return Bag { items: out }
+  }
+}
+
+impl Measure for Tree {
+  fn size(self) -> Int {
+    return match self {
+      Tree.Leaf(_) => 1,
+      Tree.Node(l, r) => l.size() + r.size(),
+    }
+  }
+}
+
+impl Describe for Tree {
+  fn describe(self) -> Str {
+    return match self {
+      Tree.Leaf(v) => "{v}",
+      Tree.Node(l, r) => "({l.describe()} {r.describe()})",
+    }
+  }
+  fn loud(self) -> Str {
+    return "tree " + self.describe()
+  }
+}
+
+impl Describe for Int {
+  fn describe(self) -> Str {
+    return match self % 2 == 0 {
+      true => "even {self}",
+      false => "odd {self}",
+    }
+  }
+}
+
+impl Measure for Int {
+  fn size(self) -> Int {
+    return self.abs()
+  }
+}
+
+impl Grow for Int {
+  fn grow(self, by: Int) -> Int {
+    return self + by
+  }
+}
+
+impl Describe for Str {
+  fn describe(self) -> Str {
+    return "'{self}'"
+  }
+}
+
+impl Describe for Bool {
+  fn describe(self) -> Str {
+    return match self {
+      true => "yes",
+      false => "no",
+    }
+  }
+}
+
+impl Describe for Float {
+  fn describe(self) -> Str {
+    return "~{self.round()}"
+  }
+}
+
+fn largest[T: Measure](xs: List[T]) -> Option[T] {
+  var best: Option[T] = None
+  for x in xs {
+    best = match best {
+      None => Some(x),
+      Some(b) => match x.bigger(b) {
+        true => Some(x),
+        false => Some(b),
+      },
+    }
+  }
+  return best
+}
+
+fn report[T: Describe + Measure](xs: List[T]) -> List[Str] {
+  return xs.map(fn(x) => "{x.describe()} (size {x.size()})")
+}
+
+fn grow_all[T: Grow](xs: List[T], by: Int) -> List[T] {
+  return xs.map(fn(x) => x.grow(by))
+}
+
+fn grow_and_measure[T: Grow + Measure](xs: List[T]) -> Int {
+  return grow_all(xs, 2).map(fn(x) => x.size()).sum()
+}
+
+fn shout_one[T: Describe](x: T) -> Str {
+  return x.twice()
+}
+
+fn depth_sum[T: Measure](x: T, n: Int) -> Int {
+  if n <= 0 {
+    return x.size()
+  }
+  return x.size() + depth_sum(x, n - 1)
+}
+
+trait Sink {
+  fn put(self, line: Str) uses io
+}
+
+type Stdout { tag: Str }
+
+impl Sink for Stdout {
+  fn put(self, line: Str) uses io {
+    print("[{self.tag}] {line}")
+  }
+}
+
+fn emit_all[S: Sink, T: Describe](sink: S, xs: List[T]) uses io {
+  for x in xs {
+    sink.put(x.describe())
+  }
+}
+
+fn main() uses io {
+  let bag = Bag { items: ["a", "b"] }
+  let tree = Tree.Node(left: Tree.Leaf(value: 1), right: Tree.Node(left: Tree.Leaf(value: 2), right: Tree.Leaf(value: 3)))
+  print(bag.describe())
+  print(bag.loud())
+  print(bag.twice())
+  print(tree.describe())
+  print(tree.loud())
+  print(tree.twice())
+  print(tree.size())
+  print(7.describe())
+  print((-4).loud())
+  print("hi".twice())
+  print(true.describe())
+  print(2.5.describe())
+  print(largest([3, -9, 4]))
+  print(largest([bag, bag.grow(3), Bag { items: [] }]))
+  let empty: List[Int] = []
+  print(largest(empty))
+  print(report([bag, bag.grow(1)]))
+  print(report([5, 6]))
+  print(grow_all([1, 2, 3], 10))
+  print(grow_and_measure([bag]))
+  print(grow_and_measure([-5, 5]))
+  print([1, 2].map(shout_one))
+  print(["x"].map(shout_one))
+  print(depth_sum(tree, 3))
+  print(bag.bigger(Bag { items: ["only"] }))
+  emit_all(Stdout { tag: "out" }, [tree, Tree.Leaf(value: 9)])
+  emit_all(Stdout { tag: "num" }, [10, 11])
+}
+
+test "traits behave the same on every back-end" {
+  assert 3.grow(4) == 7
+  assert Bag { items: [] }.grow(2).size() == 2
+  assert largest(["a", "bb"].map(fn(s) => s.len())) == Some(2)
+  assert Tree.Leaf(value: 5).loud() == "tree 5"
+}

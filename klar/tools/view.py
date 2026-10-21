@@ -108,17 +108,35 @@ def flow_stmt(s, lines):
 
 
 # ---- facts about a function --------------------------------------------------------------------------
-def calls_in(node, user_fns):
+def calls_in(node, user_fns, trait_targets=None):
+    """User functions called in `node`. A call through a trait (`x.area()` with `x: T`, `T: Shape`) may reach
+    every implementation of that method, so it links to all of them."""
     found = []
     for n in iter_nodes(node):
-        name = None
+        names = []
+        res = getattr(n, "resolved", (None,)) if isinstance(n, N.MethodCall) else (None,)
         if isinstance(n, N.Call) and isinstance(n.callee, N.Name) and n.callee.name in user_fns:
-            name = n.callee.name
-        elif isinstance(n, N.MethodCall) and getattr(n, "resolved", (None,))[0] == "ufcs" and n.method in user_fns:
-            name = n.method
-        if name and name not in found:
-            found.append(name)
+            names = [n.callee.name]
+        elif isinstance(n, N.Name) and n.name in user_fns and getattr(n, "sig", None) is not None:
+            names = [n.name]  # a function passed as a value (`xs.map(f)`)
+        elif res[0] == "ufcs" and res[2] in user_fns:
+            names = [res[2]]
+        elif res[0] == "trait":
+            names = [t for t in (trait_targets or {}).get((res[1], res[2]), []) if t in user_fns]
+        for name in names:
+            if name not in found:
+                found.append(name)
     return found
+
+
+def trait_targets_of(loaded):
+    out = {}
+    for methods in loaded.universe.type_methods.values():
+        for m, (trait, sig) in methods.items():
+            lst = out.setdefault((trait, m), [])
+            if sig.name not in lst:
+                lst.append(sig.name)
+    return out
 
 
 def builtins_used(node):
@@ -184,6 +202,7 @@ def collect(loaded, trace=None):
     mods = user_modules(loaded)
     fns, types, consts, tests = {}, [], [], []
     user_fns = set()
+    targets = trait_targets_of(loaded)
     for m in mods:
         for d in m.program.decls:
             if isinstance(d, N.FnDecl):
@@ -193,8 +212,9 @@ def collect(loaded, trace=None):
         own = m is loaded.main
         for d in m.program.decls:
             if isinstance(d, N.FnDecl):
-                calls = calls_in(d.body, user_fns)
-                calls += [c for r in d.requires + d.ensures for c in calls_in(r, user_fns) if c not in calls]
+                calls = calls_in(d.body, user_fns, targets)
+                calls += [c for r in d.requires + d.ensures for c in calls_in(r, user_fns, targets)
+                          if c not in calls]
                 errs = errors_returned(d, lines)
                 tried = [n.expr.callee.name for n in iter_nodes(d.body) if isinstance(n, N.Try)
                          and isinstance(n.expr, N.Call) and isinstance(n.expr.callee, N.Name)]
@@ -204,7 +224,9 @@ def collect(loaded, trace=None):
                     "own": own, "signature": sig_text(lines, d), "doc": (d.doc or "").strip(),
                     "effects": list(d.effects), "calls": calls, "called_by": [],
                     "summary": summary(d, lines, calls, errs, d.effects, used),
-                    "params": [{"name": p.name, "type": type_text(lines, p.type)} for p in d.params],
+                    "params": [{"name": p.name, "type": (d.owner if d.owner_kind == "impl" else "Self")
+                                if p.name == "self" and d.owner_kind else type_text(lines, p.type)}
+                               for p in d.params],
                     "returns": type_text(lines, d.ret) if d.ret else "Unit", "builtins": used,
                     "requires": [seg(lines, r.span) for r in d.requires],
                     "ensures": [seg(lines, e.span) for e in d.ensures],
@@ -222,13 +244,20 @@ def collect(loaded, trace=None):
                               "doc": (d.doc or "").strip(),
                               "fields": [v.name + (f"({', '.join(f'{f.name}: {type_text(lines, f.type)}' for f in v.fields)})"
                                                    if v.fields else "") for v in d.variants]})
+            elif isinstance(d, N.TraitDecl):
+                sigs = [sig_text(lines, f) for f in d.methods] + \
+                    [sig_text(lines, f) + "  (default)" for f in m.program.decls
+                     if isinstance(f, N.FnDecl) and f.owner_kind == "default" and f.trait == d.name]
+                types.append({"kind": "trait", "name": d.name, "module": m.display, "line": d.span.line,
+                              "doc": (d.doc or "").strip(), "fields": sigs,
+                              "impls": sorted(t for (tr, t) in loaded.universe.impls if tr == d.name)})
             elif isinstance(d, N.AliasDecl):
                 types.append({"kind": "alias", "name": d.name, "module": m.display, "line": d.span.line,
                               "doc": (d.doc or "").strip(), "fields": [type_text(lines, d.target)]})
             elif isinstance(d, N.ConstDecl):
                 consts.append({"name": d.name, "value": seg(lines, d.value.span), "line": d.span.line})
             elif isinstance(d, (N.TestDecl, N.PropertyDecl)) and own:
-                called = calls_in(d.body, user_fns)
+                called = calls_in(d.body, user_fns, targets)
                 tests.append({"name": d.name, "kind": "property" if isinstance(d, N.PropertyDecl) else
                               ("doc-test" if d.name.startswith("doc: ") else "test"),
                               "line": d.span.line, "calls": called})

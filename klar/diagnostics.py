@@ -152,6 +152,23 @@ CODES = {
               "Take a snapshot (`let n_now = n`) or accumulate with `fold` / a `for` loop."),
     "E0215": ("values are not ordered", "`sort`, `min`, `max` (and the keys of `sort_by`/`min_by`/`max_by`) need Int, "
               "Float or Str. Sort records by a field: `xs.sort_by(fn(p) => p.age)`."),
+    # traits
+    "E0220": ("trait not implemented",
+              "A generic function with a bound (`fn f[T: Shape](x: T)`) can only be called with a type that has "
+              "`impl Shape for ThatType`, or with a type parameter that carries the same bound."),
+    "E0221": ("impl does not match its trait",
+              "An `impl Trait for Type` must define every trait method without a default, only methods of the trait, "
+              "with the trait's parameter names and types (`Self` = the type), the same return type and no extra "
+              "effects. `klar fix` inserts `todo(...)` stubs for missing methods."),
+    "E0222": ("impl in the wrong place or twice",
+              "There is at most one `impl Trait for Type` per program, written in the trait's module or in the type's "
+              "module (impls for Int/Float/Bool/Str live with the trait). Every module then sees the same methods."),
+    "E0223": ("cannot infer the type of a bounded parameter",
+              "The type must be known to choose the implementation: annotate the value (`let xs: List[Circle] = []`)."),
+    "E0224": ("a trait is not a type",
+              "Klar has no trait objects: write a generic function `fn f[T: Shape](x: T)` for one kind of value at a "
+              "time; for a list of different kinds, declare an `enum` with one variant per kind and implement the "
+              "trait for the enum (each method is one `match`)."),
     # match
     "E0301": ("non-exhaustive match", "Cover every variant or add a catch-all `_ => ...` arm."),
     "E0302": ("invalid pattern", "The pattern does not fit the matched type, or the variant does not exist."),

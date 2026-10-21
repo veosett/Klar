@@ -30,7 +30,7 @@ fn main() uses io {
 }
 ```
 
-* `fn main() uses io` is the entry point; `uses io` declares that the function prints (section 8).
+* `fn main() uses io` is the entry point; `uses io` declares that the function prints (section 9).
 * `let` is a value that cannot change; `"…{name}…"` interpolates a value into a string.
 * No `;` — one statement per line; blocks use `{ }`.
 
@@ -131,7 +131,7 @@ fn main() uses io {
 * Parameter and result types are always written: a function can be understood from one line.
 * With 3+ parameters, calls must name the arguments — arguments cannot be swapped by accident.
 * `/// >>>` is an example in the documentation that `klar test` runs as a test.
-* `total / people` compiles only because `requires people > 0` proves the divisor is not zero (section 10).
+* `total / people` compiles only because `requires people > 0` proves the divisor is not zero (section 11).
 
 ## 6. Option, Result and `?`
 
@@ -204,7 +204,72 @@ fn main() uses io {
 Add a variant to an `enum` and the compiler lists every `match` that does not handle it, with the text of the
 missing arm. `match` also replaces the ternary operator: `let sign = match n > 0 { true => 1, false => -1 }`.
 
-## 8. Effects: the signature says what a function does to the world
+## 8. Traits: shared behaviour of different types
+
+A trait is a list of methods a type promises to have. A generic function with a bound `[T: Shape]` accepts any
+type that has an `impl Shape` and may call those methods.
+
+```mermaid
+flowchart LR
+    tr["trait Shape<br/>fn area(self) -> Float<br/>fn label(self) -> Str — default"]
+    c["impl Shape for Circle"] --> tr
+    r["impl Shape for Rect"] --> tr
+    tr --> g["fn total[T: Shape](xs: List[T])<br/>calls x.area()"]
+    g -- "total([circles])" --> c2["machine code:<br/>a direct call of Circle.area"]
+    g -- "total([rects])" --> r2["a direct call of Rect.area"]
+```
+
+```klar
+trait Shape {
+  fn area(self) -> Float
+  fn label(self) -> Str {               // a default method: an impl may leave it out
+    return "a shape of area {self.area()}"
+  }
+}
+
+type Circle { radius: Float }
+type Rect { w: Float, h: Float }
+
+impl Shape for Circle {
+  fn area(self) -> Float {
+    return 3.14159 * self.radius * self.radius
+  }
+}
+
+impl Shape for Rect {
+  fn area(self) -> Float {
+    return self.w * self.h
+  }
+  fn label(self) -> Str {               // its own version instead of the default
+    return "a {self.w}×{self.h} rectangle"
+  }
+}
+
+fn total[T: Shape](xs: List[T]) -> Float {
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+
+fn main() uses io {
+  print(total([Circle { radius: 1.0 }, Circle { radius: 2.0 }]))
+  print(Rect { w: 2.0, h: 3.0 }.label())
+}
+```
+
+What the compiler checks:
+
+| error | when |
+|---|---|
+| E0221 | an `impl` lacks a required method, has an extra one, or a signature differs from the trait (`klar fix` inserts `todo(...)` stubs) |
+| E0220 | `total([points])` without `impl Shape for Point`; or a parameter `U` lacks the bound `[U: Shape]` |
+| E0222 | a second `impl` of the same trait for the same type, or an `impl` outside the trait's/type's module |
+| E0224 | a trait used as a type (`fn f(s: Shape)`) |
+
+The rules are simple. Trait methods always take `self` first. Inside a trait, `Self` means "the type that
+implements it". Impls are written for `Int`, `Float`, `Bool`, `Str` and your own `type`s and `enum`s. For a list
+of different shapes, declare an `enum` with one variant per shape and implement the trait for it: each method
+is one `match`.
+
+## 9. Effects: the signature says what a function does to the world
 
 ```mermaid
 flowchart TB
@@ -226,7 +291,7 @@ flowchart TB
 A function without `uses` is **pure**: the same arguments always give the same result, so it is easy to test and
 safe to call. `klar view` colours such functions green.
 
-## 9. Tests are part of the language
+## 10. Tests are part of the language
 
 ```mermaid
 flowchart LR
@@ -253,7 +318,7 @@ property "reverse twice changes nothing" (xs: List[Int]) {
 A property is checked on a hundred random inputs; on failure Klar **shrinks** the input to a minimal example
 (e.g. `xs = [0, 1]`) so the cause is obvious.
 
-## 10. Safety before the program runs
+## 11. Safety before the program runs
 
 Klar follows Rust's principle: what can be found at compile time is found by the compiler.
 
@@ -288,7 +353,7 @@ Also rejected before running:
 
 `klar explain <code>` explains each one. Integer overflow, `null`, exceptions and data races do not exist in Klar.
 
-## 11. Modules
+## 12. Modules
 
 ```mermaid
 flowchart LR
@@ -300,7 +365,7 @@ flowchart LR
 A module is a file. Imports are explicit (`use a.b.{x, y}`), type names are unique in the whole program, and import
 cycles are forbidden — so a name always leads back to its origin (`klar refs`).
 
-## 12. How an AI works with Klar
+## 13. How an AI works with Klar
 
 ```mermaid
 sequenceDiagram
@@ -316,7 +381,7 @@ sequenceDiagram
     K-->>AI: coverage, executable
 ```
 
-## 13. Cheat sheet: "I want → I write"
+## 14. Cheat sheet: "I want → I write"
 
 | I want | I write |
 |---|---|
@@ -336,6 +401,9 @@ sequenceDiagram
 | bit operations | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (there are no `&`, `\|`, `<<` operators) |
 | character codes | `"hé".codes()` → `[104, 233]`, `65.to_char()` → `Some("A")` |
 | a set | `use std.set.{set_of}`, `set_of([1, 2]).has(1)` |
+| a shared method of different types | `trait Shape { fn area(self) -> Float }`, `impl Shape for Circle { ... }` |
+| a function for any type with a method | `fn total[T: Shape](xs: List[T]) -> Float` |
+| a list of different shapes | `enum AnyShape { ... }` + `impl Shape for AnyShape` (a trait is not a type) |
 | environment variable, exit code | `env_var("HOME")` → `Option[Str]`, `exit(1)` (effect `io`) |
 
 Details of every function: `klar doc <name>`; check behaviour: `klar eval '<expression>'`.

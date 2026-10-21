@@ -51,8 +51,13 @@
           "captures": { "1": { "name": "keyword.declaration.function.klar" }, "2": { "name": "entity.name.function.klar" } }
         },
         {
-          "match": "\\b(type|enum)\\s+([A-Z][A-Za-z0-9_]*)",
+          "match": "\\b(type|enum|trait)\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": { "1": { "name": "keyword.declaration.type.klar" }, "2": { "name": "entity.name.type.klar" } }
+        },
+        {
+          "match": "\\b(impl)\\s+([A-Z][A-Za-z0-9_]*)\\s+(for)\\s+([A-Z][A-Za-z0-9_]*)",
+          "captures": { "1": { "name": "keyword.declaration.impl.klar" }, "2": { "name": "entity.name.type.trait.klar" },
+                        "3": { "name": "keyword.declaration.impl.klar" }, "4": { "name": "entity.name.type.klar" } }
         },
         {
           "match": "\\b(const)\\s+([A-Z][A-Z0-9_]*)",
@@ -71,6 +76,7 @@
         { "name": "keyword.other.klar", "match": "\\b(module|use|let|var|with|fn)\\b" },
         { "name": "keyword.operator.logical.klar", "match": "\\b(and|or|not)\\b" },
         { "name": "constant.language.klar", "match": "\\b(true|false|None|Some|Ok|Err|result)\\b" },
+        { "name": "variable.language.self.klar", "match": "\\b(self|Self)\\b" },
         { "name": "support.function.builtin.klar", "match": "\\b(print|read_line|fail|todo|dbg|range|now_ms|now_ns|random_int|read_file|write_file|file_exists|cli_args)\\b(?=\\()" }
       ]
     },

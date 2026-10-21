@@ -12,7 +12,8 @@ from .. import nodes as N
 from ..safety import iter_nodes
 
 DECL_KINDS = {N.FnDecl: "fn", N.TypeDecl: "type", N.EnumDecl: "enum", N.AliasDecl: "alias",
-              N.ConstDecl: "const", N.TestDecl: "test", N.PropertyDecl: "property", N.UseDecl: "use"}
+              N.ConstDecl: "const", N.TestDecl: "test", N.PropertyDecl: "property", N.UseDecl: "use",
+              N.TraitDecl: "trait", N.ImplDecl: "impl"}
 
 
 def source_lines(loaded, file):
@@ -77,12 +78,25 @@ def outline(loaded, all_modules=False):
     for m in mods:
         lines = source_lines(loaded, m.display)
         items = []
-        for d in m.program.decls:
+        decls = m.program.decls
+        for i, d in enumerate(decls):
             kind = DECL_KINDS.get(type(d))
-            if kind is None:
+            if kind is None or (kind == "fn" and d.owner_kind):
                 continue
             item = {"kind": kind, "line": d.span.line}
-            if kind in ("test", "property"):
+            if kind == "trait":
+                item["name"] = d.name
+                item["signature"] = f"trait {d.name}"
+                item["methods"] = [sig_text(lines, f) for f in d.methods] + \
+                    [sig_text(lines, f) + "   (default)" for f in decls
+                     if isinstance(f, N.FnDecl) and f.owner_kind == "default" and f.trait == d.name]
+            elif kind == "impl":
+                target = getattr(d.target, "name", "?")
+                item["name"] = f"{d.trait} for {target}"
+                item["signature"] = f"impl {d.trait} for {target}"
+                item["methods"] = [sig_text(lines, f) for f in decls[i + 1:i + 1 + len(d.methods)]
+                                   if isinstance(f, N.FnDecl) and f.owner_kind == "impl"]
+            elif kind in ("test", "property"):
                 item["name"] = d.name
             elif kind == "use":
                 item["name"] = ".".join(d.path)
@@ -95,7 +109,7 @@ def outline(loaded, all_modules=False):
                 first = [x for x in doc.splitlines() if x.strip()]
                 if first:
                     item["doc"] = first[0].strip()
-            if kind not in ("test", "property", "use"):
+            if kind not in ("test", "property", "use", "impl"):
                 n = len(doc_examples(m.program.decls, lines, d.name))
                 if n:
                     item["doctests"] = n
@@ -120,6 +134,8 @@ def outline_text(data):
                 doc = f"   // {i['doc']}" if i.get("doc") else ""
                 dt = f" [{i['doctests']} doc-tests]" if i.get("doctests") else ""
                 res.append(f"  {i['line']:>4}  {i['signature']}{doc}{dt}")
+                for meth in i.get("methods", []):
+                    res.append(f"          {meth}")
         if tests:
             res.append("        tests: " + ", ".join(f"{t['name']!r}" for t in tests))
     return "\n".join(res)
@@ -137,7 +153,22 @@ def name_occurrences(loaded, name):
         f = m.display
         lines = source_lines(loaded, f)
         for d in m.program.decls:
-            if isinstance(d, (N.FnDecl, N.ConstDecl)) and d.name == name:
+            if isinstance(d, N.FnDecl):
+                for tp, items in (d.bounds or {}).items():
+                    for tname, sp in items:
+                        if tname == name and not d.owner_kind:
+                            add(f, sp, "bound")
+            if isinstance(d, N.FnDecl) and d.owner_kind and d.method == name:
+                add(f, d.name_span, "method definition")
+            elif isinstance(d, N.TraitDecl):
+                if d.name == name:
+                    add(f, d.name_span, "definition")
+                for meth in d.methods:
+                    if meth.method == name:
+                        add(f, meth.name_span, "method definition")
+            elif isinstance(d, N.ImplDecl) and d.trait == name:
+                add(f, d.trait_span, "impl")
+            elif isinstance(d, (N.FnDecl, N.ConstDecl)) and d.name == name:
                 add(f, d.name_span, "definition")
             elif isinstance(d, (N.TypeDecl, N.EnumDecl, N.AliasDecl)) and d.name == name:
                 add(f, find_word_span(lines, d.span, name), "definition")
@@ -159,7 +190,7 @@ def name_occurrences(loaded, name):
             elif isinstance(n, N.PBind) and n.name == name:
                 add(f, n.span, "binding")
             elif isinstance(n, N.MethodCall) and n.method == name and \
-                    getattr(n, "resolved", (None,))[0] in ("ufcs", "field_fn", "variant"):
+                    getattr(n, "resolved", (None,))[0] in ("ufcs", "field_fn", "variant", "trait"):
                 add(f, n.method_span, "method call")
             elif isinstance(n, N.FieldAccess) and n.name == name:
                 add(f, n.name_span, "field")
@@ -283,17 +314,41 @@ def doc_lookup(query, loaded=None):
         prog = parse(src, fname)
         lines = src.split("\n")
         for d in prog.decls:
-            if isinstance(d, N.FnDecl) and not owner and match(d.name):
+            if isinstance(d, N.FnDecl) and not d.owner_kind and not owner and match(d.name):
                 results.append(decl_doc(d, lines, f"std.{fname[:-5]}", d.name == meth, prog.decls))
+            elif isinstance(d, (N.TraitDecl, N.FnDecl)):
+                results += trait_docs(d, lines, f"std.{fname[:-5]}", owner, meth, match, prog.decls)
     if loaded is not None:
         for m in user_modules(loaded):
             lines = source_lines(loaded, m.display)
             for d in m.program.decls:
                 if isinstance(d, (N.FnDecl, N.TypeDecl, N.EnumDecl, N.ConstDecl, N.AliasDecl)) and \
-                        not owner and match(d.name):
+                        not getattr(d, "owner_kind", None) and not owner and match(d.name):
                     results.append(decl_doc(d, lines, m.display, d.name == meth, m.program.decls))
+                elif isinstance(d, (N.TraitDecl, N.FnDecl)):
+                    results += trait_docs(d, lines, m.display, owner, meth, match, m.program.decls)
     results.sort(key=lambda r: (not r["exact"], r["name"]))
     return results
+
+
+def trait_docs(d, lines, where, owner, meth, match, decls):
+    """Doc entries for a trait (`klar doc Shape`) or a trait/impl method (`klar doc area`, `Circle.area`)."""
+    loc = f"use {where}.{{...}}" if where.startswith("std.") else f"{where}:{d.span.line}"
+    if isinstance(d, N.TraitDecl):
+        if owner or not match(d.name):
+            return []
+        ms = [sig_text(lines, f) for f in d.methods]
+        ms += [sig_text(lines, f) + " (default)" for f in decls
+               if isinstance(f, N.FnDecl) and f.owner_kind == "default" and f.trait == d.name]
+        text = " ".join(x.strip() for x in (d.doc or "").splitlines() if x.strip())
+        return [{"kind": f"trait ({loc})", "name": d.name, "signature": f"trait {d.name} {{ " + "; ".join(ms) + " }",
+                 "doc": text, "examples": doc_examples(decls, lines, d.name)[:3], "exact": d.name == meth}]
+    if not d.owner_kind or not match(d.method) or (owner and owner not in (d.owner, d.trait)):
+        return []
+    r = decl_doc(d, lines, where, d.method == meth, decls)
+    r["kind"] = (f"method of `impl {d.trait} for {d.owner}` ({loc})" if d.owner_kind == "impl"
+                 else f"default method of trait `{d.trait}` ({loc})")
+    return [r]
 
 
 def decl_doc(d, lines, where, exact, decls=()):

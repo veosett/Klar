@@ -16,7 +16,8 @@ from . import nodes as N
 from .builtins import GLOBALS, METHODS
 from .diagnostics import BUILTIN_SPAN
 from .errors import KlarRuntimeError
-from .values import (UNIT, KMap, NONE, Record, Variant, err, ok, show, some)
+from .interpreter import impl_table
+from .values import (UNIT, KMap, NONE, Record, Variant, err, ok, show, some, type_head)
 
 GEN_FILE = "<klar-compiled>"
 MAX_DEPTH = 10000
@@ -273,7 +274,7 @@ class Gen:
 
     # ---- names --------------------------------------------------------------
     def fn_py(self, module_name, name):
-        return f"F_{mangle_module(module_name)}__{name}"
+        return f"F_{mangle_module(module_name)}__{name.replace('.', '__m_')}"
 
     def const_py(self, module_name, name):
         return f"C_{mangle_module(module_name)}__{name}"
@@ -319,6 +320,8 @@ class Gen:
                     for level, line in self.pre:
                         self.emit(level, line)
                     self.emit(0, f"{self.const_py(m.name, d.name)} = {value}")
+        table = impl_table(self.loaded, lambda m, name: self.fn_py(m.name, name))
+        self.emit(0, "_IMPL = {" + ", ".join(f"{k!r}: {v}" for k, v in table.items()) + "}")
         return "\n".join(self.lines) + "\n"
 
     def function(self, d: N.FnDecl):
@@ -799,6 +802,9 @@ class Gen:
             _, module_name, fname = res
             rest = self.args_code(e.args)
             return f"{self.fn_py(module_name, fname)}({recv}{', ' + rest if rest else ''})"
+        if kind == "trait":
+            rest = self.args_code(e.args)
+            return f"_tcall({recv}, {e.method!r}{', ' + rest if rest else ''})"
         raise Unsupported(kind)
 
     FAST_HOF = {("List", "map"): "_map", ("List", "filter"): "_filter", ("List", "any"): "_any",
@@ -924,6 +930,7 @@ def compile_program(loaded):
         "_fmod": _fmod, "_with": _with, "_map": _map, "_filter": _filter, "_fold": _fold, "_any": _any,
         "_all": _all, "_count": _count, "_get": _get, "_mkrec": _mkrec, "_nomatch": _nomatch, "_fail": _fail,
     }
+    ns["_tcall"] = lambda recv, m, *args: ns["_IMPL"][(type_head(recv), m)](recv, *args)
     for name, (_, impl) in GLOBALS.items():
         ns[f"B_{name}"] = impl
     for owner, ms in METHODS.items():

@@ -22,8 +22,9 @@ UPPER = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 class Sig:
-    def __init__(self, name, tparams, params, ret, effects, decl=None, user=False, module=None):
+    def __init__(self, name, tparams, params, ret, effects, decl=None, user=False, module=None, bounds=None):
         self.name = name
+        self.bounds = bounds or {}  # type parameter -> [trait names]
         self.tparams = tparams
         self.params = params        # list of (name, Type)
         self.ret = ret
@@ -51,16 +52,35 @@ class AliasInfo:
         self.resolving = False
 
 
+class TraitInfo:
+    def __init__(self, name, module, span):
+        self.name, self.module, self.span = name, module, span
+        self.methods = {}     # method -> Sig generic in `Self` (first parameter `self: Self`)
+        self.defaults = {}    # method -> Sig of the default body (`Trait.m`)
+
+
+class ImplInfo:
+    def __init__(self, trait, type_name, module, span):
+        self.trait, self.type_name, self.module, self.span = trait, type_name, module, span
+        self.methods = {}     # method -> Sig of `Type.m`
+
+
 class Universe:
-    """Program-wide registry of type declarations."""
+    """Program-wide registry of type and trait declarations (names are unique per program)."""
 
     def __init__(self):
         self.records = {}
         self.enums = {}
         self.aliases = {}
+        self.traits = {}
+        self.impls = {}          # (trait, type name) -> ImplInfo
+        self.type_methods = {}   # type name -> {method: (trait, Sig)} (impl methods and inherited defaults)
+
+    def implements(self, type_name, trait):
+        return (trait, type_name) in self.impls
 
     def owner(self, name):
-        for table in (self.records, self.enums, self.aliases):
+        for table in (self.records, self.enums, self.aliases, self.traits):
             if name in table:
                 return table[name].module
         return None
@@ -150,6 +170,10 @@ class Checker:
         self.scopes = []
         self.ctx = None
         self.tparams = {}
+        self.bounds = {}       # type parameter -> set of traits (current function)
+        self.pending = []      # calls of bounded generic functions, checked when the body is done
+        self.methods = {}      # "Type.m" / "Trait.m" -> Sig (trait/impl methods; not callable by name)
+        self.traits = self.universe.traits
         self.const_allowed = None
         for name, (kind, value) in (imports or {}).items():
             self.imported.add(name)
@@ -178,14 +202,19 @@ class Checker:
         self.collect()
         for d in self.program.decls:
             if isinstance(d, N.ConstDecl):
+                self.bounds = {}
                 self.check_const(d)
+                self.check_pending()
         for d in self.program.decls:
             if isinstance(d, N.FnDecl):
                 self.check_fn(d)
+                self.check_pending()
             elif isinstance(d, N.TestDecl):
                 self.check_test(d)
+                self.check_pending()
             elif isinstance(d, N.PropertyDecl):
                 self.check_property(d)
+                self.check_pending()
         if "main" in self.fns and "main" not in self.imported:
             sig = self.fns["main"]
             ret = prune(sig.ret)
@@ -203,6 +232,7 @@ class Checker:
     def collect(self):
         test_names = set()
         own_types = []
+        own_traits = []
         for d in self.program.decls:
             if isinstance(d, (N.TypeDecl, N.EnumDecl, N.AliasDecl)):
                 if not PASCAL.match(d.name):
@@ -226,6 +256,20 @@ class Checker:
                     self.aliases[d.name] = AliasInfo(d.name, d.type_params, d.target, self.module, d.span)
                 self.visible.add(d.name)
                 own_types.append(d)
+            elif isinstance(d, N.TraitDecl):
+                if not PASCAL.match(d.name):
+                    self.error("E0103", f"trait name `{d.name}` must be PascalCase", d.name_span)
+                owner = self.universe.owner(d.name)
+                if owner is not None or d.name in PRIMS or d.name in GENERIC_ARITY:
+                    self.error("E0101", f"`{d.name}` is already defined" + (f" in module `{owner}`" if owner and
+                               owner != self.module else ""), d.name_span,
+                               hint="trait and type names are unique across the whole program")
+                    continue
+                self.traits[d.name] = TraitInfo(d.name, self.module, d.name_span)
+                self.visible.add(d.name)
+                own_traits.append(d)
+            elif isinstance(d, N.FnDecl) and d.owner_kind:
+                continue
             elif isinstance(d, N.FnDecl):
                 if d.name in self.fns or d.name in self.globals or d.name in self.consts:
                     what = ("a built-in function" if d.name in self.globals else
@@ -274,7 +318,7 @@ class Checker:
         for d in self.own_consts:
             self.consts[d.name] = self.resolve(d.type, {})
         for d in self.program.decls:
-            if isinstance(d, N.FnDecl) and self.fns.get(d.name, 0) is None:
+            if isinstance(d, N.FnDecl) and not d.owner_kind and self.fns.get(d.name, 0) is None:
                 tps = {t: TParam(t) for t in d.type_params}
                 for t in d.type_params:
                     if not PASCAL.match(t):
@@ -293,7 +337,220 @@ class Checker:
                         self.error("E0403", f"unknown effect `{e}`", d.effects_span,
                                    hint=h or "known effects: io, time, rand, fs, net")
                 self.fns[d.name] = Sig(d.name, d.type_params, params, ret, d.effects, decl=d, user=True,
-                                       module=self.module)
+                                       module=self.module, bounds=self.resolve_bounds(d))
+        self.collect_traits(own_traits)
+
+    # ---- traits & impls --------------------------------------------------------------
+    def resolve_bounds(self, d):
+        out = {}
+        for tp, items in (d.bounds or {}).items():
+            if tp not in d.type_params:
+                continue
+            names = []
+            for tname, sp in items:
+                if tname not in self.traits:
+                    hint, fix = self.did_you_mean(tname, [t for t in self.traits if t in self.visible], sp)
+                    if tname in self.records or tname in self.enums or tname in PRIMS:
+                        hint = f"`{tname}` is a type; a bound names a trait (`trait Name {{ ... }}`)"
+                    self.error("E0104", f"unknown trait `{tname}`", sp, hint=hint, fix=fix)
+                    continue
+                if tname not in self.visible:
+                    self.not_imported(tname, sp)
+                if tname not in names:
+                    names.append(tname)
+            out[tp] = names
+        return out
+
+    def method_sig(self, d, self_type):
+        """Signature of a trait/impl method; `Self` is `self_type`."""
+        tps = {t: TParam(t) for t in d.type_params}
+        tps["Self"] = self_type
+        params = [(p.name, self.resolve(p.type, tps)) for p in d.params]
+        ret = self.resolve(d.ret, tps) if d.ret else UNIT
+        for e in d.effects:
+            if e not in KNOWN_EFFECTS:
+                self.error("E0403", f"unknown effect `{e}`", d.effects_span, hint="known effects: io, time, rand, fs, net")
+        return Sig(d.name, list(d.type_params), params, ret, d.effects, decl=d, user=True, module=self.module,
+                   bounds={"Self": [d.trait]} if d.owner_kind == "default" else {})
+
+    def collect_traits(self, own_traits):
+        for d in own_traits:
+            info = self.traits[d.name]
+            for f in d.methods:
+                if f.method in info.methods:
+                    self.error("E0101", f"duplicate method `{f.method}` in trait `{d.name}`", f.name_span)
+                    continue
+                info.methods[f.method] = self.method_sig(f, TParam("Self"))
+                info.methods[f.method].name = f.method
+                info.methods[f.method].tparams = ["Self"]
+        for d in self.program.decls:
+            if isinstance(d, N.FnDecl) and d.owner_kind == "default" and d.trait in self.traits:
+                info = self.traits[d.trait]
+                if d.method in info.methods:
+                    self.error("E0101", f"duplicate method `{d.method}` in trait `{d.trait}`", d.name_span)
+                    continue
+                sig = self.method_sig(d, TParam("Self"))
+                self.methods[d.name] = sig
+                info.defaults[d.method] = sig
+                generic = Sig(d.method, sig.tparams, sig.params, sig.ret, sig.effects, decl=None, user=True,
+                              module=self.module)
+                info.methods[d.method] = generic
+        impl = None
+        for d in self.program.decls:
+            if isinstance(d, N.ImplDecl):
+                impl = self.collect_impl(d)
+            elif isinstance(d, N.FnDecl) and d.owner_kind == "impl" and impl is not None:
+                decl, target, info, tinfo = impl
+                sig = self.method_sig(d, target)
+                if d.name in self.methods:
+                    self.error("E0101", f"`{d.owner}` already has a method `{d.method}`", d.name_span)
+                    continue
+                self.methods[d.name] = sig
+                sig.self_type = target
+                if info is not None:
+                    info.methods[d.method] = sig
+        for d in self.program.decls:
+            if isinstance(d, N.ImplDecl) and getattr(d, "info", None) is not None:
+                self.finish_impl(d)
+
+    def collect_impl(self, d):
+        """Returns (decl, target type, ImplInfo or None, TraitInfo or None)."""
+        target = self.resolve(d.target, {})
+        d.info = None
+        tname = head(target)
+        trait = self.traits.get(d.trait)
+        if trait is None:
+            hint, fix = self.did_you_mean(d.trait, [t for t in self.traits if t in self.visible], d.trait_span)
+            if d.trait in self.records or d.trait in self.enums:
+                hint = f"`{d.trait}` is a type; `impl` needs a trait: `impl Trait for {d.trait}`"
+            self.error("E0104", f"unknown trait `{d.trait}`", d.trait_span, hint=hint, fix=fix)
+            return d, target, None, None
+        if d.trait not in self.visible:
+            self.not_imported(d.trait, d.trait_span)
+        if target is ANY:
+            return d, target, None, trait
+        if not isinstance(target, TCon) or target.args or tname in ("Unit", "Never", "Word") or \
+                tname in GENERIC_ARITY or (tname in self.records and self.records[tname].tparams) or \
+                (tname in self.enums and self.enums[tname].tparams):
+            self.error("E0221", f"cannot implement `{d.trait}` for `{show(target)}`", d.target.span,
+                       hint="impls are written for Int, Float, Bool, Str and non-generic `type`/`enum` declarations "
+                            "(generic impls are planned)")
+            return d, target, None, trait
+        type_owner = self.universe.owner(tname)
+        if trait.module != self.module and type_owner != self.module:
+            where = f"module `{trait.module}`" + (f" or `{type_owner}`" if type_owner else "")
+            self.error("E0222", f"`impl {d.trait} for {tname}` must be written in {where}", d.span,
+                       hint="an impl lives next to its trait or next to its type, so every program sees the same one")
+        if (d.trait, tname) in self.universe.impls:
+            prev = self.universe.impls[(d.trait, tname)]
+            self.error("E0222", f"`{tname}` already implements `{d.trait}` (at {prev.span.short()})", d.span)
+            return d, target, None, trait
+        info = ImplInfo(d.trait, tname, self.module, d.span)
+        d.info = info
+        self.universe.impls[(d.trait, tname)] = info
+        return d, target, info, trait
+
+    def finish_impl(self, d):
+        info = d.info
+        trait = self.traits[info.trait]
+        tname = info.type_name
+        target = TCon(tname)
+        for m, sig in info.methods.items():
+            span = d.method_spans[d.methods.index(m)] if m in d.methods else d.span
+            if m not in trait.methods:
+                hint, fix = self.did_you_mean(m, trait.methods, span)
+                self.error("E0221", f"`{m}` is not a method of trait `{info.trait}`", span,
+                           hint=hint or (f"methods of `{info.trait}`: {', '.join(trait.methods)}; "
+                                         "other functions go outside the impl"), fix=fix)
+                continue
+            if m == "to_str" or m in BUILTIN_METHODS.get(tname, {}):
+                self.error("E0221", f"`{tname}` already has a built-in method `{m}`", span,
+                           hint="rename the trait method")
+                continue
+            if m in self.fns and self.fns[m] and self.fns[m].params and head(self.fns[m].params[0][1]) == tname:
+                self.error("E0101", f"method `{m}` of `{tname}` conflicts with the function `{m}`", span,
+                           hint="rename one of them")
+                continue
+            want = trait.methods[m]
+            problem = self.signature_mismatch(want, sig, target)
+            if problem:
+                self.error("E0221", f"`{tname}.{m}` does not match the trait: {problem}", span,
+                           hint=f"the trait declares `{self.show_method(want, target)}`")
+        missing = [m for m in trait.methods if m not in info.methods and m not in trait.defaults]
+        if missing:
+            stubs = "".join(f"  {self.show_method(trait.methods[m], target)} {{\n    return todo(\"{m}\")\n  }}\n"
+                            for m in missing)
+            end = d.span
+            fix = {"span": Span(end.file, end.end_line, end.end_col - 1, end.end_line, end.end_col - 1),
+                   "text": stubs, "safe": True}
+            self.error("E0221", f"`impl {info.trait} for {tname}` is missing "
+                                f"{', '.join(f'`{m}`' for m in missing)}", d.span,
+                       hint="add " + ", ".join(f"`{self.show_method(trait.methods[m], target)}`" for m in missing),
+                       fix=fix)
+        table = self.universe.type_methods.setdefault(tname, {})
+        for m in trait.methods:
+            sig = info.methods.get(m) or trait.defaults.get(m) or trait.methods[m]  # (missing: already an error)
+            if m in table and table[m][0] != info.trait:
+                self.error("E0101", f"`{tname}` gets method `{m}` from both `{table[m][0]}` and `{info.trait}`",
+                           d.span, hint="rename the method in one of the traits")
+                continue
+            table[m] = (info.trait, sig)
+
+    def show_method(self, sig, self_type):
+        m = {"Self": self_type}
+        ps = ["self"] + [f"{n}: {show(subst(t, m))}" for n, t in sig.params[1:]]
+        ret = subst(sig.ret, m)
+        out = f"fn {sig.name.split('.')[-1]}({', '.join(ps)})"
+        if not is_unit(ret):
+            out += f" -> {show(ret)}"
+        if sig.effects:
+            out += " uses " + ", ".join(sorted(sig.effects))
+        return out
+
+    def signature_mismatch(self, want, got, target):
+        m = {"Self": target}
+        if len(want.params) != len(got.params):
+            return f"it takes {len(got.params) - 1} argument(s) besides `self`, the trait says {len(want.params) - 1}"
+        for (wn, wt), (gn, gt) in zip(want.params[1:], got.params[1:]):
+            if wn != gn:
+                return f"parameter `{gn}` should be named `{wn}`"
+            if show(subst(wt, m)) != show(gt):
+                return f"parameter `{gn}` has type `{show(gt)}`, the trait says `{show(subst(wt, m))}`"
+        if show(subst(want.ret, m)) != show(got.ret):
+            return f"it returns `{show(got.ret)}`, the trait says `{show(subst(want.ret, m))}`"
+        extra = got.effects - want.effects
+        if extra:
+            return f"it uses `{', '.join(sorted(extra))}`, which the trait method does not declare"
+        return None
+
+    def note_bounds(self, sig, mapping, span):
+        if sig.bounds:
+            self.pending.append((sig, mapping, span, {k: set(v) for k, v in self.bounds.items()}))
+
+    def check_pending(self):
+        pending, self.pending = self.pending, []
+        for sig, mapping, span, ctx_bounds in pending:
+            for tp, traits in sig.bounds.items():
+                t = prune(mapping.get(tp, ANY))
+                name = sig.name if "." not in sig.name else sig.name.split(".")[-1]
+                for tr in traits:
+                    if t is ANY or t is NEVER:
+                        continue
+                    if isinstance(t, TVar):
+                        self.error("E0223", f"cannot infer `{tp}` for `{name}` (it must implement `{tr}`)", span,
+                                   hint="annotate the value, e.g. `let xs: List[Circle] = []`")
+                        break
+                    if isinstance(t, TParam):
+                        if tr not in ctx_bounds.get(t.name, ()):
+                            self.error("E0220", f"type parameter `{t.name}` must implement `{tr}` to call `{name}`",
+                                       span, hint=f"add the bound to the type parameter: `[{t.name}: {tr}]`")
+                        continue
+                    h = head(t)
+                    if h is None or t.args or not self.universe.implements(h, tr):
+                        methods = ", ".join(f"`{self.show_method(s, t)}`" for s in self.traits[tr].methods.values()
+                                            if s.name.split(".")[-1] not in self.traits[tr].defaults)
+                        self.error("E0220", f"`{show(t)}` does not implement trait `{tr}` (needed by `{name}`)", span,
+                                   hint=f"add `impl {tr} for {show(t)} {{ ... }}`" + (f" with {methods}" if methods else ""))
 
     def not_imported(self, name, span):
         owner = self.universe.owner(name)
@@ -323,6 +580,11 @@ class Checker:
                            hint=f"for example `{example}`")
                 return TCon(name, [ANY] * n)
             return TCon(name, [self.resolve(a, tps) for a in te.args])
+        if name in self.traits:
+            self.error("E0224", f"`{name}` is a trait, not a type", te.span,
+                       hint=f"use a type parameter with a bound: `fn f[T: {name}](x: T)`; "
+                            f"for a list of different kinds of values use an `enum` (and `impl {name}` for it)")
+            return ANY
         info = self.records.get(name) or self.enums.get(name) or self.aliases.get(name)
         if info is not None:
             if name not in self.visible:
@@ -358,6 +620,10 @@ class Checker:
                    "list": "List", "dict": "Map", "HashMap": "Map", "Dict": "Map", "Optional": "Option",
                    "Maybe": "Option", "Either": "Result", "Tuple": "Pair"}
         cands = self.type_names_visible() | set(tps)
+        if name == "Self":
+            self.error("E0104", "`Self` is only available in `trait` and `impl` methods", te.span,
+                       hint="write the concrete type name")
+            return ANY
         if name in aliases:
             hint, fix = f"Klar calls this type `{aliases[name]}`", {"span": te.span, "text": aliases[name]}
         else:
@@ -388,7 +654,7 @@ class Checker:
     def pop(self):
         sc = self.scopes.pop()
         for name, v in sc.items():
-            if not v.used and not name.startswith("_") and v.kind in ("let", "var", "param", "for", "bind"):
+            if not v.used and not name.startswith("_") and name != "self" and v.kind in ("let", "var", "param", "for", "bind"):
                 what = {"param": "parameter", "for": "loop variable", "bind": "pattern variable"}.get(v.kind, "variable")
                 self.warn("W0402", f"unused {what} `{name}`", v.span,
                           hint=f"remove it or rename it to `_{name}`")
@@ -459,14 +725,18 @@ class Checker:
         self.ctx = None
 
     def check_fn(self, d: N.FnDecl):
-        sig = self.fns.get(d.name)
+        sig = self.methods.get(d.name) if d.owner_kind else self.fns.get(d.name)
         if sig is None or sig.decl is not d:
             return
         self.tparams = {t: TParam(t) for t in d.type_params}
+        if getattr(sig, "self_type", None) is not None:
+            self.tparams["Self"] = sig.self_type
+        self.bounds = {t: set(v) for t, v in sig.bounds.items()}
         self.scopes = []
         self.push()
         for (pname, pt), p in zip(sig.params, d.params):
-            self.declare(pname, pt, False, p.span, "param")
+            # a trait fixes the parameters of its methods: unused ones are not a smell there
+            self.declare(pname, pt, False, p.span, "method_param" if d.owner_kind else "param")
         # contracts are pure and see the parameters (+ `result` in ensures)
         self.ctx = Ctx(d.name, sig.ret, set(), purpose="contract")
         for r in d.requires:
@@ -488,6 +758,7 @@ class Checker:
 
     def check_test(self, d: N.TestDecl):
         self.tparams = {}
+        self.bounds = {}
         self.scopes = []
         self.push()
         self.ctx = Ctx(f'test "{d.name}"', UNIT, {"io"}, is_test=True, purpose="test")
@@ -497,6 +768,7 @@ class Checker:
 
     def check_property(self, d: N.PropertyDecl):
         self.tparams = {}
+        self.bounds = {}
         self.scopes = []
         self.push()
         d.param_types = []
@@ -571,7 +843,7 @@ class Checker:
             return
         if not v.mutable:
             fix = {"span": v.decl_kw_span, "text": "var"} if v.decl_kw_span else None
-            kind = {"param": "parameter", "for": "loop variable", "bind": "pattern variable",
+            kind = {"param": "parameter", "method_param": "parameter", "for": "loop variable", "bind": "pattern variable",
                     "builtin": "contract variable"}.get(v.kind, "immutable variable")
             self.error("E0207", f"cannot assign to {kind} `{s.name}` (declared with `let`)" if v.kind == "let"
                        else f"cannot assign to {kind} `{s.name}`", s.span,
@@ -801,6 +1073,7 @@ class Checker:
             self.check_effects(sig, e.span)
             mapping = {t: TVar() for t in sig.tparams}
             e.sig, e.inst = sig, mapping
+            self.note_bounds(sig, mapping, e.span)
             return TFn([subst(t, mapping) for _, t in sig.params], subst(sig.ret, mapping))
         if e.name in self.records:
             self.error("E0201", f"`{e.name}` is a type, not a value", e.span, hint=self.record_hint(e.name))
@@ -939,13 +1212,20 @@ class Checker:
         mapping = {t: TVar(t) for t in sig.tparams}
         if node is not None:
             node.sig, node.inst = sig, mapping
+        self.note_bounds(sig, mapping, span)
         params = [(n, subst(t, mapping)) for n, t in sig.params]
         ret = subst(sig.ret, mapping)
         if self_type is not None:
             if not params or not unify(params[0][1], self_type):
                 need = show(params[0][1]) if params else "?"
+                alt = None
+                for name, other in BUILTIN_METHODS.get(head(self_type), {}).items():
+                    if name != display and name.startswith(display) and other.params and \
+                            unify(subst(other.params[0][1], {t: TVar() for t in other.tparams}), self_type):
+                        alt = name
+                        break
                 self.error("E0204", f"method `{display}` needs a receiver of type `{need}`, found `{show(self_type)}`",
-                           span)
+                           span, hint=f"use `.{alt}()` for `{show(self_type)}`" if alt else None)
                 for a in args:
                     self.expr(a.value)
                 return ANY
@@ -1057,7 +1337,11 @@ class Checker:
                                "max": "use the method: `a.max(b)` or `xs.max()`",
                                "sum": "use the method: `xs.sum()`", "sorted": "use the method: `xs.sort()`",
                                "enumerate": "use the method: `xs.enumerate()`", "zip": "use the method: `xs.zip(ys)`"}
-                    if c.name in special:
+                    owners = [tr for tr, info in self.traits.items() if c.name in info.methods]
+                    if owners:
+                        hint, fix = (f"`{c.name}` is a method of trait `{owners[0]}`: call it on the value, "
+                                     f"`x.{c.name}(...)`"), None
+                    elif c.name in special:
                         hint, fix = special[c.name], None
                     else:
                         hint, fix = self.did_you_mean(c.name, self.visible_names(), c.span)
@@ -1134,14 +1418,44 @@ class Checker:
         if bsig is not None:
             e.resolved = ("builtin", h, m)
             return self.call_sig(bsig, e.args, e.span, expected=exp, self_type=rt, display=m, node=e)
+        if isinstance(rt, TParam):
+            found = [tr for tr in sorted(self.bounds.get(rt.name, ())) if m in self.traits[tr].methods]
+            if found:
+                if len(found) > 1:
+                    self.error("E0204", f"`{m}` is a method of both `{found[0]}` and `{found[1]}`", e.method_span,
+                               hint="rename the method in one of the traits")
+                e.resolved = ("trait", found[0], m)
+                return self.call_sig(self.traits[found[0]].methods[m], e.args, e.span, expected=exp, self_type=rt,
+                                     display=m, node=e)
+        tm = self.universe.type_methods.get(h, {}).get(m) if h else None
+        if tm is not None and tm[0] in self.visible:
+            e.resolved = ("ufcs", tm[1].module, tm[1].name)
+            return self.call_sig(tm[1], e.args, e.span, expected=exp, self_type=rt, display=m, node=e)
         usig = self.fns.get(m)
         if usig is not None and usig.params:
             first = subst(usig.params[0][1], {t: TVar() for t in usig.tparams})
             if unify(first, rt):
                 e.resolved = ("ufcs", usig.module, usig.name)
                 return self.call_sig(usig, e.args, e.span, expected=exp, self_type=rt, display=m, node=e)
+        if tm is not None:
+            trait = tm[0]
+            self.error("E0104", f"method `{m}` of `{h}` comes from trait `{trait}`, which is not imported here",
+                       e.method_span, hint=f"add `use {self.traits[trait].module}.{{{trait}}}` at the top of the file")
+            for a in e.args:
+                self.expr(a.value)
+            return ANY
         # error: unknown method
-        cands = set(BUILTIN_METHODS.get(h, {})) | {"to_str"}
+        cands = set(BUILTIN_METHODS.get(h, {})) | {"to_str"} | set(self.universe.type_methods.get(h, {}))
+        if isinstance(rt, TParam):
+            for tr in self.bounds.get(rt.name, ()):
+                cands |= set(self.traits[tr].methods)
+            having = [tr for tr, info in self.traits.items() if m in info.methods and tr in self.visible]
+            if having:
+                self.error("E0204", f"type parameter `{rt.name}` has no method `{m}`", e.method_span,
+                           hint=f"`{m}` belongs to trait `{having[0]}`: declare the bound `[{rt.name}: {having[0]}]`")
+                for a in e.args:
+                    self.expr(a.value)
+                return ANY
         for name, s in self.fns.items():
             if s and s.params and head(s.params[0][1]) == h:
                 cands.add(name)
@@ -1491,7 +1805,8 @@ class Checker:
                 out[d.name] = ("fn", self.fns[d.name])
             elif isinstance(d, N.ConstDecl) and d.name in self.consts:
                 out[d.name] = ("const", self.consts[d.name])
-            elif isinstance(d, (N.TypeDecl, N.EnumDecl, N.AliasDecl)) and self.universe.owner(d.name) == self.module:
+            elif isinstance(d, (N.TypeDecl, N.EnumDecl, N.AliasDecl, N.TraitDecl)) and \
+                    self.universe.owner(d.name) == self.module:
                 out[d.name] = ("type", d.name)
         return out
 

@@ -112,6 +112,28 @@ m = m.set("k", 1)
 ```
 No indexing `xs[i]`: use `xs.get(i)` → `Option[T]`. No `unwrap`: use `?`, `match`, `.unwrap_or(d)`.
 
+## Traits (shared methods of different types)
+```klar
+trait Shape {
+  fn area(self) -> Float                 // required: every impl defines it
+  fn label(self) -> Str {                // default: an impl may override it
+    return "area {self.area()}"
+  }
+}
+impl Shape for Circle {                  // for Int/Float/Bool/Str or your own non-generic type/enum
+  fn area(self) -> Float {
+    return 3.14 * self.r * self.r
+  }
+}
+fn total[T: Shape](xs: List[T]) -> Float {     // bound; several: [T: Shape + Show]
+  return xs.map(fn(s) => s.area()).sum_float()
+}
+```
+Methods take `self` first; `Self` is the implementing type. Call them with a dot: `c.area()` (never `area(c)`).
+An impl lives in the trait's or the type's module; import the trait to use its methods. A trait is not a type:
+for a list of different kinds use an `enum` and `impl Shape for ThatEnum` (one `match` per method).
+`klar fix` adds `todo(...)` stubs for missing impl methods.
+
 ## Types
 `Int` (arbitrary precision), `Float`, `Bool`, `Str`, `Unit`, `Never`, `List[T]`, `Map[K, V]` (K: Int/Str/Bool,
 insertion-ordered), `Option[T]`, `Result[T, E]`, `fn(A, B) -> R`, user `type`/`enum`. Annotate empty

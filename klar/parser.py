@@ -132,11 +132,21 @@ class Parser:
                     d = self.parse_test()
                 elif self.at_kw("property"):
                     d = self.parse_property()
+                elif self.at_kw("trait") or self.at_kw("impl"):
+                    group = self.parse_trait(doc) if self.at_kw("trait") else self.parse_impl()
+                    decls.extend(group)
+                    doctest = self.doctest(docs, group[0])
+                    if doctest is not None:
+                        decls.append(doctest)
+                    if not (self.at("NEWLINE") or self.at("EOF")):
+                        self.fail(f"expected end of line after declaration, found {self.cur.describe()}")
+                    continue
                 elif self.at_kw("let") or self.at_kw("var"):
                     self.fail("top-level variables are not allowed",
                               hint="declare a constant: `const MAX_USERS: Int = 100`")
                 else:
-                    self.fail("expected a declaration (`fn`, `type`, `enum`, `const`, `test`, `property`, `use`), "
+                    self.fail("expected a declaration (`fn`, `type`, `enum`, `trait`, `impl`, `const`, `test`, "
+                              "`property`, `use`), "
                               f"found {self.cur.describe()}")
                 decls.append(d)
                 doctest = self.doctest(docs, d)
@@ -171,12 +181,24 @@ class Parser:
         span = docs[0].span.merge(docs[-1].span)
         return N.TestDecl(span=span, name=f"doc: {name}", body=N.Block(span=span, stmts=stmts))
 
-    def parse_type_params(self):
+    def parse_type_params(self, allow_bounds=False):
         tparams = []
+        self.last_bounds = {}
         if self.accept_op("["):
             while not self.at_op("]"):
                 tp = self.expect_ident("type parameter")
                 tparams.append(tp.value)
+                if self.accept_op(":"):
+                    if not allow_bounds:
+                        self.fail("trait bounds are only allowed on functions", tok=self.prev(),
+                                  hint="write the bound where the type is used: `fn f[T: Shape](x: T)`")
+                    bounds = []
+                    while True:
+                        tr = self.expect_ident("trait name")
+                        bounds.append((tr.value, tr.span))
+                        if not self.accept_op("+"):
+                            break
+                    self.last_bounds[tp.value] = bounds
                 if not self.accept_op(","):
                     break
             self.expect_op("]")
@@ -233,14 +255,15 @@ class Parser:
         return N.PropertyDecl(span=self.span_from(start), name=name, params=params, body=body)
 
     # ---- declarations -------------------------------------------------------
-    def parse_fn(self, doc=None, with_body=True) -> N.FnDecl:
+    def parse_fn(self, doc=None, with_body=True, method_of=None) -> N.FnDecl:
         start = self.advance().span  # fn
         if self.at_op("("):
             self.fail("top-level functions need a name: `fn name(...)`")
         name_tok = self.expect_ident("function name")
-        tparams = self.parse_type_params()
+        tparams = self.parse_type_params(allow_bounds=True)
+        bounds = self.last_bounds
         self.expect_op("(", " after function name")
-        params = self.parse_params(require_types=True)
+        params = self.parse_params(require_types=True, method_of=method_of)
         self.expect_op(")", " to close the parameter list")
         ret = None
         if self.accept_op("->"):
@@ -281,13 +304,24 @@ class Parser:
         return N.FnDecl(span=self.span_from(start), name=name_tok.value, name_span=name_tok.span,
                         type_params=tparams, params=params, ret=ret, effects=effects,
                         effects_span=eff_span, sig_end=sig_end, requires=requires,
-                        ensures=ensures, body=body, doc=doc)
+                        ensures=ensures, body=body, doc=doc, bounds=bounds)
 
-    def parse_params(self, require_types: bool) -> List[N.Param]:
+    def parse_params(self, require_types: bool, method_of=None) -> List[N.Param]:
         params = []
         while not self.at_op(")"):
             tok = self.expect_ident("parameter name")
             ptype = None
+            if tok.value == "self" and method_of is not None and not params:
+                if self.at_op(":"):
+                    self.fail("`self` has no type annotation: its type is the implementing type", tok=self.cur,
+                              hint="write just `self`")
+                params.append(N.Param(span=tok.span, name="self", type=N.TypeName(span=tok.span, name="Self", args=[])))
+                if not self.accept_op(","):
+                    break
+                continue
+            if tok.value == "self" and not self.at_op(":"):
+                self.fail("an untyped `self` is only allowed as the first parameter of a `trait` or `impl` method",
+                          tok=tok, hint="give the parameter a type, or move the function into an `impl` block")
             if self.accept_op(":"):
                 ptype = self.parse_type()
             elif require_types:
@@ -336,6 +370,89 @@ class Parser:
             self.accept_op(",")
             self.skip_nl()
         return fields
+
+    def method_block(self, what, method_of):
+        """`{ [doc] fn ... }` of a trait or impl: returns [(FnDecl, doc tokens)]."""
+        self.expect_op("{", f" to start the body of the {what}")
+        out = []
+        while True:
+            docs = []
+            while self.cur.kind in ("NEWLINE", "DOC"):
+                tok = self.advance()
+                if tok.kind == "DOC":
+                    docs.append(tok)
+            if self.at_op("}"):
+                self.advance()
+                return out
+            if not self.at_kw("fn"):
+                self.fail(f"a {what} contains only methods (`fn name(self, ...)`), found {self.cur.describe()}")
+            doc = "\n".join(t.value.strip() for t in docs if not t.value.strip().startswith(">>>")) or None
+            f = self.parse_fn(doc, with_body=False, method_of=method_of)
+            save = self.p
+            self.skip_nl()
+            if not self.at_op("{"):
+                self.p = save
+            if self.at_op("{"):
+                f.body = self.parse_block()
+                f.span = f.span.merge(self.prev().span)
+            elif what == "impl":
+                self.fail(f"method `{f.name}` in an impl needs a body", hint="write `fn name(self) -> T { ... }`")
+            if not f.params or f.params[0].name != "self":
+                self.fail(f"method `{f.name}` must take `self` as its first parameter", tok=self.prev(),
+                          hint=f"write `fn {f.name}(self, ...)`; functions without `self` belong outside the {what}")
+            out.append((f, docs))
+            if not (self.at("NEWLINE") or self.at_op("}")):
+                self.fail(f"expected end of line after method `{f.name}`, found {self.cur.describe()}")
+
+    def parse_trait(self, doc) -> list:
+        start = self.advance().span
+        name = self.expect_ident("trait name")
+        if self.at_op("["):
+            self.fail("generic traits are not supported yet", hint="declare the trait without type parameters")
+        out_methods, defaults, extra = [], [], []
+        for f, docs in self.method_block("trait", name.value):
+            f.trait = name.value
+            f.method = f.name
+            if f.body is None:
+                out_methods.append(f)
+            else:
+                defaults.append(f.name)
+                f.owner_kind, f.owner = "default", name.value
+                f.name = f"{name.value}.{f.method}"
+                if f.type_params:
+                    self.fail(f"trait method `{f.method}` cannot have its own type parameters (not supported yet)")
+                f.type_params = ["Self"]
+                f.bounds = {"Self": [(name.value, name.span)]}
+                extra.append(f)
+                t = self.doctest(docs, f)
+                if t is not None:
+                    extra.append(t)
+        decl = N.TraitDecl(span=self.span_from(start), name=name.value, name_span=name.span, methods=out_methods,
+                           defaults=defaults, doc=doc)
+        return [decl] + extra
+
+    def parse_impl(self) -> list:
+        start = self.advance().span
+        if self.at_op("["):
+            self.fail("generic impls are not supported yet", hint="write `impl Trait for Type` for a concrete type")
+        trait = self.expect_ident("trait name")
+        if not self.accept_kw("for"):
+            self.fail("expected `for` after the trait name", hint=f"write `impl {trait.value} for TypeName {{ ... }}`")
+        target = self.parse_type()
+        tname = getattr(target, "name", "?")
+        methods, extra = [], []
+        for f, docs in self.method_block("impl", tname):
+            f.owner_kind, f.owner, f.trait, f.method = "impl", tname, trait.value, f.name
+            f.name = f"{tname}.{f.method}"
+            if f.type_params:
+                self.fail(f"method `{f.method}` cannot have its own type parameters (not supported yet)")
+            methods.append(f)
+            t = self.doctest(docs, f)
+            if t is not None:
+                extra.append(t)
+        decl = N.ImplDecl(span=self.span_from(start), trait=trait.value, trait_span=trait.span, target=target,
+                          methods=[f.method for f in methods], method_spans=[f.name_span for f in methods])
+        return [decl] + methods + extra
 
     def parse_type_decl(self, doc) -> N.TypeDecl:
         start = self.advance().span

@@ -159,23 +159,26 @@ flowchart TB
         direction TB
         v01["0.1 — core language, types, effects,<br/>contracts, tests, JSON diagnostics"]
         v02["0.2 — modules, generics, doc &amp; property tests,<br/>dev / fix / profile, std library"]
-        v03["0.3 — native x86-64 compiler + linker,<br/>runtime in Klar, compile-time safety,<br/>speed &amp; AI benchmarks"]
+        v03["0.3 — native x86-64 compiler + linker,<br/>runtime in Klar, compile-time safety,<br/>dev tools (fmt, view, refs…), benchmarks"]
         v01 --> v02 --> v03
+    end
+    subgraph now["🚧 In progress"]
+        v04["0.4 — ✅ traits &amp; bounded generics, ✅ bit operations,<br/>Set, exit, env_var · next: pub, nested patterns,<br/>floats in XMM registers, JSON &amp; time in std"]
     end
     subgraph next["🔜 Planned"]
         direction TB
-        v04["0.4 — floats in XMM registers, mutable lambda captures,<br/>Bytes, interval analysis for safety"]
-        v05["0.5 — self-hosting: compiler rewritten in Klar,<br/>klar fmt, LSP"]
+        v05["0.5 — self-hosting: compiler rewritten in Klar, LSP"]
         v06["0.6 — AI patch protocol (edits by AST node id),<br/>static contract checking"]
         v10["1.0 — ARM64 / macOS, package manager,<br/>stable specification"]
-        v04 --> v05 --> v06 --> v10
+        v05 --> v06 --> v10
     end
-    v03 --> v04
+    v03 --> v04 --> v05
 ```
 
 | area | status |
 |---|---|
 | Language core: types with inference, generics, records/enums, `Option`/`Result`/`?`, `match`, modules | ✅ |
+| Traits with default methods and bounded generics (`fn f[T: Shape]`), static dispatch in native code | ✅ 0.4 |
 | Effects (`uses io`), contracts (`requires`/`ensures`), immutability with in-place updates | ✅ |
 | Tests, doc-tests, property tests with shrinking, profiler | ✅ |
 | Native compiler for x86-64 Linux and Windows, own linker, runtime in Klar | ✅ |

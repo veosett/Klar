@@ -14,7 +14,7 @@ KEYWORDS = {
     "module", "use", "fn", "type", "enum", "let", "var", "return", "if", "else",
     "while", "for", "in", "break", "continue", "match", "test", "assert",
     "requires", "ensures", "uses", "and", "or", "not", "true", "false", "with",
-    "const", "property",
+    "const", "property", "trait", "impl",
 }
 
 TWO_CHAR = {"->", "=>", "==", "!=", "<=", ">="}

@@ -125,6 +125,7 @@ const DATA = /*__DATA__*/null;
 const T = {
   en: {
     overview: "Overview", functions: "Functions", types: "Data types", tests: "Tests", consts: "Constants",
+    implementedBy: "implemented by", noImpls: "no implementations yet",
     entry: "Entry point", graph: "Who calls whom", graphHint: "Click a function to see what it does. Arrows point from caller to callee.",
     pure: "pure (no side effects)", effect: "has side effects (io, files, time…)", ext: "from another module", cold: "never ran",
     takes: "Takes", nothing: "no arguments", returns: "Returns", requires: "Requires", guarantees: "Guarantees",
@@ -143,6 +144,7 @@ const T = {
   },
   ru: {
     overview: "Обзор", functions: "Функции", types: "Типы данных", tests: "Тесты", consts: "Константы",
+    implementedBy: "реализуют", noImpls: "реализаций пока нет",
     entry: "Точка входа", graph: "Кто кого вызывает", graphHint: "Нажмите на функцию, чтобы увидеть, что она делает. Стрелки идут от вызывающей к вызываемой.",
     pure: "чистая (без побочных эффектов)", effect: "с побочными эффектами (ввод-вывод, файлы, время…)", ext: "из другого модуля", cold: "не выполнялась",
     takes: "Принимает", nothing: "ничего", returns: "Возвращает", requires: "Требует", guarantees: "Гарантирует",
@@ -283,7 +285,8 @@ function overview() {
   if (DATA.types.length) {
     h += `<div class="card"><h2>${t().types}</h2><div class="types">` + DATA.types.map(x => `<div class="type">
       <div class="nm">${esc(x.kind)} ${esc(x.name)}</div>${x.doc ? `<div class="muted">${esc(x.doc)}</div>` : ""}
-      ${x.fields.map(f => `<div class="mono">${esc(f)}</div>`).join("")}</div>`).join("") + `</div></div>`;
+      ${x.fields.map(f => `<div class="mono">${esc(f)}</div>`).join("")}
+      ${x.kind === "trait" ? `<div class="muted">${x.impls.length ? t().implementedBy + ": " + x.impls.map(esc).join(", ") : t().noImpls}</div>` : ""}</div>`).join("") + `</div></div>`;
   }
   if (DATA.consts.length) {
     h += `<div class="card"><h2>${t().consts}</h2>` + DATA.consts.map(c => `<div class="mono">${esc(c.name)} = ${esc(c.value)}</div>`).join("") + `</div>`;

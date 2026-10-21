@@ -99,6 +99,17 @@ class Profiler:
         return (self.end or time.perf_counter()) - self.start
 
 
+def impl_table(loaded, get):
+    """(type name, method) -> implementation, for trait methods (dispatch on the receiver's runtime type).
+    `get(module, fn name)` returns the back-end's value for a function declared in that module."""
+    by_name = {m.name: m for m in loaded.modules}
+    table = {}
+    for type_name, methods in loaded.universe.type_methods.items():
+        for method, (_, sig) in methods.items():
+            table[(type_name, method)] = get(by_name[sig.module], sig.name)
+    return table
+
+
 class Interpreter:
     def __init__(self, loaded, out=None, inp=None, err_stream=None, cli_args=()):
         self.loaded = loaded
@@ -145,6 +156,8 @@ class Interpreter:
                     env.vars[d.name] = self.eval(d.value, env)
                     self.stack = []
         self.main_env = self.loaded.main.env
+        self.impl_methods = impl_table(self.loaded, lambda m, name: m.env.vars[name])
+        self.module_envs = {m.name: m.env for m in self.loaded.modules}
 
     # ---- errors ----------------------------------------------------------------
     def error(self, code, msg, span, details=None, hint=None):
@@ -423,10 +436,16 @@ class Interpreter:
                 return impl(self, [recv] + args, e.span)
             finally:
                 self.prof.exit()
-        try:
-            fv = env.get(m)
-        except KeyError:
-            fv = None
+        res = getattr(e, "resolved", None)
+        if res is not None and res[0] == "trait":
+            fv = self.impl_methods.get((h, m))        # dynamic dispatch on the receiver's type
+        elif res is not None and res[0] == "ufcs" and "." in res[2]:
+            fv = self.module_envs[res[1]].vars[res[2]]  # an impl / default method chosen by the checker
+        else:
+            try:
+                fv = env.get(m)
+            except KeyError:
+                fv = None
         if isinstance(fv, Closure):
             args = self.order_args(fv.params[1:], e.args, env)
             return self.call_value(fv, [recv] + args, e.span)
