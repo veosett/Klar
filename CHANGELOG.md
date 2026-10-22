@@ -5,6 +5,11 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-22
+
+Self-hosting: the whole compiler is written in Klar (`compiler/`, ~22 000 lines) and builds itself — byte-identical
+to the Python implementation at every stage, from tokens to executables, and faster than it.
+
 ### Added
 - Self-hosting, stage 3a: `compiler/lexer.klar` — the lexer written in Klar. `tests/selfhost.py` checks that it
   produces exactly the tokens (kinds, values, spans, string parts) and the errors of `klar/lexer.py` on every
@@ -53,6 +58,9 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - The Klar loader loads the runtime (`klar/rt`, one module of several files); the Klar checker records what the
   backend needs (the type arguments of every call, the element type of every `for`).
 - The Klar parser reports the same hints as the Python one, and the parser comparison now covers every `*_span`.
+
+### Changed
+- CI runs only on demand (`workflow_dispatch`).
 
 ### Fixed
 - Native: constants holding lists or maps corrupted the heap (they were built before the runtime's own constants

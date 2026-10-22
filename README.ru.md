@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.5.0-informational)
+![Version](https://img.shields.io/badge/version-0.6.0-informational)
 
 [English](README.md) · [**Руководство в картинках**](docs/GUIDE.md) · [Инструменты](docs/TOOLS.md) ·
 [Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·
@@ -32,7 +32,7 @@
    возвращает компактный JSON с полем `next`. Весь справочник языка — ~2 тыс. токенов (`klar spec`).
 3. **Скорость.** Klar компилируется в машинный код x86-64 **собственным компилятором и линкером**: без C-компилятора,
    без libc, без виртуальной машины.
-4. **Автономность.** Рантайм написан на самом Klar; следующая веха — компилятор на Klar (self-hosting).
+4. **Автономность.** Рантайм и компилятор написаны на самом Klar: `klarc` собирает сам себя.
 
 ```klar
 use std.math.{gcd}
@@ -154,18 +154,16 @@ flowchart TB
         v03["0.3 — компилятор в x86-64 + линкер,<br/>рантайм на Klar, безопасность на этапе компиляции,<br/>инструменты (fmt, view, refs…), бенчмарки"]
         v04["0.4 — трейты, pub, полнота вложенных шаблонов,<br/>Float в XMM-регистрах, std.json, std.time"]
         v05["0.5 — языковой сервер + VS Code, REPL,<br/>быстрые вызовы, Bytes, CI на Windows"]
-        v01 --> v02 --> v03 --> v04 --> v05
+        v06["0.6 — self-hosting: компилятор на Klar собирает сам себя,<br/>обновление на месте через вызовы, run_command"]
+        v01 --> v02 --> v03 --> v04 --> v05 --> v06
     end
     subgraph now["🚧 В работе"]
-        v06["0.6 — self-hosting: компилятор на самом Klar"]
+        v07["0.7 — обобщённые impl, newtype, протокол «AI patch»,<br/>статическая проверка контрактов"]
     end
     subgraph next["🔜 Планируется"]
-        direction TB
-        v07["0.7 — обобщённые impl, newtype, протокол «AI patch»,<br/>статическая проверка контрактов"]
         v10["1.0 — ARM64 / macOS, пакетный менеджер, параллелизм,<br/>стабильная спецификация"]
-        v07 --> v10
     end
-    v05 --> v06 --> v07
+    v06 --> v07 --> v10
 ```
 
 | направление | статус |
@@ -178,12 +176,13 @@ flowchart TB
 | Анализ безопасности на этапе компиляции (деление, рекурсия, контракты, индексы) | ✅ |
 | Инструменты для ИИ: `dev --json`, `fix`, `spec`, `explain`, стабильные коды ошибок | ✅ |
 | Языковой сервер (`klar lsp`) и расширение VS Code: ошибки при наборе, наведение, определения, ссылки, переименование, дополнение | ✅ 0.5 |
-| Компилятор на самом Klar (self-hosting) | 🔜 0.6 |
+| Компилятор на самом Klar: `compiler/klarc.klar` собирает, запускает и тестирует программы и собирает сам себя (stage1 == stage2 == stage3 побайтно), быстрее Python-реализации | ✅ 0.6 |
 | ARM64, macOS, пакетный менеджер | 🔜 1.0 |
 
 ## Быстрый старт
 
-Для компилятора нужен **Python 3.10+** (без зависимостей; это временный bootstrap до self-hosting).
+Нужен **Python 3.10+** (без зависимостей) — для инструмента `klar` и чтобы один раз собрать `klarc`, компилятор
+на самом Klar (см. ниже).
 Скомпилированным программам не нужно ничего.
 
 ```sh
@@ -196,6 +195,15 @@ python -m klar test examples/bank.klar          # тесты, doc-тесты, pr
 python -m klar fix examples/mistakes.klar       # применить все безопасные исправления
 python -m klar spec                             # справка по языку для промпта
 python -m klar explain E0701
+```
+
+Компилятор на Klar (`compiler/`) после сборки работает без Python:
+
+```sh
+python -m klar build compiler/klarc.klar -o klarc   # stage 1: Python-компилятор собирает klarc
+./klarc build compiler/klarc.klar -o klarc2         # stage 2: klarc собирает сам себя (те же байты)
+./klarc run examples/shapes.klar -- arg1 arg2       # собрать во временный файл и запустить
+./klarc test examples/bank.klar                     # собрать блоки `test` и запустить каждый
 ```
 
 `pip install -e .` установит команду `klar`. На Windows из корня репозитория работает `klar.bat run examples\hello.klar`,

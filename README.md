@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.5.0-informational)
+![Version](https://img.shields.io/badge/version-0.6.0-informational)
 ![Targets](https://img.shields.io/badge/targets-x86--64%20Linux%20%7C%20Windows-lightgrey)
 
 [Русская версия](README.ru.md) · [**Guide in pictures**](docs/GUIDE.en.md) · [Tools](docs/TOOLS.md) ·
@@ -32,7 +32,7 @@ Worst of all, many of these mistakes **run without an error and silently print a
    JSON with a `next` step; the whole language reference fits into ~2,000 tokens (`klar spec`).
 3. **Be fast** — Klar compiles to native x86-64 machine code with its **own compiler and linker**: no C compiler,
    no libc, no virtual machine.
-4. **Be autonomous** — the runtime is written in Klar itself; the next milestone is a self-hosted compiler.
+4. **Be autonomous** — the runtime and the compiler are written in Klar itself: `klarc` builds itself.
 
 ```klar
 use std.math.{gcd}
@@ -164,18 +164,16 @@ flowchart TB
         v03["0.3 — native x86-64 compiler + linker,<br/>runtime in Klar, compile-time safety,<br/>dev tools (fmt, view, refs…), benchmarks"]
         v04["0.4 — traits, pub, nested-pattern exhaustiveness,<br/>floats in XMM registers, std.json, std.time"]
         v05["0.5 — language server + VS Code, REPL,<br/>faster calls, Bytes, Windows CI"]
-        v01 --> v02 --> v03 --> v04 --> v05
+        v06["0.6 — self-hosting: the compiler in Klar builds itself,<br/>in-place updates across calls, run_command"]
+        v01 --> v02 --> v03 --> v04 --> v05 --> v06
     end
     subgraph now["🚧 In progress"]
-        v06["0.6 — self-hosting: the compiler rewritten in Klar"]
+        v07["0.7 — generic impls, newtype, AI patch protocol,<br/>static contract checking"]
     end
     subgraph next["🔜 Planned"]
-        direction TB
-        v07["0.7 — generic impls, newtype, AI patch protocol,<br/>static contract checking"]
         v10["1.0 — ARM64 / macOS, package manager, concurrency,<br/>stable specification"]
-        v07 --> v10
     end
-    v05 --> v06 --> v07
+    v06 --> v07 --> v10
 ```
 
 | area | status |
@@ -188,13 +186,13 @@ flowchart TB
 | Compile-time safety pass (division, recursion, contracts, built-in domains, indexes) | ✅ |
 | AI tooling: `dev --json`, `fix`, `spec`, `explain`, stable error codes | ✅ |
 | Language server (`klar lsp`) and VS Code extension: diagnostics, hover, definition, references, rename, completion | ✅ 0.5 |
-| Self-hosted compiler: `compiler/klarc.klar` builds itself (stage1 == stage2 == stage3, byte for byte) | ✅ bootstrap · 🚧 0.6 speed, Python retirement |
+| Self-hosted compiler: `compiler/klarc.klar` builds, runs and tests programs and builds itself (stage1 == stage2 == stage3, byte for byte), faster than the Python implementation | ✅ 0.6 |
 | ARM64, macOS, package manager | 🔜 1.0 |
 
 ## Quick start
 
-Requirements for the compiler: **Python 3.10+** (no dependencies; a temporary bootstrap until the compiler is
-self-hosted). Compiled programs need nothing.
+Requirements: **Python 3.10+** (no dependencies) for the `klar` tool and to bootstrap `klarc`, the compiler written
+in Klar (see below). Compiled programs need nothing.
 
 ```sh
 git clone https://github.com/veosett/Klar.git && cd Klar
