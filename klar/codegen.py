@@ -807,7 +807,7 @@ class Gen:
             return f"_tcall({recv}, {e.method!r}{', ' + rest if rest else ''})"
         raise Unsupported(kind)
 
-    FAST_HOF = {("List", "map"): "_map", ("List", "filter"): "_filter", ("List", "any"): "_any",
+    FAST_HOF = {("List", "map"): "_map", ("List", "par_map"): "_map", ("List", "filter"): "_filter", ("List", "any"): "_any",
                 ("List", "all"): "_all", ("List", "count"): "_count"}
 
     def fast_method(self, owner, m, recv, args):

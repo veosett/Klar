@@ -18,7 +18,8 @@ MAX_DEPTH = 10000
 SOFT = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
 
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
-            "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
+            "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
+            "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
@@ -1133,6 +1134,31 @@ class Emitter:
         a.mov_ri(RAX, 90)
         a.syscall()
         self.stub_end()
+        # worker processes for List.par_map (rt/par.klar)
+        sys("os_fork", 57, 0)
+        sys("os_pipe", 22, 1)
+        self.stub_begin("os_wait")             # wait4(pid, &status, 0, 0) -> wait status (or -errno)
+        a.alu_ri("sub", RSP, 16)
+        self.arg(RDI, 0)
+        a.mov_rr(RSI, RSP)
+        a.mov_ri(RDX, 0)
+        a.mov_ri(R10, 0)
+        a.mov_ri(RAX, 61)
+        a.syscall()
+        done = a.new_label("wd")
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.load32(RAX, RSP, 0)
+        a.label(done)
+        self.stub_end()
+        sys("os_kill", 62, 2)
+        self.stub_begin("os_cpu_mask")         # sched_getaffinity(0, n, buf) -> bytes written (or -errno)
+        a.mov_ri(RDI, 0)
+        self.arg(RSI, 1)
+        self.arg(RDX, 0)
+        a.mov_ri(RAX, 204)
+        a.syscall()
+        self.stub_end()
         self.test_index_stub()
         # entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
         a.label("_start")
@@ -1358,6 +1384,10 @@ class Emitter:
         self.stub_begin("os_chmod")
         a.mov_ri(RAX, 0)
         self.stub_end()
+        for name in ("os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"):   # no worker processes here
+            self.stub_begin(name)
+            a.mov_ri(RAX, -1)
+            self.stub_end()
         self.test_index_stub()
 
         a.label("_start")

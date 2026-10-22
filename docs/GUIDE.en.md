@@ -312,6 +312,37 @@ flowchart TB
 A function without `uses` is **pure**: the same arguments always give the same result, so it is easy to test and
 safe to call. `klar view` colours such functions green.
 
+### Parallelism: `par_map`
+
+Purity is what makes parallel code safe. `xs.par_map(f)` gives the same list as `xs.map(f)`, but in native code it
+spreads the elements over the CPU cores (worker processes, one contiguous chunk per core):
+
+```klar
+fn score(doc: Str) -> Int {          // pure: no `uses`
+  return doc.split(" ").filter(fn(w) => w.len() > 3).len()
+}
+
+fn main() uses io {
+  let docs = ["the quick brown fox", "jumps over the lazy dog", "hello parallel world"]
+  let scores = docs.par_map(score)    // all cores; same result and order as map
+  print(scores.sum())                 // the effects come afterwards, in main
+}
+
+test "par_map gives the result of map" {
+  let docs = ["a bb ccc dddd", "eeeee"]
+  assert docs.par_map(score) == docs.map(score)
+}
+```
+
+The compiler checks what makes this safe (error E0406 / E0401):
+* `f` is a lambda that uses no effects, or the name of a function without `uses` — nothing can print, write a file
+  or read the clock from another process;
+* the results contain no functions (they are sent back between processes).
+
+There are no locks, no data races and no "sometimes" bugs: values are immutable and `f` is pure, so the result
+cannot depend on timing. A runtime error inside `f` is reported exactly as `map` would report it (the first failing
+element). Where there are no worker processes (Windows for now, one CPU, the interpreter) `par_map` is `map`.
+
 ## 10. Tests are part of the language
 
 ```mermaid
@@ -469,6 +500,7 @@ sequenceDiagram
 | a default value | `opt.unwrap_or(0)` |
 | pass an error on | `let v = parse(s)?` |
 | a lambda | `xs.map(fn(x) => x * 2)` |
+| use all CPU cores | `xs.par_map(f)` (`f` pure; same result as `map`) |
 | debug | `dbg(x)` prints the expression and its value |
 | a placeholder | `todo("write later")` |
 | bit operations | `a.bit_and(b)`, `a.bit_xor(b)`, `a.shift_left(3)` (there are no `&`, `\|`, `<<` operators) |

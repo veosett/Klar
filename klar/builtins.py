@@ -638,6 +638,10 @@ def _(it, a, sp): return a[0] + a[1]
 def _(it, a, sp): return tuple(_call(it, a[1], [x], sp) for x in a[0])
 
 
+@method("List", "fn par_map[T, U](self: List[T], f: fn(T) -> U) -> List[U]")
+def _(it, a, sp): return tuple(_call(it, a[1], [x], sp) for x in a[0])   # (in parallel only in native code)
+
+
 @method("List", "fn filter[T](self: List[T], keep: fn(T) -> Bool) -> List[T]")
 def _(it, a, sp): return tuple(x for x in a[0] if _call(it, a[1], [x], sp))
 

@@ -140,6 +140,8 @@ pub type Ck {
   next_var: Int,
   next_scope: Int,
   lambda_bounds: List[Int],
+  /// the lambda passed to `par_map` that is being checked (it may not use effects)
+  pure_lambda: Option[Span],
   reported: Map[Str, Bool],
   resolving: List[Str],
   /// declaration index of an `impl` -> its key in `uni.impls` (impls that were registered)
@@ -502,6 +504,7 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       next_var: 0,
       next_scope: 0,
       lambda_bounds: [],
+      pure_lambda: None,
       reported: Map {},
       resolving: [],
       impl_keys: Map {},
@@ -2841,6 +2844,115 @@ fn e_binary(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
 
 // ---- calls --------------------------------------------------------------------------------------------------
 
+const PAR_HINT: Str = "compute the values with `par_map`, then do the effects with the results"
+
+/// `xs.par_map(f)` runs `f` in worker processes: it must be pure (a lambda checked without effects, or a function
+/// declared without `uses`), and the values it returns must not contain functions.
+fn par_map_call(ck: Ck, bsig: Sig, rt: Type, args: List[Arg], span: Span, exp: Option[Type]) -> Res[Type] {
+  var c = ck
+  var f: Option[Expr] = None
+  if args.len() == 1 {
+    f = args.get(0).map(fn(a) => a.value)
+  }
+  var is_lambda = false
+  match f {
+    Some(Expr.Lambda(ls, _, _, _)) => {
+      c = c with { pure_lambda: Some(ls) }
+      is_lambda = true
+    },
+    _ => {},
+  }
+  let r = call_sig(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: "par_map")
+  c = r.c with { pure_lambda: None }
+  match f {
+    Some(fe) => {
+      if not is_lambda {
+        match fn_ref_sig(c, fe) {
+          None => {
+            c = error(c: c, code: "E0406", msg: "`par_map` needs a lambda or the name of a function, so that it can " +
+                "be checked to be pure", span: expr_span(fe), hint: Some("write `xs.par_map(fn(x) => ...)`"))
+          },
+          Some(sig) => {
+            if not sig.effects.is_empty() {
+              let effs = sig.effects.sort().join(", ")
+              c = error(c: c, code: "E0406", msg: "`par_map` runs `{sig.name}` in worker processes, so it must be " +
+                  "pure, but `{sig.name}` uses `{effs}`", span: expr_span(fe), hint: Some(PAR_HINT))
+            }
+          },
+        }
+      }
+    },
+    None => {},
+  }
+  match pr(c, r.v) {
+    Type.Con(_, targs) => {
+      match targs.get(0) {
+        Some(u) => {
+          if holds_fn(c: c, t: u, seen: []) {
+            c = error(c: c, code: "E0406", msg: "the results of `par_map` are sent between processes, so they " +
+                "cannot contain functions (`{sh(c, u)}`)", span: span, hint: None)
+          }
+        },
+        None => {},
+      }
+    },
+    _ => {},
+  }
+  return ok(c, r.v)
+}
+
+/// The signature of a function named by `e` (not a variable or constant).
+fn fn_ref_sig(c: Ck, e: Expr) -> Option[Sig] {
+  return match e {
+    Expr.Name(_, name) => {
+      if lookup(c, name) != None or name == "None" or c.consts.has(name) {
+        return None
+      }
+      return callable(c, name)
+    },
+    _ => None,
+  }
+}
+
+/// Whether values of type t may contain functions.
+fn holds_fn(c: Ck, t: Type, seen: List[Str]) -> Bool {
+  let p = pr(c, t)
+  let parts = match p {
+    Type.Fun(_, _) => {
+      return true
+    },
+    Type.Con(name, targs) => Pair { first: name, second: targs },
+    _ => {
+      return false
+    },
+  }
+  let key = sh(c, p)
+  if seen.contains(key) {
+    return false
+  }
+  let now = seen.push(key)
+  let name = parts.first
+  if parts.second.any(fn(a) => holds_fn(c: c, t: a, seen: now)) {
+    return true
+  }
+  match c.uni.records.get(name) {
+    Some(info) => {
+      let m = args_map(c: c, tparams: info.tparams, t: p)
+      return info.fields.values().any(fn(ft) => holds_fn(c: c, t: sub(c: c, t: ft, m: m), seen: now))
+    },
+    None => {},
+  }
+  match c.uni.enums.get(name) {
+    Some(info) => {
+      let m = args_map(c: c, tparams: info.tparams, t: p)
+      return info.variants.values().any(fn(fs) => fs.any(fn(f) => holds_fn(c: c, t: sub(c: c, t: f.second, m: m),
+        seen: now)))
+    },
+    None => {},
+  }
+  return false
+}
+
 fn check_effects(ck: Ck, sig: Sig, span: Span) -> Ck {
   let missing = minus(sig.effects, ck.ctx.effects)
   if missing.is_empty() {
@@ -2854,6 +2966,10 @@ fn check_effects(ck: Ck, sig: Sig, span: Span) -> Ck {
       false => "constants",
     }
     return error(c: ck, code: "E0401", msg: "{what} must be pure, but `{sig.name}` uses `{effs}`", span: span, hint: None)
+  }
+  if purpose == "parallel" {
+    return error(c: ck, code: "E0401", msg: "`par_map` runs this function in worker processes, so it must be pure, " +
+        "but `{sig.name}` uses `{effs}`", span: span, hint: Some(PAR_HINT))
   }
   if purpose == "test" or ck.ctx.is_test {
     return error(c: ck, code: "E0401", msg: "tests may only use `io`, but `{sig.name}` uses `{effs}`", span: span,
@@ -3269,6 +3385,9 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
   match builtins.get(m) {
     Some(bsig) => {
       c = resolve_as(c: c, span: span, kind: "builtin", of: or_empty(h), name: m, sig: Some(bsig))
+      if h == Some("List") and m == "par_map" {
+        return par_map_call(ck: c, bsig: bsig, rt: rt, args: args, span: span, exp: exp)
+      }
       return call_sig(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: m)
     },
     None => {},
@@ -3744,12 +3863,18 @@ fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     },
   }
   let outer = c.ctx
-  let purpose = match outer.purpose == "test" or outer.purpose == "contract" or outer.purpose == "const" {
+  var purpose = match ["test", "contract", "const", "parallel"].contains(outer.purpose) {
     true => outer.purpose,
     false => "lambda",
   }
-  c = c with { ctx: Ctx { name: outer.name, ret: ret, effects: outer.effects, is_test: false, loop: 0,
-    sig_end: outer.sig_end, purpose: purpose }, lambda_bounds: c.lambda_bounds.push(c.scopes.len()) }
+  var effects = outer.effects
+  if c.pure_lambda == Some(span) {
+    purpose = "parallel"
+    effects = []
+    c = c with { pure_lambda: None }
+  }
+  c = c with { ctx: Ctx { name: outer.name, ret: ret, effects: effects, is_test: false, loop: 0, sig_end: outer.sig_end,
+    purpose: purpose }, lambda_bounds: c.lambda_bounds.push(c.scopes.len()) }
   c = push_scope(c)
   i = 0
   for p in params {

@@ -114,6 +114,7 @@ pub fn method_sigs() -> List[Pair[Str, Str]] {
     Pair { first: "List", second: "fn set[T](self: List[T], index: Int, item: T) -> List[T]" },
     Pair { first: "List", second: "fn concat[T](self: List[T], other: List[T]) -> List[T]" },
     Pair { first: "List", second: "fn map[T, U](self: List[T], f: fn(T) -> U) -> List[U]" },
+    Pair { first: "List", second: "fn par_map[T, U](self: List[T], f: fn(T) -> U) -> List[U]" },
     Pair { first: "List", second: "fn filter[T](self: List[T], keep: fn(T) -> Bool) -> List[T]" },
     Pair { first: "List", second: "fn fold[T, A](self: List[T], init: A, f: fn(A, T) -> A) -> A" },
     Pair { first: "List", second: "fn any[T](self: List[T], pred: fn(T) -> Bool) -> Bool" },
@@ -231,6 +232,11 @@ pub fn sys_sigs() -> List[Str] {
     "fn os_getenv(name: Word, buf: Word, cap: Word) -> Word",
     "fn os_spawn(p: Word) -> Word",
     "fn os_chmod(path: Word, mode: Word) -> Word",
+    "fn os_fork() -> Word",
+    "fn os_pipe(fds: Word) -> Word",
+    "fn os_wait(pid: Word) -> Word",
+    "fn os_kill(pid: Word, sig: Word) -> Word",
+    "fn os_cpu_mask(buf: Word, n: Word) -> Word",
   ]
 }
 
@@ -328,6 +334,7 @@ pub fn rt_files() -> List[Str] {
     "list.klar",
     "map.klar",
     "misc.klar",
+    "par.klar",
     "show.klar",
     "softmath.klar",
     "str.klar",

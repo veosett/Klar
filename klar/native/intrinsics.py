@@ -59,6 +59,11 @@ SYS_SIGNATURES = [
     "fn os_getenv(name: Word, buf: Word, cap: Word) -> Word",
     "fn os_spawn(p: Word) -> Word",
     "fn os_chmod(path: Word, mode: Word) -> Word",
+    "fn os_fork() -> Word",
+    "fn os_pipe(fds: Word) -> Word",
+    "fn os_wait(pid: Word) -> Word",
+    "fn os_kill(pid: Word, sig: Word) -> Word",
+    "fn os_cpu_mask(buf: Word, n: Word) -> Word",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

@@ -1285,6 +1285,23 @@ fn linux_layer(a0: A64, main_entry: Str) -> A64 {
   a = arg(a: mov_ri(a: stub_begin(a, "os_chmod"), rd: X0, imm: AT_FDCWD), reg: X1, i: 0)
   a = mov_ri(a: arg(a: a, reg: X2, i: 1), rd: X3, imm: 0)
   a = stub_end(syscall(a, 53))                                                    // fchmodat
+  // worker processes for List.par_map (rt/par.klar)
+  a = mov_ri(a: stub_begin(a, "os_fork"), rd: X0, imm: 17)                       // clone(SIGCHLD, 0, 0, 0, 0)
+  for r in [X1, X2, X3, X4] {
+    a = mov_ri(a: a, rd: r, imm: 0)
+  }
+  a = stub_end(syscall(a, 220))
+  a = mov_ri(a: arg(a: stub_begin(a, "os_pipe"), reg: X0, i: 0), rd: X1, imm: 0)
+  a = stub_end(syscall(a, 59))                                                    // pipe2
+  a = addsub_imm(a: stub_begin(a, "os_wait"), op: "sub", rd: SP, rn: SP, imm: 16)   // wait4(pid, &status, 0, 0)
+  a = mov_rr(a: arg(a: a, reg: X0, i: 0), rd: X1, rn: SP)
+  a = syscall(mov_ri(a: mov_ri(a: a, rd: X2, imm: 0), rd: X3, imm: 0), 260)
+  let wd = new_label64(a, "wd")
+  a = bcc(a: cmp_ri(a: wd.a, rn: X0, imm: 0), cc: "lt", target: wd.l)
+  a = stub_end(label64(mem(a: a, op: "ldrw", rt: X0, rn: SP, off: 0), wd.l))
+  a = sys_stub(a0: a, name: "os_kill", nr: 129, nargs: 2)
+  a = arg(a: mov_ri(a: stub_begin(a, "os_cpu_mask"), rd: X0, imm: 0), reg: X1, i: 1)   // sched_getaffinity
+  a = stub_end(syscall(arg(a: a, reg: X2, i: 0), 123))
   a = test_index_stub(a)
   // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
   a = mov_rr(a: label64(a, "_start"), rd: X0, rn: SP)

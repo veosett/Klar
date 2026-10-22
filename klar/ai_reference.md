@@ -162,6 +162,9 @@ A function without `uses` is pure. Calling something with an effect requires dec
 inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
 pure. Tests may use only `io`.
 Lambdas inherit the effects of the enclosing function.
+Parallel: `xs.par_map(f)` = `xs.map(f)` computed on all CPU cores. `f` must be a lambda without effects or a
+function name without `uses` (E0401/E0406; not a variable of fn type); results must not contain functions. Do the
+effects (print, files) afterwards with the returned list.
 
 ## Debugging helpers
 `dbg(expr)` prints `[dbg file:line] expr = value` to stderr and returns the value. `todo("what")` has type `Never`:

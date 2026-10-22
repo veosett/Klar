@@ -3351,3 +3351,51 @@ fn main() uses io {
 --- klar.toml
 [package]
 version = 12x
+=== par-map-purity
+fn show_it(i: Int) -> Int uses io {
+  print(i)
+  return i
+}
+
+fn main() uses io {
+  let xs = [1, 2, 3]
+  let a = xs.par_map(fn(i) => show_it(i))
+  let b = xs.par_map(show_it)
+  let g = fn(i: Int) => i + 1
+  let c = xs.par_map(g)
+  let d = xs.par_map(fn(i) => fn(j: Int) => i + j)
+  let e = xs.par_map(fn(i) => [1].map(fn(k) => show_it(k)))
+  print("{a} {b} {c} {d.len()} {e}")
+}
+=== par-map-ok
+type Box { f: fn(Int) -> Int }
+
+type Pt { x: Int, tag: Option[Str] }
+
+enum Tree {
+  Leaf(v: Int),
+  Node(kids: List[Tree]),
+}
+
+enum Holder {
+  H(b: Box),
+}
+
+fn sq(i: Int) -> Int {
+  return i * i
+}
+
+fn main() uses io {
+  let xs = [1, 2, 3]
+  print(xs.par_map(sq))
+  print(xs.par_map(fn(i) => Pt { x: i, tag: None }))
+  print(xs.par_map(fn(i) => Tree.Node([Tree.Leaf(i)])))
+  let hs = xs.par_map(fn(i) => Holder.H(Box { f: fn(k) => k + i }))
+  print(hs.len())
+  test_it()
+}
+
+fn test_it() {
+  let r = [1].par_map(fn(i) => [i].map(fn(k) => k + 1))
+  assert r == [[2]]
+}

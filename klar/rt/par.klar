@@ -1,0 +1,373 @@
+// Klar runtime: List.par_map — a pure function applied to a list by worker processes.
+//
+// The list is cut into one contiguous chunk per CPU (at most 64). Each chunk runs in a child process made by fork:
+// it sees the whole program state as it was (copy-on-write), applies `f` to its elements in order and sends the
+// results back through a pipe in a small binary format (one stream per worker: a status byte, then the values).
+// The parent reads the streams in chunk order and rebuilds the values with their type descriptors, so the result
+// is the list `map` would give. A runtime error in a worker is reported exactly as `map` would report it: the
+// worker writes its report into the pipe instead of stderr, and the parent prints the report of the first failing
+// chunk, stops the other workers and exits with the worker's code. Where there are no worker processes (Windows,
+// one CPU, inside a worker, lists shorter than 2) par_map is map.
+//
+// The checker guarantees that `f` is pure (no effects) and that the results contain no functions.
+
+const PAR_MAX: Word = 64
+
+fn List_par_map(xs: Word, f: Word, rtd: Word) -> Word {
+  let n = peek(xs + 16)
+  var k: Word = 1
+  if n >= 2 and peek(g() + G_WORKER) == 0 and os_platform() == 0 {
+    k = cpu_count()
+  }
+  if k > n {
+    k = n
+  }
+  if k > PAR_MAX {
+    k = PAR_MAX
+  }
+  if k < 2 {
+    return List_map(xs, f, rtd)
+  }
+  flush_out()
+  let et = peek(rtd + 16)
+  let tab = alloc(k * 16)
+  var j: Word = 0
+  while j < k {
+    start_worker(xs, f, et, tab, j, k)
+    j = j + 1
+  }
+  let out = list_with_cap(rtd, n)
+  j = 0
+  while j < k {
+    collect_chunk(xs, f, out, tab, j, k)
+    j = j + 1
+  }
+  block_free(tab)
+  return out
+}
+
+fn chunk_lo(n: Word, j: Word, k: Word) -> Word {
+  return w_udiv(n * j, k)
+}
+
+// Starts the worker of chunk j: tab[j] = (pid, read end of its pipe); pid -1 when the parent must do the chunk.
+fn start_worker(xs: Word, f: Word, et: Word, tab: Word, j: Word, k: Word) {
+  let fds = static_addr("g_scratch")
+  poke(tab + j * 16, -1)
+  if os_pipe(fds) < 0 {
+    return
+  }
+  let rfd = peek32(fds)
+  let wfd = peek32(fds + 4)
+  let pid = os_fork()
+  if pid == 0 {
+    os_close(rfd)
+    let n = peek(xs + 16)
+    run_worker(xs, f, et, chunk_lo(n, j, k), chunk_lo(n, j + 1, k), wfd)
+  }
+  os_close(wfd)
+  if pid < 0 {
+    os_close(rfd)
+    return
+  }
+  poke(tab + j * 16, pid)
+  poke(tab + j * 16 + 8, rfd)
+}
+
+// In the worker: map the chunk, send [0][values...] and exit.
+fn run_worker(xs: Word, f: Word, et: Word, lo: Word, hi: Word, wfd: Word) {
+  let gp = g()
+  poke(gp + G_WORKER, 1)
+  poke(gp + G_WFD, wfd)
+  let b = sb_with_cap(4096)
+  sb_add_byte(b, 0)
+  var i = lo
+  while i < hi {
+    let v = call1(f, list_at(xs, i))
+    put_value(b, v, et)
+    release_v(v, et)
+    i = i + 1
+  }
+  write_all(wfd, peek(b + 32), peek(b + 16))
+  os_exit(0)
+}
+
+// Called first by every runtime error report: in a worker the report goes into the pipe, after the status byte 1.
+fn worker_failing() {
+  let gp = g()
+  if peek(gp + G_WORKER) == 1 and peek(gp + G_ERRFD) == 0 {
+    let fd = peek(gp + G_WFD)
+    poke(gp + G_ERRFD, fd)
+    let tmp = static_addr("g_scratch")
+    poke8(tmp, 1)
+    write_all(fd, tmp, 1)
+  }
+}
+
+fn write_all(fd: Word, p: Word, n: Word) {
+  var done: Word = 0
+  while done < n {
+    let w = os_write(fd, p + done, n - done)
+    if w <= 0 {
+      return
+    }
+    done = done + w
+  }
+}
+
+// Appends the results of chunk j to `out` (computing them here when the chunk has no worker).
+fn collect_chunk(xs: Word, f: Word, out: Word, tab: Word, j: Word, k: Word) {
+  let n = peek(xs + 16)
+  let lo = chunk_lo(n, j, k)
+  let hi = chunk_lo(n, j + 1, k)
+  let et = list_elem_td(out)
+  let pid = peek(tab + j * 16)
+  if pid < 0 {
+    var i = lo
+    while i < hi {
+      append_owned(out, call1(f, list_at(xs, i)))
+      i = i + 1
+    }
+    return
+  }
+  let fd = peek(tab + j * 16 + 8)
+  let b = sb_with_cap(4096)
+  var reading = true
+  while reading {
+    sb_reserve(b, 65536)
+    let len = peek(b + 16)
+    let r = os_read(fd, peek(b + 32) + len, peek(b + 24) - len)
+    if r <= 0 {
+      reading = false
+    } else {
+      poke(b + 16, len + r)
+    }
+  }
+  os_close(fd)
+  let status = os_wait(pid)
+  let data = peek(b + 32)
+  let len = peek(b + 16)
+  if len > 0 and peek8(data) == 0 {
+    let st = alloc(16)
+    poke(st, data + 1)
+    poke(st + 8, data + len)
+    var i = lo
+    while i < hi {
+      append_owned(out, get_value(st, et))
+      i = i + 1
+    }
+    block_free(st)
+    rc_dec(b)
+    return
+  }
+  // the worker failed: its report (if any) is the error of the whole par_map
+  stop_workers(tab, j + 1, k)
+  var code: Word = 2
+  if len > 0 and peek8(data) == 1 {
+    err_bytes(data + 1, len - 1)
+    if status >= 0 and w_and(status, 127) == 0 {
+      code = w_and(w_shr(status, 8), 255)
+    }
+  } else {
+    err_str(bits("runtime error[R0014]: a par_map worker process stopped without a result\n"))
+  }
+  os_exit(code)
+}
+
+fn stop_workers(tab: Word, from: Word, k: Word) {
+  var j = from
+  while j < k {
+    let pid = peek(tab + j * 16)
+    if pid > 0 {
+      os_kill(pid, 9)
+      os_wait(pid)
+    }
+    j = j + 1
+  }
+}
+
+fn append_owned(out: Word, v: Word) {
+  let n = peek(out + 16)
+  poke(peek(out + 32) + n * 8, v)
+  poke(out + 16, n + 1)
+}
+
+fn cpu_count() -> Word {
+  let buf = static_addr("g_scratch")
+  let got = os_cpu_mask(buf, 128)
+  if got <= 0 {
+    return 1
+  }
+  var c: Word = 0
+  var i: Word = 0
+  while i < got {
+    var byte = peek8(buf + i)
+    while byte != 0 {
+      c = c + w_and(byte, 1)
+      byte = w_shr(byte, 1)
+    }
+    i = i + 1
+  }
+  if c < 1 {
+    return 1
+  }
+  return c
+}
+
+// ---- values as bytes ------------------------------------------------------------------------------------------
+// Words are 8 bytes, little-endian. Int: [0][tagged] or [1][limb count][sign word, count word, limbs...];
+// Str / Bytes: [n][bytes]; List: [n][items]; Map: [n][key, value]*; record: fields; enum: [variant][fields].
+
+fn put_word(b: Word, v: Word) {
+  let tmp = static_addr("g_scratch") + 128
+  poke(tmp, v)
+  sb_add_bytes(b, tmp, 8)
+}
+
+fn put_value(b: Word, v: Word, td: Word) {
+  let k = peek(td)
+  if k == K_INT {
+    if w_and(v, 1) == 1 {
+      put_word(b, 0)
+      put_word(b, v)
+    } else {
+      let limbs = peek(v + 24)
+      put_word(b, 1)
+      put_word(b, limbs)
+      sb_add_bytes(b, v + 16, 16 + limbs * 8)
+    }
+  } else if k < K_STR {
+    put_word(b, v)
+  } else if k == K_STR {
+    put_word(b, peek(v + 16))
+    sb_add_bytes(b, v + 32, peek(v + 16))
+  } else if k == K_BYTES {
+    put_word(b, peek(v + 16))
+    sb_add_bytes(b, peek(v + 32), peek(v + 16))
+  } else if k == K_LIST {
+    let n = peek(v + 16)
+    let et = peek(td + 16)
+    put_word(b, n)
+    var i: Word = 0
+    while i < n {
+      put_value(b, list_at(v, i), et)
+      i = i + 1
+    }
+  } else if k == K_MAP {
+    let n = peek(v + 16)
+    put_word(b, n)
+    var i: Word = 0
+    while i < n {
+      put_value(b, peek(peek(v + 32) + i * 8), peek(td + 16))
+      put_value(b, peek(peek(v + 40) + i * 8), peek(td + 24))
+      i = i + 1
+    }
+  } else if k == K_RECORD {
+    let nf = peek(td + 16)
+    var i: Word = 0
+    while i < nf {
+      put_value(b, peek(v + 16 + i * 8), peek(peek(td + 24) + i * 8))
+      i = i + 1
+    }
+  } else if k == K_ENUM {
+    let tagv = peek(v + 16)
+    let row = peek(td + 24) + tagv * 32
+    put_word(b, tagv)
+    var i: Word = 0
+    while i < peek(row + 8) {
+      put_value(b, peek(v + 24 + i * 8), peek(peek(row + 16) + i * 8))
+      i = i + 1
+    }
+  } else {
+    fatal(bits("internal: par_map cannot send this value"))
+  }
+}
+
+// st = [next byte][end]
+fn get_word(st: Word) -> Word {
+  let p = peek(st)
+  if p + 8 > peek(st + 8) {
+    fatal(bits("internal: truncated par_map result"))
+  }
+  poke(st, p + 8)
+  return peek(p)
+}
+
+fn get_bytes(st: Word, n: Word) -> Word {
+  let p = peek(st)
+  if n < 0 or p + n > peek(st + 8) {
+    fatal(bits("internal: truncated par_map result"))
+  }
+  poke(st, p + n)
+  return p
+}
+
+fn get_value(st: Word, td: Word) -> Word {
+  let k = peek(td)
+  if k == K_INT {
+    if get_word(st) == 0 {
+      return get_word(st)
+    }
+    let limbs = get_word(st)
+    let o = obj_new(32 + limbs * 8, static_addr("td_Big"))
+    copy_bytes(o + 16, get_bytes(st, 16 + limbs * 8), 16 + limbs * 8)
+    return o
+  }
+  if k < K_STR {
+    return get_word(st)
+  }
+  if k == K_STR {
+    let n = get_word(st)
+    return str_from(get_bytes(st, n), n)
+  }
+  if k == K_BYTES {
+    let n = get_word(st)
+    return bytes_from(get_bytes(st, n), n)
+  }
+  if k == K_LIST {
+    let n = get_word(st)
+    let l = list_with_cap(td, n)
+    let et = peek(td + 16)
+    var i: Word = 0
+    while i < n {
+      append_owned(l, get_value(st, et))
+      i = i + 1
+    }
+    return l
+  }
+  if k == K_MAP {
+    let n = get_word(st)
+    var m = map_new(td)
+    var i: Word = 0
+    while i < n {
+      let key = get_value(st, peek(td + 16))
+      m = Map_set_owned(m, key, get_value(st, peek(td + 24)))
+      i = i + 1
+    }
+    return m
+  }
+  if k == K_RECORD {
+    let nf = peek(td + 16)
+    let o = obj_new(16 + nf * 8, td)
+    var i: Word = 0
+    while i < nf {
+      poke(o + 16 + i * 8, get_value(st, peek(peek(td + 24) + i * 8)))
+      i = i + 1
+    }
+    return o
+  }
+  if k == K_ENUM {
+    let tagv = get_word(st)
+    let row = peek(td + 24) + tagv * 32
+    let nf = peek(row + 8)
+    let o = obj_new(24 + nf * 8, td)
+    poke(o + 16, tagv)
+    var i: Word = 0
+    while i < nf {
+      poke(o + 24 + i * 8, get_value(st, peek(peek(row + 16) + i * 8)))
+      i = i + 1
+    }
+    return o
+  }
+  return fatal(bits("internal: par_map cannot receive this value"))
+}

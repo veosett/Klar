@@ -3,6 +3,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -426,6 +427,42 @@ fn main() -> Result[Unit, Str] {
         self.assertEqual(runtime_code("fn main() uses io { print([1].set(5, 2)) }"), "R0011")
         self.assertEqual(runtime_code("fn main() uses io { let x = 0.0 - read_line().unwrap_or(\"ab\").len().to_float()\n"
                                       " print(x.sqrt()) }"), "R0009")
+
+
+class Parallelism(unittest.TestCase):
+    def test_par_map_needs_a_pure_function_and_plain_results(self):
+        self.assertEqual(errors("fn main() uses io { print([1].par_map(fn(i) => i + 1)) }"), [])
+        self.assertEqual(errors("fn sq(i: Int) -> Int { return i * i }\nfn main() uses io { print([1].par_map(sq)) }"),
+                         [])
+        self.assertEqual(errors("fn main() uses io { print([1].par_map(fn(i) => now_ms() + i)) }"), ["E0401"])
+        self.assertEqual(errors("fn main() uses io { print([1].par_map(fn(i) => [i].map(fn(k) => dbg(k)))) }"),
+                         ["E0401"])
+        self.assertEqual(errors("fn p(i: Int) -> Int uses io {\n print(i)\n return i\n}\n"
+                                "fn main() uses io { print([1].par_map(p)) }"), ["E0406"])
+        self.assertEqual(errors("fn main() uses io {\n let f = fn(i: Int) => i\n print([1].par_map(f))\n}"),
+                         ["E0406"])
+        self.assertEqual(errors("fn main() uses io { print([1].par_map(fn(i) => fn(k: Int) => k + i).len()) }"),
+                         ["E0406"])
+
+    def test_par_map_native_matches_map_and_reports_the_first_error(self):
+        from klar.native.build import build, host_target
+        if host_target() != "linux":
+            self.skipTest("native Linux only")
+        src = ("fn f(i: Int) -> Int {\n  if i == 3 or i == 9 {\n    return fail(\"bad {i}\")\n  }\n  return i * i\n}\n\n"
+               "fn main() uses io {\n  print(range(0, 3).par_map(f))\n  print(range(0, 12).par_map(f))\n}\n")
+        with tempfile.TemporaryDirectory() as d:
+            path, exe = os.path.join(d, "p.klar"), os.path.join(d, "p")
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(src)
+            build(path, out=exe, target="linux")
+            got = subprocess.run([exe], capture_output=True, text=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(src.replace("par_map", "map"))
+            build(path, out=exe, target="linux")
+            want = subprocess.run([exe], capture_output=True, text=True)
+        self.assertEqual((got.stdout, got.stderr, got.returncode), (want.stdout, want.stderr, want.returncode))
+        self.assertIn("bad 3", got.stderr)
+        self.assertEqual(got.stdout, "[0, 1, 4]\n")
 
 
 class CompileTimeSafety(unittest.TestCase):

@@ -129,7 +129,7 @@ class Ctx:
         self.is_test = is_test
         self.loop = 0
         self.sig_end = sig_end
-        self.purpose = purpose  # fn | lambda | test | contract | const
+        self.purpose = purpose  # fn | lambda | test | contract | const | parallel (the function of a par_map)
 
 
 def _resolve_builtin_type(te, tps):
@@ -1296,6 +1296,10 @@ class Checker:
         if purpose in ("contract", "const"):
             what = "contracts" if purpose == "contract" else "constants"
             self.error("E0401", f"{what} must be pure, but `{sig.name}` uses `{effs}`", span)
+        elif purpose == "parallel":
+            self.error("E0401", f"`par_map` runs this function in worker processes, so it must be pure, but "
+                                f"`{sig.name}` uses `{effs}`", span,
+                       hint="compute the values with `par_map`, then do the effects with the results")
         elif purpose == "test" or self.ctx.is_test:
             self.error("E0401", f"tests may only use `io`, but `{sig.name}` uses `{effs}`", span,
                        hint="pass the time/random/file value as a parameter so the code under test stays deterministic")
@@ -1520,6 +1524,8 @@ class Checker:
         bsig = BUILTIN_METHODS.get(h, {}).get(m) if h else None
         if bsig is not None:
             e.resolved = ("builtin", h, m)
+            if h == "List" and m == "par_map":
+                return self.par_map_call(bsig, rt, e, exp)
             return self.call_sig(bsig, e.args, e.span, expected=exp, self_type=rt, display=m, node=e)
         if isinstance(rt, TParam):
             found = [tr for tr in sorted(self.bounds.get(rt.name, ())) if m in self.traits[tr].methods]
@@ -1579,6 +1585,49 @@ class Checker:
         for a in e.args:
             self.expr(a.value)
         return ANY
+
+    def par_map_call(self, bsig, rt, e, exp):
+        """`xs.par_map(f)` runs `f` in worker processes: it must be pure (a lambda checked without effects, or a
+        function declared without `uses`), and the values it returns must not contain functions."""
+        f = e.args[0].value if len(e.args) == 1 else None
+        if isinstance(f, N.Lambda):
+            self.pure_lambda = f
+        t = self.call_sig(bsig, e.args, e.span, expected=exp, self_type=rt, display="par_map", node=e)
+        self.pure_lambda = None
+        if f is not None and not isinstance(f, N.Lambda):
+            sig = getattr(f, "sig", None) if isinstance(f, N.Name) else None
+            if sig is None:
+                self.error("E0406", "`par_map` needs a lambda or the name of a function, so that it can be checked "
+                                    "to be pure", f.span, hint="write `xs.par_map(fn(x) => ...)`")
+            elif sig.effects:
+                effs = ", ".join(sorted(sig.effects))
+                self.error("E0406", f"`par_map` runs `{sig.name}` in worker processes, so it must be pure, but "
+                                    f"`{sig.name}` uses `{effs}`", f.span,
+                           hint="compute the values with `par_map`, then do the effects with the results")
+        r = prune(t)
+        if isinstance(r, TCon) and r.args and self.holds_fn(r.args[0], set()):
+            self.error("E0406", f"the results of `par_map` are sent between processes, so they cannot contain "
+                                f"functions (`{show(r.args[0])}`)", e.span)
+        return t
+
+    def holds_fn(self, t, seen):
+        t = prune(t)
+        if isinstance(t, TFn):
+            return True
+        if not isinstance(t, TCon) or show(t) in seen:
+            return False
+        seen.add(show(t))
+        if any(self.holds_fn(a, seen) for a in t.args):
+            return True
+        if t.name in self.records:
+            info = self.records[t.name]
+            m = self.args_map(info, t)
+            return any(self.holds_fn(subst(ft, m), seen) for ft in info.fields.values())
+        if t.name in self.enums:
+            info = self.enums[t.name]
+            m = self.args_map(info, t)
+            return any(self.holds_fn(subst(ft, m), seen) for fs in info.variants.values() for _, ft in fs)
+        return False
 
     def e_FieldAccess(self, e, exp):
         obj = e.obj
@@ -1743,9 +1792,13 @@ class Checker:
         else:
             ret = TVar()
         outer = self.ctx
-        purpose = outer.purpose if outer.purpose in ("test", "contract", "const") else "lambda"
+        purpose = outer.purpose if outer.purpose in ("test", "contract", "const", "parallel") else "lambda"
+        effects = outer.effects
+        if getattr(self, "pure_lambda", None) is e:
+            purpose, effects = "parallel", set()
+            self.pure_lambda = None
         e.ptypes, e.ret_t = ptypes, ret
-        self.ctx = Ctx(outer.name, ret, outer.effects, purpose=purpose, sig_end=outer.sig_end)
+        self.ctx = Ctx(outer.name, ret, effects, purpose=purpose, sig_end=outer.sig_end)
         self.ctx.is_test = False
         if not hasattr(self, "lambda_bounds"):
             self.lambda_bounds = []

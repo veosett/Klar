@@ -142,6 +142,7 @@ test "List basics" {
 test "List higher-order" {
   let xs = [1, 2, 3, 4]
   assert xs.map(fn(x) => x * 10) == [10, 20, 30, 40]
+  assert xs.par_map(fn(x) => x * 10) == xs.map(fn(x) => x * 10)
   assert xs.filter(fn(x) => x % 2 == 0) == [2, 4]
   assert xs.fold(0, fn(acc, x) => acc + x) == 10
   assert xs.fold("", fn(acc, x) => acc + x.to_str()) == "1234"

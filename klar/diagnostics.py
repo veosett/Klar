@@ -180,6 +180,8 @@ CODES = {
     "E0401": ("missing effect", "Functions must declare effects they use: `fn f() uses io { ... }`. Contracts are pure; tests may only use `io`."),
     "E0402": ("unhandled Result", "A `Result` may carry an error and must be handled with `?`, `match`, or discarded explicitly with `let _ = ...`."),
     "E0403": ("unknown effect", "Known effects: io, time, rand, fs, net, proc."),
+    "E0406": ("par_map needs a pure function", "`xs.par_map(f)` runs `f` in worker processes: `f` must be a lambda "
+              "or a named function without effects, and its results must not contain functions."),
     "E0405": ("discarded immutable update",
               "Values are immutable. Methods like `push`, `set`, `concat`, `with` return a NEW value; "
               "assign it: `xs = xs.push(1)` (requires `var xs`)."),
@@ -255,6 +257,8 @@ CODES = {
               "(shrunk) counterexample and the seed to reproduce it."),
     "R0011": ("index out of bounds", "`List.set`/`insert`/`remove_at` got an index outside the list."),
     "R0012": ("reached todo()", "The program executed a `todo(...)` placeholder."),
+    "R0014": ("par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was "
+                                     "killed, e.g. by the system running out of memory)."),
 }
 
 

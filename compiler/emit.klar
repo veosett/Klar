@@ -24,7 +24,8 @@ pub const MAX_DEPTH: Int = 10000
 const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
 
 pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
-  "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
+  "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
+  "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
@@ -1549,6 +1550,20 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   a = stub_end(label(load32(a: a, dst: RAX, base: RSP, disp: 0), done.l))
   a = arg(a: arg(a: stub_begin(a, "os_chmod"), reg: RDI, i: 0), reg: RSI, i: 1)
   a = stub_end(syscall(mov_ri(a: a, dst: RAX, imm: 90)))
+  // worker processes for List.par_map (rt/par.klar)
+  a = sys_stub(a0: a, name: "os_fork", nr: 57, nargs: 0)
+  a = sys_stub(a0: a, name: "os_pipe", nr: 22, nargs: 1)
+  a = alu_ri(a: stub_begin(a, "os_wait"), op: "sub", dst: RSP, imm: 16)     // wait4(pid, &status, 0, 0)
+  a = mov_rr(a: arg(a: a, reg: RDI, i: 0), dst: RSI, src: RSP)
+  a = mov_ri(a: mov_ri(a: a, dst: RDX, imm: 0), dst: R10, imm: 0)
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 61))
+  let wd = new_label(a, "wd")
+  a = jcc(a: test_rr(a: wd.a, x: RAX, y: RAX), cc: "l", target: wd.l)
+  a = stub_end(label(load32(a: a, dst: RAX, base: RSP, disp: 0), wd.l))
+  a = sys_stub(a0: a, name: "os_kill", nr: 62, nargs: 2)
+  a = mov_ri(a: stub_begin(a, "os_cpu_mask"), dst: RDI, imm: 0)              // sched_getaffinity(0, n, buf)
+  a = arg(a: arg(a: a, reg: RSI, i: 1), reg: RDX, i: 0)
+  a = stub_end(syscall(mov_ri(a: a, dst: RAX, imm: 204)))
   a = test_index_stub(a, "linux")
   // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
   a = store_rip(a: label(a, "_start"), target: "g_argp", src: RSP)
@@ -1677,6 +1692,9 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
   a = win_end(load32(a: a, dst: RAX, base: RSP, disp: 208))
   a = win_end(mov_ri(a: label(a, failed.l), dst: RAX, imm: -1))
   a = stub_end(mov_ri(a: stub_begin(a, "os_chmod"), dst: RAX, imm: 0))
+  for name in ["os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"] {      // no worker processes here
+    a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
+  }
   a = test_index_stub(a, "windows")
   a = alu_ri(a: alu_ri(a: label(a, "_start"), op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
   a = win_call(mov_ri(a: a, dst: RCX, imm: 65001), "SetConsoleOutputCP")

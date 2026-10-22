@@ -21,6 +21,14 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   `emit_a64.klar`) and `tests/selfhost.py` compares their arm64 executables byte for byte; `klarc build --target
   linux-arm64` cross-compiles. `tests/native_diff.py --arm64` runs every native test under qemu-aarch64.
 
+- Parallelism: `xs.par_map(f)` — the result of `xs.map(f)`, computed on all CPU cores. In native code on Linux the
+  list is cut into one chunk per core and each chunk runs in a worker process (fork; results come back through a
+  pipe in a compact binary form rebuilt with the type descriptors). The checker makes it safe: `f` must be a lambda
+  without effects or a function without `uses` (E0401 / new E0406), and the results must not contain functions
+  (E0406). A runtime error in `f` is reported exactly like in `map` (the first failing element); the other workers
+  are stopped. On Windows and in the interpreter `par_map` is `map`. New runtime file `klar/rt/par.klar`, new
+  intrinsics `os_fork`, `os_pipe`, `os_wait`, `os_kill`, `os_cpu_mask` in all three OS layers of both compilers.
+
 ### Changed
 - `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm
   algorithms with an exact reduction of huge arguments) on every target instead of x87 instructions: results are the

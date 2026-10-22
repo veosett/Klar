@@ -1,0 +1,52 @@
+// List.par_map: the same results as map, computed by worker processes in native code.
+
+type Point { x: Int, y: Float, tag: Str }
+
+enum Shape {
+  Circle(r: Float),
+  Poly(pts: List[Point]),
+  Empty,
+}
+
+fn fib(n: Int) -> Int {
+  if n < 2 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+
+fn shape(i: Int) -> Shape {
+  if i % 3 == 0 {
+    return Shape.Circle(i.to_float() / 4.0)
+  }
+  if i % 3 == 1 {
+    return Shape.Poly([Point { x: i, y: 0.5, tag: "p{i}" }, Point { x: -i, y: -1.25, tag: "ü{i}" }])
+  }
+  return Shape.Empty
+}
+
+fn squares(i: Int) -> Map[Str, Int] {
+  return Map { "k": i, "sq": i * i }
+}
+
+fn main() uses io {
+  let xs = range(0, 25)
+  let a = xs.par_map(fib)
+  print(a == xs.map(fib))
+  print(a.drop(18))
+  print(xs.par_map(fn(i) => 1000000000000 * 1000000000000 * (i - 12)).take(3))
+  print(xs.par_map(squares).get(7))
+  print(range(0, 7).par_map(shape))
+  print(xs.par_map(fn(i) => match i % 2 == 0 {
+    true => Some("e{i}"),
+    false => None,
+  }).take(4))
+  print([1, 2, 3].par_map(fn(i) => bytes_of([i, i + 1])))
+  print([1.5, 2.5].par_map(fn(f) => f * 2.0).sum_float())
+  print([true, false].par_map(fn(b) => not b))
+  print([[1, 2], [], [3]].par_map(fn(l) => l.map(fn(v) => v * 10)))
+  let empty: List[Int] = []
+  print(empty.par_map(fn(i) => i + 1))
+  print([7].par_map(fn(i) => i + 1))
+  print(range(0, 200).par_map(fn(i) => "{i}").join("").len())
+}
