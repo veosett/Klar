@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.6.0-informational)
+![Version](https://img.shields.io/badge/version-0.7.0-informational)
 
 [English](README.md) · [**Руководство в картинках**](docs/GUIDE.md) · [Инструменты](docs/TOOLS.md) ·
 [Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·
@@ -155,15 +155,13 @@ flowchart TB
         v04["0.4 — трейты, pub, полнота вложенных шаблонов,<br/>Float в XMM-регистрах, std.json, std.time"]
         v05["0.5 — языковой сервер + VS Code, REPL,<br/>быстрые вызовы, Bytes, CI на Windows"]
         v06["0.6 — self-hosting: компилятор на Klar собирает сам себя,<br/>обновление на месте через вызовы, run_command"]
-        v01 --> v02 --> v03 --> v04 --> v05 --> v06
-    end
-    subgraph now["🚧 В работе"]
-        v07["0.7 — обобщённые impl, newtype, протокол «AI patch»,<br/>статическая проверка контрактов"]
+        v07["0.7 — обобщённые impl, newtype с инвариантами,<br/>klar patch, контракты при компиляции"]
+        v01 --> v02 --> v03 --> v04 --> v05 --> v06 --> v07
     end
     subgraph next["🔜 Планируется"]
         v10["1.0 — ARM64 / macOS, пакетный менеджер, параллелизм,<br/>стабильная спецификация"]
     end
-    v06 --> v07 --> v10
+    v07 --> v10
 ```
 
 | направление | статус |
@@ -177,6 +175,7 @@ flowchart TB
 | Инструменты для ИИ: `dev --json`, `fix`, `spec`, `explain`, стабильные коды ошибок | ✅ |
 | Языковой сервер (`klar lsp`) и расширение VS Code: ошибки при наборе, наведение, определения, ссылки, переименование, дополнение | ✅ 0.5 |
 | Компилятор на самом Klar: `compiler/klarc.klar` собирает, запускает и тестирует программы и собирает сам себя (stage1 == stage2 == stage3 побайтно), быстрее Python-реализации | ✅ 0.6 |
+| Обобщённые `impl` (`impl[T: Show] Show for List[T]`), newtype с инвариантами (`type Percent = new Int` + `requires`), проверка простых контрактов при компиляции, `klar patch` (проверенные правки по имени) | ✅ 0.7 |
 | ARM64, macOS, пакетный менеджер | 🔜 1.0 |
 
 ## Быстрый старт

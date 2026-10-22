@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.6.0-informational)
+![Version](https://img.shields.io/badge/version-0.7.0-informational)
 ![Targets](https://img.shields.io/badge/targets-x86--64%20Linux%20%7C%20Windows-lightgrey)
 
 [Русская версия](README.ru.md) · [**Guide in pictures**](docs/GUIDE.en.md) · [Tools](docs/TOOLS.md) ·
@@ -165,15 +165,13 @@ flowchart TB
         v04["0.4 — traits, pub, nested-pattern exhaustiveness,<br/>floats in XMM registers, std.json, std.time"]
         v05["0.5 — language server + VS Code, REPL,<br/>faster calls, Bytes, Windows CI"]
         v06["0.6 — self-hosting: the compiler in Klar builds itself,<br/>in-place updates across calls, run_command"]
-        v01 --> v02 --> v03 --> v04 --> v05 --> v06
-    end
-    subgraph now["🚧 In progress"]
-        v07["0.7 — generic impls, newtype, AI patch protocol,<br/>static contract checking"]
+        v07["0.7 — generic impls, newtypes with invariants,<br/>klar patch, contracts checked at compile time"]
+        v01 --> v02 --> v03 --> v04 --> v05 --> v06 --> v07
     end
     subgraph next["🔜 Planned"]
         v10["1.0 — ARM64 / macOS, package manager, concurrency,<br/>stable specification"]
     end
-    v06 --> v07 --> v10
+    v07 --> v10
 ```
 
 | area | status |
@@ -187,6 +185,7 @@ flowchart TB
 | AI tooling: `dev --json`, `fix`, `spec`, `explain`, stable error codes | ✅ |
 | Language server (`klar lsp`) and VS Code extension: diagnostics, hover, definition, references, rename, completion | ✅ 0.5 |
 | Self-hosted compiler: `compiler/klarc.klar` builds, runs and tests programs and builds itself (stage1 == stage2 == stage3, byte for byte), faster than the Python implementation | ✅ 0.6 |
+| Generic impls (`impl[T: Show] Show for List[T]`), newtypes with invariants (`type Percent = new Int` + `requires`), simple contracts checked at compile time, `klar patch` (verified edits by name) | ✅ 0.7 |
 | ARM64, macOS, package manager | 🔜 1.0 |
 
 ## Quick start

@@ -5,6 +5,11 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-22
+
+Safer types and safer edits: generic impls, newtypes with invariants, contracts checked at compile time, and a patch
+protocol that lets an AI change code by name and keeps only edits that still compile and pass the tests.
+
 ### Added
 - `klar patch FILE PATCH` — the "AI patch" protocol: structured edits addressed by declaration name (`area`,
   `Circle.area`, `test:name`), by node id (`klar ast`) or by unique text, plus renames; all edits apply to the original

@@ -1,4 +1,4 @@
-# Klar 0.5 — compact reference for AI authors
+# Klar 0.7 — compact reference for AI authors
 
 Klar is a small, strict, statically typed language compiled to native code. Follow these rules
 exactly; the compiler rejects everything else with a coded error (`klar explain CODE`).
