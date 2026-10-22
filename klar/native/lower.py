@@ -1703,6 +1703,9 @@ def lower_test(prog, module, t, index):
     return name
 
 
+SOFT_MATH = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
+
+
 def lower_program(loaded, image, tests=None):
     """Lower the whole program; returns (Program, runtime-helper map for the emitter).
 
@@ -1754,6 +1757,16 @@ def lower_program(loaded, image, tests=None):
     for helper in ("free", "int_add", "int_sub", "int_mul", "int_div", "int_mod", "int_neg", "int_cmp",
                    "div_zero", "stack_overflow", "main_entry"):
         rt[helper], _ = prog.rt_fn(helper)
+    prog.run()
+    # the software math functions the program's `fun` / `fpow` instructions call (rt/softmath.klar)
+    soft = []
+    for f in prog.fns:
+        for ins in f.code:
+            name = "soft_pow" if ins[0] == "fpow" else SOFT_MATH.get(ins[1]) if ins[0] == "fun" else None
+            if name is not None and name not in soft:
+                soft.append(name)
+    for name in sorted(soft):
+        rt[name], _ = prog.rt_fn(name)
     prog.run()
     # static descriptors the runtime refers to by name
     for nm, t in (("td_Str", STR_T), ("td_Int", INT_T), ("td_Float", FLOAT_T), ("td_Bool", BOOL_T),

@@ -11,9 +11,11 @@ Each function is first optimized (opt.py) and register-allocated (regalloc.py): 
 live in machine registers where possible and in stack slots otherwise. Int slow paths,
 division-by-zero and freeing are emitted out of line after the function body.
 """
+from .regalloc import CALLER_SAVED
 from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R15, XMM0, XMM1)
 
 MAX_DEPTH = 10000
+SOFT = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
 
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
@@ -125,15 +127,6 @@ class Emitter:
         if v not in self.loc:
             self.a.store(RBP, self.slot(fn, v), reg)
 
-    def mem(self, fn, v, which=0):
-        """(base, disp) of v in memory — a scratch slot when v lives in a register."""
-        r = self.loc.get(v)
-        if r is None:
-            return RBP, self.slot(fn, v)
-        off = self.scratch_off - 8 * which
-        self.a.store(RBP, off, r)
-        return RBP, off
-
     # ---- functions -------------------------------------------------------------
     def function(self, fn):
         from .opt import optimize
@@ -157,8 +150,13 @@ class Emitter:
         csave = sorted({r for regs in self.call_saves.values() for r in regs})
         first = self.scratch_off - 16 - 8 * len(self.xmm_used)
         self.csave_off = {r: first - 8 * k for k, r in enumerate(csave)}
+        # software math calls save every live caller-saved register (the allocator counts them as non-calls)
+        soft = any(ins[0] == "fpow" or (ins[0] == "fun" and ins[1] != "sqrt") for ins in fn.code)
+        self.caller_used = sorted({r for r in self.loc.values() if r in CALLER_SAVED}) if soft else []
+        first = first - 8 * len(csave)
+        self.allsave_off = {r: first - 8 * k for k, r in enumerate(self.caller_used)}
         self.cur_saves = ()
-        frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used) + len(csave)))
+        frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used) + len(csave) + len(self.caller_used)))
         a.alu_ri("sub", RSP, frame)
         for r, off in zip(self.saved, self.save_off):
             a.store(RBP, off, r)
@@ -274,7 +272,7 @@ class Emitter:
     # ---- floats in XMM registers -------------------------------------------------------
     # A value in self.xloc lives in an XMM register. Its stack slot is kept current too (written through)
     # whenever some instruction reads it the generic way, so every other instruction stays correct.
-    XMM_AWARE = {"fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun"}
+    XMM_AWARE = {"fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun", "fpow"}
 
     def xmm_slot_needed(self, fn):
         from .opt import uses
@@ -283,7 +281,7 @@ class Emitter:
             return need
         for ins in fn.code:
             op = ins[0]
-            if op in ("fbin", "fcmp", "fbr", "f2i", "mov") or (op == "fun" and ins[1] == "sqrt"):
+            if op in ("fbin", "fcmp", "fbr", "f2i", "mov", "fun", "fpow"):
                 continue
             for u in uses(ins):
                 if u in self.xloc:
@@ -550,64 +548,52 @@ class Emitter:
         self.a.cvttsd2si(r, xa)
         self.fin(fn, d, r)
 
-    def fstp_to(self, fn, d):
-        a = self.a
-        r = self.loc.get(d)
-        if r is None:
-            a.fstp_m(RBP, self.slot(fn, d))
-            if d in self.xloc:
-                a.movsd_load(self.xloc[d], RBP, self.slot(fn, d))
-        else:
-            a.fstp_m(RBP, self.scratch_off)
-            a.load(r, RBP, self.scratch_off)
-
     def i_fun(self, fn, op, d, x):
-        a = self.a
         if op == "sqrt":
             xs = self.xsrc(fn, x, XMM1)
             t = self.xtarget(d)
-            a.sse("sqrt", t, xs)
+            self.a.sse("sqrt", t, xs)
             self.xfin(fn, d, t)
             return
-        a.fld_m(*self.mem(fn, x))
-        if op == "sin":
-            a.x87("fsin")
-        elif op == "cos":
-            a.x87("fcos")
-        elif op == "ln":            # ln(x) = ln2 * log2(x)
-            a.x87("fldln2")
-            a.x87("fxch")
-            a.x87("fyl2x")
-        elif op == "exp":           # e^x = 2^f * 2^n with y = x*log2(e), n = round(y), f = y - n
-            a.x87("fldl2e")
-            a.x87("fmulp")          # st0 = y
-            a.x87("fld0")           # st0 = y, st1 = y
-            a.x87("frndint")        # st0 = n, st1 = y
-            a.x87("fxch")           # st0 = y, st1 = n
-            a.x87("fsub01")         # st0 = y - n = f
-            a.x87("f2xm1")          # st0 = 2^f - 1
-            a.x87("fld1")
-            a.x87("faddp")          # st0 = 2^f, st1 = n
-            a.x87("fscale")         # st0 = 2^f * 2^n
-            a.x87("fstp1")          # drop n
-        self.fstp_to(fn, d)
+        self.soft_call(fn, SOFT[op], [x], d)
 
     def i_fpow(self, fn, d, x, y):
-        """x^y = 2^(y*log2 x) for x > 0, computed in x87 extended precision."""
+        self.soft_call(fn, "soft_pow", [x, y], d)
+
+    def soft_call(self, fn, helper, args, d):
+        """sin, cos, ln, exp and pow are the runtime's software versions (rt/softmath.klar: the same results on
+        every target). The allocator treats them as call-free, so everything live in a caller-saved register is
+        saved around the call. Arguments and the result are the bits of doubles."""
         a = self.a
-        a.fld_m(*self.mem(fn, y, 0))
-        a.fld_m(*self.mem(fn, x, 1))
-        a.x87("fyl2x")           # st0 = y*log2(x)
-        a.x87("fld0")
-        a.x87("frndint")         # st0 = n, st1 = z
-        a.x87("fxch")            # st0 = z, st1 = n
-        a.x87("fsub01")          # st0 = z - n
-        a.x87("f2xm1")
-        a.x87("fld1")
-        a.x87("faddp")
-        a.x87("fscale")
-        a.x87("fstp1")
-        self.fstp_to(fn, d)
+        for x, off in zip(self.xmm_used, self.xsave_off):
+            a.movsd_store(RBP, off, x)
+        for r in self.caller_used:
+            a.store(RBP, self.allsave_off[r], r)
+        area = align16(8 * len(args))
+        a.alu_ri("sub", RSP, area)
+        for i, v in enumerate(args):
+            a.store(RSP, 8 * i, self.bits_of(fn, v, RAX))
+        a.call(self.rt[helper])
+        self.note_site()
+        a.alu_ri("add", RSP, area)
+        for r in self.caller_used:
+            a.load(r, RBP, self.allsave_off[r])
+        for x, off in zip(self.xmm_used, self.xsave_off):
+            a.movsd_load(x, RBP, off)
+        xd = self.xloc.get(d)
+        if xd is not None:
+            a.movq_xr(xd, RAX)
+            if d in self.slot_needed:
+                a.store(RBP, self.slot(fn, d), RAX)
+        else:
+            self.st(fn, d, RAX)
+
+    def bits_of(self, fn, v, scratch):
+        x = self.xloc.get(v)
+        if x is not None:
+            self.a.movq_rx(scratch, x)
+            return scratch
+        return self.src(fn, v, scratch)
 
     # ---- tagged Int fast paths ------------------------------------------------------
     # Fast paths stay inline; the bignum / error paths are emitted out of line ("cold").

@@ -1,7 +1,8 @@
-"""Writes standalone executables: ELF64 (Linux, no libc) and PE32+ (Windows, imports only kernel32.dll).
+"""Writes standalone executables: ELF64 (Linux x86-64 and arm64, no libc) and PE32+ (Windows, imports only
+kernel32.dll).
 
-Input: one code blob (with rel32 fixups to data symbols / import slots) and one data
-blob (with absolute 64-bit pointer relocations), plus zero-initialised bss.
+Input: one code blob (with fixups to data symbols / import slots: rel32 on x86-64, ADRP page / ADD low-12-bit
+fields on arm64) and one data blob (with absolute 64-bit pointer relocations), plus zero-initialised bss.
 """
 import struct
 
@@ -22,6 +23,7 @@ class Image:
         self.bss_syms = {}
         self.imports = []           # Windows: kernel32 function names
         self.entry = "_start"
+        self.machine = "x86_64"     # or "aarch64" (the fixups are then (pos, target, "page" | "lo12"))
 
     # ---- data helpers ---------------------------------------------------------
     def add_data(self, name, payload, alignment=8):
@@ -54,8 +56,17 @@ class Image:
         for pos, target, addend in self.code_fixups:
             if target not in addr:
                 raise KeyError(f"unresolved symbol {target}")
-            rel = addr[target] + addend - (code_base + pos + 4)
-            code[pos:pos + 4] = struct.pack("<i", rel)
+            if addend == "page":                        # ADRP: the 4 KB page of the target, PC-relative
+                delta = (addr[target] >> 12) - ((code_base + pos) >> 12)
+                word, = struct.unpack_from("<I", code, pos)
+                word |= ((delta & 3) << 29) | (((delta >> 2) & 0x7FFFF) << 5)
+                struct.pack_into("<I", code, pos, word)
+            elif addend == "lo12":                      # ADD: the offset inside that page
+                word, = struct.unpack_from("<I", code, pos)
+                struct.pack_into("<I", code, pos, word | ((addr[target] & 0xFFF) << 10))
+            else:
+                rel = addr[target] + addend - (code_base + pos + 4)
+                code[pos:pos + 4] = struct.pack("<i", rel)
         data = bytearray(self.data)
         for off, target, addend in self.data_abs:
             data[off:off + 8] = struct.pack("<Q", absolute(addr[target] + addend))
@@ -64,7 +75,8 @@ class Image:
     # ---- ELF ----------------------------------------------------------------------
     def write_elf(self, path):
         base = 0x400000
-        page = 0x1000
+        arm = self.machine == "aarch64"
+        page = 0x10000 if arm else 0x1000            # (arm64 kernels may use 64 KB pages)
         text_off = page
         text_vaddr = base + text_off
         data_off = align(text_off + len(self.code), page)
@@ -73,7 +85,7 @@ class Image:
         addr = self._addresses(text_vaddr, data_vaddr, bss_vaddr, {})
         code, data = self._patch(addr, text_vaddr, data_vaddr, lambda a: a)
         ehdr = struct.pack("<4sBBBBB7sHHIQQQIHHHHHH", b"\x7fELF", 2, 1, 1, 0, 0, b"\0" * 7,
-                           2, 0x3E, 1, addr[self.entry], 64, 0, 0, 64, 56, 2, 64, 0, 0)
+                           2, 0xB7 if arm else 0x3E, 1, addr[self.entry], 64, 0, 0, 64, 56, 2, 64, 0, 0)
         memsz_data = align(len(self.data), 16) + self.bss_size
         ph_text = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, text_off + len(code), text_off + len(code), page)
         ph_data = struct.pack("<IIQQQQQQ", 1, 6, data_off, data_vaddr, data_vaddr, len(data), max(memsz_data, 1), page)

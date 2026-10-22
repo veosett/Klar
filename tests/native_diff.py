@@ -1,6 +1,7 @@
 """Differential testing of the native backend against the reference interpreter.
 
     python tests/native_diff.py [files...]          (default: examples, std modules, built-in tests, benchmarks)
+    python tests/native_diff.py --windows / --arm64  (Windows executables under wine, arm64 ones under qemu-aarch64)
 
 For programs with main(): stdout and exit status must match.
 For test files: every `test` / doc-test block is compiled into one executable
@@ -61,10 +62,15 @@ def interp_tests(path):
     return out
 
 
+QEMU = "qemu-aarch64-static"
+
+
 def run_exe(exe, args=()):
     cmd = [exe, *args]
     if exe.endswith(".exe") and host_target() != "windows":
         cmd = ["/usr/lib/wine/wine64", *cmd]
+    elif exe.endswith(".a64") and host_target() != "linux-arm64":
+        cmd = [QEMU, *cmd]
     env = dict(os.environ, WINEDEBUG="-all")
     return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
@@ -73,7 +79,7 @@ def check_file(path, target, tmp):
     loaded = load_path(path, with_runtime=True)
     has_main = any(isinstance(d, N.FnDecl) and d.name == "main" for d in loaded.program.decls)
     problems = []
-    suffix = ".exe" if target == "windows" else ""
+    suffix = {"windows": ".exe", "linux-arm64": ".a64"}.get(target, "")
     if has_main:
         exe = os.path.join(tmp, "main" + suffix)
         build(path, out=exe, target=target, loaded=loaded)
@@ -102,6 +108,9 @@ def main(argv):
     if "--windows" in argv:
         target = "windows"
         argv = [a for a in argv if a != "--windows"]
+    if "--arm64" in argv:
+        target = "linux-arm64"
+        argv = [a for a in argv if a != "--arm64"]
     files = argv or default_files()
     failed = 0
     with tempfile.TemporaryDirectory() as tmp:

@@ -562,7 +562,7 @@ def main(argv=None):
     p = sub.add_parser("build", help="compile to a standalone native executable (x86-64 Linux ELF / Windows PE)")
     p.add_argument("file")
     p.add_argument("-o", "--output", help="output path (default: next to the source)")
-    p.add_argument("--target", choices=["linux", "windows"], help="default: this machine")
+    p.add_argument("--target", choices=["linux", "windows", "linux-arm64"], help="default: this machine")
     p.add_argument("--json", action="store_true")
     p.add_argument("-q", "--quiet", action="store_true", help="print nothing on success")
     p.set_defaults(fn=cmd_build)

@@ -11,14 +11,17 @@
 // that grow in place. Out-of-line paths ("cold" code) are data (`Cold`), emitted after the function body.
 use lower.{Img, Ins, KFn, KV, Lw, Reloc, add_bss, add_data, rt_names}
 use opt.{defs, inline_calls, optimize, used_regs}
-use regalloc.{Alloc, allocate}
+use regalloc.{Alloc, allocate, x64_regs}
 use x64.{AL, Asm, Fix, R10, R11, R15, R8, R9, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Site, XMM0, XMM1, alu_ri}
-use x64.{alu_rr, call, call_r, call_rip, cqo, cvtsi2sd, cvttsd2si, div, fld_m, fresh, fstp_m, idiv, imul1, imul_rr}
+use x64.{alu_rr, call, call_r, call_rip, cqo, cvtsi2sd, cvttsd2si, div, fresh, idiv, imul1, imul_rr}
 use x64.{imul_rri, jcc, jmp, label, lea, lea_rip, load, load32, load8, load_rip, mov_ri, mov_rr, movapd, movq_rx}
 use x64.{movq_xr, movsd_load, movsd_store, mul, neg, new_asm, new_label, pop, push, ret, setcc, shift_cl, shift_i}
-use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_rr, ucomisd, ud2, x87}
+use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_rr, ucomisd, ud2}
 
 const MAX_DEPTH: Int = 10000
+
+/// The caller-saved registers the allocator hands out (regalloc.klar).
+const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
 
 const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
@@ -29,7 +32,7 @@ pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "Ex
   "WaitForSingleObject", "GetExitCodeProcess"]
 
 /// Instructions that know where floats live in XMM registers.
-const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun"]
+const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun", "fpow"]
 
 const TWO64: Int = 18446744073709551616
 
@@ -216,6 +219,9 @@ type Em {
   xmm_used: List[Int],
   xsave_off: List[Int],
   csave_off: Map[Int, Int],
+  /// caller-saved registers in use, saved around software math calls (in functions that make them), and where
+  caller_used: List[Int],
+  allsave_off: Map[Int, Int],
   slot_needed: Map[Int, Bool],
   user: Bool,
   site: Str,
@@ -226,9 +232,6 @@ type Em {
 
 /// A register together with the code that put the value there.
 type AR { a: Asm, r: Int }
-
-/// A memory operand together with the code that put the value there.
-type AM { a: Asm, base: Int, disp: Int }
 
 fn with_a(e: Em, a: Asm) -> Em {
   return e with { a: a }
@@ -284,17 +287,6 @@ fn fin(a: Asm, e: Em, v: Int, reg: Int) -> Asm {
     return a
   }
   return store(a: a, base: RBP, disp: slot(e, v), src: reg)
-}
-
-/// v in memory — a scratch slot when v lives in a register.
-fn mem(a: Asm, e: Em, v: Int, which: Int) -> AM {
-  return match e.loc.get(v) {
-    None => AM { a: a, base: RBP, disp: slot(e, v) },
-    Some(r) => {
-      let off = e.scratch_off - 8 * which
-      return AM { a: store(a: a, base: RBP, disp: off, src: r), base: RBP, disp: off }
-    },
-  }
 }
 
 // ---- calls ----------------------------------------------------------------------------------------------------
@@ -459,7 +451,7 @@ fn xmm_slot_needed(f: KFn, xloc: Map[Int, Int]) -> Map[Int, Bool] {
   }
   for ins in f.code {
     let o = sat(ins, 0)
-    let skip = ["fbin", "fcmp", "fbr", "f2i", "mov"].contains(o) or (o == "fun" and sat(ins, 1) == "sqrt")
+    let skip = ["fbin", "fcmp", "fbr", "f2i", "mov", "fun", "fpow"].contains(o)
     if not skip {
       for u in used_regs(ins) {
         if xloc.has(u) {
@@ -799,25 +791,14 @@ fn i_f2i(e: Em, ins: Ins) -> Em {
   return with_a(e, fin(a: cvttsd2si(a: xa.a, r: r, x: xa.r), e: e, v: d, reg: r))
 }
 
-fn fstp_to(a: Asm, e: Em, d: Int) -> Asm {
-  return match e.loc.get(d) {
-    None => {
-      let a1 = fstp_m(a: a, base: RBP, disp: slot(e, d))
-      return match e.xloc.get(d) {
-        Some(xd) => movsd_load(a: a1, x: xd, base: RBP, disp: slot(e, d)),
-        None => a1,
-      }
-    },
-    Some(r) => load(a: fstp_m(a: a, base: RBP, disp: e.scratch_off), dst: r, base: RBP, disp: e.scratch_off),
+fn soft_helper(opn: Str) -> Str {
+  return match opn {
+    "sin" => "soft_sin",
+    "cos" => "soft_cos",
+    "ln" => "soft_ln",
+    "exp" => "soft_exp",
+    _ => fail("emit: no software function for {opn}"),
   }
-}
-
-fn x87s(a0: Asm, names: List[Str]) -> Asm {
-  var a = a0
-  for n in names {
-    a = x87(a, n)
-  }
-  return a
 }
 
 fn i_fun(e: Em, ins: Ins) -> Em {
@@ -829,29 +810,53 @@ fn i_fun(e: Em, ins: Ins) -> Em {
     let t = xtarget(e: e, d: d, avoid: [])
     return with_a(e, xfin(a: sse(a: xs.a, op: "sqrt", dst: t, src: xs.r), e: e, d: d, x: t))
   }
-  let m = mem(a: e.a, e: e, v: x, which: 0)
-  var a = fld_m(a: m.a, base: m.base, disp: m.disp)
-  if opn == "sin" {
-    a = x87(a, "fsin")
-  } else if opn == "cos" {
-    a = x87(a, "fcos")
-  } else if opn == "ln" {             // ln(x) = ln2 * log2(x)
-    a = x87s(a, ["fldln2", "fxch", "fyl2x"])
-  } else if opn == "exp" {            // e^x = 2^f * 2^n with y = x*log2(e), n = round(y), f = y - n
-    a = x87s(a, ["fldl2e", "fmulp", "fld0", "frndint", "fxch", "fsub01", "f2xm1", "fld1", "faddp", "fscale", "fstp1"])
-  }
-  return with_a(e, fstp_to(a: a, e: e, d: d))
+  return with_a(e, soft_call(e: e, helper: soft_helper(opn), args: [x], d: d))
 }
 
-/// x^y = 2^(y*log2 x) for x > 0, computed in x87 extended precision.
 fn i_fpow(e: Em, ins: Ins) -> Em {
-  let d = iat(ins, 1)
-  let my = mem(a: e.a, e: e, v: iat(ins, 3), which: 0)
-  let a1 = fld_m(a: my.a, base: my.base, disp: my.disp)
-  let mx = mem(a: a1, e: e, v: iat(ins, 2), which: 1)
-  let a2 = fld_m(a: mx.a, base: mx.base, disp: mx.disp)
-  let a3 = x87s(a2, ["fyl2x", "fld0", "frndint", "fxch", "fsub01", "f2xm1", "fld1", "faddp", "fscale", "fstp1"])
-  return with_a(e, fstp_to(a: a3, e: e, d: d))
+  return with_a(e, soft_call(e: e, helper: "soft_pow", args: [iat(ins, 2), iat(ins, 3)], d: iat(ins, 1)))
+}
+
+/// sin, cos, ln, exp and pow are the runtime's software versions (rt/softmath.klar: the same results on every
+/// target). The allocator treats them as call-free, so everything live in a caller-saved register is saved around
+/// the call. Arguments and the result are the bits of doubles.
+fn soft_call(e: Em, helper: Str, args: List[Int], d: Int) -> Asm {
+  var a = xmm_store_all(e.a, e)
+  for r in e.caller_used {
+    a = store(a: a, base: RBP, disp: e.allsave_off.get(r).unwrap_or(0), src: r)
+  }
+  let area = align16(8 * args.len())
+  a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
+  var i = 0
+  for v in args {
+    let s = bits_of(a: a, e: e, v: v, scratch: RAX)
+    a = store(a: s.a, base: RSP, disp: 8 * i, src: s.r)
+    i = i + 1
+  }
+  a = note_site(call(a, rt_target(e, helper)), e)
+  a = alu_ri(a: a, op: "add", dst: RSP, imm: area)
+  for r in e.caller_used {
+    a = load(a: a, dst: r, base: RBP, disp: e.allsave_off.get(r).unwrap_or(0))
+  }
+  a = xmm_load_all(a, e)
+  return match e.xloc.get(d) {
+    Some(xd) => {
+      let a1 = movq_xr(a: a, x: xd, r: RAX)
+      if e.slot_needed.has(d) {
+        return store(a: a1, base: RBP, disp: slot(e, d), src: RAX)
+      }
+      return a1
+    },
+    None => st(a: a, e: e, v: d, reg: RAX),
+  }
+}
+
+/// A general-purpose register holding the bits of v (a float vreg possibly in an XMM register).
+fn bits_of(a: Asm, e: Em, v: Int, scratch: Int) -> AR {
+  return match e.xloc.get(v) {
+    Some(x) => AR { a: movq_rx(a: a, r: scratch, x: x), r: scratch },
+    None => src(a: a, e: e, v: v, scratch: scratch),
+  }
 }
 
 // ---- tagged Int fast paths ------------------------------------------------------------------------------------
@@ -1296,7 +1301,7 @@ fn sorted_saves(al: Alloc, k: Int) -> List[Int] {
 
 fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
   let f = optimize(f0)
-  let al = allocate(f)
+  let al = allocate(f, x64_regs())
   var enter: Option[Str] = None
   for ins in f.code {
     if enter == None and sat(ins, 0) == "enter" {
@@ -1340,7 +1345,20 @@ fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
     csave_off = csave_off.set(r, first - 8 * k)
     k = k + 1
   }
-  let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len()))
+  // software math calls save every live caller-saved register (the allocator counts them as non-calls)
+  let soft = f.code.any(fn(ins) => sat(ins, 0) == "fpow" or (sat(ins, 0) == "fun" and sat(ins, 1) != "sqrt"))
+  var caller_used: List[Int] = []
+  if soft {
+    caller_used = al.loc.values().filter(fn(x) => CALLER_SAVED.contains(x)).unique().sort()
+  }
+  let first2 = first - 8 * csave.len()
+  var allsave_off: Map[Int, Int] = Map {}
+  k = 0
+  for r in caller_used {
+    allsave_off = allsave_off.set(r, first2 - 8 * k)
+    k = k + 1
+  }
+  let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len() + caller_used.len()))
   var a = mov_rr(a: push(label(new_asm(n), f.name), RBP), dst: RBP, src: RSP)
   a = alu_ri(a: a, op: "sub", dst: RSP, imm: frame)
   k = 0
@@ -1360,6 +1378,8 @@ fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
     xmm_used: xmm_used,
     xsave_off: xsave_off,
     csave_off: csave_off,
+    caller_used: caller_used,
+    allsave_off: allsave_off,
     slot_needed: xmm_slot_needed(f, al.xloc),
     user: user,
     site: "",

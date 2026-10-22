@@ -127,6 +127,8 @@ pub type Lw {
   bound: Map[Str, Int],
   /// field uses inside such a `with` that take their field out of it
   takeable: Map[Str, Bool],
+  /// the software math functions (rt/softmath.klar) the program calls, in name order
+  soft: List[Str],
 }
 
 /// A result with the updated lowering state.
@@ -3121,10 +3123,42 @@ const RT_HELPERS: List[Str] = ["free", "int_add", "int_sub", "int_mul", "int_div
 /// Runtime helper name -> its KIR function (the out-of-line paths of the machine code call these).
 pub fn rt_names(w: Lw) -> Map[Str, Str] {
   var out: Map[Str, Str] = Map {}
-  for helper in RT_HELPERS {
+  for helper in RT_HELPERS.concat(w.soft) {
     out = out.set(helper, rt_fn(w, helper).v)
   }
   return out
+}
+
+/// The software math function a `fun` / `fpow` instruction calls ("" for others, and for sqrt).
+fn soft_name(ins: Ins) -> Str {
+  let o = match ins.get(0) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+  if o == "fpow" {
+    return "soft_pow"
+  }
+  if o != "fun" {
+    return ""
+  }
+  return match ins.get(1) {
+    Some(KV.S("sin")) => "soft_sin",
+    Some(KV.S("cos")) => "soft_cos",
+    Some(KV.S("ln")) => "soft_ln",
+    Some(KV.S("exp")) => "soft_exp",
+    _ => "",
+  }
+}
+
+fn drain(w0: Lw, md: FnDecl) -> Lw {
+  var w = w0
+  // the instances, most recent first (like the Python lowering's stack)
+  while not w.queue.is_empty() {
+    let item = w.queue.last().unwrap_or(QItem { name: "", mod_name: "", decl: md, idx: 0, file: "", env: Map {},
+      kind: "" })
+    w = lower_function(w with { queue: w.queue.take(w.queue.len() - 1) }, item)
+  }
+  return w
 }
 
 fn zero_span() -> Span {
@@ -3191,6 +3225,7 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
     modules: modules,
     sources: ld.sources,
     fns: [],
+    soft: [],
     instances: Map {},
     names_used: Map {},
     queue: [],
@@ -3347,12 +3382,22 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
   for helper in RT_HELPERS {
     w = rt_fn(w, helper).w
   }
-  // the instances, most recent first (like the Python lowering's stack)
-  while not w.queue.is_empty() {
-    let item = w.queue.last().unwrap_or(QItem { name: "", mod_name: "", decl: md, idx: 0, file: "", env: Map {},
-      kind: "" })
-    w = lower_function(w with { queue: w.queue.take(w.queue.len() - 1) }, item)
+  w = drain(w, md)
+  // the software math functions the program's `fun` / `fpow` instructions call (rt/softmath.klar)
+  var soft: List[Str] = []
+  for f in w.fns {
+    for ins in f.code {
+      let name = soft_name(ins)
+      if name != "" and not soft.contains(name) {
+        soft = soft.push(name)
+      }
+    }
   }
+  soft = soft.sort()
+  for name in soft {
+    w = rt_fn(w, name).w
+  }
+  w = drain(w with { soft: soft }, md)
   // static descriptors the runtime refers to by name
   w = w with { m: main_mod, file: main_mod.display }
   for nt in [Pair { first: "td_Str", second: con("Str") }, Pair { first: "td_Int", second: con("Int") }, Pair {

@@ -1,0 +1,562 @@
+// Klar runtime: software sin, cos, ln, exp and pow for targets without instructions for them (arm64).
+// Ports of the FreeBSD/Sun fdlibm algorithms (error < 1 ulp); the argument reduction of sin/cos for huge
+// arguments is exact (2/pi to 1200 bits as an Int). The x86-64 back-end uses the x87 instructions instead.
+// fdlibm works on the 32-bit halves of a double: hi(x) is the signed high word, lo(x) the low one.
+
+const TWO_OVER_PI: Int = 10961624472040172306819695974506753824149736177290862121133802293415128153967426855786600179383830818005251620686212276383741462382840646446665240090662947422797946208107084433317427984328678325390393467973966095626422319580541169421538667751778104036224809616456980795286610787367809947266181514671532645040128653394793474164295916360012309370980042855028292731
+
+fn hi32(x: Float) -> Word {
+  return w_sar(fbits(x), 32)
+}
+
+fn lo32(x: Float) -> Word {
+  return w_and(fbits(x), 4294967295)
+}
+
+fn with_hi(x: Float, h: Word) -> Float {
+  return ffrom(w_or(w_shl(h, 32), lo32(x)))
+}
+
+fn from_words(h: Word, l: Word) -> Float {
+  return ffrom(w_or(w_shl(h, 32), w_and(l, 4294967295)))
+}
+
+// ---- ln ------------------------------------------------------------------------------------------------------
+fn soft_ln(x0: Float) -> Float {
+  var x = x0
+  var hx = hi32(x)
+  let lx = lo32(x)
+  var k: Word = 0
+  if hx < 1048576 {
+    if w_or(w_and(hx, 2147483647), lx) == 0 {
+      return -1.0 / 0.0
+    }
+    if hx < 0 {
+      return (x - x) / 0.0
+    }
+    k = k - 54
+    x = x * 18014398509481984.0
+    hx = hi32(x)
+  }
+  if hx >= 2146435072 {
+    return x + x
+  }
+  k = k + w_sar(hx, 20) - 1023
+  hx = w_and(hx, 1048575)
+  let i = w_and(hx + 614244, 1048576)
+  x = with_hi(x, w_or(hx, w_xor(i, 1072693248)))
+  k = k + w_shr(i, 20)
+  let f = x - 1.0
+  let dk = w2f(k)
+  if w_and(1048575, 2 + hx) < 3 {
+    if f == 0.0 {
+      if k == 0 {
+        return 0.0
+      }
+      return dk * 0.693147180369123816490 + dk * 0.00000000019082149292705877
+    }
+    let rr = f * f * (0.5 - 0.33333333333333333 * f)
+    if k == 0 {
+      return f - rr
+    }
+    return dk * 0.693147180369123816490 - ((rr - dk * 0.00000000019082149292705877) - f)
+  }
+  let s = f / (2.0 + f)
+  let z = s * s
+  let w = z * z
+  let t1 = w * (0.3999999999940942 + w * (0.22222198432149784 + w * 0.15313837699209373))
+  let t2 = z * (0.6666666666666735 + w * (0.2857142874366239 + w * (0.1818357216161805 +
+      w * 0.14798198605116586)))
+  let r = t2 + t1
+  if w_or(hx - 398458, 440401 - hx) > 0 {
+    let hfsq = 0.5 * f * f
+    if k == 0 {
+      return f - (hfsq - s * (hfsq + r))
+    }
+    return dk * 0.693147180369123816490 - ((hfsq - (s * (hfsq + r) + dk * 0.00000000019082149292705877)) - f)
+  }
+  if k == 0 {
+    return f - s * (f - r)
+  }
+  return dk * 0.693147180369123816490 - ((s * (f - r) - dk * 0.00000000019082149292705877) - f)
+}
+
+// ---- exp -----------------------------------------------------------------------------------------------------
+fn soft_exp(x0: Float) -> Float {
+  var x = x0
+  var hx = hi32(x)
+  let xsb = w_and(w_shr(hx, 31), 1)
+  hx = w_and(hx, 2147483647)
+  if hx >= 1082535490 {
+    if hx >= 2146435072 {
+      if w_or(w_and(hx, 1048575), lo32(x)) != 0 {
+        return x + x
+      }
+      if xsb == 0 {
+        return x
+      }
+      return 0.0
+    }
+    if x > 709.782712893384 {
+      return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+    }
+    if x < -745.1332191019411 {
+      return ffrom(103582791429521408) * ffrom(103582791429521408)
+    }
+  }
+  var hi = 0.0
+  var lo = 0.0
+  var k: Word = 0
+  if hx > 1071001154 {
+    if hx < 1072734898 {
+      if xsb == 0 {
+        hi = x - 0.6931471803691238
+        lo = 0.00000000019082149292705877
+        k = 1
+      } else {
+        hi = x + 0.6931471803691238
+        lo = -0.00000000019082149292705877
+        k = -1
+      }
+    } else {
+      if xsb == 0 {
+        k = f2w(1.4426950408889634 * x + 0.5)
+      } else {
+        k = f2w(1.4426950408889634 * x - 0.5)
+      }
+      let t = w2f(k)
+      hi = x - t * 0.6931471803691238
+      lo = t * 0.00000000019082149292705877
+    }
+    x = hi - lo
+  } else if hx < 1043333120 {
+    if ffrom(9094988921128908188) + x > 1.0 {
+      return 1.0 + x
+    }
+  }
+  let t = x * x
+  let c = x - t * (0.16666666666666602 + t * (-0.0027777777777015593 + t * (0.00006613756321437934 +
+      t * (-0.0000016533902205465252 + t * 0.000000041381367970572385))))
+  if k == 0 {
+    return 1.0 - ((x * c) / (c - 2.0) - x)
+  }
+  let y = 1.0 - ((lo - (x * c) / (2.0 - c)) - hi)
+  if k >= -1021 {
+    return with_hi(y, hi32(y) + w_shl(k, 20))
+  }
+  return with_hi(y, hi32(y) + w_shl(k + 1000, 20)) * ffrom(103582791429521408)
+}
+
+// ---- sin / cos -------------------------------------------------------------------------------------------------
+fn k_sin(x: Float, y: Float, iy: Word) -> Float {
+  let ix = w_and(hi32(x), 2147483647)
+  if ix < 1044381696 {
+    if f2w(x) == 0 {
+      return x
+    }
+  }
+  let z = x * x
+  let v = z * x
+  let r = 0.00833333333332249 + z * (-0.0001984126982985795 + z * (0.0000027557313707070068 + z *
+      (-0.000000025050760253406863 + z * 0.000000000158969099521155)))
+  if iy == 0 {
+    return x + v * (-0.16666666666666632 + z * r)
+  }
+  return x - ((z * (0.5 * y - v * r) - y) - v * -0.16666666666666632)
+}
+
+fn k_cos(x: Float, y: Float) -> Float {
+  let ix = w_and(hi32(x), 2147483647)
+  if ix < 1044381696 {
+    if f2w(x) == 0 {
+      return 1.0
+    }
+  }
+  let z = x * x
+  let r = z * (0.0416666666666666 + z * (-0.001388888888887411 + z * (0.00002480158728947673 + z *
+      (-0.00000027557314351390663 + z * (0.000000002087572321298175 + z * -0.000000000011359647557788195)))))
+  if ix < 1070805811 {
+    return 1.0 - (0.5 * z - (z * r - x * y))
+  }
+  var qx = 0.28125
+  if ix <= 1072234496 {
+    qx = from_words(ix - 2097152, 0)
+  }
+  let hz = 0.5 * z - qx
+  let a = 1.0 - qx
+  return a - (hz - (z * r - x * y))
+}
+
+// x = n*pi/2 + (y0 + y1): returns n and writes y0, y1 to the two words at out
+fn rem_pio2(x: Float, out: Word) -> Word {
+  let hx = hi32(x)
+  let ix = w_and(hx, 2147483647)
+  if ix <= 1072243195 {
+    poke(out, fbits(x))
+    poke(out + 8, 0)
+    return 0
+  }
+  if ix < 1073928572 {
+    if hx > 0 {
+      var z = x - 1.5707963267341256
+      if ix != 1073291771 {
+        let y0 = z - 0.00000000006077100506506192
+        poke(out, fbits(y0))
+        poke(out + 8, fbits((z - y0) - 0.00000000006077100506506192))
+      } else {
+        z = z - 0.00000000006077100506303966
+        let y0 = z - 0.0000000000000000000020222662487959506
+        poke(out, fbits(y0))
+        poke(out + 8, fbits((z - y0) - 0.0000000000000000000020222662487959506))
+      }
+      return 1
+    }
+    var z = x + 1.5707963267341256
+    if ix != 1073291771 {
+      let y0 = z + 0.00000000006077100506506192
+      poke(out, fbits(y0))
+      poke(out + 8, fbits((z - y0) + 0.00000000006077100506506192))
+    } else {
+      z = z + 0.00000000006077100506303966
+      let y0 = z + 0.0000000000000000000020222662487959506
+      poke(out, fbits(y0))
+      poke(out + 8, fbits((z - y0) + 0.0000000000000000000020222662487959506))
+    }
+    return -1
+  }
+  if ix <= 1094263291 {
+    let t = ffrom(w_and(fbits(x), F_ABS))
+    let n = f2w(t * 0.6366197723675814 + 0.5)
+    let fnum = w2f(n)
+    var r = t - fnum * 1.5707963267341256
+    var w = fnum * 0.00000000006077100506506192
+    let j = w_sar(ix, 20)
+    var y0 = r - w
+    var i = j - w_and(w_sar(hi32(y0), 20), 2047)
+    if i > 16 {
+      var t2 = r
+      w = fnum * 0.00000000006077100506303966
+      r = t2 - w
+      w = fnum * 0.0000000000000000000020222662487959506 - ((t2 - r) - w)
+      y0 = r - w
+      i = j - w_and(w_sar(hi32(y0), 20), 2047)
+      if i > 49 {
+        t2 = r
+        w = fnum * 0.0000000000000000000020222662487111665
+        r = t2 - w
+        w = fnum * 0.000000000000000000000000000000084784276603689 - ((t2 - r) - w)
+        y0 = r - w
+      }
+    }
+    let y1 = (r - y0) - w
+    if hx < 0 {
+      poke(out, fbits(fneg(y0)))
+      poke(out + 8, fbits(fneg(y1)))
+      return 0 - n
+    }
+    poke(out, fbits(y0))
+    poke(out + 8, fbits(y1))
+    return n
+  }
+  if ix >= 2146435072 {
+    poke(out, fbits(x - x))
+    poke(out + 8, fbits(x - x))
+    return 0
+  }
+  return rem_pio2_big(x, out)
+}
+
+// the exact reduction of a huge |x|: x * 2/pi = q + f with 2/pi to 1200 bits; f to 120 bits, times pi/2 in
+// double-double
+fn rem_pio2_big(x: Float, out: Word) -> Word {
+  let ax = ffrom(w_and(fbits(x), F_ABS))
+  let prod = float_mant(ax) * TWO_OVER_PI
+  let shift = 1200 - float_exp2(ax)
+  let unit = pow2(shift)
+  let q = prod / unit
+  var f = (prod - q * unit) / pow2(shift - 120)
+  var n = untag(q % 8)
+  if f >= pow2(119) {
+    f = f - pow2(120)
+    n = n + 1
+  }
+  let fhi = f / pow2(67)
+  let fhd = int_to_float(fhi, 0) * 0.00000000000000011102230246251565
+  let fld = int_to_float(f - fhi * pow2(67), 0) * 0.000000000000000000000000000000000000752316384526264
+  // (fhd + fld) * (pio2_hi + pio2_lo), with the exact product of the high parts (Veltkamp split)
+  let ph = 1.5707963267948966
+  let pl = 0.00000000000000006123233995736766
+  let p = fhd * ph
+  let ca = 134217729.0 * fhd
+  let ah = ca - (ca - fhd)
+  let al = fhd - ah
+  let cb = 134217729.0 * ph
+  let bh = cb - (cb - ph)
+  let bl = ph - bh
+  let err = ((ah * bh - p) + ah * bl + al * bh) + al * bl
+  let rlo = err + fhd * pl + fld * ph
+  let y0 = p + rlo
+  let y1 = rlo - (y0 - p)
+  if x < 0.0 {
+    poke(out, fbits(fneg(y0)))
+    poke(out + 8, fbits(fneg(y1)))
+    return 0 - n
+  }
+  poke(out, fbits(y0))
+  poke(out + 8, fbits(y1))
+  return n
+}
+
+fn soft_sin(x: Float) -> Float {
+  let ix = w_and(hi32(x), 2147483647)
+  if ix <= 1072243195 {
+    return k_sin(x, 0.0, 0)
+  }
+  if ix >= 2146435072 {
+    return x - x
+  }
+  let out = static_addr("g_scratch") + 128
+  let n = rem_pio2(x, out)
+  let y0 = ffrom(peek(out))
+  let y1 = ffrom(peek(out + 8))
+  let m = w_and(n, 3)
+  if m == 0 {
+    return k_sin(y0, y1, 1)
+  }
+  if m == 1 {
+    return k_cos(y0, y1)
+  }
+  if m == 2 {
+    return fneg(k_sin(y0, y1, 1))
+  }
+  return fneg(k_cos(y0, y1))
+}
+
+fn soft_cos(x: Float) -> Float {
+  let ix = w_and(hi32(x), 2147483647)
+  if ix <= 1072243195 {
+    return k_cos(x, 0.0)
+  }
+  if ix >= 2146435072 {
+    return x - x
+  }
+  let out = static_addr("g_scratch") + 128
+  let n = rem_pio2(x, out)
+  let y0 = ffrom(peek(out))
+  let y1 = ffrom(peek(out + 8))
+  let m = w_and(n, 3)
+  if m == 0 {
+    return k_cos(y0, y1)
+  }
+  if m == 1 {
+    return fneg(k_sin(y0, y1, 1))
+  }
+  if m == 2 {
+    return fneg(k_cos(y0, y1))
+  }
+  return k_sin(y0, y1, 1)
+}
+
+// ---- pow (x > 0 here: the callers handle signs, zeros and the special values) ---------------------------------
+fn scale2(z0: Float, n0: Word) -> Float {
+  var z = z0
+  var n = n0
+  while n < -1000 {
+    z = z * ffrom(w_shl(23, 52))
+    n = n + 1000
+  }
+  return z * ffrom(w_shl(n + 1023, 52))
+}
+
+fn clear_lo(x: Float) -> Float {
+  return ffrom(w_and(fbits(x), -4294967296))
+}
+
+// x > 0 (or +inf / NaN), y anything: the callers handle negative bases, zeros, y == 0 and x == 1
+fn soft_pow(x: Float, y: Float) -> Float {
+  let hx = hi32(x)
+  let lx = lo32(x)
+  let hy = hi32(y)
+  let ly = lo32(y)
+  var ix = w_and(hx, 2147483647)
+  let iy = w_and(hy, 2147483647)
+  if w_or(iy, ly) == 0 {
+    return 1.0
+  }
+  if ix > 2146435072 or (ix == 2146435072 and lx != 0) or iy > 2146435072 or (iy == 2146435072 and ly != 0) {
+    return x + y
+  }
+  if ly == 0 {
+    if iy == 2146435072 {
+      if w_or(ix - 1072693248, lx) == 0 {
+        return 1.0
+      }
+      if ix >= 1072693248 {
+        if hy >= 0 {
+          return y
+        }
+        return 0.0
+      }
+      if hy < 0 {
+        return fneg(y)
+      }
+      return 0.0
+    }
+    if iy == 1072693248 {
+      if hy < 0 {
+        return 1.0 / x
+      }
+      return x
+    }
+    if hy == 1073741824 {
+      return x * x
+    }
+    if hy == 1071644672 {
+      return fsqrt(x)
+    }
+  }
+  var ax = ffrom(w_and(fbits(x), F_ABS))
+  if lx == 0 {
+    if ix == 2146435072 or ix == 0 or ix == 1072693248 {
+      if hy < 0 {
+        return 1.0 / ax
+      }
+      return ax
+    }
+  }
+  var t1 = 0.0
+  var t2 = 0.0
+  if iy > 1105199104 {
+    if iy > 1139802112 {
+      if ix <= 1072693247 {
+        if hy < 0 {
+          return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+        }
+        return ffrom(118622047889322841) * ffrom(118622047889322841)
+      }
+      if hy > 0 {
+        return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+      }
+      return ffrom(118622047889322841) * ffrom(118622047889322841)
+    }
+    if ix < 1072693247 {
+      if hy < 0 {
+        return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+      }
+      return ffrom(118622047889322841) * ffrom(118622047889322841)
+    }
+    if ix > 1072693248 {
+      if hy > 0 {
+        return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+      }
+      return ffrom(118622047889322841) * ffrom(118622047889322841)
+    }
+    let t = ax - 1.0
+    let w = (t * t) * (0.5 - t * (0.3333333333333333333333 - t * 0.25))
+    let u = 1.4426950216293335 * t
+    let v = t * 0.000000019259629911266175 - w * 1.4426950408889634
+    t1 = clear_lo(u + v)
+    t2 = v - (t1 - u)
+  } else {
+    var n: Word = 0
+    if ix < 1048576 {
+      ax = ax * 9007199254740992.0
+      n = n - 53
+      ix = hi32(ax)
+    }
+    n = n + w_sar(ix, 20) - 1023
+    let j = w_and(ix, 1048575)
+    ix = w_or(j, 1072693248)
+    var k: Word = 0
+    if j <= 235662 {
+      k = 0
+    } else if j < 767610 {
+      k = 1
+    } else {
+      k = 0
+      n = n + 1
+      ix = ix - 1048576
+    }
+    ax = with_hi(ax, ix)
+    var bp = 1.0
+    var dp_h = 0.0
+    var dp_l = 0.0
+    if k == 1 {
+      bp = 1.5
+      dp_h = 0.5849624872207642
+      dp_l = 0.00000001350039202129749
+    }
+    var u = ax - bp
+    var v = 1.0 / (ax + bp)
+    let ss = u * v
+    let s_h = clear_lo(ss)
+    var t_h = from_words(w_or(w_sar(ix, 1), 536870912) + 524288 + w_shl(k, 18), 0)
+    var t_l = ax - (t_h - bp)
+    let s_l = v * ((u - s_h * t_h) - s_h * t_l)
+    var s2 = ss * ss
+    var r = s2 * s2 * (0.5999999999999946 + s2 * (0.4285714285785502 + s2 * (0.33333332981837743 +
+        s2 * (0.272728123808534 + s2 * (0.23066074577556175 + s2 * 0.20697501780033842)))))
+    r = r + s_l * (s_h + ss)
+    s2 = s_h * s_h
+    t_h = clear_lo(3.0 + s2 + r)
+    t_l = r - ((t_h - 3.0) - s2)
+    u = s_h * t_h
+    v = s_l * t_h + t_l * ss
+    let p_h = clear_lo(u + v)
+    let p_l = v - (p_h - u)
+    let z_h = 0.9617967009544373 * p_h
+    let z_l = -0.000000007028461650952758 * p_h + p_l * 0.9617966939259756 + dp_l
+    let t = w2f(n)
+    t1 = clear_lo(((z_h + z_l) + dp_h) + t)
+    t2 = z_l - (((t1 - t) - dp_h) - z_h)
+  }
+  let y1 = clear_lo(y)
+  let pl = (y - y1) * t1 + y * t2
+  var ph = y1 * t1
+  var z = pl + ph
+  let j = hi32(z)
+  let i = lo32(z)
+  if j >= 1083179008 {
+    if w_or(j - 1083179008, i) != 0 {
+      return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+    }
+    if pl + 0.00000000000000008008566259537294 > z - ph {
+      return ffrom(9094988921128908188) * ffrom(9094988921128908188)
+    }
+  } else if w_and(j, 2147483647) >= 1083231232 {
+    if w_or(j + 1064252416, i) != 0 {
+      return ffrom(118622047889322841) * ffrom(118622047889322841)
+    }
+    if pl <= z - ph {
+      return ffrom(118622047889322841) * ffrom(118622047889322841)
+    }
+  }
+  let i2 = w_and(j, 2147483647)
+  var k2 = w_sar(i2, 20) - 1023
+  var n2: Word = 0
+  if i2 > 1071644672 {
+    n2 = j + w_sar(1048576, k2 + 1)
+    k2 = w_sar(w_and(n2, 2147483647), 20) - 1023
+    let tt = from_words(w_and(n2, w_xor(w_sar(1048575, k2), -1)), 0)
+    n2 = w_sar(w_or(w_and(n2, 1048575), 1048576), 20 - k2)
+    if j < 0 {
+      n2 = 0 - n2
+    }
+    ph = ph - tt
+  }
+  let t = clear_lo(pl + ph)
+  let u = t * 0.6931471824645996
+  let v = (pl - (t - ph)) * 0.6931471805599453 + t * -0.000000001904654299957768
+  z = u + v
+  let w = v - (z - u)
+  let tz = z * z
+  let tz1 = z - tz * (0.16666666666666602 + tz * (-0.0027777777777015593 + tz * (0.00006613756321437934 +
+      tz * (-0.0000016533902205465252 + tz * 0.000000041381367970572385))))
+  let r = (z * tz1) / (tz1 - 2.0) - (w + z * w)
+  z = 1.0 - (r - z)
+  let jz = hi32(z) + w_shl(n2, 20)
+  if w_sar(jz, 20) <= 0 {
+    return scale2(z, n2)
+  }
+  return with_hi(z, jz)
+}

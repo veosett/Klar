@@ -329,6 +329,7 @@ pub fn rt_files() -> List[Str] {
     "map.klar",
     "misc.klar",
     "show.klar",
+    "softmath.klar",
     "str.klar",
   ]
 }

@@ -3,7 +3,7 @@
 use loader.{load_program, load_runtime}
 use lower.{KFn, KV, Lw, lower_program}
 use opt.{inline_calls, optimize}
-use regalloc.{Alloc, allocate}
+use regalloc.{Alloc, allocate, x64_regs}
 use std.json.{Json, json_object, json_text}
 
 fn kv_json(k: KV) -> Json {
@@ -52,7 +52,7 @@ pub fn program_json(w: Lw) -> Json {
   var optimized: List[Json] = []
   for f in inline_calls(w.fns) {
     let o = optimize(f)
-    optimized = optimized.push(optimized_json(o, allocate(o)))
+    optimized = optimized.push(optimized_json(o, allocate(o, x64_regs())))
   }
   return json_object([
     Pair { first: "fns", second: Json.Arr(items: w.fns.map(fn_json)) },

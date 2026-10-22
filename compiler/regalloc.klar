@@ -16,6 +16,21 @@ const FP_DEF: List[Str] = ["fbin", "i2f", "fun"]
 const XMM_SAFE: List[Str] = ["iop", "iopi", "icmp", "icmpi", "ibr", "ibri", "ineg", "release", "enter"]
 const FP_USE: List[Str] = ["fbin", "fcmp", "fbr", "f2i", "fun"]
 
+/// The registers a target gives the allocator, each list taken from the end: callee-saved and caller-saved
+/// general-purpose registers and the float registers (all caller-saved).
+pub type Regs { callee: List[Int], caller: List[Int], fregs: List[Int] }
+
+/// x86-64 (emit.klar).
+pub fn x64_regs() -> Regs {
+  return Regs { callee: CALLEE_SAVED, caller: CALLER_SAVED, fregs: XMM_REGS }
+}
+
+/// AArch64 (emit_a64.klar): X19–X27 callee-saved (X28 holds the call depth), X9–X15 caller-saved, D16–D31 for floats.
+pub fn a64_regs() -> Regs {
+  return Regs { callee: [27, 26, 25, 24, 23, 22, 21, 20, 19], caller: [15, 14, 13, 12, 11, 10, 9], fregs: [31, 30, 29,
+    28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16] }
+}
+
 /// The registers of a function: vreg -> register, the callee-saved registers used, vreg -> XMM register, and the
 /// caller-saved registers to save around each call-like instruction.
 pub type Alloc { loc: Map[Int, Int], used: List[Int], xloc: Map[Int, Int], call_saves: Map[Int, List[Int]] }
@@ -362,9 +377,9 @@ fn cheapest(iv: Intervals, xs: List[Pair[Int, Int]]) -> Pair[Int, Int] {
   return best
 }
 
-fn allocate_xmm(f: KFn, iv: Intervals, real_calls: List[Int]) -> Map[Int, Int] {
+fn allocate_xmm(f: KFn, iv: Intervals, real_calls: List[Int], fregs: List[Int]) -> Map[Int, Int] {
   let cands = float_candidates(f, iv.depth).filter(fn(v) => iv.lo.has(v) and not crosses(calls: real_calls, iv: iv, v: v))
-  var free = XMM_REGS
+  var free = fregs
   var active: List[Pair[Int, Int]] = []
   var xloc: Map[Int, Int] = Map {}
   for v in by_interval(iv, cands) {
@@ -405,7 +420,7 @@ fn remove_first(xs: List[Pair[Int, Int]], x: Pair[Int, Int]) -> List[Pair[Int, I
   }
 }
 
-pub fn allocate(f: KFn) -> Alloc {
+pub fn allocate(f: KFn, regs: Regs) -> Alloc {
   let iv = intervals(f)
   var calls: List[Int] = []
   var real_calls: List[Int] = []
@@ -420,10 +435,10 @@ pub fn allocate(f: KFn) -> Alloc {
     }
     i = i + 1
   }
-  let xloc = allocate_xmm(f: f, iv: iv, real_calls: real_calls)
+  let xloc = allocate_xmm(f: f, iv: iv, real_calls: real_calls, fregs: regs.fregs)
   let order = by_interval(iv, iv.lo.keys().filter(fn(v) => not xloc.has(v)))
-  var free_callee = CALLEE_SAVED
-  var free_caller = CALLER_SAVED
+  var free_callee = regs.callee
+  var free_caller = regs.caller
   var active: List[Pair[Int, Int]] = []
   var loc: Map[Int, Int] = Map {}
   for v in order {
@@ -432,7 +447,7 @@ pub fn allocate(f: KFn) -> Alloc {
     for a in active {
       if a.first < start {
         let rg = loc.get(a.second).unwrap_or(0)
-        if CALLEE_SAVED.contains(rg) {
+        if regs.callee.contains(rg) {
           free_callee = free_callee.push(rg)
         } else {
           free_caller = free_caller.push(rg)
@@ -460,7 +475,7 @@ pub fn allocate(f: KFn) -> Alloc {
     if not placed {
       // spill the (compatible) interval with the lowest weight per instruction covered
       let snap = loc
-      let cands = active.filter(fn(a) => not need_callee or CALLEE_SAVED.contains(snap.get(a.second).unwrap_or(-1)))
+      let cands = active.filter(fn(a) => not need_callee or regs.callee.contains(snap.get(a.second).unwrap_or(-1)))
       if not cands.is_empty() {
         let w = cheapest(iv, cands)
         if cost(iv, w.second) < cost(iv, v) {
@@ -476,11 +491,11 @@ pub fn allocate(f: KFn) -> Alloc {
       active = active.push(Pair { first: iv.hi.get(v).unwrap_or(0), second: v })
     }
   }
-  let used = loc.values().filter(fn(x) => CALLEE_SAVED.contains(x)).unique().sort()
+  let used = loc.values().filter(fn(x) => regs.callee.contains(x)).unique().sort()
   // caller-saved registers that must survive each call-like instruction
   var call_saves: Map[Int, List[Int]] = Map {}
   for e in loc.entries() {
-    if CALLER_SAVED.contains(e.value) and crosses(calls: calls, iv: iv, v: e.key) {
+    if regs.caller.contains(e.value) and crosses(calls: calls, iv: iv, v: e.key) {
       let a = bisect_right(calls, iv.lo.get(e.key).unwrap_or(0))
       let b = bisect_right(calls, iv.hi.get(e.key).unwrap_or(0) - 1)
       for c in calls.slice(a, b) {

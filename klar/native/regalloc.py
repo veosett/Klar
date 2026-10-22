@@ -26,6 +26,20 @@ from .x64 import R8, R9, R10, R12, R13, R14, RBX, RDI, RSI
 CALLEE_SAVED = [RBX, R12, R13, R14]   # R15 is reserved: the call-depth counter (see emit.py)
 CALLER_SAVED = [RSI, RDI, R8, R9, R10]
 XMM_REGS = list(range(15, 1, -1))     # XMM2..XMM15 (popped from the end: XMM2 first)
+
+
+class Regs:
+    """The registers a target gives the allocator: callee-saved and caller-saved general-purpose registers and
+    the float registers (all caller-saved), each list popped from the end."""
+
+    def __init__(self, callee, caller, fregs):
+        self.callee, self.caller, self.fregs = list(callee), list(caller), list(fregs)
+
+
+X64 = Regs(CALLEE_SAVED, CALLER_SAVED, XMM_REGS)
+# AArch64 (emit_a64.py): X19–X27 callee-saved (X28 holds the call depth, X29/X30 are FP/LR), X9–X15 caller-saved
+# (X0–X8, X16, X17 are the emitter's scratch and argument registers), D16–D31 for floats (D0–D7 scratch)
+A64 = Regs(range(27, 18, -1), range(15, 8, -1), range(31, 15, -1))
 FP_DEF = {"fbin", "i2f", "fun"}
 # instructions whose only calls are out-of-line runtime calls (Int slow paths, free, stack overflow): the
 # emitter saves the XMM registers around those, so a float may stay in an XMM register across them
@@ -162,10 +176,10 @@ def intervals(fn):
     return lo, hi, weight
 
 
-def allocate_xmm(fn, lo, hi, weight, crosses):
+def allocate_xmm(fn, lo, hi, weight, crosses, regs=X64):
     cands = float_candidates(fn, lambda i: 8 ** min(fn.depth[i], 6))
     cands = [v for v in cands if v in lo and not crosses(v)]
-    free = list(XMM_REGS)
+    free = list(regs.fregs)
     active = []
     xloc = {}
     for v in sorted(cands, key=lambda v: (lo[v], hi[v], v)):   # (ties by vreg: no dependence on set order)
@@ -189,8 +203,9 @@ def allocate_xmm(fn, lo, hi, weight, crosses):
     return xloc
 
 
-def allocate(fn):
+def allocate(fn, regs=X64):
     """Returns ({vreg: register}, [callee-saved registers used], {vreg: XMM register})."""
+    callee_saved, caller_saved = regs.callee, regs.caller
     lo, hi, weight = intervals(fn)
     calls = [i for i, ins in enumerate(fn.code) if ins[0] not in NO_CALL]
 
@@ -206,14 +221,14 @@ def allocate(fn):
         k = bisect_right(real_calls, lo[v])
         return k < len(real_calls) and real_calls[k] < hi[v]
 
-    xloc = allocate_xmm(fn, lo, hi, weight, crosses_real)
+    xloc = allocate_xmm(fn, lo, hi, weight, crosses_real, regs)
 
     def save_cost(v):
         a, b = bisect_right(calls, lo[v]), bisect_right(calls, hi[v] - 1)
         return sum(2 * 8 ** min(fn.depth[i], 6) / (64 if is_cold_call(fn.code[i]) else 1) for i in calls[a:b])
     order = sorted((v for v in lo if v not in xloc), key=lambda v: (lo[v], hi[v], v))
-    free_callee = list(CALLEE_SAVED)
-    free_caller = list(CALLER_SAVED)
+    free_callee = list(callee_saved)
+    free_caller = list(caller_saved)
     active = []                    # (hi, v)
     loc = {}
     for v in order:
@@ -222,7 +237,7 @@ def allocate(fn):
         for end, w in active:
             if end < start:
                 r = loc[w]
-                (free_callee if r in CALLEE_SAVED else free_caller).append(r)
+                (free_callee if r in callee_saved else free_caller).append(r)
             else:
                 still.append((end, w))
         active = still
@@ -240,7 +255,7 @@ def allocate(fn):
             # spill the (compatible) interval with the lowest weight per instruction covered
             def cost(u):
                 return weight.get(u, 0) / (hi[u] - lo[u] + 1)
-            cands = [(end, w) for end, w in active if not need_callee or loc[w] in CALLEE_SAVED]
+            cands = [(end, w) for end, w in active if not need_callee or loc[w] in callee_saved]
             if not cands:
                 continue
             end, w = min(cands, key=lambda c: cost(c[1]))
@@ -250,10 +265,10 @@ def allocate(fn):
             active.remove((end, w))
         loc[v] = reg
         active.append((hi[v], v))
-    used = sorted({r for r in loc.values() if r in CALLEE_SAVED})
+    used = sorted({r for r in loc.values() if r in callee_saved})
     # caller-saved registers that must survive each call-like instruction (saved around the call itself)
     fn.call_saves = {}
-    across = [v for v, r in loc.items() if r in CALLER_SAVED and crosses(v)]
+    across = [v for v, r in loc.items() if r in caller_saved and crosses(v)]
     for v in across:
         a, b = bisect_right(calls, lo[v]), bisect_right(calls, hi[v] - 1)
         for i in calls[a:b]:

@@ -4,6 +4,7 @@ import os
 import sys
 
 from .emit import Emitter
+from .emit_a64 import A64Emitter
 from .opt import inline_calls
 from .link import Image
 from .lower import lower_program
@@ -12,10 +13,16 @@ from ..loader import load_path
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".klar-cache")
 
 
+TARGETS = ("linux", "windows", "linux-arm64")
+
+
 def host_target():
-    """The native target for this machine, or None when it is not x86-64 Linux/Windows."""
+    """The native target for this machine, or None when there is none (x86-64 Linux/Windows, arm64 Linux)."""
     import platform
-    if platform.machine().lower() not in ("x86_64", "amd64"):
+    machine = platform.machine().lower()
+    if machine in ("aarch64", "arm64") and sys.platform.startswith("linux"):
+        return "linux-arm64"
+    if machine not in ("x86_64", "amd64"):
         return None
     if os.name == "nt":
         return "windows"
@@ -65,8 +72,9 @@ def build(path, out=None, target=None, loaded=None, tests=None):
         errs = [d for d in loaded.diags if d.severity == "error"]
         raise SystemExit("\n".join(d.format(loaded.sources.get(d.span.file)) for d in errs))
     img = Image()
+    arm = target == "linux-arm64"
     prog, rt = lower_program(loaded, img, tests)
-    em = Emitter(img, target, rt)
+    em = (A64Emitter if arm else Emitter)(img, target, rt)
     em.os_layer()
     inline_calls(prog.fns)
     for fn in prog.fns:
@@ -81,7 +89,7 @@ def build(path, out=None, target=None, loaded=None, tests=None):
         img.write_elf(out)
         os.chmod(out, 0o755)
     if os.environ.get("KLAR_MAP"):
-        base = 0x401000 if target == "linux" else 0x140001000
+        base = {"linux": 0x401000, "linux-arm64": 0x410000}.get(target, 0x140001000)
         with open(out + ".map", "w") as f:
             for name, off in sorted(img.code_labels.items(), key=lambda kv: kv[1]):
                 if not name.startswith("."):
