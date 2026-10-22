@@ -36,6 +36,12 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   (`klarc build app.klar [-o out] [--target linux|windows] [--lib dir] [--time]`, `klarc check app.klar`). Built by
   the Python compiler it builds itself, and the result builds itself again: stage1 == stage2 == stage3, byte for
   byte (`tests/bootstrap.py`, also in the unit tests on Linux).
+- Native: "functional but in place" across function calls. Parameters a function consumes are passed owned
+  (inferred over the call graph), the last use of a local moves its value (path-wise liveness: `w`, `w.img`,
+  `a.w`), a field of a unique record is taken out instead of shared, and `x with { f: x.f.push(v) }` reuses a unique
+  record and updates the field in place (`klar/native/own.py`, `compiler/own.klar`). `Bytes.concat` and `push`/`set`
+  on temporaries update in place too. The self-hosted compiler builds itself in 8 s instead of 35 s.
+- `tests/native/ownership.klar`: unique and shared values through calls, records, closures and `match`.
 - `Float.to_bits()` and `float_from_bits(bits)`: the IEEE-754 bits of a Float as a signed 64-bit Int, and back
   (the Klar backend needs them for float constants).
 - The Klar loader loads the runtime (`klar/rt`, one module of several files); the Klar checker records what the

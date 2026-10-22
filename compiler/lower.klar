@@ -3,15 +3,18 @@
 //
 // * Monomorphization: every generic function is instantiated per concrete type list.
 // * Uniform 64-bit values; records, enums, strings, lists, maps and closures are heap objects [rc][td][payload...].
-// * Reference counting: parameters are borrowed, results are owned, locals own their values.
-// * Reuse: `x = x.push(v)` (and set/insert/remove/concat/update, `s = s + t`) moves `x` into the runtime, which
-//   updates the object in place when it is unique.
+// * Reference counting: parameters are borrowed unless the function consumes them (own.klar), results are owned,
+//   locals own their values.
+// * Reuse: the last use of a local moves its value (own.klar): `x = x.push(v)`, `w = f(w)`,
+//   `w with { f: w.f.set(k, v) }` update unique objects in place, across function calls.
 //
 // KIR instructions are lists of `KV` (the Python tuples): the opcode first, then registers, immediates, labels,
 // symbols, argument lists or nothing.
 use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span, Stmt}
 use ast.{StrPiece, TypeExpr, expr_span, pattern_span}
 use checker.{Builtins, CallInfo, Ck, Resolution, Sig, Universe, span_key}
+use own.{Cx, OwnFn, REUSE, all_exprs, body_exprs, infer_owned, liveness_block, liveness_expr, node_key, path_of}
+use own.{root_of, sub_exprs}
 use loader.{Ld, Module}
 use types.{Type, con, show}
 
@@ -69,9 +72,6 @@ const K_BIG: Int = 16
 const K_BUF: Int = 17
 const K_BYTES: Int = 18
 
-const REUSE: List[Str] = ["List.push", "List.set", "List.insert", "List.remove_at", "List.concat", "Bytes.push",
-  "Bytes.push_le", "Bytes.set", "Map.set", "Map.remove", "Map.update"]
-
 /// A value in a register: its type and whether this code owns a reference to it.
 type V { reg: Int, t: Type, owned: Bool }
 
@@ -82,7 +82,7 @@ type LScope { vars: Map[Str, Local], clean: List[Pair[Int, Str]] }
 type LoopT { end: Str, step: Str, depth: Int }
 
 /// A function instance waiting to be lowered.
-type QItem { name: Str, mod_name: Str, decl: FnDecl, file: Str, env: Map[Str, Type], kind: Str }
+type QItem { name: Str, mod_name: Str, decl: FnDecl, idx: Int, file: Str, env: Map[Str, Type], kind: Str }
 
 /// The lowering state: the whole program, and the function being lowered.
 pub type Lw {
@@ -119,6 +119,14 @@ pub type Lw {
   decl: Option[FnDecl],
   posts: List[Expr],
   in_test: Bool,
+  /// module#declaration index -> the parameters that function consumes
+  owned: Map[Str, List[Int]],
+  /// uses that may move their value (own.klar liveness), by node key
+  cand: Map[Str, Bool],
+  /// path -> register of the unique record an in-place `with` is updating
+  bound: Map[Str, Int],
+  /// field uses inside such a `with` that take their field out of it
+  takeable: Map[Str, Bool],
 }
 
 /// A result with the updated lowering state.
@@ -566,7 +574,7 @@ fn instance(w: Lw, md: Module, decl: FnDecl, idx: Int, type_args: List[Type], ki
   while w.names_used.has(name) {
     name = name + "_"
   }
-  let item = QItem { name: name, mod_name: md.name, decl: decl, file: decl_file(md, idx),
+  let item = QItem { name: name, mod_name: md.name, decl: decl, idx: idx, file: decl_file(md, idx),
     env: tparam_env(decl.type_params, type_args), kind: kind }
   return lr(w with { instances: w.instances.set(key, name), names_used: w.names_used.set(name, true),
     queue: w.queue.push(item) }, name)
@@ -707,6 +715,312 @@ fn drop_all(w0: Lw, vs: List[V]) -> Lw {
     w = drop(w, v)
   }
   return w
+}
+
+// ---- moves (own.klar) -----------------------------------------------------------------------------------------
+
+/// The local variables of a function: its parameters, `let`s and loop variables.
+fn locals_of(params: List[Str], body: Body) -> List[Str] {
+  var out = params
+  for it in walk_body(body) {
+    match it {
+      Item.LetI(n) => {
+        out = out.push(n)
+      },
+      Item.ForI(n) => {
+        out = out.push(n)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn nkey(e: Expr) -> Str {
+  return node_key(expr_span(e))
+}
+
+/// The longest path bound by an enclosing in-place `with` that `path` lies in ("" if none).
+fn bound_prefix(w: Lw, path: Str) -> Str {
+  var best = ""
+  for q in w.bound.keys() {
+    if (path == q or path.starts_with(q + ".")) and q.len() > best.len() {
+      best = q
+    }
+  }
+  return best
+}
+
+fn is_record(w: Lw, t: Type) -> Bool {
+  return match t {
+    Type.Con(name, _) => w.uni.records.has(name),
+    _ => false,
+  }
+}
+
+fn field_off(w: Lw, t: Type, name: Str) -> Int {
+  return 16 + 8 * record_fields(w, t).map(fn(f) => f.first).index_of(name).unwrap_or(0)
+}
+
+fn obj_of(e: Expr) -> Expr {
+  return match e {
+    Expr.FieldAccess(_, obj, _, _) => obj,
+    _ => e,
+  }
+}
+
+fn field_name(e: Expr) -> Str {
+  return match e {
+    Expr.FieldAccess(_, _, name, _) => name,
+    _ => "",
+  }
+}
+
+/// Does consuming `e` move a value out of a variable or a record field (instead of copying)?
+fn moves(w: Lw, e: Expr) -> Bool {
+  let k = nkey(e)
+  if w.takeable.has(k) {
+    return true
+  }
+  if not w.cand.has(k) {
+    return false
+  }
+  let p = match path_of(e) {
+    Some(x) => x,
+    None => {
+      return false
+    },
+  }
+  if bound_prefix(w, p) != "" {
+    return false
+  }
+  let t = ty(w, e)
+  let loc = match lookup(w, root_of(p)) {
+    Some(l) => l,
+    None => {
+      return false
+    },
+  }
+  if not loc.owned or loc.boxed or rck(t) == "" {
+    return false
+  }
+  if not p.contains(".") {
+    return true
+  }
+  // a field is taken out only when it can then be updated in place (a record or a collection)
+  let obj = obj_of(e)
+  return match obj {
+    Expr.Name(_, _) => is_record(w, ty(w, obj)) and (is_record(w, t) or ["List", "Map", "Bytes"].contains(tname(t))),
+    _ => false,
+  }
+}
+
+/// An expression in a consuming position: a last use moves the value.
+fn cexpr(w0: Lw, e: Expr) -> LR[V] {
+  if not moves(w0, e) {
+    return expr(w0, e)
+  }
+  let t = ty(w0, e)
+  let hole = addr(w0, "obj_None")           // immortal: releasing it does nothing
+  var w = hole.w
+  if w.takeable.has(nkey(e)) {               // a field of a record a `with` owns uniquely: take it out
+    let obj = obj_of(e)
+    let base = w.bound.get(path_of(obj).unwrap_or("")).unwrap_or(0)
+    let off = field_off(w: w, t: ty(w, obj), name: field_name(e))
+    let d = reg(w)
+    w = emit(d.w, [op("load"), r(d.v), r(base), r(off)])
+    w = emit(w, [op("store"), r(base), r(off), r(hole.v)])
+    return vv(w: w, rg: d.v, t: t, owned: true)
+  }
+  match e {
+    Expr.Name(_, name) => {                  // the variable's last use: move its value out
+      let loc = lookup(w, name).unwrap_or(Local { reg: 0, t: t, owned: true, boxed: false })
+      let d = reg(w)
+      w = emit(emit(d.w, [op("mov"), r(d.v), r(loc.reg)]), [op("mov"), r(loc.reg), r(hole.v)])
+      return vv(w: w, rg: d.v, t: t, owned: true)
+    },
+    _ => {},
+  }
+  // `a.f`, the last use of a field of an owned record: take it out if the record is unique, else share it
+  let obj_e = obj_of(e)
+  let obj = match obj_e {
+    Expr.Name(_, n) => lookup(w, n).map(fn(l) => l.reg).unwrap_or(0),
+    _ => 0,
+  }
+  let off = field_off(w: w, t: ty(w, obj_e), name: field_name(e))
+  let d = reg(w)
+  w = emit(d.w, [op("load"), r(d.v), r(obj), r(off)])
+  let rc = reg(w)
+  let c = reg(rc.w)
+  let one = konst(emit(c.w, [op("load"), r(rc.v), r(obj), r(0)]), 1)
+  w = emit(one.w, [op("cmp"), op("eq"), r(c.v), r(rc.v), r(one.v)])
+  let steal = label(w, "tk")
+  let share = label(steal.w, "sh")
+  let done = label(share.w, "tkd")
+  w = place(emit(done.w, [op("br"), r(c.v), KV.S(s: steal.v), KV.S(s: share.v)]), steal.v)
+  w = place(jump(emit(w, [op("store"), r(obj), r(off), r(hole.v)]), done.v), share.v)
+  w = place(jump(emit(w, [op("retain"), KV.S(s: rck(t)), r(d.v)]), done.v), done.v)
+  return vv(w: w, rg: d.v, t: t, owned: true)
+}
+
+/// A read of a path inside an in-place `with`: from the record being updated (borrowed).
+fn bound_read(w0: Lw, e: Expr) -> Option[LR[V]] {
+  if w0.bound.is_empty() {
+    return None
+  }
+  let p = match path_of(e) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  let q = bound_prefix(w0, p)
+  if q == "" {
+    return None
+  }
+  var chain: List[Expr] = []
+  var cur = e
+  while path_of(cur).unwrap_or("") != q {
+    chain = chain.push(cur)
+    cur = obj_of(cur)
+  }
+  var w = w0
+  var rg = w.bound.get(q).unwrap_or(0)
+  var cur_t = ty(w, cur)
+  for fa in chain.reverse() {
+    let d = reg(w)
+    w = emit(d.w, [op("load"), r(d.v), r(rg), r(field_off(w: d.w, t: cur_t, name: field_name(fa)))])
+    rg = d.v
+    cur_t = ty(w, fa)
+  }
+  return Some(vv(w: w, rg: rg, t: cur_t, owned: false))
+}
+
+/// An owned record value -> a register holding a unique copy (the value itself when it is unique).
+fn unique_record(w0: Lw, v: V) -> LR[Int] {
+  let t = v.t
+  let u = reg(w0)
+  let rc = reg(u.w)
+  let c = reg(rc.w)
+  var w = emit(c.w, [op("load"), r(rc.v), r(v.reg), r(0)])
+  let one = konst(w, 1)
+  w = emit(one.w, [op("cmp"), op("eq"), r(c.v), r(rc.v), r(one.v)])
+  let same = label(w, "uq")
+  let copy = label(same.w, "cp")
+  let done = label(copy.w, "uqd")
+  w = place(emit(done.w, [op("br"), r(c.v), KV.S(s: same.v), KV.S(s: copy.v)]), copy.v)
+  let fields = record_fields(w, t)
+  let size = konst(w, 16 + 8 * fields.len())
+  let a = addr_td(size.w, t)
+  let obj = call_rt(w: a.w, name: "obj_new", args: [size.v, a.v])
+  w = obj.w
+  var i = 0
+  for f in fields {
+    let x = reg(w)
+    w = emit(x.w, [op("load"), r(x.v), r(v.reg), r(16 + 8 * i)])
+    let k = rck(f.second)
+    if k != "" {
+      w = emit(w, [op("retain"), KV.S(s: k), r(x.v)])
+    }
+    w = emit(w, [op("store"), r(obj.v), r(16 + 8 * i), r(x.v)])
+    i = i + 1
+  }
+  w = emit(w, [op("release"), op("obj"), r(v.reg)])
+  w = jump(emit(w, [op("mov"), r(u.v), r(obj.v)]), done.v)
+  w = place(w, same.v)
+  w = jump(emit(w, [op("mov"), r(u.v), r(v.reg)]), done.v)
+  return lr(place(w, done.v), u.v)
+}
+
+/// A use inside the fields of a `with`: its path, node and the bases of the nested `with`s around it.
+type WOcc { path: Str, key: Str, bases: List[Str] }
+
+fn with_occs(e: Expr, bases: List[Str]) -> List[WOcc] {
+  match path_of(e) {
+    Some(p) => {
+      return [WOcc { path: p, key: nkey(e), bases: bases }]
+    },
+    None => {},
+  }
+  return match e {
+    Expr.Lambda(_, _, _, body) => all_exprs(body_exprs(body)).flat_map(fn(x) => match x {
+      Expr.Name(_, n) => [WOcc { path: n, key: nkey(x), bases: bases }],
+      _ => [],
+    }),
+    Expr.WithExpr(_, base, fs) => {
+      let inner = match path_of(base) {
+        Some(_) => bases.push(nkey(base)),
+        None => bases,
+      }
+      return with_occs(base, bases).concat(fs.flat_map(fn(f) => with_occs(f.value, inner)))
+    },
+    _ => sub_exprs(e).flat_map(fn(x) => with_occs(x, bases)),
+  }
+}
+
+/// The field uses inside `e` (a `with` updating the record at path bp in place) that may take their field out: the
+/// only use of that field, in a consuming position or as the base of a nested `with`.
+fn with_takes(w: Lw, e: Expr, fields: List[FieldInit], bp: Str) -> Map[Str, Bool] {
+  let occs = fields.flat_map(fn(f) => with_occs(f.value, []))
+  var out: Map[Str, Bool] = Map {}
+  if occs.any(fn(o) => bp == o.path or bp.starts_with(o.path + ".")) {
+    return out
+  }
+  let t = ty(w, e)
+  let fts = record_fields(w, t)
+  for f in fields {
+    let ft = fts.find(fn(x) => x.first == f.name).map(fn(x) => x.second).unwrap_or(unit_t())
+    if rck(ft) != "" {
+      let fp = bp + "." + f.name
+      let near = occs.filter(fn(o) => o.path == fp or o.path.starts_with(fp + ".") or fp.starts_with(o.path + "."))
+      let exact = near.filter(fn(o) => o.path == fp)
+      if exact.len() == 1 {
+        let ek = exact.get_or(0, WOcc { path: "", key: "", bases: [] }).key
+        if near.all(fn(o) => o.key == ek or o.bases.contains(ek)) {
+          out = out.set(ek, true)
+        }
+      }
+    }
+  }
+  return out
+}
+
+/// `base with {...}` on an owned value: reuse the record when it is unique (else a copy), take out the fields being
+/// replaced when nothing else reads them, then store the new values.
+fn with_in_place(w0: Lw, e: Expr, fields: List[FieldInit], src: V, bp: Str) -> LR[V] {
+  let t = src.t
+  let u = unique_record(w0, src)
+  let saved_bound = u.w.bound
+  let saved_takes = u.w.takeable
+  var w = u.w
+  if bp != "" {
+    var tk = w.takeable
+    for k in with_takes(w: w, e: e, fields: fields, bp: bp).keys() {
+      tk = tk.set(k, true)
+    }
+    w = w with { bound: w.bound.set(bp, u.v), takeable: tk }
+  }
+  var upd: List[Pair[Str, V]] = []
+  for f in fields {
+    let v = cexpr(w, f.value)
+    w = v.w
+    upd = upd.push(Pair { first: f.name, second: v.v })
+  }
+  w = w with { bound: saved_bound, takeable: saved_takes }
+  let fts = record_fields(w, t)
+  for p in upd {
+    let off = field_off(w: w, t: t, name: p.first)
+    let ft = fts.find(fn(x) => x.first == p.first).map(fn(x) => x.second).unwrap_or(unit_t())
+    let k = rck(ft)
+    let nw = own(w, p.second)
+    w = nw.w
+    if k != "" {
+      let old = reg(w)
+      w = emit(emit(old.w, [op("load"), r(old.v), r(u.v), r(off)]), [op("release"), KV.S(s: k), r(old.v)])
+    }
+    w = emit(w, [op("store"), r(u.v), r(off), r(nw.v)])
+  }
+  return vv(w: w, rg: u.v, t: t, owned: true)
 }
 
 // ---- scopes -------------------------------------------------------------------------------------------------
@@ -910,7 +1224,8 @@ fn unit_v(w: Lw) -> LR[V] {
 /// Starts a new function: it is appended to the program now, its code is filled while it is the current one.
 fn begin_fn(w: Lw, f: KFn) -> Lw {
   return w with { fns: w.fns.push(f), cur: f, cur_index: w.fns.len(), scopes: [], loops: [], dead: false,
-    closure_self: None, captures: Map {}, decl: None, posts: [], in_test: false }
+    closure_self: None, captures: Map {}, decl: None, posts: [], in_test: false, cand: Map {}, bound: Map {},
+    takeable: Map {} }
 }
 
 /// Stores the current function back into the program.
@@ -941,12 +1256,23 @@ fn lower_function(w0: Lw, item: QItem) -> Lw {
     klar_name: d.name, nparams: d.params.len(), nregs: d.params.len(), code: [], labels: 0 })
   let sig = sig_of(m, d)
   w = push_scope(w with { ret_t: zonk(sig.ret, w.env) })
+  var owned: List[Int] = []
+  if not is_rt {
+    owned = w.owned.get("{item.mod_name}#{item.idx}").unwrap_or([])
+  }
   var i = 0
   for p in sig.params {
-    w = declare(w: w, name: p.first, rg: i, t: zonk(p.second, w.env), owned: false)
+    w = declare(w: w, name: p.first, rg: i, t: zonk(p.second, w.env), owned: owned.contains(i))
     i = i + 1
   }
   if not is_rt {
+    let b = match d.body {
+      Some(blk) => blk,
+      None => Block { span: d.span, stmts: [] },
+    }
+    let keep = names_of(d.post.flat_map(walk_expr))
+    w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of(sig.params.map(fn(p) =>
+      p.first), Body.BlockBody(block: b)), no_move: keep, b: b) }
     let s = str_obj(w, d.name)
     w = emit(s.w, [op("enter"), KV.S(s: s.v)])
   }
@@ -1062,7 +1388,7 @@ fn stmt(w0: Lw, st: Stmt) -> Lw {
   var w = w0
   match st {
     Stmt.Let(_, name, _, _, _, value, _) => {
-      let v = expr(w, value)
+      let v = cexpr(w, value)
       if name == "_" {
         return drop(v.w, v.v)
       }
@@ -1080,7 +1406,7 @@ fn stmt(w0: Lw, st: Stmt) -> Lw {
           return do_return(u.w, u.v)
         },
         Some(x) => {
-          let v = expr(w, x)
+          let v = cexpr(w, x)
           return do_return(v.w, v.v)
         },
       }
@@ -1135,8 +1461,8 @@ fn assign(w0: Lw, name: Str, value: Expr) -> Lw {
         Some(res) => {
           if obj_name == name and res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name) and
             not args.any(fn(a) => names_name(walk_expr(a.value), name)) {
-            let new = builtin_method(w: w, e: value, owner: res.owner, m: res.name, recv: V { reg: loc.reg, t: loc.t,
-              owned: true }, consume: true)
+            let new = builtin_method(w: w, e: value, owner: res.owner, m: res.name, recv: Some(V { reg: loc.reg, t: loc.t,
+              owned: true }), consume: true, recv_node: None)
             let o = own(new.w, new.v)
             return emit(o.w, [op("mov"), r(loc.reg), r(o.v)])
           }
@@ -1153,7 +1479,7 @@ fn assign(w0: Lw, name: Str, value: Expr) -> Lw {
     },
     _ => {},
   }
-  let v = expr(w, value)
+  let v = cexpr(w, value)
   let o = own(v.w, v.v)
   w = o.w
   if k != "" {
@@ -1366,8 +1692,8 @@ fn expr(w: Lw, e: Expr) -> LR[V] {
       var x = m0.w
       var mp = m0.v
       for en in entries {
-        let k = expr(x, en.key)
-        let v = expr(k.w, en.value)
+        let k = cexpr(x, en.key)
+        let v = cexpr(k.w, en.value)
         let ko = own(v.w, k.v)
         let vo = own(ko.w, v.v)
         let s = call_rt(w: vo.w, name: "Map_set_owned", args: [mp, ko.v, vo.v])
@@ -1384,7 +1710,7 @@ fn expr(w: Lw, e: Expr) -> LR[V] {
     Expr.FieldAccess(_, _, _, _) => x_field_access(w, e),
     Expr.Try(span, x) => x_try(w0: w, span: span, x: x),
     Expr.RecordLit(_, _, fields) => x_record(w0: w, e: e, fields: fields),
-    Expr.WithExpr(_, base, fields) => x_with(w0: w, base: base, fields: fields),
+    Expr.WithExpr(_, base, fields) => x_with(w0: w, e: e, base: base, fields: fields),
     Expr.Match(_, subject, arms) => x_match(w0: w, e: e, subject: subject, arms: arms),
     Expr.Lambda(_, _, _, _) => x_lambda(w, e),
   }
@@ -1467,7 +1793,7 @@ fn list_lit(w0: Lw, e: Expr, items: List[Expr]) -> LR[V] {
   var w = emit(data.w, [op("load"), r(data.v), r(l.v), r(32)])
   var i = 0
   for it in items {
-    let v = expr(w, it)
+    let v = cexpr(w, it)
     let o = own(v.w, v.v)
     w = emit(o.w, [op("store"), r(data.v), r(8 * i), r(o.v)])
     i = i + 1
@@ -1498,6 +1824,12 @@ fn resolve_const(w: Lw, name: Str) -> Option[Pair[Str, Str]] {
 }
 
 fn x_name(w: Lw, e: Expr, name: Str) -> LR[V] {
+  match bound_read(w, e) {
+    Some(b) => {
+      return b
+    },
+    None => {},
+  }
   match lookup(w, name) {
     Some(loc) => {
       return read_local(w, loc)
@@ -1556,9 +1888,21 @@ fn fn_value(w0: Lw, e: Expr, info: CallInfo) -> LR[V] {
     }
     var tramp = KFn { name: target.v + "__tramp", klar_name: target.v + "__tramp", nparams: 1 + nps, nregs: 1 + nps, code: [],
       labels: 0 }
+    var code: List[Ins] = []
+    let fps = match ft {
+      Type.Fun(ps, _) => ps,
+      _ => [],
+    }
+    for i in w.owned.get("{sig.mod_name}#{sig.decl}").unwrap_or([]).sort() {
+      let k = rck(fps.get_or(i, unit_t()))
+      if k != "" {
+        code = code.push([op("retain"), KV.S(s: k), r(1 + i)])       // closure callers lend their arguments
+      }
+    }
     let d = tramp.nregs
     tramp = tramp with { nregs: d + 1 }
-    tramp = tramp with { code: [[op("call"), r(d), KV.S(s: target.v), KV.L(regs: range(1, 1 + nps))], [op("ret"), r(d)]] }
+    tramp = tramp with { code: code.concat([[op("call"), r(d), KV.S(s: target.v), KV.L(regs: range(1, 1 + nps))], [op(
+      "ret"), r(d)]]) }
     w = w with { fns: w.fns.push(tramp) }
     let sym = "fnv{w.static_objs.len()}"
     let ctd = closure_td(w, [])
@@ -1763,6 +2107,35 @@ fn args_in_param_order(w0: Lw, names: List[Str], args: List[Arg]) -> LR[Pair[Lis
   return lr(w, Pair { first: ordered, second: order })
 }
 
+/// The arguments of a variant constructor, in parameter order; each one is consumed.
+fn args_consumed(w0: Lw, names: List[Str], args: List[Arg]) -> LR[Pair[List[V], List[V]]] {
+  var w = w0
+  var vals: Map[Str, V] = Map {}
+  var pos = 0
+  for a in args {
+    let v = cexpr(w, a.value)
+    w = v.w
+    let name = match a.name {
+      Some(n) => n,
+      None => names.get_or(pos, ""),
+    }
+    if a.name == None {
+      pos = pos + 1
+    }
+    vals = vals.set(name, v.v)
+  }
+  var ordered: List[V] = []
+  for n in names {
+    match vals.get(n) {
+      Some(v) => {
+        ordered = ordered.push(v)
+      },
+      None => {},
+    }
+  }
+  return lr(w, Pair { first: ordered, second: [] })
+}
+
 fn regs_of(vs: List[V]) -> List[Int] {
   return vs.map(fn(v) => v.reg)
 }
@@ -1824,7 +2197,8 @@ fn closure_call(w: Lw, f: V, args: List[V], ret_t: Type) -> LR[V] {
     owned: true)
 }
 
-fn user_call(w0: Lw, e: Expr, sig: Sig, info: CallInfo, recv: Option[V]) -> LR[V] {
+/// recv: the receiver expression of a method-style call (the first argument).
+fn user_call(w0: Lw, e: Expr, sig: Sig, info: CallInfo, recv: Option[Expr]) -> LR[V] {
   let parts = call_parts(e)
   let tm = module_of(w0, sig.mod_name)
   let decl = match sig.fdecl {
@@ -1837,21 +2211,70 @@ fn user_call(w0: Lw, e: Expr, sig: Sig, info: CallInfo, recv: Option[V]) -> LR[V
   }
   let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: sig.tparams.map(fn(tp) => inst_type(w: w0,
     info: info, tp: tp)), kind: kind)
-  let names = sig.params.map(fn(p) => p.first)
-  let a = match recv {
-    Some(rv) => {
-      let x = args_in_param_order(w0: target.w, names: names.drop(1), args: parts.second)
-      return finish_user_call(w0: x.w, e: e, target: target.v, ordered: [rv].concat(x.v.first), order: x.v.second)
-    },
-    None => args_in_param_order(w0: target.w, names: names, args: parts.second),
+  var w = target.w
+  let owned = match tm.is_sys {
+    true => [],
+    false => w.owned.get("{sig.mod_name}#{sig.decl}").unwrap_or([]),
   }
-  return finish_user_call(w0: a.w, e: e, target: target.v, ordered: a.v.first, order: a.v.second)
-}
-
-fn finish_user_call(w0: Lw, e: Expr, target: Str, ordered: List[V], order: List[V]) -> LR[V] {
-  let w = site(w0, expr_span(e))
-  let d = call(w: w, target: target, args: regs_of(ordered))
-  return vv(w: drop_all(d.w, order), rg: d.v, t: ty(d.w, e), owned: true)
+  let names = sig.params.map(fn(p) => p.first)
+  var exprs: List[Pair[Int, Expr]] = []
+  var rest = names
+  match recv {
+    Some(x) => {
+      exprs = exprs.push(Pair { first: 0, second: x })
+      rest = names.drop(1)
+    },
+    None => {},
+  }
+  var pos = 0
+  for a in parts.second {
+    let name = match a.name {
+      Some(n) => n,
+      None => rest.get_or(pos, ""),
+    }
+    if a.name == None {
+      pos = pos + 1
+    }
+    exprs = exprs.push(Pair { first: names.index_of(name).unwrap_or(0), second: a.value })
+  }
+  var vals: Map[Int, V] = Map {}
+  var later: List[Pair[Int, Expr]] = []
+  for x in exprs {
+    if owned.contains(x.first) and moves(w, x.second) {
+      later = later.push(x)       // moved after the other arguments are evaluated (they may read it)
+    } else {
+      let v = expr(w, x.second)
+      w = v.w
+      vals = vals.set(x.first, v.v)
+    }
+  }
+  for x in later {
+    let v = cexpr(w, x.second)
+    w = v.w
+    vals = vals.set(x.first, v.v)
+  }
+  var regs: List[Int] = []
+  var keep: List[V] = []
+  var i = 0
+  while i < names.len() {
+    var v = vals.get(i).unwrap_or(V { reg: 0, t: unit_t(), owned: false })
+    if owned.contains(i) {
+      let o = own(w, v)
+      w = o.w
+      regs = regs.push(o.v)
+    } else {
+      if not later.is_empty() and not v.owned and rck(v.t) != "" {
+        w = emit(w, [op("retain"), KV.S(s: rck(v.t)), r(v.reg)])   // a borrowed view must outlive the moved value
+        v = V { reg: v.reg, t: v.t, owned: true }
+      }
+      keep = keep.push(v)
+      regs = regs.push(v.reg)
+    }
+    i = i + 1
+  }
+  w = site(w, expr_span(e))
+  let d = call(w: w, target: target.v, args: regs)
+  return vv(w: drop_all(d.w, keep), rg: d.v, t: ty(d.w, e), owned: true)
 }
 
 /// The extra arguments a runtime function declares after the real ones: the result's type descriptor (`rtd`), the
@@ -1894,7 +2317,7 @@ fn builtin_global(w0: Lw, e: Expr, name: Str) -> LR[V] {
   let first = args.get_or(0, Arg { span: span, name: None, value: e }).value
   if name == "Some" or name == "Ok" or name == "Err" {
     let t = ty(w0, e)
-    let v = expr(w0, first)
+    let v = cexpr(w0, first)
     let tagv = match name == "Some" or name == "Err" {
       true => 1,
       false => 0,
@@ -1946,8 +2369,34 @@ fn x_method_call(w0: Lw, e: Expr) -> LR[V] {
   if res.kind == "variant" {
     return variant_ctor(w0: w0, e: e, enum_name: res.owner, vname: res.name)
   }
+  if res.kind == "ufcs" or res.kind == "trait" {
+    let info = match call_info(w0, span) {
+      Some(i) => i,
+      None => fail("native: method call without a signature"),
+    }
+    if res.kind == "ufcs" {
+      return user_call(w0: w0, e: e, sig: info.sig, info: info, recv: Some(obj))
+    }
+    // static dispatch: inside an instance every type parameter is a concrete type
+    let concrete = inst_type(w: w0, info: info, tp: "Self")
+    let entry = match w0.uni.type_methods.get(tname(concrete)) {
+      Some(table) => table.get(res.name),
+      None => None,
+    }
+    return match entry {
+      Some(en) => user_call(w0: w0, e: e, sig: en.second, info: info, recv: Some(obj)),
+      None => fail("native: no impl of `{res.owner}.{res.name}` for {tshow(concrete)}"),
+    }
+  }
+  let reuse = res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name)
+  if reuse and moves(w0, obj) {
+    return builtin_method(w: w0, e: e, owner: res.owner, m: res.name, recv: None, consume: true, recv_node: Some(obj))
+  }
   let recv = expr(w0, obj)
   var w = recv.w
+  if reuse and recv.v.owned and path_of(obj) == None {        // a temporary: update it in place
+    return builtin_method(w: w, e: e, owner: res.owner, m: res.name, recv: Some(recv.v), consume: true, recv_node: None)
+  }
   if res.kind == "to_str" {
     let a = addr_td(w, recv.v.t)
     let x = call_rt(w: a.w, name: "show_to_str", args: [recv.v.reg, a.v])
@@ -1969,35 +2418,12 @@ fn x_method_call(w0: Lw, e: Expr) -> LR[V] {
     return lr(drop(drop_all(out.w, vals), recv.v), out.v)
   }
   if res.kind == "builtin" {
-    return builtin_method(w: w, e: e, owner: res.owner, m: res.name, recv: recv.v, consume: false)
-  }
-  let info = match call_info(w, span) {
-    Some(i) => i,
-    None => fail("native: method call without a signature"),
-  }
-  if res.kind == "ufcs" {
-    let out = user_call(w0: w, e: e, sig: info.sig, info: info, recv: Some(recv.v))
-    return lr(drop(out.w, recv.v), out.v)
-  }
-  if res.kind == "trait" {
-    // static dispatch: inside an instance every type parameter is a concrete type
-    let concrete = inst_type(w: w, info: info, tp: "Self")
-    let entry = match w.uni.type_methods.get(tname(concrete)) {
-      Some(table) => table.get(res.name),
-      None => None,
-    }
-    return match entry {
-      Some(en) => {
-        let out = user_call(w0: w, e: e, sig: en.second, info: info, recv: Some(recv.v))
-        return lr(drop(out.w, recv.v), out.v)
-      },
-      None => fail("native: no impl of `{res.owner}.{res.name}` for {tshow(concrete)}"),
-    }
+    return builtin_method(w: w, e: e, owner: res.owner, m: res.name, recv: Some(recv.v), consume: false, recv_node: None)
   }
   return fail("native: {res.kind}")
 }
 
-fn builtin_method(w: Lw, e: Expr, owner: Str, m: Str, recv: V, consume: Bool) -> LR[V] {
+fn builtin_method(w: Lw, e: Expr, owner: Str, m: Str, recv: Option[V], consume: Bool, recv_node: Option[Expr]) -> LR[V] {
   let parts = call_parts(e)
   let span = parts.first.first
   let sig = match w.b.methods.get(owner) {
@@ -2027,12 +2453,21 @@ fn builtin_method(w: Lw, e: Expr, owner: Str, m: Str, recv: V, consume: Bool) ->
     ordered = owned
     order = []
   }
+  var rv = recv.unwrap_or(V { reg: 0, t: unit_t(), owned: false })
+  match recv_node {
+    Some(node) => {
+      let c = cexpr(x, node)        // the receiver's last use: moved after the arguments
+      x = c.w
+      rv = c.v
+    },
+    None => {},
+  }
   let extra = magic_args(w0: x, rt: rd, n_real: sig.params.len(), e: e, info: call_info(x, span))
   let s = site(extra.w, span)
-  let d = call(w: s, target: target.v, args: [recv.reg].concat(regs_of(ordered)).concat(extra.v))
+  let d = call(w: s, target: target.v, args: [rv.reg].concat(regs_of(ordered)).concat(extra.v))
   var out = drop_all(d.w, order)
   if not consume {
-    out = drop(out, recv)
+    out = drop(out, rv)
   }
   let t = ty(out, e)
   return vv(w: out, rg: d.v, t: t, owned: rck(t) != "")
@@ -2044,7 +2479,7 @@ fn variant_ctor(w0: Lw, e: Expr, enum_name: Str, vname: Str) -> LR[V] {
     Some(info) => info.variants.get(vname).unwrap_or([]).map(fn(f) => f.first),
     None => [],
   }
-  let a = args_in_param_order(w0: w0, names: names, args: call_parts(e).second)
+  let a = args_consumed(w0: w0, names: names, args: call_parts(e).second)
   let tagv = variant_index(w: a.w, t: t, vname: vname)
   let size = konst(a.w, 24 + 8 * names.len())
   let td_a = addr_td(size.w, t)
@@ -2063,6 +2498,12 @@ fn variant_ctor(w0: Lw, e: Expr, enum_name: Str, vname: Str) -> LR[V] {
 // ---- records, Try, match --------------------------------------------------------------------------------------
 
 fn x_field_access(w0: Lw, e: Expr) -> LR[V] {
+  match bound_read(w0, e) {
+    Some(b) => {
+      return b
+    },
+    None => {},
+  }
   let parts = match e {
     Expr.FieldAccess(_, obj, name, _) => Pair { first: obj, second: name },
     _ => fail("native: not a field access"),
@@ -2145,7 +2586,7 @@ fn x_record(w0: Lw, e: Expr, fields: List[FieldInit]) -> LR[V] {
   var w = w0
   var vals: Map[Str, V] = Map {}
   for f in fields {
-    let v = expr(w, f.value)
+    let v = cexpr(w, f.value)
     w = v.w
     vals = vals.set(f.name, v.v)
   }
@@ -2167,8 +2608,23 @@ fn x_record(w0: Lw, e: Expr, fields: List[FieldInit]) -> LR[V] {
   return vv(w: w, rg: obj.v, t: t, owned: true)
 }
 
-fn x_with(w0: Lw, base: Expr, fields: List[FieldInit]) -> LR[V] {
-  let b = expr(w0, base)
+fn x_with(w0: Lw, e: Expr, base: Expr, fields: List[FieldInit]) -> LR[V] {
+  let bp = path_of(base)
+  let moved = moves(w0, base)
+  var b = lr(w0, V { reg: 0, t: unit_t(), owned: false })
+  if moved or bp == None {
+    let src = cexpr(w0, base)
+    if src.v.owned {
+      let path = match moved {
+        true => bp.unwrap_or(""),
+        false => "",
+      }
+      return with_in_place(w0: src.w, e: e, fields: fields, src: src.v, bp: path)
+    }
+    b = src
+  } else {
+    b = expr(w0, base)
+  }
   let t = b.v.t
   let fs = record_fields(b.w, t)
   var w = b.w
@@ -2387,10 +2843,15 @@ fn x_lambda(w0: Lw, e: Expr) -> LR[V] {
   for f in free {
     match f.second {
       Some(loc) => {
-        let v = read_local(w, loc)
-        w = v.w
-        cap_types = cap_types.push(v.v.t)
-        cap_vals = cap_vals.push(v.v)
+        if bound_prefix(w, f.first) == f.first {
+          cap_types = cap_types.push(loc.t)
+          cap_vals = cap_vals.push(V { reg: w.bound.get(f.first).unwrap_or(0), t: loc.t, owned: false })
+        } else {
+          let v = read_local(w, loc)
+          w = v.w
+          cap_types = cap_types.push(v.v.t)
+          cap_vals = cap_vals.push(v.v)
+        }
       },
       None => {
         let cap = w.captures.get(f.first).unwrap_or(Pair { first: 0, second: unit_t() })
@@ -2444,6 +2905,12 @@ fn lambda_fn(w0: Lw, name: Str, params: List[Param], body: Body, ft: Type, captu
     i = i + 1
   }
   if not w.is_rt {
+    let cx = Cx { ck: ck_of(w), file: w.file }
+    let names = locals_of(params.map(fn(p) => p.name), body)
+    w = w with { cand: match body {
+      Body.BlockBody(b) => liveness_block(cx: cx, locals: names, no_move: [], b: b),
+      Body.ExprBody(x) => liveness_expr(cx: cx, locals: names, e: x),
+    } }
     let s = str_obj(w, "<lambda>")
     w = emit(s.w, [op("enter"), KV.S(s: s.v)])
   }
@@ -2473,6 +2940,9 @@ fn lambda_fn(w0: Lw, name: Str, params: List[Param], body: Body, ft: Type, captu
     decl: outer.decl,
     posts: outer.posts,
     in_test: outer.in_test,
+    cand: outer.cand,
+    bound: outer.bound,
+    takeable: outer.takeable,
   }
 }
 
@@ -2694,7 +3164,31 @@ pub fn lower_program(ld: Ld, main_path: Str) -> Lw {
     decl: None,
     posts: [],
     in_test: false,
+    owned: Map {},
+    cand: Map {},
+    bound: Map {},
+    takeable: Map {},
   }
+  // the parameters each function consumes (own.klar)
+  var ofns: List[OwnFn] = []
+  for m in ordered {
+    if not m.is_sys {
+      var di = 0
+      for d in checker_of(m).decls {
+        match d {
+          Decl.Fn(f) => {
+            if f.body != None {
+              ofns = ofns.push(OwnFn { key: "{m.name}#{di}", decl: f, cx: Cx { ck: checker_of(m), file: decl_file(m, di)
+              } })
+            }
+          },
+          _ => {},
+        }
+        di = di + 1
+      }
+    }
+  }
+  w = w with { owned: infer_owned(ofns) }
   // __user_main calls main
   w = begin_fn(w, um0)
   let rr = reg(w)
@@ -2749,7 +3243,8 @@ pub fn lower_program(ld: Ld, main_path: Str) -> Lw {
   }
   // the instances, most recent first (like the Python lowering's stack)
   while not w.queue.is_empty() {
-    let item = w.queue.last().unwrap_or(QItem { name: "", mod_name: "", decl: md, file: "", env: Map {}, kind: "" })
+    let item = w.queue.last().unwrap_or(QItem { name: "", mod_name: "", decl: md, idx: 0, file: "", env: Map {},
+      kind: "" })
     w = lower_function(w with { queue: w.queue.take(w.queue.len() - 1) }, item)
   }
   // static descriptors the runtime refers to by name

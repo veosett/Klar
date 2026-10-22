@@ -3,11 +3,11 @@
 * Monomorphization: every generic function is instantiated per concrete type list.
 * Uniform 64-bit values (see kir.py); records, enums, strings, lists, maps and
   closures are heap objects  [rc][type-descriptor][payload...].
-* Reference counting: parameters are *borrowed*, results are *owned*; locals own
-  their values; temporaries are released right after use.  Because Klar values are
+* Reference counting: parameters are *borrowed* unless the function consumes them (own.py), results are
+  *owned*; locals own their values; temporaries are released right after use.  Because Klar values are
   immutable there are no cycles, so reference counting frees everything.
-* Reuse: `x = x.push(v)` (and set/insert/remove/concat/update, `s = s + t`) moves
-  `x` into the runtime, which updates the object in place when it is unique.
+* Reuse: the last use of a local moves its value (own.py): `x = x.push(v)`, `w = f(w)`,
+  `w with { f: w.f.set(k, v) }` update unique objects in place, across function calls.
 
 Runtime services are ordinary Klar functions in klar/rt/*.klar (system Klar).
 """
@@ -18,6 +18,7 @@ from ..builtins import GLOBALS, METHODS, parsed
 from ..types import NEVER, TCon, TFn, TParam, prune, show
 from .intrinsics import SYS_NAMES
 from .kir import Fn
+from .own import EMPTY, REUSE, Liveness, infer_owned, path_of, root_of
 
 K_UNIT, K_BOOL, K_INT, K_FLOAT, K_WORD = 0, 1, 2, 3, 4
 K_STR, K_LIST, K_MAP, K_RECORD, K_ENUM, K_FN, K_BIG, K_BUF, K_BYTES = 10, 11, 12, 13, 14, 15, 16, 17, 18
@@ -29,10 +30,6 @@ BOOL_T = TCon("Bool")
 FLOAT_T = TCon("Float")
 WORD_T = TCon("Word")
 
-# methods whose `x = x.m(...)` form may update x in place (runtime function <Owner>_<m>_owned)
-REUSE = {("List", "push"), ("List", "set"), ("List", "insert"), ("List", "remove_at"), ("List", "concat"),
-         ("Bytes", "push"), ("Bytes", "push_le"), ("Bytes", "set"),
-         ("Map", "set"), ("Map", "remove"), ("Map", "update")}
 
 
 class NativeUnsupported(Exception):
@@ -119,6 +116,12 @@ class Program:
         self.modules_by_name = {m.name: m for m in loaded.modules}
         for m in getattr(loaded, "runtime", []):
             self.modules_by_name[m.name] = m
+        self.owned = infer_owned([d for m in loaded.modules if not m.is_sys for d in m.program.decls
+                                  if isinstance(d, N.FnDecl) and d.body is not None])
+
+    def owned_of(self, decl):
+        """Indices of the parameters `decl` consumes (passed owned)."""
+        return self.owned.get(id(decl), EMPTY)
 
     def uid(self, prefix):
         self.counter += 1
@@ -306,6 +309,18 @@ class FnLowering:
         self.dead = False
         self.closure_self = None
         self.captures = {}
+        self.cand = set()         # uses that may move their value (own.Liveness)
+        self.bound = {}           # path -> register of the unique record a `with` is updating in place
+        self.takeable = set()     # field uses inside such a `with` that take the field out of it
+
+    def locals_of(self, params, body):
+        names = list(params)
+        for n in N.walk(body):
+            if isinstance(n, N.Let):
+                names.append(n.name)
+            elif isinstance(n, N.For):
+                names.append(n.var)
+        return names
 
     # ---- small helpers ----------------------------------------------------------
     def ty(self, node):
@@ -372,6 +387,171 @@ class FnLowering:
     def owned_v(self, v):
         return V(self.own(v), v.t, True)
 
+    # ---- moves (own.py) -------------------------------------------------------------
+    def bound_prefix(self, path):
+        """The longest path bound by an enclosing in-place `with` that `path` lies in, or None."""
+        best = None
+        for q in self.bound:
+            if (path == q or path.startswith(q + ".")) and (best is None or len(q) > len(best)):
+                best = q
+        return best
+
+    def moves(self, e):
+        """Does consuming `e` move a value out of a variable or a record field (instead of copying)?"""
+        if id(e) in self.takeable:
+            return True
+        if id(e) not in self.cand:
+            return False
+        p = path_of(e)
+        if p is None or self.bound_prefix(p) is not None:
+            return False
+        loc = self.lookup(root_of(p))
+        t = self.ty(e)
+        if loc is None or not loc.owned or loc.box or rck(t) is None:
+            return False
+        # a field is taken out only when it can then be updated in place (a record or a collection)
+        return "." not in p or (isinstance(e.obj, N.Name) and self.is_record(self.ty(e.obj)) and
+                                (self.is_record(t) or getattr(t, "name", None) in ("List", "Map", "Bytes")))
+
+    def is_record(self, t):
+        return isinstance(t, TCon) and t.name in self.p.universe.records
+
+    def field_off(self, t, name):
+        return 16 + 8 * [f for f, _ in self.p.record_fields(t)].index(name)
+
+    def cexpr(self, e):
+        """An expression in a consuming position: a last use moves the value."""
+        if not self.moves(e):
+            return self.expr(e)
+        t = self.ty(e)
+        hole = self.addr("obj_None")         # immortal: releasing it does nothing
+        if id(e) in self.takeable:           # a field of a record a `with` owns uniquely: take it out
+            base = self.bound[path_of(e.obj)]
+            off = self.field_off(self.ty(e.obj), e.name)
+            r = self.reg()
+            self.emit("load", r, base, off)
+            self.emit("store", base, off, hole)
+            return V(r, t, True)
+        if isinstance(e, N.Name):            # the variable's last use: move its value out
+            loc = self.lookup(e.name)
+            r = self.reg()
+            self.emit("mov", r, loc.reg)
+            self.emit("mov", loc.reg, hole)
+            return V(r, t, True)
+        # `a.f`, the last use of a field of an owned record: take it out if the record is unique, else share it
+        obj = self.lookup(e.obj.name).reg
+        off = self.field_off(self.ty(e.obj), e.name)
+        r = self.reg()
+        self.emit("load", r, obj, off)
+        rc, c = self.reg(), self.reg()
+        self.emit("load", rc, obj, 0)
+        self.emit("cmp", "eq", c, rc, self.const(1))
+        steal, share, done = self.label("tk"), self.label("sh"), self.label("tkd")
+        self.emit("br", c, steal, share)
+        self.place(steal)
+        self.emit("store", obj, off, hole)
+        self.jump(done)
+        self.place(share)
+        self.emit("retain", rck(t), r)
+        self.jump(done)
+        self.place(done)
+        return V(r, t, True)
+
+    def bound_read(self, e):
+        """A read of a path inside an in-place `with`: from the record being updated (borrowed)."""
+        p = path_of(e)
+        if p is None or not self.bound:
+            return None
+        q = self.bound_prefix(p)
+        if q is None:
+            return None
+        r = self.bound[q]
+        chain = []
+        while path_of(e) != q:
+            chain.append(e)
+            e = e.obj
+        cur_t = self.ty(e)
+        for fa in reversed(chain):
+            nr = self.reg()
+            self.emit("load", nr, r, self.field_off(cur_t, fa.name))
+            r, cur_t = nr, self.ty(fa)
+        return V(r, cur_t, False)
+
+    def unique_record(self, v):
+        """An owned record value -> a register holding a unique copy (the value itself when it is unique)."""
+        t = v.t
+        u = self.reg()
+        rc, c = self.reg(), self.reg()
+        self.emit("load", rc, v.reg, 0)
+        self.emit("cmp", "eq", c, rc, self.const(1))
+        same, copy, done = self.label("uq"), self.label("cp"), self.label("uqd")
+        self.emit("br", c, same, copy)
+        self.place(copy)
+        fields = self.p.record_fields(t)
+        obj = self.call_rt("obj_new", [self.const(16 + 8 * len(fields)), self.addr(self.p.td(t))])
+        for i, (_, ft) in enumerate(fields):
+            r = self.reg()
+            self.emit("load", r, v.reg, 16 + 8 * i)
+            k = rck(ft)
+            if k:
+                self.emit("retain", k, r)
+            self.emit("store", obj, 16 + 8 * i, r)
+        self.emit("release", "obj", v.reg)
+        self.emit("mov", u, obj)
+        self.jump(done)
+        self.place(same)
+        self.emit("mov", u, v.reg)
+        self.jump(done)
+        self.place(done)
+        return u
+
+    def with_takes(self, e, bp):
+        """The field uses inside `e` (a `with` updating the record at path bp in place) that may take their field out:
+        the only use of that field, in a consuming position or as the base of a nested `with`."""
+        occs = []
+
+        def collect(x, bases):
+            p = path_of(x)
+            if p is not None:
+                occs.append((p, x, bases))
+                return
+            if isinstance(x, N.Lambda):
+                for n in N.walk(x.body):
+                    if isinstance(n, N.Name):
+                        occs.append((n.name, n, bases))
+                return
+            if isinstance(x, N.WithExpr):
+                bp2 = path_of(x.base)
+                collect(x.base, bases)
+                inner = bases + (id(x.base),) if bp2 is not None else bases
+                for f in x.fields:
+                    collect(f.value, inner)
+                return
+            if isinstance(x, N.Node):
+                for f in x.__dataclass_fields__:
+                    v = getattr(x, f)
+                    if isinstance(v, N.Node):
+                        collect(v, bases)
+                    elif isinstance(v, list):
+                        for it in v:
+                            if isinstance(it, N.Node):
+                                collect(it, bases)
+        for f in e.fields:
+            collect(f.value, ())
+        if any(bp == p or bp.startswith(p + ".") for p, _, _ in occs):
+            return set()
+        out = set()
+        t = self.ty(e)
+        for f in e.fields:
+            if not rck(dict(self.p.record_fields(t))[f.name]):
+                continue
+            fp = bp + "." + f.name
+            near = [o for o in occs if o[0] == fp or o[0].startswith(fp + ".") or fp.startswith(o[0] + ".")]
+            exact = [o for o in near if o[0] == fp]
+            if len(exact) == 1 and all(o is exact[0] or id(exact[0][1]) in o[2] for o in near):
+                out.add(id(exact[0][1]))
+        return out
+
     # ---- scopes -----------------------------------------------------------------
     def push_scope(self):
         self.scopes.append({"vars": {}, "clean": []})
@@ -408,9 +588,12 @@ class FnLowering:
         self.p.fns.append(self.fn)
         self.ret_t = zonk(sig.ret, self.env)
         self.push_scope()
+        owned = EMPTY if self.is_rt else self.p.owned_of(d)
         for i, (pname, pt) in enumerate(sig.params):
-            self.declare(pname, i, zonk(pt, self.env), False)
+            self.declare(pname, i, zonk(pt, self.env), i in owned)
         if not self.is_rt:
+            self.cand = Liveness(self.locals_of([p for p, _ in sig.params], d.body),
+                                 {n.name for n in N.walk(d.ensures) if isinstance(n, N.Name)}).run_block(d.body)
             self.emit("enter", self.p.str_obj(d.name))
         self.decl = d
         for r in d.requires:
@@ -491,7 +674,7 @@ class FnLowering:
         getattr(self, "s_" + type(s).__name__)(s)
 
     def s_Let(self, s):
-        v = self.expr(s.value)
+        v = self.cexpr(s.value)
         if s.name == "_":
             self.drop(v)
             return
@@ -523,7 +706,7 @@ class FnLowering:
             self.drop(rhs)
             self.emit("mov", loc.reg, new)
             return
-        v = self.expr(val)
+        v = self.cexpr(val)
         new = self.own(v)
         if k:
             self.emit("release", k, loc.reg)
@@ -533,7 +716,7 @@ class FnLowering:
         if s.value is None:
             self.do_return(V(self.const(0), UNIT_T, True))
             return
-        self.do_return(self.expr(s.value))
+        self.do_return(self.cexpr(s.value))
 
     def s_ExprStmt(self, s):
         v = self.expr(s.expr)
@@ -747,7 +930,7 @@ class FnLowering:
         data = self.reg()
         self.emit("load", data, lst, 32)
         for i, it in enumerate(e.items):
-            v = self.expr(it)
+            v = self.cexpr(it)
             self.emit("store", data, 8 * i, self.own(v))
         self.emit("store", lst, 16, self.const(n))
         return V(lst, t, True)
@@ -756,8 +939,8 @@ class FnLowering:
         t = self.ty(e)
         mp = self.call_rt("map_new", [self.addr(self.p.td(t))])
         for en in e.entries:
-            k = self.expr(en.key)
-            v = self.expr(en.value)
+            k = self.cexpr(en.key)
+            v = self.cexpr(en.value)
             mp = self.call_rt("Map_set_owned", [mp, self.own(k), self.own(v)])
         return V(mp, t, True)
 
@@ -769,6 +952,9 @@ class FnLowering:
         return V(loc.reg, loc.t, False)
 
     def x_Name(self, e):
+        b = self.bound_read(e)
+        if b is not None:
+            return b
         loc = self.lookup(e.name)
         if loc is not None:
             return self.read_local(e.name, loc)
@@ -808,6 +994,10 @@ class FnLowering:
         if key not in self.p.static_objs:
             tramp = Fn(target + "__tramp", 1 + len(ft.params))
             self.p.fns.append(tramp)
+            for i in sorted(self.p.owned_of(sig.decl)):
+                k = rck(ft.params[i])
+                if k:
+                    tramp.emit("retain", k, 1 + i)      # closure callers lend their arguments
             d = tramp.reg()
             tramp.emit("call", d, target, list(range(1, 1 + len(ft.params))))
             tramp.emit("ret", d)
@@ -920,12 +1110,12 @@ class FnLowering:
         raise NativeUnsupported(f"operator {op} on {show(t)}")
 
     # ---- calls ------------------------------------------------------------------------
-    def args_in_param_order(self, param_names, args):
+    def args_in_param_order(self, param_names, args, consume=False):
         vals = {}
         pos = 0
         order = []
         for a in args:
-            v = self.expr(a.value)
+            v = self.cexpr(a.value) if consume else self.expr(a.value)
             name = a.name if a.name is not None else param_names[pos]
             if a.name is None:
                 pos += 1
@@ -961,18 +1151,48 @@ class FnLowering:
         return V(d, ret_t, True)
 
     def user_call(self, e, sig, args, recv=None):
+        """recv: the receiver expression of a method-style call (the first argument)."""
         module = self.p.modules_by_name[sig.module]
         targs = [zonk(e.inst[tp], self.env) for tp in sig.tparams]
         target = self.p.instance(module, sig.decl, targs, kind="rt" if module.is_sys else "user")
+        owned = EMPTY if module.is_sys else self.p.owned_of(sig.decl)
         names = [n for n, _ in sig.params]
+        exprs = []                         # (parameter index, expression) in evaluation order
         if recv is not None:
-            ordered, order = self.args_in_param_order(names[1:], args)
-            ordered = [recv] + ordered
+            exprs.append((0, recv))
+            rest = names[1:]
         else:
-            ordered, order = self.args_in_param_order(names, args)
+            rest = names
+        pos = 0
+        for a in args:
+            name = a.name if a.name is not None else rest[pos]
+            if a.name is None:
+                pos += 1
+            exprs.append((names.index(name), a.value))
+        vals = {}
+        later = []
+        for i, x in exprs:
+            if i in owned and self.moves(x):
+                later.append((i, x))       # moved after the other arguments are evaluated (they may read it)
+            else:
+                vals[i] = self.expr(x)
+        for i, x in later:
+            vals[i] = self.cexpr(x)
+        regs = []
+        keep = []
+        for i in range(len(names)):
+            v = vals[i]
+            if i in owned:
+                regs.append(self.own(v))
+            else:
+                if later and not v.owned and rck(v.t):
+                    self.emit("retain", rck(v.t), v.reg)   # a borrowed view must outlive the moved value
+                    v = V(v.reg, v.t, True)
+                keep.append(v)
+                regs.append(v.reg)
         self.site(e.span)
-        d = self.call(target, [v.reg for v in ordered])
-        for v in order:
+        d = self.call(target, regs)
+        for v in keep:
             self.drop(v)
         return V(d, self.ty(e), True)
 
@@ -993,7 +1213,7 @@ class FnLowering:
     def builtin_global(self, e, name):
         if name in ("Some", "Ok", "Err"):
             t = self.ty(e)
-            v = self.expr(e.args[0].value)
+            v = self.cexpr(e.args[0].value)
             tagv = {"Some": 1, "Ok": 0, "Err": 1}[name]
             obj = self.call_rt("obj_new", [self.const(32), self.addr(self.p.td(t))])
             self.emit("store", obj, 16, self.const(tagv))
@@ -1025,7 +1245,20 @@ class FnLowering:
         kind = res[0]
         if kind == "variant":
             return self.variant_ctor(e, res[1], res[2])
+        if kind == "ufcs":
+            return self.user_call(e, e.sig, e.args, recv=e.obj)
+        if kind == "trait":
+            # static dispatch: inside an instance every type parameter is a concrete type
+            concrete = zonk(e.inst["Self"], self.env)
+            entry = self.p.universe.type_methods.get(getattr(concrete, "name", None), {}).get(e.method)
+            if entry is None:
+                raise NativeUnsupported(f"no impl of `{res[1]}.{e.method}` for {show(concrete)}")
+            return self.user_call(e, entry[1], e.args, recv=e.obj)
+        if kind == "builtin" and (res[1], res[2]) in REUSE and self.moves(e.obj):
+            return self.builtin_method(e, res[1], res[2], None, consume=True, recv_node=e.obj)
         recv = self.expr(e.obj)
+        if kind == "builtin" and (res[1], res[2]) in REUSE and recv.owned and path_of(e.obj) is None:
+            return self.builtin_method(e, res[1], res[2], recv, consume=True)   # a temporary: update it in place
         if kind == "to_str":
             r = self.call_rt("show_to_str", [recv.reg, self.addr(self.p.td(recv.t))])
             self.drop(recv)
@@ -1044,22 +1277,9 @@ class FnLowering:
         if kind == "builtin":
             out = self.builtin_method(e, res[1], res[2], recv)
             return out
-        if kind == "ufcs":
-            out = self.user_call(e, e.sig, e.args, recv=recv)
-            self.drop(recv)
-            return out
-        if kind == "trait":
-            # static dispatch: inside an instance every type parameter is a concrete type
-            concrete = zonk(e.inst["Self"], self.env)
-            entry = self.p.universe.type_methods.get(getattr(concrete, "name", None), {}).get(e.method)
-            if entry is None:
-                raise NativeUnsupported(f"no impl of `{res[1]}.{e.method}` for {show(concrete)}")
-            out = self.user_call(e, entry[1], e.args, recv=recv)
-            self.drop(recv)
-            return out
         raise NativeUnsupported(kind)
 
-    def builtin_method(self, e, owner, m, recv, consume=False):
+    def builtin_method(self, e, owner, m, recv, consume=False, recv_node=None):
         decl = parsed(METHODS[owner][m][0])
         rt_name = f"{owner}_{m}" + ("_owned" if consume else "")
         target, rt_decl = self.p.rt_fn(rt_name)
@@ -1067,6 +1287,8 @@ class FnLowering:
         if consume:
             ordered = [V(self.own(v), v.t, True) for v in ordered]
             order = []
+        if recv_node is not None:
+            recv = self.cexpr(recv_node)    # the receiver's last use: moved after the arguments
         extra = self.magic_args(rt_decl, len(decl.params), e, decl.type_params, getattr(e, "inst", {}))
         self.site(e.span)
         d = self.call(target, [recv.reg] + [v.reg for v in ordered] + extra)
@@ -1081,7 +1303,7 @@ class FnLowering:
         t = self.ty(e)
         fields = list(self.p.universe.enums[enum].variants[vname])
         names = [f for f, _ in fields]
-        ordered, _ = self.args_in_param_order(names, e.args)
+        ordered, _ = self.args_in_param_order(names, e.args, consume=True)
         tagv = self.p.variant_index(t, vname)
         obj = self.call_rt("obj_new", [self.const(24 + 8 * len(names)), self.addr(self.p.td(t))])
         self.emit("store", obj, 16, self.const(tagv))
@@ -1090,6 +1312,9 @@ class FnLowering:
         return V(obj, t, True)
 
     def x_FieldAccess(self, e):
+        b = self.bound_read(e)
+        if b is not None:
+            return b
         obj = e.obj
         if isinstance(obj, N.Name) and self.lookup(obj.name) is None and obj.name not in self.captures \
                 and obj.name in self.p.universe.enums:
@@ -1147,14 +1372,22 @@ class FnLowering:
         names = [f for f, _ in self.p.record_fields(t)]
         vals = {}
         for f in e.fields:
-            vals[f.name] = self.expr(f.value)
+            vals[f.name] = self.cexpr(f.value)
         obj = self.call_rt("obj_new", [self.const(16 + 8 * len(names)), self.addr(self.p.td(t))])
         for i, n in enumerate(names):
             self.emit("store", obj, 16 + 8 * i, self.own(vals[n]))
         return V(obj, t, True)
 
     def x_WithExpr(self, e):
-        base = self.expr(e.base)
+        bp = path_of(e.base)
+        moved = self.moves(e.base)
+        if moved or bp is None:
+            src = self.cexpr(e.base)
+            if src.owned:
+                return self.with_in_place(e, src, bp if moved else None)
+            base = src
+        else:
+            base = self.expr(e.base)
         t = base.t
         fields = self.p.record_fields(t)
         upd = {f.name: self.expr(f.value) for f in e.fields}
@@ -1171,6 +1404,30 @@ class FnLowering:
                 self.emit("store", obj, 16 + 8 * i, r)
         self.drop(base)
         return V(obj, t, True)
+
+    def with_in_place(self, e, src, bp):
+        """`base with {...}` on an owned value: reuse the record when it is unique (else a copy), take out the fields
+        being replaced when nothing else reads them, then store the new values."""
+        t = src.t
+        u = self.unique_record(src)
+        saved = (self.bound, self.takeable)
+        if bp is not None:
+            self.bound = dict(self.bound)
+            self.bound[bp] = u
+            self.takeable = self.takeable | self.with_takes(e, bp)
+        upd = [(f.name, self.cexpr(f.value)) for f in e.fields]
+        self.bound, self.takeable = saved
+        for name, v in upd:
+            off = self.field_off(t, name)
+            ft = dict(self.p.record_fields(t))[name]
+            k = rck(ft)
+            new = self.own(v)
+            if k:
+                old = self.reg()
+                self.emit("load", old, u, off)
+                self.emit("release", k, old)
+            self.emit("store", u, off, new)
+        return V(u, t, True)
 
     # ---- match ----------------------------------------------------------------------------
     def x_Match(self, e):
@@ -1280,7 +1537,9 @@ class FnLowering:
         cap_types = []
         cap_vals = []
         for nm, loc in free:
-            if loc is not None:
+            if loc is not None and self.bound_prefix(nm) == nm:
+                v = V(self.bound[nm], loc.t, False)
+            elif loc is not None:
                 v = self.read_local(nm, loc)
             else:
                 idx, t = self.captures[nm]
@@ -1312,6 +1571,8 @@ class FnLowering:
         for i, p in enumerate(e.params):
             self.declare(p.name, 1 + i, ft.params[i], False)
         if not self.is_rt:
+            live = Liveness(self.locals_of([p.name for p in e.params], e.body))
+            self.cand = live.run_block(e.body) if isinstance(e.body, N.Block) else live.run_expr(e.body)
             self.emit("enter", self.p.str_obj("<lambda>"))
         if isinstance(e.body, N.Block):
             self.block_body(e.body)
@@ -1419,6 +1680,7 @@ def lower_test(prog, module, t, index):
     fl.ensures = None
     fl.decl = None
     fl.push_scope()
+    fl.cand = Liveness(fl.locals_of([], t.body)).run_block(t.body)
     fl.emit("enter", prog.str_obj(f'test "{t.name}"'))
     fl.block_body(t.body)
     if not fl.dead:

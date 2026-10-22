@@ -139,6 +139,15 @@ fn Bytes_concat(o: Word, other: Word) -> Word {
   return r
 }
 
+fn Bytes_concat_owned(o: Word, other: Word) -> Word {
+  let n = peek(o + 16)
+  let m = peek(other + 16)
+  let u = bytes_unique(o, m)
+  copy_bytes(peek(u + 32) + n, peek(other + 32), m)
+  poke(u + 16, n + m)
+  return u
+}
+
 fn bytes_push_raw(o: Word, k: Word) -> Word {
   let n = peek(o + 16)
   if peek(o) == 1 and n < peek(o + 24) {

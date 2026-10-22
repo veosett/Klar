@@ -144,7 +144,9 @@ flowchart LR
 
 * Values are 64-bit words: small `Int`s are tagged inline (`(n << 1) | 1`; overflow transparently becomes a bignum),
   heap objects carry a reference count and a type descriptor. Values are immutable, so reference counting needs no
-  cycle collector, and uniquely referenced values are updated in place (`xs = xs.push(v)` is amortized O(1)).
+  cycle collector, and uniquely referenced values are updated in place (`xs = xs.push(v)` is amortized O(1)) —
+  also across function calls and inside records: a parameter the function consumes is passed owned, the last use of
+  a variable moves it, and `s with { items: s.items.push(x) }` reuses a unique record.
 * Executables call only the OS: raw syscalls on Linux, `KERNEL32.dll` on Windows. Typical size: 50–150 KB.
 * Every back-end must produce identical output and error codes — `tests/native_diff.py` checks it on Linux and
   Windows.

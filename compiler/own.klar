@@ -1,0 +1,878 @@
+// Ownership for the native backend, in Klar (self-hosting): klar/native/own.py decision for decision.
+//
+// * `infer_owned`: the parameters each function consumes (passed owned; a fixpoint over the call graph).
+// * `liveness`: the uses of a local that are its last, path by path (`w`, `w.img`, `a.w`) — such a use in a
+//   consuming position moves the value instead of copying it, so unique records and collections are updated in
+//   place across function calls.
+//
+// Nodes are identified by their source span (`node_key`); live sets are sets of "path!excluded,fields" strings.
+use ast.{Arg, Block, Body, Else, Expr, FieldInit, FnDecl, MatchArm, Pattern, Span, Stmt, StrPiece}
+use checker.{CallInfo, Ck, Resolution, span_key}
+
+/// Methods whose receiver may be updated in place (runtime function <Owner>_<m>_owned).
+pub const REUSE: List[Str] = ["List.push", "List.set", "List.insert", "List.remove_at", "List.concat", "Bytes.push",
+  "Bytes.push_le", "Bytes.set", "Bytes.concat", "Map.set", "Map.remove", "Map.update"]
+
+/// Where the checker's annotations of a function body are: its module's checker and its file.
+pub type Cx { ck: Ck, file: Str }
+
+pub fn node_key(sp: Span) -> Str {
+  return "{sp.line}:{sp.col}:{sp.end_line}:{sp.end_col}"
+}
+
+/// `x`, `x.f.g` for a Name or a chain of field accesses on a Name.
+pub fn path_of(e: Expr) -> Option[Str] {
+  return match e {
+    Expr.Name(_, n) => Some(n),
+    Expr.FieldAccess(_, obj, name, _) => match path_of(obj) {
+      Some(p) => Some(p + "." + name),
+      None => None,
+    },
+    _ => None,
+  }
+}
+
+pub fn root_of(p: Str) -> Str {
+  return match p.index_of(".") {
+    Some(i) => p.slice(0, i),
+    None => p,
+  }
+}
+
+/// p is q or lies inside q.
+pub fn extends(p: Str, q: Str) -> Bool {
+  return p == q or p.starts_with(q + ".")
+}
+
+fn overlaps(p: Str, q: Str) -> Bool {
+  return extends(p, q) or extends(q, p)
+}
+
+fn item_key(path: Str, excl: List[Str]) -> Str {
+  return path + "!" + excl.sort().join(",")
+}
+
+/// Does a move of path p break the later use `item`?
+fn hits(p: Str, item: Str) -> Bool {
+  let i = item.index_of("!").unwrap_or(item.len())
+  let q = item.slice(0, i)
+  if extends(q, p) {
+    return true
+  }
+  if p.starts_with(q + ".") {
+    let rest = p.slice(q.len() + 1, p.len())
+    let seg = root_of(rest)
+    let excl = item.slice(i + 1, item.len()).split(",")
+    return not excl.contains(seg)
+  }
+  return false
+}
+
+fn is_name(e: Expr, name: Str) -> Bool {
+  return match e {
+    Expr.Name(_, n) => n == name,
+    _ => false,
+  }
+}
+
+fn resolution_at(cx: Cx, sp: Span) -> Option[Resolution] {
+  return cx.ck.resolutions.get(span_key(cx.file, sp))
+}
+
+fn info_at(cx: Cx, sp: Span) -> Option[CallInfo] {
+  return cx.ck.calls.get(span_key(cx.file, sp))
+}
+
+/// The resolution kind of a method call ("" when unknown).
+fn method_kind(cx: Cx, sp: Span) -> Str {
+  return match resolution_at(cx, sp) {
+    Some(r) => r.kind,
+    None => "",
+  }
+}
+
+fn is_reuse(cx: Cx, sp: Span) -> Bool {
+  return match resolution_at(cx, sp) {
+    Some(r) => r.kind == "builtin" and REUSE.contains(r.owner + "." + r.name),
+    None => false,
+  }
+}
+
+/// A direct call of a user function: its callee (module#index), parameter names and whether a receiver comes first.
+type Callee { key: Str, names: List[Str], recv: Bool }
+
+fn callee_of(info: Option[CallInfo], recv: Bool) -> Option[Callee] {
+  return match info {
+    Some(i) => match i.sig.fdecl {
+      Some(_) => Some(Callee { key: "{i.sig.mod_name}#{i.sig.decl}", names: i.sig.params.map(fn(p) => p.first), recv: recv }),
+      None => None,
+    },
+    None => None,
+  }
+}
+
+fn user_callee(cx: Cx, e: Expr) -> Option[Callee] {
+  return match e {
+    Expr.Call(sp, Expr.Name(_, _), _) => callee_of(info_at(cx, sp), false),
+    Expr.MethodCall(sp, _, _, _, _) => match method_kind(cx, sp) == "ufcs" {
+      true => callee_of(info_at(cx, sp), true),
+      false => None,
+    },
+    _ => None,
+  }
+}
+
+/// (parameter index, argument) in source order.
+fn arg_positions(names: List[Str], args: List[Arg]) -> List[Pair[Int, Arg]] {
+  var out: List[Pair[Int, Arg]] = []
+  var pos = 0
+  for a in args {
+    let name = match a.name {
+      Some(n) => n,
+      None => names.get_or(pos, ""),
+    }
+    if a.name == None {
+      pos = pos + 1
+    }
+    out = out.push(Pair { first: names.index_of(name).unwrap_or(0), second: a })
+  }
+  return out
+}
+
+// ---- walking every expression of a body (the order does not matter here) --------------------------------------
+
+pub fn sub_exprs(e: Expr) -> List[Expr] {
+  return match e {
+    Expr.StrLit(_, parts) => parts.flat_map(fn(p) => match p {
+      StrPiece.Code(x) => [x],
+      _ => [],
+    }),
+    Expr.ListLit(_, items) => items,
+    Expr.MapLit(_, entries) => entries.flat_map(fn(m) => [m.key, m.value]),
+    Expr.Unary(_, _, x) => [x],
+    Expr.Binary(_, _, l, rr) => [l, rr],
+    Expr.Call(_, f, args) => [f].concat(args.map(fn(a) => a.value)),
+    Expr.MethodCall(_, o, _, _, args) => [o].concat(args.map(fn(a) => a.value)),
+    Expr.FieldAccess(_, o, _, _) => [o],
+    Expr.Try(_, x) => [x],
+    Expr.RecordLit(_, _, fs) => fs.map(fn(f) => f.value),
+    Expr.WithExpr(_, b, fs) => [b].concat(fs.map(fn(f) => f.value)),
+    Expr.Match(_, subj, arms) => [subj].concat(arms.flat_map(fn(a) => arm_exprs(a))),
+    Expr.Lambda(_, _, _, body) => body_exprs(body),
+    _ => [],
+  }
+}
+
+fn arm_exprs(a: MatchArm) -> List[Expr] {
+  let g = match a.guard {
+    Some(x) => [x],
+    None => [],
+  }
+  return g.concat(body_exprs(a.body))
+}
+
+pub fn body_exprs(b: Body) -> List[Expr] {
+  return match b {
+    Body.ExprBody(x) => [x],
+    Body.BlockBody(blk) => block_exprs(blk),
+  }
+}
+
+fn block_exprs(b: Block) -> List[Expr] {
+  return b.stmts.flat_map(stmt_exprs)
+}
+
+/// The expressions directly in a statement and in its nested blocks.
+fn stmt_exprs(s: Stmt) -> List[Expr] {
+  return match s {
+    Stmt.Let(_, _, _, _, _, v, _) => [v],
+    Stmt.Assign(_, _, v) => [v],
+    Stmt.Return(_, v) => match v {
+      Some(x) => [x],
+      None => [],
+    },
+    Stmt.If(_, c, then, else_) => [c].concat(block_exprs(then)).concat(match else_ {
+      Else.NoElse => [],
+      Else.ElseBlock(b) => block_exprs(b),
+      Else.ElseIf(st) => stmt_exprs(st),
+    }),
+    Stmt.While(_, c, body) => [c].concat(block_exprs(body)),
+    Stmt.For(_, _, _, it, body) => [it].concat(block_exprs(body)),
+    Stmt.Assert(_, c, m) => match m {
+      Some(x) => [c, x],
+      None => [c],
+    },
+    Stmt.ExprStmt(_, x) => [x],
+    _ => [],
+  }
+}
+
+/// Every expression node of a subtree (pre-order).
+pub fn all_exprs(roots: List[Expr]) -> List[Expr] {
+  var out: List[Expr] = []
+  var stack = roots.reverse()
+  while not stack.is_empty() {
+    let e = stack.last().unwrap_or(Expr.UnitLit(span: Span { line: 0, col: 0, end_line: 0, end_col: 0 }))
+    stack = stack.take(stack.len() - 1)
+    out = out.push(e)
+    stack = stack.concat(sub_exprs(e).reverse())
+  }
+  return out
+}
+
+/// The statements of a block, nested ones included.
+fn all_stmts(b: Block) -> List[Stmt] {
+  var out: List[Stmt] = []
+  for s in b.stmts {
+    out = out.push(s)
+    out = out.concat(match s {
+      Stmt.If(_, _, then, else_) => all_stmts(then).concat(match else_ {
+        Else.NoElse => [],
+        Else.ElseBlock(eb) => all_stmts(eb),
+        Else.ElseIf(st) => all_stmts(Block { span: Span { line: 0, col: 0, end_line: 0, end_col: 0 }, stmts: [st] }),
+      }),
+      Stmt.While(_, _, body) => all_stmts(body),
+      Stmt.For(_, _, _, _, body) => all_stmts(body),
+      _ => [],
+    })
+  }
+  return out
+}
+
+/// The blocks of match arms and lambdas inside expressions.
+fn inner_blocks(es: List[Expr]) -> List[Block] {
+  var out: List[Block] = []
+  for e in es {
+    match e {
+      Expr.Match(_, _, arms) => {
+        for a in arms {
+          match a.body {
+            Body.BlockBody(b) => {
+              out = out.push(b)
+            },
+            _ => {},
+          }
+        }
+      },
+      Expr.Lambda(_, _, _, Body.BlockBody(b)) => {
+        out = out.push(b)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+/// Every statement of a body, including those in match-arm and lambda blocks (like nodes.walk).
+fn every_stmt(b: Block) -> List[Stmt] {
+  var out: List[Stmt] = []
+  var pending = [b]
+  while not pending.is_empty() {
+    let blk = pending.last().unwrap_or(b)
+    pending = pending.take(pending.len() - 1)
+    let ss = all_stmts(blk)
+    out = out.concat(ss)
+    pending = pending.concat(inner_blocks(all_exprs(ss.flat_map(stmt_exprs))))
+  }
+  return out
+}
+
+fn names_in(es: List[Expr]) -> List[Str] {
+  var out: List[Str] = []
+  for x in all_exprs(es) {
+    match x {
+      Expr.Name(_, n) => {
+        out = out.push(n)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+// ---- parameters -----------------------------------------------------------------------------------------------
+
+/// A function whose consumed parameters are wanted: its key (module#index), declaration and annotations.
+pub type OwnFn { key: Str, decl: FnDecl, cx: Cx }
+
+type Edge { from: Str, i: Int, to: Str, j: Int }
+
+fn param_index(e: Expr, pidx: Map[Str, Int], keep: List[Str]) -> Int {
+  return match path_of(e) {
+    Some(p) => match keep.contains(root_of(p)) {
+      true => -1,
+      false => pidx.get(root_of(p)).unwrap_or(-1),
+    },
+    None => -1,
+  }
+}
+
+/// {module#index: consumed parameter indices}.
+pub fn infer_owned(fns: List[OwnFn]) -> Map[Str, List[Int]] {
+  var owned: Map[Str, List[Int]] = Map {}
+  var edges: List[Edge] = []
+  for f in fns {
+    let d = f.decl
+    let cx = f.cx
+    var pidx: Map[Str, Int] = Map {}
+    var k = 0
+    for p in d.params {
+      pidx = pidx.set(p.name, k)
+      k = k + 1
+    }
+    let keep = names_in(d.post)
+    var got: List[Int] = []
+    let body = match d.body {
+      Some(b) => b,
+      None => Block { span: d.span, stmts: [] },
+    }
+    let stmts = every_stmt(body)
+    var marks: List[Expr] = []
+    for s in stmts {
+      match s {
+        Stmt.Let(_, _, _, _, _, v, _) => {
+          marks = marks.push(v)
+        },
+        Stmt.Assign(_, _, v) => {
+          marks = marks.push(v)
+        },
+        Stmt.Return(_, Some(v)) => {
+          marks = marks.push(v)
+        },
+        _ => {},
+      }
+    }
+    for e in all_exprs(stmts.flat_map(stmt_exprs)) {
+      match e {
+        Expr.RecordLit(_, _, fs) => {
+          marks = marks.concat(fs.map(fn(x) => x.value))
+        },
+        Expr.WithExpr(_, base, fs) => {
+          marks = marks.push(base).concat(fs.map(fn(x) => x.value))
+        },
+        Expr.ListLit(_, items) => {
+          marks = marks.concat(items)
+        },
+        Expr.MapLit(_, entries) => {
+          marks = marks.concat(entries.flat_map(fn(m) => [m.key, m.value]))
+        },
+        Expr.Call(_, callee, args) => {
+          match user_callee(cx, e) {
+            Some(c) => {
+              for pa in arg_positions(c.names, args) {
+                let i = param_index(e: pa.second.value, pidx: pidx, keep: keep)
+                if i >= 0 {
+                  edges = edges.push(Edge { from: f.key, i: i, to: c.key, j: pa.first })
+                }
+              }
+            },
+            None => {
+              if is_name(callee, "Some") or is_name(callee, "Ok") or is_name(callee, "Err") {
+                marks = marks.concat(args.map(fn(a) => a.value))
+              }
+            },
+          }
+        },
+        Expr.MethodCall(sp, obj, _, _, args) => {
+          match user_callee(cx, e) {
+            Some(c) => {
+              let ri = param_index(e: obj, pidx: pidx, keep: keep)
+              if ri >= 0 {
+                edges = edges.push(Edge { from: f.key, i: ri, to: c.key, j: 0 })
+              }
+              for pa in arg_positions(c.names.drop(1), args) {
+                let i = param_index(e: pa.second.value, pidx: pidx, keep: keep)
+                if i >= 0 {
+                  edges = edges.push(Edge { from: f.key, i: i, to: c.key, j: pa.first + 1 })
+                }
+              }
+            },
+            None => {
+              let mk = method_kind(cx, sp)
+              if mk == "variant" {
+                marks = marks.concat(args.map(fn(a) => a.value))
+              } else if is_reuse(cx, sp) {
+                marks = marks.push(obj)
+              }
+            },
+          }
+        },
+        _ => {},
+      }
+    }
+    for m in marks {
+      let i = param_index(e: m, pidx: pidx, keep: keep)
+      if i >= 0 and not got.contains(i) {
+        got = got.push(i)
+      }
+    }
+    owned = owned.set(f.key, got)
+  }
+  var changed = true
+  while changed {
+    changed = false
+    for ed in edges {
+      let to = owned.get(ed.to).unwrap_or([])
+      let from = owned.get(ed.from).unwrap_or([])
+      if to.contains(ed.j) and not from.contains(ed.i) {
+        owned = owned.set(ed.from, from.push(ed.i))
+        changed = true
+      }
+    }
+  }
+  return owned
+}
+
+// ---- last uses ------------------------------------------------------------------------------------------------
+
+/// A use of a local: its path, statement, the calls / `with`s around it, the call or `with` it is a direct
+/// argument / base of ("" if none), what must not overlap it for a move, and the expressions around it.
+type Occ { path: Str, stmt: Str, regions: List[Str], parent: Str, live: List[Str], alias: Bool,
+  anc: List[Pair[Str, Bool]] }
+
+type Lv {
+  cx: Cx,
+  locals: List[Str],
+  no_move: List[Str],
+  /// pattern binding -> the path of the matched value ("" when it is a temporary)
+  alias: Map[Str, Str],
+  occs: Map[Str, Occ],
+  regions: List[Str],
+  stmt: Str,
+  anc: List[Pair[Str, Bool]],
+  /// [exit live set, head live set] of the loops around
+  loops: List[Pair[Map[Str, Bool], Map[Str, Bool]]],
+}
+
+/// A walk result: the state and the live set before the walked code.
+type LS { s: Lv, live: Map[Str, Bool] }
+
+fn union(a: Map[Str, Bool], b: Map[Str, Bool]) -> Map[Str, Bool] {
+  var out = a
+  for k in b.keys() {
+    out = out.set(k, true)
+  }
+  return out
+}
+
+fn same_set(a: Map[Str, Bool], b: Map[Str, Bool]) -> Bool {
+  return a.len() == b.len() and a.keys().all(fn(k) => b.has(k))
+}
+
+fn without_root(live: Map[Str, Bool], name: Str) -> Map[Str, Bool] {
+  return live.filter(fn(k, _) => root_of(k.slice(0, k.index_of("!").unwrap_or(k.len()))) != name)
+}
+
+fn add_item(live: Map[Str, Bool], path: Str, excl: List[Str]) -> Map[Str, Bool] {
+  return live.set(item_key(path, excl), true)
+}
+
+/// Is o2 inside a subexpression that has produced a value of its own before o runs?
+fn finished(o2: Occ, o: Occ) -> Bool {
+  var k = 0
+  while k < o.anc.len() and k < o2.anc.len() and o.anc.get_or(k, Pair { first: "", second: false }).first == o2.anc.get_or(
+    k, Pair { first: "?", second: false }).first {
+      k = k + 1
+    }
+  return o2.anc.drop(k).any(fn(a) => a.second)
+}
+
+fn candidate(o: Occ, occs: List[Occ], no_move: List[Str]) -> Bool {
+  if o.alias or no_move.contains(root_of(o.path)) {
+    return false
+  }
+  if o.live.any(fn(it) => hits(o.path, it)) {
+    return false
+  }
+  for o2 in occs {
+    if overlaps(o2.path, o.path) and not finished(o2, o) {
+      let r = o.parent
+      if r == "" or not o2.regions.contains(r) {
+        return false
+      }
+      if r.starts_with("c") and not o2.path.starts_with(o.path + ".") {
+        return false
+      }
+      if r.starts_with("w") and not extends(o2.path, o.path) {
+        return false
+      }
+    }
+  }
+  return true
+}
+
+/// The keys of the uses that may move their value.
+fn candidates(s: Lv) -> Map[Str, Bool] {
+  var by_stmt: Map[Str, List[Pair[Str, Occ]]] = Map {}
+  for e in s.occs.entries() {
+    by_stmt = by_stmt.set(e.value.stmt, by_stmt.get(e.value.stmt).unwrap_or([]).push(Pair { first: e.key, second: e.value
+    }))
+  }
+  var out: Map[Str, Bool] = Map {}
+  for g in by_stmt.values() {
+    for p in g {
+      let others = g.filter(fn(q) => q.first != p.first).map(fn(q) => q.second)
+      if candidate(o: p.second, occs: others, no_move: s.no_move) {
+        out = out.set(p.first, true)
+      }
+    }
+  }
+  return out
+}
+
+pub fn liveness_block(cx: Cx, locals: List[Str], no_move: List[Str], b: Block) -> Map[Str, Bool] {
+  let s = Lv { cx: cx, locals: locals, no_move: no_move, alias: Map {}, occs: Map {}, regions: [], stmt: "", anc: [],
+    loops: [] }
+  return candidates(block(s: s, b: b, live: Map {}).s)
+}
+
+pub fn liveness_expr(cx: Cx, locals: List[Str], e: Expr) -> Map[Str, Bool] {
+  let s = Lv { cx: cx, locals: locals, no_move: [], alias: Map {}, occs: Map {}, regions: [], stmt: "e:" + node_key(
+    expr_span_of(e)), anc: [], loops: [] }
+  return candidates(ex(s: s, e: e, live: Map {}, parent: "", check: None, excl: []).s)
+}
+
+fn expr_span_of(e: Expr) -> Span {
+  return match e {
+    Expr.IntLit(sp, _) => sp,
+    Expr.FloatLit(sp, _) => sp,
+    Expr.StrLit(sp, _) => sp,
+    Expr.BoolLit(sp, _) => sp,
+    Expr.UnitLit(sp) => sp,
+    Expr.ListLit(sp, _) => sp,
+    Expr.MapLit(sp, _) => sp,
+    Expr.Name(sp, _) => sp,
+    Expr.Unary(sp, _, _) => sp,
+    Expr.Binary(sp, _, _, _) => sp,
+    Expr.Call(sp, _, _) => sp,
+    Expr.MethodCall(sp, _, _, _, _) => sp,
+    Expr.FieldAccess(sp, _, _, _) => sp,
+    Expr.Try(sp, _) => sp,
+    Expr.RecordLit(sp, _, _) => sp,
+    Expr.WithExpr(sp, _, _) => sp,
+    Expr.Match(sp, _, _) => sp,
+    Expr.Lambda(sp, _, _, _) => sp,
+  }
+}
+
+fn stmt_span(st: Stmt) -> Span {
+  return match st {
+    Stmt.Let(sp, _, _, _, _, _, _) => sp,
+    Stmt.Assign(sp, _, _) => sp,
+    Stmt.Return(sp, _) => sp,
+    Stmt.If(sp, _, _, _) => sp,
+    Stmt.While(sp, _, _) => sp,
+    Stmt.For(sp, _, _, _, _) => sp,
+    Stmt.Break(sp) => sp,
+    Stmt.Continue(sp) => sp,
+    Stmt.Assert(sp, _, _) => sp,
+    Stmt.ExprStmt(sp, _) => sp,
+  }
+}
+
+// ---- statements
+
+fn block(s: Lv, b: Block, live: Map[Str, Bool]) -> LS {
+  var st = s
+  var lv = live
+  for x in b.stmts.reverse() {
+    let r = stmt(s: st, st: x, live: lv)
+    st = r.s
+    lv = r.live
+  }
+  return LS { s: st, live: lv }
+}
+
+fn stmt(s: Lv, st: Stmt, live: Map[Str, Bool]) -> LS {
+  let r = stmt_in(s: s with { stmt: "s:" + node_key(stmt_span(st)), anc: [], regions: [] }, st: st, live: live)
+  return LS { s: r.s with { stmt: s.stmt, anc: s.anc, regions: s.regions }, live: r.live }
+}
+
+fn walk(s: Lv, e: Expr, live: Map[Str, Bool]) -> LS {
+  return ex(s: s, e: e, live: live, parent: "", check: None, excl: [])
+}
+
+fn stmt_in(s: Lv, st: Stmt, live: Map[Str, Bool]) -> LS {
+  return match st {
+    Stmt.Let(_, name, _, _, _, v, _) => walk(s: s, e: v, live: without_root(live, name)),
+    Stmt.Assign(_, name, v) => walk(s: s, e: v, live: without_root(live, name)),
+    Stmt.Return(_, v) => match v {
+      Some(x) => walk(s: s, e: x, live: Map {}),
+      None => LS { s: s, live: Map {} },
+    },
+    Stmt.ExprStmt(_, x) => walk(s: s, e: x, live: live),
+    Stmt.If(_, c, then, else_) => {
+      let lt = block(s: s, b: then, live: live)
+      let le = match else_ {
+        Else.NoElse => LS { s: lt.s, live: live },
+        Else.ElseBlock(b) => block(s: lt.s, b: b, live: live),
+        Else.ElseIf(x) => stmt(s: lt.s, st: x, live: live),
+      }
+      return walk(s: le.s, e: c, live: union(lt.live, le.live))
+    },
+    Stmt.While(_, c, body) => {
+      var head = live
+      var cur = s
+      var going = true
+      while going {
+        let b = block(s: cur with { loops: cur.loops.push(Pair { first: live, second: head }) }, b: body, live: head)
+        let after = b.s with { loops: cur.loops }
+        let cnd = walk(s: after, e: c, live: union(b.live, live))
+        let nw = union(cnd.live, head)
+        cur = cnd.s
+        if same_set(nw, head) {
+          going = false
+        } else {
+          head = nw
+        }
+      }
+      return LS { s: cur, live: head }
+    },
+    Stmt.For(_, v, _, it, body) => {
+      var head = without_root(live, v)
+      var cur = s
+      var going = true
+      while going {
+        let b = block(s: cur with { loops: cur.loops.push(Pair { first: live, second: head }) }, b: body, live: head)
+        cur = b.s with { loops: cur.loops }
+        let nw = union(without_root(b.live, v), head)
+        if same_set(nw, head) {
+          going = false
+        } else {
+          head = nw
+        }
+      }
+      return walk(s: cur, e: it, live: head)
+    },
+    Stmt.Break(_) => LS { s: s, live: s.loops.last().map(fn(p) => p.first).unwrap_or(Map {}) },
+    Stmt.Continue(_) => LS { s: s, live: s.loops.last().map(fn(p) => p.second).unwrap_or(Map {}) },
+    Stmt.Assert(_, c, m) => {
+      let a = match m {
+        Some(x) => walk(s: s, e: x, live: live),
+        None => LS { s: s, live: live },
+      }
+      return walk(s: a.s, e: c, live: a.live)
+    },
+  }
+}
+
+// ---- expressions (walked backwards, in reverse evaluation order)
+
+/// The path of a use of a local (an alias stands for the matched value), and whether it is an alias.
+fn local_path(s: Lv, e: Expr) -> Option[Pair[Str, Bool]] {
+  return match path_of(e) {
+    Some(p) => {
+      let r = root_of(p)
+      return match s.alias.get(r) {
+        Some(a) => match a == "" {
+          true => None,
+          false => Some(Pair { first: a, second: true }),
+        },
+        None => match s.locals.contains(r) {
+          true => Some(Pair { first: p, second: false }),
+          false => None,
+        },
+      }
+    },
+    None => None,
+  }
+}
+
+fn passes_through(cx: Cx, e: Expr) -> Bool {
+  return match e {
+    Expr.FieldAccess(_, _, _, _) => true,
+    Expr.Try(_, _) => true,
+    Expr.Call(_, Expr.Name(_, "dbg"), _) => user_callee(cx, e) == None,
+    _ => false,
+  }
+}
+
+fn ex(s: Lv, e: Expr, live: Map[Str, Bool], parent: Str, check: Option[Map[Str, Bool]], excl: List[Str]) -> LS {
+  match local_path(s, e) {
+    Some(lp) => {
+      var par = parent
+      var ex2 = excl
+      if lp.second {
+        par = ""
+        ex2 = []
+      }
+      let chk = check.unwrap_or(live)
+      let o = Occ { path: lp.first, stmt: s.stmt, regions: s.regions, parent: par, live: chk.keys(), alias: lp.second,
+        anc: s.anc }
+      return LS { s: s with { occs: s.occs.set(node_key(expr_span_of(e)), o) }, live: add_item(live: live, path: lp.first, excl: ex2) }
+    },
+    None => {},
+  }
+  let key = node_key(expr_span_of(e))
+  let inner = s with { anc: s.anc.push(Pair { first: key, second: not passes_through(s.cx, e) }) }
+  let r = ex_in(s: inner, e: e, live: live, key: key)
+  return LS { s: r.s with { anc: s.anc }, live: r.live }
+}
+
+fn walk_all(s: Lv, es: List[Expr], live: Map[Str, Bool]) -> LS {
+  var st = s
+  var lv = live
+  for x in es.reverse() {
+    let r = walk(s: st, e: x, live: lv)
+    st = r.s
+    lv = r.live
+  }
+  return LS { s: st, live: lv }
+}
+
+/// The arguments of a call, backwards, inside its region; direct ones are marked when the call is a user call.
+fn call_args(s: Lv, args: List[Arg], live: Map[Str, Bool], key: Str, direct: Bool) -> LS {
+  let after = live
+  var st = s with { regions: s.regions.push(key) }
+  var lv = live
+  for a in args.reverse() {
+    let r = match direct {
+      true => ex(s: st, e: a.value, live: lv, parent: key, check: Some(after), excl: []),
+      false => walk(s: st, e: a.value, live: lv),
+    }
+    st = r.s
+    lv = r.live
+  }
+  return LS { s: st with { regions: s.regions }, live: lv }
+}
+
+fn ex_in(s: Lv, e: Expr, live: Map[Str, Bool], key: Str) -> LS {
+  return match e {
+    Expr.FieldAccess(_, obj, _, _) => walk(s: s, e: obj, live: live),
+    Expr.StrLit(_, parts) => walk_all(s: s, es: parts.flat_map(fn(p) => match p {
+      StrPiece.Code(x) => [x],
+      _ => [],
+    }), live: live),
+    Expr.ListLit(_, items) => walk_all(s: s, es: items, live: live),
+    Expr.MapLit(_, entries) => walk_all(s: s, es: entries.flat_map(fn(m) => [m.key, m.value]), live: live),
+    Expr.Unary(_, _, x) => walk(s: s, e: x, live: live),
+    Expr.Binary(_, _, l, rr) => walk_all(s: s, es: [l, rr], live: live),
+    Expr.Try(_, x) => walk(s: s, e: x, live: live),
+    Expr.RecordLit(_, _, fs) => walk_all(s: s, es: fs.map(fn(f) => f.value), live: live),
+    Expr.WithExpr(_, base, fs) => {
+      let wk = "w" + key
+      let f = walk_all(s: s with { regions: s.regions.push(wk) }, es: fs.map(fn(x) => x.value), live: live)
+      return ex(s: f.s with { regions: s.regions }, e: base, live: f.live, parent: wk, check: Some(live), excl: fs.map(fn(
+        x) => x.name))
+    },
+    Expr.Call(_, callee, args) => {
+      let direct = user_callee(s.cx, e) != None
+      let a = call_args(s: s, args: args, live: live, key: "c" + key, direct: direct)
+      let local_callee = match callee {
+        Expr.Name(_, _) => local_path(a.s, callee) != None,
+        _ => true,
+      }
+      if local_callee {
+        return walk(s: a.s, e: callee, live: a.live)
+      }
+      return a
+    },
+    Expr.MethodCall(sp, obj, _, _, args) => {
+      let k = method_kind(s.cx, sp)
+      let direct = k == "ufcs" or k == "trait"
+      let a = call_args(s: s, args: args, live: live, key: "c" + key, direct: direct)
+      if k == "variant" {
+        return a
+      }
+      if direct or is_reuse(s.cx, sp) {
+        return ex(s: a.s, e: obj, live: a.live, parent: "c" + key, check: Some(live), excl: [])
+      }
+      return walk(s: a.s, e: obj, live: a.live)
+    },
+    Expr.Match(_, subject, arms) => {
+      let sp = match local_path(s, subject) {
+        Some(lp) => lp.first,
+        None => "",
+      }
+      var st = s
+      for arm in arms {
+        for n in pattern_binds(arm.pattern) {
+          st = st with { alias: st.alias.set(n, sp) }
+        }
+      }
+      var outs: Map[Str, Bool] = Map {}
+      for arm in arms {
+        let b = match arm.body {
+          Body.BlockBody(blk) => block(s: st, b: blk, live: live),
+          Body.ExprBody(x) => walk(s: st, e: x, live: live),
+        }
+        let g = match arm.guard {
+          Some(x) => walk(s: b.s, e: x, live: b.live),
+          None => b,
+        }
+        st = g.s
+        outs = union(outs, g.live)
+      }
+      return walk(s: st, e: subject, live: outs)
+    },
+    Expr.Lambda(_, params, _, body) => {
+      var own_names = params.map(fn(p) => p.name)
+      let es = body_exprs(body)
+      var stmts = match body {
+        Body.BlockBody(b) => every_stmt(b),
+        Body.ExprBody(_) => [],
+      }
+      for blk in inner_blocks(all_exprs(es)) {
+        stmts = stmts.concat(every_stmt(blk))
+      }
+      for st in stmts {
+        match st {
+          Stmt.Let(_, n, _, _, _, _, _) => {
+            own_names = own_names.push(n)
+          },
+          Stmt.For(_, n, _, _, _) => {
+            own_names = own_names.push(n)
+          },
+          _ => {},
+        }
+      }
+      let all = all_exprs(es)
+      for x in all {
+        match x {
+          Expr.Match(_, _, arms) => {
+            for a in arms {
+              own_names = own_names.concat(pattern_binds(a.pattern))
+            }
+          },
+          _ => {},
+        }
+      }
+      var lv = live
+      var seen: List[Str] = []
+      for x in all {
+        match x {
+          Expr.Name(_, n) => {
+            if not own_names.contains(n) and not seen.contains(n) {
+              seen = seen.push(n)
+            }
+          },
+          _ => {},
+        }
+      }
+      for n in seen {
+        match s.alias.get(n) {
+          Some(a) => {
+            if a != "" {
+              lv = add_item(live: lv, path: a, excl: [])
+            }
+          },
+          None => {
+            if s.locals.contains(n) {
+              lv = add_item(live: lv, path: n, excl: [])
+            }
+          },
+        }
+      }
+      return LS { s: s, live: lv }
+    },
+    _ => LS { s: s, live: live },
+  }
+}
+
+fn pattern_binds(p: Pattern) -> List[Str] {
+  return match p {
+    Pattern.Bind(_, n) => [n],
+    Pattern.Variant(_, _, _, args) => args.flat_map(pattern_binds),
+    _ => [],
+  }
+}

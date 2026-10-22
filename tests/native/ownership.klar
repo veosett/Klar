@@ -1,0 +1,113 @@
+// In-place updates across function calls (klar/native/own.py): every case must print exactly what the
+// interpreter prints, whether the value is unique (updated in place) or shared (copied).
+
+type Inner { items: List[Int], name: Str }
+
+type State { inner: Inner, log: List[Str], counts: Map[Str, Int], data: Bytes, n: Int }
+
+type Pair2 { s: State, v: Int }
+
+fn new_state() -> State {
+  return State { inner: Inner { items: [], name: "st" }, log: [], counts: Map {}, data: bytes_of([]), n: 0 }
+}
+
+fn add(s: State, x: Int) -> State {
+  return s with { inner: s.inner with { items: s.inner.items.push(x) }, n: s.n + 1 }
+}
+
+fn note(s: State, msg: Str) -> State {
+  return s with { log: s.log.push(msg), counts: s.counts.set(msg, s.counts.get(msg).unwrap_or(0) + 1) }
+}
+
+fn bytes_in(s: State, b: Int) -> State {
+  var d = s.data
+  d = d.push(b)
+  return s with { data: d.concat(bytes_of([b, b])) }
+}
+
+fn step(s: State, x: Int) -> Pair2 {
+  let t = add(s, x)
+  return Pair2 { s: note(t, "add"), v: x * 2 }
+}
+
+/// reads the state after handing it on: the callee must not have changed what we still see
+fn keep_old(s: State) -> Int {
+  let t = add(s, 100)
+  return s.n * 1000 + t.n
+}
+
+fn total(xs: List[Int]) -> Int {
+  var sum = 0
+  for x in xs {
+    sum = sum + x
+  }
+  return sum
+}
+
+fn describe(s: State) -> Str {
+  return "{s.inner.name}: n={s.n} items={s.inner.items} log={s.log.len()} data={s.data.hex()}"
+}
+
+fn main() uses io {
+  // unique state threaded through calls: updated in place
+  var s = new_state()
+  var i = 0
+  while i < 5 {
+    s = add(s, i)
+    i = i + 1
+  }
+  s = note(note(s, "a"), "b")
+  s = bytes_in(s, 7)
+  print(describe(s))
+
+  // a shared state: the copy must not change the original
+  let saved = s
+  s = add(s, 42)
+  print(describe(saved))
+  print(describe(s))
+
+  // the pair pattern: take the state out of a result record
+  let r = step(s, 3)
+  s = r.s
+  print("{r.v} {describe(s)}")
+  let r2 = step(saved, 9)
+  print("{r2.v} {describe(r2.s)} {describe(saved)}")
+
+  // a value used after it was passed on
+  print(keep_old(s))
+  print(keep_old(saved))
+
+  // closures capture what they need before the state moves on
+  let before = fn() => describe(saved)
+  s = add(s, 1)
+  print(before())
+
+  // match bindings borrow from the matched value
+  let opt: Option[State] = Some(s)
+  match opt {
+    Some(st) => {
+      let t = add(st, 5)
+      print("{st.n} {t.n}")
+    },
+    None => print("none"),
+  }
+
+  // lists: unique and shared
+  var xs = [1, 2, 3]
+  let ys = xs
+  xs = xs.push(4)
+  print("{xs} {ys} {total(xs)} {total(ys)}")
+  var zs = [0]
+  for x in xs {
+    zs = zs.push(x * x)
+  }
+  print(zs)
+
+  // nested updates of a record field that the state still shares with `saved`
+  let s3 = saved with { inner: saved.inner with { name: "copy" } }
+  print("{s3.inner.name} {saved.inner.name}")
+
+  // the same variable twice in one call
+  let both = Pair2 { s: s, v: s.n }
+  print("{both.v} {describe(both.s)}")
+}

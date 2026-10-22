@@ -99,7 +99,8 @@ fn main() uses io {
 
 A bare `xs.push(4)` statement is **a compile error** (E0405) — the most common model mistake. Immutability makes
 code predictable: passing a value to a function never changes it behind your back. It costs no speed: when a
-list has only one reference, the compiler quietly updates it in place.
+list has only one reference, the compiler quietly updates it in place — also when the state is passed through
+functions (`s = add(s, x)`, `return s with { items: s.items.push(x) }`).
 
 ## 5. Functions: the signature is a contract
 
