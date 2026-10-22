@@ -756,6 +756,43 @@ fn main() uses io {
         self.assertIn("E0003", errs("trait T {\n  fn make() -> Int\n}\n"))
         self.assertIn("E0003", errs("fn f(self) -> Int {\n  return 1\n}\n"))
 
+    def test_generic_impls(self):
+        src = self.BASE + """
+type Pile[T] { items: List[T] }
+
+impl[T: Shape] Shape for Pile[T] {
+  fn area(self) -> Float {
+    return total(self.items)
+  }
+}
+
+impl[T: Shape] Shape for List[T] {
+  fn area(self) -> Float {
+    return total(self)
+  }
+}
+
+fn main() uses io {
+  let p = Pile { items: [Sq { side: 2.0 }, Sq { side: 1.0 }] }
+  print(p.area())
+  print(total([p, Pile { items: [] }]))
+  print([[Circle { r: 1.0 }]].label())
+}
+"""
+        self.assertEqual(run(src), "5.0\n5.0\narea 3.0\n")
+        bad = src.replace("print(p.area())", "print(total([Pile { items: [1] }]))")
+        ds = [d for d in diags(bad) if d.code == "E0220"]
+        self.assertEqual(len(ds), 1)
+        self.assertIn("only if `Int` implements `Shape`", ds[0].hint)
+        def errs(extra):
+            return errors(self.BASE + "type Pile[T] { items: List[T] }\n" + extra)
+        body = " {\n  fn area(self) -> Float {\n    return 1.0\n  }\n}\n"
+        self.assertEqual(errs("impl[T] Shape for Pile[T]" + body), [])
+        for target in ("impl Shape for Pile[Int]", "impl[T] Shape for Pile[Int]", "impl[T, U] Shape for Pile[T]",
+                       "impl[T] Shape for Sq", "impl[T] Shape for Map[T, T]"):
+            self.assertIn("E0221", errs(target + body), target)
+        self.assertIn("E0104", errs("impl[T: Nope] Shape for Pile[T]" + body))
+
     def test_missing_methods_are_stubbed_by_fix(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "t.klar")

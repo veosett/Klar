@@ -1325,12 +1325,8 @@ fn parse_trait(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[List[Decl]], Parse
 
 fn parse_impl(p: Ps, i: Int) -> Result[Got[List[Decl]], ParseError] {
   let start = span_of(tk(p, i))
-  var j = next(p, i)
-  if is_op(tk(p, j), "[") {
-    return bad_h(t: tk(p, j), message: "generic impls are not supported yet",
-      hint: "write `impl Trait for Type` for a concrete type")
-  }
-  let trait_tok = expect_ident(p: p, i: j, what: "trait name")?
+  let tparams = parse_type_params(p: p, i: next(p, i), allow_bounds: true)?
+  let trait_tok = expect_ident(p: p, i: tparams.pos, what: "trait name")?
   if not is_kw(tk(p, trait_tok.pos), "for") {
     return bad_h(t: tk(p, trait_tok.pos), message: "expected `for` after the trait name",
       hint: "write `impl {trait_tok.value.text} for TypeName \{ ... \}`")
@@ -1355,6 +1351,8 @@ fn parse_impl(p: Ps, i: Int) -> Result[Got[List[Decl]], ParseError] {
       trait_name: Some(trait_tok.value.text),
       method_name: Some(m.decl.name),
       name: tname + "." + m.decl.name,
+      type_params: tparams.value.names,
+      bounds: tparams.value.bounds,
     }
     methods = methods.push(Decl.Fn(decl: f))
     names = names.push(m.decl.name)
@@ -1367,7 +1365,8 @@ fn parse_impl(p: Ps, i: Int) -> Result[Got[List[Decl]], ParseError] {
     }
   }
   let decl = Decl.Impl(span: span_from(p: p, start: start, i: block.pos), trait_name: trait_tok.value.text,
-    trait_span: span_of(trait_tok.value), target: target.value, methods: names, method_spans: spans, public: false)
+    trait_span: span_of(trait_tok.value), target: target.value, methods: names, method_spans: spans, public: false,
+    type_params: tparams.value.names, bounds: tparams.value.bounds)
   return Ok(Got { value: [decl].concat(methods).concat(extra), pos: block.pos })
 }
 

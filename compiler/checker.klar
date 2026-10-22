@@ -51,7 +51,23 @@ pub type AliasInfo { name: Str, tparams: List[Str], target: TypeExpr, mod_name: 
 
 pub type TraitInfo { name: Str, mod_name: Str, methods: Map[Str, Sig], defaults: Map[Str, Sig] }
 
-pub type ImplInfo { trait_name: Str, type_name: Str, mod_name: Str, file: Str, span: Span, methods: Map[Str, Sig] }
+/// `target`: the implementing type — `List[T]` for a generic impl `impl[T: Show] Show for List[T]`, with its type
+/// parameters `tparams` and their `bounds`.
+pub type ImplInfo {
+  trait_name: Str,
+  type_name: Str,
+  mod_name: Str,
+  file: Str,
+  span: Span,
+  methods: Map[Str, Sig],
+  target: Type,
+  tparams: List[Str],
+  bounds: Map[Str, List[Str]],
+}
+
+/// What `collect_impl` found: the target type, the key of the ImplInfo (None when the impl is not valid) and the
+/// bounds of its type parameters.
+type ImplHead { target: Type, key: Option[Str], bounds: Map[Str, List[Str]] }
 
 /// Program-wide registry of type and trait declarations (type names are unique per program).
 pub type Universe {
@@ -581,8 +597,67 @@ fn owner(u: Universe, name: Str) -> Option[Str] {
   }
 }
 
-fn implements(u: Universe, type_name: Str, trait_name: Str) -> Bool {
-  return u.impls.has(trait_name + "/" + type_name)
+/// None when `t` implements `trait_name` (with the bounds of a generic impl satisfied, recursively), else the type
+/// and trait of the first requirement that fails. `ctx`: the bounds of the type parameters in scope.
+fn missing_impl(c: Ck, t: Type, trait_name: Str, ctx: Map[Str, List[Str]]) -> Option[Pair[Type, Str]] {
+  let pt = pr(c, t)
+  let failed = Some(Pair { first: pt, second: trait_name })
+  return match pt {
+    Type.Any => None,
+    Type.Never => None,
+    Type.Var(_) => None,
+    Type.Param(pn) => match ctx.get(pn).unwrap_or([]).contains(trait_name) {
+      true => None,
+      false => failed,
+    },
+    Type.Con(name, args) => match c.uni.impls.get(trait_name + "/" + name) {
+      Some(info) => match args.len() == info.tparams.len() {
+        true => impl_args_missing(c: c, info: info, args: args, ctx: ctx),
+        false => failed,
+      },
+      None => failed,
+    },
+    _ => failed,
+  }
+}
+
+/// The first bound of a generic impl that the type arguments `args` do not satisfy.
+fn impl_args_missing(c: Ck, info: ImplInfo, args: List[Type], ctx: Map[Str, List[Str]]) -> Option[Pair[Type, Str]] {
+  let pat = args_of(c.s, info.target)
+  var i = 0
+  while i < args.len() {
+    let pn = match pat.get(i) {
+      Some(Type.Param(n)) => n,
+      _ => "",
+    }
+    for tr in info.bounds.get(pn).unwrap_or([]) {
+      match missing_impl(c: c, t: args.get_or(i, Type.Any), trait_name: tr, ctx: ctx) {
+        Some(m) => {
+          return Some(m)
+        },
+        None => {},
+      }
+    }
+    i = i + 1
+  }
+  return None
+}
+
+/// The type parameters of a generic type (`List` → [T]); [] for other types.
+fn type_param_names(c: Ck, tname: Str) -> List[Str] {
+  return match tname {
+    "List" => ["T"],
+    "Map" => ["K", "V"],
+    "Option" => ["T"],
+    "Result" => ["T", "E"],
+    _ => match c.uni.records.get(tname) {
+      Some(r) => r.tparams,
+      None => match c.uni.enums.get(tname) {
+        Some(e) => e.tparams,
+        None => [],
+      },
+    },
+  }
 }
 
 fn type_names_visible(c: Ck) -> List[Str] {
@@ -1137,38 +1212,43 @@ fn visible_traits(c: Ck) -> List[Str] {
 }
 
 fn resolve_bounds(ck: Ck, f: FnDecl) -> Res[Map[Str, List[Str]]] {
-  var c = ck
-  var out: Map[Str, List[Str]] = Map {}
-  for entry in f.bounds {
-    let tp = entry.first
-    if f.type_params.contains(tp) {
-      var names: List[Str] = []
-      for item in entry.second {
-        let tname = item.first
-        let sp = item.second
-        if not c.uni.traits.has(tname) {
-          var hint = did_you_mean(tname, visible_traits(c))
-          if c.uni.records.has(tname) or c.uni.enums.has(tname) or PRIMS.contains(tname) {
-            hint = Some("`{tname}` is a type; a bound names a trait (`trait Name \{ ... \}`)")
-          }
-          c = error(c: c, code: "E0104", msg: "unknown trait `{tname}`", span: sp, hint: hint)
-        } else {
-          if not c.visible.has(tname) {
-            c = not_imported(c: c, name: tname, span: sp)
-          }
-          if not names.contains(tname) {
-            names = names.push(tname)
-          }
-        }
-      }
-      out = out.set(tp, names)
-    }
-  }
-  return Res { c: c, v: out }
+  return resolve_bounds_of(ck: ck, type_params: f.type_params, bounds: f.bounds)
 }
 
+fn resolve_bounds_of(ck: Ck, type_params: List[Str], bounds: List[Pair[Str, List[Pair[Str, Span]]]]) -> Res[Map[Str,
+  List[Str]]] {
+    var c = ck
+    var out: Map[Str, List[Str]] = Map {}
+    for entry in bounds {
+      let tp = entry.first
+      if type_params.contains(tp) {
+        var names: List[Str] = []
+        for item in entry.second {
+          let tname = item.first
+          let sp = item.second
+          if not c.uni.traits.has(tname) {
+            var hint = did_you_mean(tname, visible_traits(c))
+            if c.uni.records.has(tname) or c.uni.enums.has(tname) or PRIMS.contains(tname) {
+              hint = Some("`{tname}` is a type; a bound names a trait (`trait Name \{ ... \}`)")
+            }
+            c = error(c: c, code: "E0104", msg: "unknown trait `{tname}`", span: sp, hint: hint)
+          } else {
+            if not c.visible.has(tname) {
+              c = not_imported(c: c, name: tname, span: sp)
+            }
+            if not names.contains(tname) {
+              names = names.push(tname)
+            }
+          }
+        }
+        out = out.set(tp, names)
+      }
+    }
+    return Res { c: c, v: out }
+  }
+
 /// The signature of a trait or impl method; `Self` is `self_type`.
-fn method_sig(ck: Ck, f: FnDecl, self_type: Type, idx: Int) -> Res[Sig] {
+fn method_sig(ck: Ck, f: FnDecl, self_type: Type, idx: Int, impl_bounds: Map[Str, List[Str]]) -> Res[Sig] {
   var c = ck
   let tps = tparam_map(f.type_params).set("Self", self_type)
   let ps = resolve_params(ck: c, params: f.params, tps: tps, check_dups: false)
@@ -1183,7 +1263,7 @@ fn method_sig(ck: Ck, f: FnDecl, self_type: Type, idx: Int) -> Res[Sig] {
   }
   let bounds = match f.owner_kind == Some("default") {
     true => no_bounds().set("Self", [f.trait_name.unwrap_or("")]),
-    false => no_bounds(),
+    false => impl_bounds,
   }
   return Res { c: c, v: Sig {
     name: f.name,
@@ -1218,7 +1298,7 @@ fn collect_traits(ck: Ck, own_traits: List[Int]) -> Ck {
             c = error(c: c, code: "E0101", msg: "duplicate method `{mname}` in trait `{name}`", span: f.name_span,
               hint: None)
           } else {
-            let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: -1)
+            let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: -1, impl_bounds: no_bounds())
             c = r.c
             let now = c.uni.traits.get(name).unwrap_or(info)
             c = set_trait(c, now with { methods: now.methods.set(mname, r.v with { name: mname, tparams: ["Self"] }) })
@@ -1241,7 +1321,7 @@ fn collect_traits(ck: Ck, own_traits: List[Int]) -> Ck {
             c = error(c: c, code: "E0101", msg: "duplicate method `{mname}` in trait `{tname}`", span: f.name_span,
               hint: None)
           } else {
-            let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: idx)
+            let r = method_sig(ck: c, f: f, self_type: Type.Param(name: "Self"), idx: idx, impl_bounds: no_bounds())
             c = r.c with { methods: r.c.methods.set(f.name, r.v) }
             let generic = r.v with { name: mname, decl: -1, bounds: no_bounds(), fdecl: None }
             let now = c.uni.traits.get(tname).unwrap_or(info)
@@ -1256,20 +1336,22 @@ fn collect_traits(ck: Ck, own_traits: List[Int]) -> Ck {
   // impls: each `impl` is followed by its methods
   var target = Type.Any
   var impl_key: Option[Str] = None
+  var impl_bounds = no_bounds()
   var seen_impl = false
   idx = 0
   for d in c.decls {
     match d {
-      Decl.Impl(_, _, _, _, _, _, _) => {
+      Decl.Impl(_, _, _, _, _, _, _, _, _) => {
         let r = collect_impl(ck: c, d: d, idx: idx)
         c = r.c
-        target = r.v.first
-        impl_key = r.v.second
+        target = r.v.target
+        impl_key = r.v.key
+        impl_bounds = r.v.bounds
         seen_impl = true
       },
       Decl.Fn(f) => {
         if f.owner_kind == Some("impl") and seen_impl {
-          let r = method_sig(ck: c, f: f, self_type: target, idx: idx)
+          let r = method_sig(ck: c, f: f, self_type: target, idx: idx, impl_bounds: impl_bounds)
           c = r.c
           if c.methods.has(f.name) {
             c = error(c: c, code: "E0101", msg: "`{or_empty(f.owner)}` already has a method " +
@@ -1311,22 +1393,33 @@ fn collect_traits(ck: Ck, own_traits: List[Int]) -> Ck {
 }
 
 /// Registers an `impl`: the target type and the key of its ImplInfo (None when it is not valid).
-fn collect_impl(ck: Ck, d: Decl, idx: Int) -> Res[Pair[Type, Option[Str]]] {
+fn collect_impl(ck: Ck, d: Decl, idx: Int) -> Res[ImplHead] {
   var c = ck
   let parts = match d {
-    Decl.Impl(span, trait_name, trait_span, target, _, _, _) => Pair { first: Pair { first: span, second: trait_span },
-      second: Pair { first: trait_name, second: target } },
+    Decl.Impl(span, trait_name, trait_span, target, _, _, _, tps, bs) => Pair { first: Pair { first: span,
+      second: trait_span }, second: Pair { first: trait_name, second: Pair { first: target, second: Pair { first: tps,
+        second: bs } } } },
     _ => {
-      return Res { c: c, v: Pair { first: Type.Any, second: None } }
+      return Res { c: c, v: ImplHead { target: Type.Any, key: None, bounds: no_bounds() } }
     },
   }
   let span = parts.first.first
   let trait_span = parts.first.second
   let trait_name = parts.second.first
-  let target_te = parts.second.second
-  let r = resolve(ck: c, te: target_te, tps: Map {})
+  let target_te = parts.second.second.first
+  let type_params = parts.second.second.second.first
+  for t in type_params {
+    if not is_pascal(t) {
+      c = error(c: c, code: "E0103", msg: "type parameter `{t}` must be PascalCase (e.g. `T`)", span: span, hint: None)
+    }
+  }
+  let r = resolve(ck: c, te: target_te, tps: tparam_map(type_params))
   c = r.c
   let target = r.v
+  let rb = resolve_bounds_of(ck: c, type_params: type_params, bounds: parts.second.second.second.second)
+  c = rb.c
+  let bounds = rb.v
+  let invalid = ImplHead { target: target, key: None, bounds: bounds }
   let tname = hd(c, target).unwrap_or("")
   let tr = match c.uni.traits.get(trait_name) {
     Some(t) => t,
@@ -1336,27 +1429,54 @@ fn collect_impl(ck: Ck, d: Decl, idx: Int) -> Res[Pair[Type, Option[Str]]] {
         hint = Some("`{trait_name}` is a type; `impl` needs a trait: `impl Trait for {trait_name}`")
       }
       c = error(c: c, code: "E0104", msg: "unknown trait `{trait_name}`", span: trait_span, hint: hint)
-      return Res { c: c, v: Pair { first: target, second: None } }
+      return Res { c: c, v: invalid }
     },
   }
   if not c.visible.has(trait_name) {
     c = not_imported(c: c, name: trait_name, span: trait_span)
   }
   if is_any(target) {
-    return Res { c: c, v: Pair { first: target, second: None } }
+    return Res { c: c, v: invalid }
   }
-  let generic_decl = c.uni.records.get(tname).map(fn(i) => not i.tparams.is_empty()).unwrap_or(false) or
-    c.uni.enums.get(tname).map(fn(i) => not i.tparams.is_empty()).unwrap_or(false)
-  let bad = match target {
-    Type.Con(_, args) => not args.is_empty() or ["Unit", "Never", "Word"].contains(tname) or GENERICS.contains(tname) or
-      generic_decl,
-    _ => true,
+  let target_args = match target {
+    Type.Con(_, args) => Some(args),
+    _ => None,
   }
-  if bad {
+  let args = match target_args {
+    Some(a) => a,
+    None => [],
+  }
+  if target_args.is_none() or ["Unit", "Never", "Word"].contains(tname) {
     c = error(c: c, code: "E0221", msg: "cannot implement `{trait_name}` for `{sh(c, target)}`", span: te_span(target_te),
-      hint: Some("impls are written for Int, Float, Bool, Str and non-generic `type`/`enum` declarations " +
-          "(generic impls are planned)"))
-    return Res { c: c, v: Pair { first: target, second: None } }
+      hint: Some("impls are written for Int, Float, Bool, Str, Bytes, `type`/`enum` declarations and " +
+          "List, Map, Option, Result"))
+    return Res { c: c, v: invalid }
+  }
+  let params = type_param_names(c, tname)
+  if not params.is_empty() {
+    var names: List[Str] = []
+    for a in args {
+      match a {
+        Type.Param(n) => {
+          names = names.push(n)
+        },
+        _ => {},
+      }
+    }
+    if names.len() != args.len() or names.unique().len() != names.len() or names.sort() != type_params.sort() {
+      let ps = match type_params.len() == params.len() {
+        true => commas(type_params),
+        false => commas(params),
+      }
+      c = error(c: c, code: "E0221", msg: "cannot implement `{trait_name}` for `{sh(c, target)}`", span: te_span(target_te),
+        hint: Some("an impl covers every `{tname}`: write `impl[{ps}] {trait_name} for {tname}[{ps}]`"))
+      return Res { c: c, v: invalid }
+    }
+  } else if not type_params.is_empty() {
+    let first = type_params.get_or(0, "")
+    c = error(c: c, code: "E0221", msg: "`{tname}` has no type parameters for the impl's `{first}`",
+      span: te_span(target_te), hint: Some("write `impl {trait_name} for {tname}`"))
+    return Res { c: c, v: invalid }
   }
   let type_owner = owner(c.uni, tname)
   if tr.mod_name != c.mod_name and type_owner != Some(c.mod_name) {
@@ -1372,14 +1492,14 @@ fn collect_impl(ck: Ck, d: Decl, idx: Int) -> Res[Pair[Type, Option[Str]]] {
     Some(prev) => {
       c = error(c: c, code: "E0222", msg: "`{tname}` already implements `{trait_name}` (at {short(prev.file, prev.span)})",
         span: span, hint: None)
-      return Res { c: c, v: Pair { first: target, second: None } }
+      return Res { c: c, v: invalid }
     },
     None => {},
   }
   let info = ImplInfo { trait_name: trait_name, type_name: tname, mod_name: c.mod_name, file: c.file, span: span,
-    methods: empty_sigs() }
+    methods: empty_sigs(), target: target, tparams: type_params, bounds: bounds }
   c = c with { uni: c.uni with { impls: c.uni.impls.set(key, info) }, impl_keys: c.impl_keys.set(idx, key) }
-  return Res { c: c, v: Pair { first: target, second: Some(key) } }
+  return Res { c: c, v: ImplHead { target: target, key: Some(key), bounds: bounds } }
 }
 
 fn self_map(t: Type) -> Map[Str, Type] {
@@ -1444,7 +1564,7 @@ fn finish_impl(ck: Ck, d: Decl, key: Str) -> Ck {
     },
   }
   let names_spans = match d {
-    Decl.Impl(span, _, _, _, ms, spans, _) => Pair { first: span, second: Pair { first: ms, second: spans } },
+    Decl.Impl(span, _, _, _, ms, spans, _, _, _) => Pair { first: span, second: Pair { first: ms, second: spans } },
     _ => {
       return c
     },
@@ -1459,7 +1579,7 @@ fn finish_impl(ck: Ck, d: Decl, key: Str) -> Ck {
     },
   }
   let tname = info.type_name
-  let target = con(tname)
+  let target = info.target
   for entry in info.methods.entries() {
     let m = entry.key
     let sig = entry.value
@@ -1567,12 +1687,17 @@ fn check_pending(ck: Ck) -> Ck {
               }
             },
             _ => {
-              let h = hd(c, t)
-              let fits = match h {
-                Some(hn) => args_of(c.s, t).is_empty() and implements(u: c.uni, type_name: hn, trait_name: tr),
+              let miss = missing_impl(c: c, t: t, trait_name: tr, ctx: p.ctx_bounds)
+              let nested = match miss {
+                Some(m) => m.second != tr or sh(c, m.first) != sh(c, t),
                 None => false,
               }
-              if not fits {
+              if nested {
+                let m = miss.unwrap_or(Pair { first: t, second: tr })
+                c = error(c: c, code: "E0220", msg: "`{sh(c, t)}` does not implement trait `{tr}` (needed by `{name}`)",
+                  span: p.span, hint: Some("`{sh(c, t)}` implements `{tr}` only if `{sh(c, m.first)}` implements " +
+                      "`{m.second}`"))
+              } else if miss.is_some() {
                 let info = c.uni.traits.get(tr).unwrap_or(TraitInfo { name: tr, mod_name: "", methods: empty_sigs(),
                   defaults: empty_sigs() })
                 let snap = c
@@ -1582,8 +1707,18 @@ fn check_pending(ck: Ck) -> Ck {
                   true => "",
                   false => " with {methods}",
                 }
+                let th = hd(c, t).unwrap_or("")
+                let params = type_param_names(c, th)
+                let for_t = match params.is_empty() {
+                  true => sh(c, t),
+                  false => "{th}[{commas(params)}]",
+                }
+                let gen = match params.is_empty() {
+                  true => "",
+                  false => "[{commas(params)}]",
+                }
                 c = error(c: c, code: "E0220", msg: "`{sh(c, t)}` does not implement trait `{tr}` (needed by `{name}`)",
-                  span: p.span, hint: Some("add `impl {tr} for {sh(c, t)} \{ ... \}`" + with_methods))
+                  span: p.span, hint: Some("add `impl{gen} {tr} for {for_t} \{ ... \}`" + with_methods))
               }
             },
           }

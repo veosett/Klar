@@ -83,6 +83,8 @@ class ImplDecl(Node):
     target: Any                       # TypeName
     methods: List[str]
     method_spans: List[Span]
+    type_params: List[str] = field(default_factory=list)    # `impl[T: Show] Show for List[T]`
+    bounds: Dict[str, list] = field(default_factory=dict)
 
 
 @dataclass(eq=False)

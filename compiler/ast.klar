@@ -136,7 +136,7 @@ pub enum Decl {
   Trait(span: Span, name: Str, name_span: Span, methods: List[FnDecl], defaults: List[Str], doc: Option[Str],
     public: Bool),
   Impl(span: Span, trait_name: Str, trait_span: Span, target: TypeExpr, methods: List[Str], method_spans: List[Span],
-    public: Bool),
+    public: Bool, type_params: List[Str], bounds: List[Pair[Str, List[Pair[Str, Span]]]]),
 }
 
 pub type Program { span: Span, module_name: Option[Str], decls: List[Decl] }

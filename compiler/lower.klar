@@ -1100,6 +1100,26 @@ fn resolution(w: Lw, sp: Span) -> Option[Resolution] {
   return ck_of(w).resolutions.get(skey(w, sp))
 }
 
+/// Binds the type parameters of `pat` (e.g. `Box[T]`) to the parts of the concrete type `t`.
+fn bind_params(pat: Type, t: Type, out: Map[Str, Type]) -> Map[Str, Type] {
+  return match pat {
+    Type.Param(n) => out.set(n, t),
+    Type.Con(_, pat_args) => match t {
+      Type.Con(_, con_args) => {
+        var m = out
+        var i = 0
+        while i < pat_args.len() and i < con_args.len() {
+          m = bind_params(pat: pat_args.get_or(i, Type.Any), t: con_args.get_or(i, Type.Any), out: m)
+          i = i + 1
+        }
+        return m
+      },
+      _ => out,
+    },
+    _ => out,
+  }
+}
+
 fn inst_type(w: Lw, info: CallInfo, tp: Str) -> Type {
   return zonk(info.inst.get(tp).unwrap_or(unit_t()), w.env)
 }
@@ -2384,7 +2404,16 @@ fn x_method_call(w0: Lw, e: Expr) -> LR[V] {
       None => None,
     }
     return match entry {
-      Some(en) => user_call(w0: w0, e: e, sig: en.second, info: info, recv: Some(obj)),
+      Some(en) => {
+        let sig = en.second
+        var dispatch = info
+        if sig.tparams.any(fn(tp) => tp != "Self") {
+          // a generic impl: its type parameters come from the receiver's type
+          let self_t = sig.params.get(0).map(fn(p) => p.second).unwrap_or(unit_t())
+          dispatch = CallInfo { sig: sig, inst: bind_params(pat: self_t, t: concrete, out: Map {}) }
+        }
+        return user_call(w0: w0, e: e, sig: sig, info: dispatch, recv: Some(obj))
+      },
       None => fail("native: no impl of `{res.owner}.{res.name}` for {tshow(concrete)}"),
     }
   }

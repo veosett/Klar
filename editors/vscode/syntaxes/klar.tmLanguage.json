@@ -55,7 +55,7 @@
           "captures": { "1": { "name": "keyword.declaration.type.klar" }, "2": { "name": "entity.name.type.klar" } }
         },
         {
-          "match": "\\b(impl)\\s+([A-Z][A-Za-z0-9_]*)\\s+(for)\\s+([A-Z][A-Za-z0-9_]*)",
+          "match": "\\b(impl)(?:\\[[^\\]]*\\])?\\s*([A-Z][A-Za-z0-9_]*)\\s+(for)\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": { "1": { "name": "keyword.declaration.impl.klar" }, "2": { "name": "entity.name.type.trait.klar" },
                         "3": { "name": "keyword.declaration.impl.klar" }, "4": { "name": "entity.name.type.klar" } }
         },

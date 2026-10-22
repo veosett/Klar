@@ -1,0 +1,145 @@
+// Generic impls (`impl[T: Show] Show for List[T]`): every back-end must dispatch to the same implementation as the
+// interpreter, with the impl's type parameters taken from the receiver's type.
+
+trait Show {
+  fn show(self) -> Str
+
+  fn shout(self) -> Str {
+    return self.show() + "!"
+  }
+}
+
+trait Size {
+  fn size(self) -> Int
+}
+
+impl Show for Int {
+  fn show(self) -> Str {
+    return "#{self}"
+  }
+}
+
+impl Show for Str {
+  fn show(self) -> Str {
+    return "'{self}'"
+  }
+}
+
+type Box[T] { value: T, label: Str }
+
+enum Tree[T] {
+  Leaf,
+  Node(left: Tree[T], value: T, right: Tree[T]),
+}
+
+type Duo[A, B] { a: A, b: B }
+
+impl[T: Show] Show for Box[T] {
+  fn show(self) -> Str {
+    return "Box({self.label}: {self.value.show()})"
+  }
+}
+
+impl[T] Size for Box[T] {
+  fn size(self) -> Int {
+    return 1
+  }
+}
+
+impl[T: Show] Show for List[T] {
+  fn show(self) -> Str {
+    return "[" + self.map(fn(x) => x.show()).join(", ") + "]"
+  }
+}
+
+impl[T] Size for List[T] {
+  fn size(self) -> Int {
+    return self.len()
+  }
+}
+
+impl[T: Show] Show for Option[T] {
+  fn show(self) -> Str {
+    return match self {
+      Some(x) => "Some " + x.show(),
+      None => "nothing",
+    }
+  }
+}
+
+impl[T: Show, E: Show] Show for Result[T, E] {
+  fn show(self) -> Str {
+    return match self {
+      Ok(x) => "Ok " + x.show(),
+      Err(e) => "Err " + e.show(),
+    }
+  }
+}
+
+impl[K: Show, V: Show] Show for Map[K, V] {
+  fn show(self) -> Str {
+    return "\{" + self.entries().map(fn(e) => e.key.show() + ": " + e.value.show()).join(", ") + "\}"
+  }
+}
+
+impl[T: Show] Show for Tree[T] {
+  fn show(self) -> Str {
+    return match self {
+      Tree.Leaf => ".",
+      Tree.Node(l, v, r) => "(" + l.show() + " " + v.show() + " " + r.show() + ")",
+    }
+  }
+}
+
+impl[T: Size] Size for Tree[T] {
+  fn size(self) -> Int {
+    return match self {
+      Tree.Leaf => 0,
+      Tree.Node(l, v, r) => l.size() + v.size() + r.size(),
+    }
+  }
+}
+
+impl[B: Show, A: Show] Show for Duo[A, B] {
+  fn show(self) -> Str {
+    return "<{self.a.show()} | {self.b.show()}>"
+  }
+}
+
+/// Uses `Show` through a bound: the implementation is chosen per instance.
+fn twice[T: Show](x: T) -> Str {
+  return x.show() + " " + x.shout()
+}
+
+fn total[T: Size](xs: List[T]) -> Int {
+  return xs.fold(0, fn(acc, x) => acc + x.size())
+}
+
+fn leaf[T](v: T) -> Tree[T] {
+  return Tree.Node(left: Tree.Leaf, value: v, right: Tree.Leaf)
+}
+
+fn main() uses io {
+  let b = Box { value: 3, label: "n" }
+  print(b.show())
+  print([1, 2].show())
+  print(twice([b, b]))
+  print(twice(Some([Box { value: Some(1), label: "o" }])))
+  let none: Option[Int] = None
+  print(none.shout())
+  let ok: Result[Int, Str] = Ok(7)
+  let err: Result[Int, Str] = Err("bad")
+  print("{ok.show()} {err.show()} {twice([ok, err])}")
+  print(Map { "a": [1], "b": [] }.show())
+  let t = Tree.Node(left: leaf([1, 2]), value: [3], right: leaf([]))
+  print(t.show())
+  print(t.size())
+  print(twice(Duo { a: "x", b: Some(t) }))
+  print(total([[1, 2, 3], [], [4]]))
+  print(total([Box { value: "s", label: "1" }, Box { value: "t", label: "2" }]))
+}
+
+test "generic impls" {
+  assert [Some(1), None].show() == "[Some #1, nothing]"
+  assert leaf(Box { value: 2, label: "b" }).shout() == "(. Box(b: #2) .)!"
+}

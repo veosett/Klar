@@ -2806,3 +2806,107 @@ property "nonzero" (k: Int) {
 }
 
 fn main() {}
+=== generic impls: invalid targets and unmet bounds
+trait Show {
+  fn show(self) -> Str
+}
+
+type Box[T] { value: T }
+
+type Plain { n: Int }
+
+impl[T: Show] Show for Box[T] {
+  fn show(self) -> Str {
+    return self.value.show()
+  }
+}
+
+impl Show for List[Int] {
+  fn show(self) -> Str {
+    return ""
+  }
+}
+
+impl[A] Show for Map[A, A] {
+  fn show(self) -> Str {
+    return ""
+  }
+}
+
+impl[T] Show for Plain {
+  fn show(self) -> Str {
+    return ""
+  }
+}
+
+impl[t] Show for Option[t] {
+  fn show(self) -> Str {
+    return ""
+  }
+}
+
+impl[T: Nope] Show for Result[T, Int] {
+  fn show(self) -> Str {
+    return ""
+  }
+}
+
+fn need[T: Show](x: T) -> Str {
+  return x.show()
+}
+
+fn main() uses io {
+  print(need(Box { value: "s" }))
+  print(need(Box { value: Plain { n: 1 } }))
+  print(need(Plain { n: 1 }))
+}
+=== generic impls: a module and a bound inside a generic function
+use shows.{Show, Wrap}
+
+fn all[T: Show](xs: List[T]) -> Str {
+  return xs.show()
+}
+
+fn loose[T](x: Wrap[T]) -> Str {
+  return x.show()
+}
+
+fn main() uses io {
+  print(all([Wrap { v: 1 }]))
+  print(all([[Wrap { v: 2 }]]))
+  print(all([Wrap { v: [Wrap { v: "s" }] }]))
+}
+--- shows.klar
+pub trait Show {
+  fn show(self) -> Str
+}
+
+pub type Wrap[T] { v: T }
+
+impl Show for Int {
+  fn show(self) -> Str {
+    return "{self}"
+  }
+}
+
+impl[T: Show] Show for Wrap[T] {
+  fn show(self) -> Str {
+    return "w" + self.v.show()
+  }
+}
+
+impl[T: Show] Show for List[T] {
+  fn show(self) -> Str {
+    return self.map(fn(x) => x.show()).join(",")
+  }
+
+  fn extra(self) -> Int {
+    return 1
+  }
+}
+
+impl[K, V] Show for Map[K, V] {
+  fn show(self) -> Int {
+    return 0
+  }
+}

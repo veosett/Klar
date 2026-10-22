@@ -93,7 +93,9 @@ def outline(loaded, all_modules=False):
             elif kind == "impl":
                 target = getattr(d.target, "name", "?")
                 item["name"] = f"{d.trait} for {target}"
-                item["signature"] = f"impl {d.trait} for {target}"
+                head = lines[d.span.line - 1].strip() if 0 < d.span.line <= len(lines) else ""
+                item["signature"] = head[:head.index("{")].strip() if head.startswith("impl") and "{" in head \
+                    else f"impl {d.trait} for {target}"            # `impl[T: Show] Show for List[T]` as written
                 item["methods"] = [sig_text(lines, f) for f in decls[i + 1:i + 1 + len(d.methods)]
                                    if isinstance(f, N.FnDecl) and f.owner_kind == "impl"]
             elif kind in ("test", "property"):

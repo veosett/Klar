@@ -256,10 +256,11 @@ fn decl_json(d: Decl) -> Json {
       value: text(name)), field(name: "name_span", value: span_json(ns)), field(name: "methods", value: Json.Arr(items: ms.map(fn_json))), field(name: "defaults",
         value: json_strings(defaults)), field(name: "doc", value: opt_text(doc)), field(name: "public",
           value: Json.Bool(value: public))]),
-    Decl.Impl(s, tr, ts, target, ms, spans, _) => node(kind: "ImplDecl", span: s, fields: [field(name: "trait", value: text(tr)),
+    Decl.Impl(s, tr, ts, target, ms, spans, _, tps, bs) => node(kind: "ImplDecl", span: s, fields: [field(name: "trait", value: text(tr)),
       field(name: "trait_span", value: span_json(ts)),
       field(name: "target", value: type_json(target)), field(name: "methods", value: json_strings(ms)),
-      field(name: "method_spans", value: Json.Arr(items: spans.map(span_json)))]),
+      field(name: "method_spans", value: Json.Arr(items: spans.map(span_json))),
+      field(name: "type_params", value: json_strings(tps)), field(name: "bounds", value: bounds_json(bs))]),
   }
 }
 

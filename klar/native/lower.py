@@ -292,6 +292,15 @@ class Program:
 # ===========================================================================
 # function bodies
 # ===========================================================================
+def bind_params(pattern, t, out):
+    """Binds the type parameters of `pattern` (e.g. `Box[T]`) to the parts of the concrete type `t`."""
+    if isinstance(pattern, TParam):
+        out[pattern.name] = t
+    elif isinstance(pattern, TCon) and isinstance(t, TCon):
+        for p, a in zip(pattern.args, t.args):
+            bind_params(p, a, out)
+
+
 class Exit(Exception):
     pass
 
@@ -1150,10 +1159,11 @@ class FnLowering:
         self.emit("callind", d, fp, [f.reg] + [a.reg for a in args])
         return V(d, ret_t, True)
 
-    def user_call(self, e, sig, args, recv=None):
+    def user_call(self, e, sig, args, recv=None, inst=None):
         """recv: the receiver expression of a method-style call (the first argument)."""
         module = self.p.modules_by_name[sig.module]
-        targs = [zonk(e.inst[tp], self.env) for tp in sig.tparams]
+        inst = e.inst if inst is None else inst
+        targs = [zonk(inst[tp], self.env) for tp in sig.tparams]
         target = self.p.instance(module, sig.decl, targs, kind="rt" if module.is_sys else "user")
         owned = EMPTY if module.is_sys else self.p.owned_of(sig.decl)
         names = [n for n, _ in sig.params]
@@ -1253,7 +1263,12 @@ class FnLowering:
             entry = self.p.universe.type_methods.get(getattr(concrete, "name", None), {}).get(e.method)
             if entry is None:
                 raise NativeUnsupported(f"no impl of `{res[1]}.{e.method}` for {show(concrete)}")
-            return self.user_call(e, entry[1], e.args, recv=e.obj)
+            sig = entry[1]
+            inst = e.inst
+            if any(tp != "Self" for tp in sig.tparams):
+                inst = {}                       # a generic impl: its type parameters come from the receiver's type
+                bind_params(sig.params[0][1], concrete, inst)
+            return self.user_call(e, sig, e.args, recv=e.obj, inst=inst)
         if kind == "builtin" and (res[1], res[2]) in REUSE and self.moves(e.obj):
             return self.builtin_method(e, res[1], res[2], None, consume=True, recv_node=e.obj)
         recv = self.expr(e.obj)

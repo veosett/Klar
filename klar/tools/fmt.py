@@ -123,7 +123,8 @@ def space_between(p, t, after_unary):
     if tt in ("(", "[") and t.kind == "op":
         if p.kind == "str":
             return " "
-        if p.kind == "word" and pt in KEYWORDS and pt not in ("fn", "true", "false"):
+        if p.kind == "word" and pt in KEYWORDS and pt not in ("fn", "true", "false") and \
+                not (pt == "impl" and tt == "["):                       # `impl[T: Show] Show for List[T]`
             return " "
         return " " if pt in (",", ":", "{") or (p.kind == "op" and pt in UNARY_BEFORE) else ""
     if tt == "{" or pt == "{":

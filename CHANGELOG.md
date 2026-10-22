@@ -11,6 +11,11 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   text together, the result is formatted and checked (and tested with `--test`), and the file is written only when
   nothing new breaks. `--dry-run`, `--force`, `--json` (diff, errors, test results).
 - `klar ast` numbers nodes per file (stable ids, pre-order from 1).
+- Generic impls: `impl[T: Show] Show for List[T]`, `impl[K, V] Show for Map[K, V]`, `impl[T] Show for Box[T]` — for
+  List, Map, Option, Result and generic `type`/`enum` declarations. An impl covers every instance; its bounds apply
+  inside its methods and are checked recursively at use (`List[Box[Str]]: Show` needs `Str: Show`, E0220 names the
+  missing piece). All back-ends dispatch statically (native: the impl's type parameters come from the receiver's
+  type), in both the Python and the self-hosted compiler. `klar outline` shows impl headers as written.
 
 ## [0.6.0] — 2026-10-22
 

@@ -441,8 +441,8 @@ class Parser:
 
     def parse_impl(self) -> list:
         start = self.advance().span
-        if self.at_op("["):
-            self.fail("generic impls are not supported yet", hint="write `impl Trait for Type` for a concrete type")
+        tparams = self.parse_type_params(allow_bounds=True)
+        bounds = self.last_bounds
         trait = self.expect_ident("trait name")
         if not self.accept_kw("for"):
             self.fail("expected `for` after the trait name", hint=f"write `impl {trait.value} for TypeName {{ ... }}`")
@@ -454,12 +454,14 @@ class Parser:
             f.name = f"{tname}.{f.method}"
             if f.type_params:
                 self.fail(f"method `{f.method}` cannot have its own type parameters (not supported yet)")
+            f.type_params, f.bounds = list(tparams), dict(bounds)   # a generic impl's methods are generic
             methods.append(f)
             t = self.doctest(docs, f)
             if t is not None:
                 extra.append(t)
         decl = N.ImplDecl(span=self.span_from(start), trait=trait.value, trait_span=trait.span, target=target,
-                          methods=[f.method for f in methods], method_spans=[f.name_span for f in methods])
+                          methods=[f.method for f in methods], method_spans=[f.name_span for f in methods],
+                          type_params=tparams, bounds=bounds)
         return [decl] + methods + extra
 
     def parse_type_decl(self, doc) -> N.TypeDecl:

@@ -127,7 +127,7 @@ trait Shape {
     return "area {self.area()}"
   }
 }
-impl Shape for Circle {                  // for Int/Float/Bool/Str or your own non-generic type/enum
+impl Shape for Circle {                  // for Int/Float/Bool/Str/Bytes or your own type/enum
   fn area(self) -> Float {
     return 3.14 * self.r * self.r
   }
@@ -139,6 +139,8 @@ fn total[T: Shape](xs: List[T]) -> Float {     // bound; several: [T: Shape + Sh
 Methods take `self` first; `Self` is the implementing type. Call them with a dot: `c.area()` (never `area(c)`).
 An impl lives in the trait's or the type's module; import the trait to use its methods. A trait is not a type:
 for a list of different kinds use an `enum` and `impl Shape for ThatEnum` (one `match` per method).
+Generic types get generic impls that cover every instance: `impl[T: Show] Show for List[T]`, `impl[T] Show for Box[T]`,
+`impl[K, V] Show for Map[K, V]` (the target's arguments are exactly the impl's parameters; no `impl Show for List[Int]`).
 `klar fix` adds `todo(...)` stubs for missing impl methods.
 
 ## Types

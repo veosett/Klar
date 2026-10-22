@@ -60,9 +60,13 @@ class TraitInfo:
 
 
 class ImplInfo:
-    def __init__(self, trait, type_name, module, span):
+    def __init__(self, trait, type_name, module, span, target=None, tparams=(), bounds=None):
         self.trait, self.type_name, self.module, self.span = trait, type_name, module, span
         self.methods = {}     # method -> Sig of `Type.m`
+        # a generic impl (`impl[T: Show] Show for List[T]`): the target `List[T]`, its parameters and their bounds
+        self.target = target if target is not None else TCon(type_name)
+        self.tparams = list(tparams)
+        self.bounds = bounds or {}
 
 
 class Universe:
@@ -78,6 +82,24 @@ class Universe:
 
     def implements(self, type_name, trait):
         return (trait, type_name) in self.impls
+
+    def missing_impl(self, t, trait, ctx_bounds):
+        """None when type `t` implements `trait` (with the bounds of a generic impl satisfied, recursively), else
+        (type, trait) of the first requirement that fails. `ctx_bounds`: the bounds of the type parameters in scope."""
+        t = prune(t)
+        if t is ANY or t is NEVER or isinstance(t, TVar):
+            return None
+        if isinstance(t, TParam):
+            return None if trait in ctx_bounds.get(t.name, ()) else (t, trait)
+        info = self.impls.get((trait, head(t))) if isinstance(t, TCon) else None
+        if info is None or len(t.args) != len(info.tparams):
+            return (t, trait)
+        for arg, tp in zip(t.args, info.target.args):
+            for tr in info.bounds.get(tp.name, ()):
+                miss = self.missing_impl(arg, tr, ctx_bounds)
+                if miss is not None:
+                    return miss
+        return None
 
     def owner(self, name):
         for table in (self.records, self.enums, self.aliases, self.traits):
@@ -386,8 +408,8 @@ class Checker:
             out[tp] = names
         return out
 
-    def method_sig(self, d, self_type):
-        """Signature of a trait/impl method; `Self` is `self_type`."""
+    def method_sig(self, d, self_type, impl_bounds=None):
+        """Signature of a trait/impl method; `Self` is `self_type` (impl_bounds: those of a generic impl)."""
         tps = {t: TParam(t) for t in d.type_params}
         tps["Self"] = self_type
         params = [(p.name, self.resolve(p.type, tps)) for p in d.params]
@@ -396,7 +418,7 @@ class Checker:
             if e not in KNOWN_EFFECTS:
                 self.error("E0403", f"unknown effect `{e}`", d.effects_span, hint="known effects: io, time, rand, fs, net, proc")
         return Sig(d.name, list(d.type_params), params, ret, d.effects, decl=d, user=True, module=self.module,
-                   bounds={"Self": [d.trait]} if d.owner_kind == "default" else {})
+                   bounds={"Self": [d.trait]} if d.owner_kind == "default" else dict(impl_bounds or {}))
 
     def collect_traits(self, own_traits):
         for d in own_traits:
@@ -426,7 +448,7 @@ class Checker:
                 impl = self.collect_impl(d)
             elif isinstance(d, N.FnDecl) and d.owner_kind == "impl" and impl is not None:
                 decl, target, info, tinfo = impl
-                sig = self.method_sig(d, target)
+                sig = self.method_sig(d, target, decl.resolved_bounds)
                 if d.name in self.methods:
                     self.error("E0101", f"`{d.owner}` already has a method `{d.method}`", d.name_span)
                     continue
@@ -440,7 +462,12 @@ class Checker:
 
     def collect_impl(self, d):
         """Returns (decl, target type, ImplInfo or None, TraitInfo or None)."""
-        target = self.resolve(d.target, {})
+        tps = {t: TParam(t) for t in d.type_params}
+        for t in d.type_params:
+            if not PASCAL.match(t):
+                self.error("E0103", f"type parameter `{t}` must be PascalCase (e.g. `T`)", d.span)
+        target = self.resolve(d.target, tps)
+        d.resolved_bounds = self.resolve_bounds(d)
         d.info = None
         tname = head(target)
         trait = self.traits.get(d.trait)
@@ -454,12 +481,23 @@ class Checker:
             self.not_imported(d.trait, d.trait_span)
         if target is ANY:
             return d, target, None, trait
-        if not isinstance(target, TCon) or target.args or tname in ("Unit", "Never", "Word") or \
-                tname in GENERIC_ARITY or (tname in self.records and self.records[tname].tparams) or \
-                (tname in self.enums and self.enums[tname].tparams):
+        if not isinstance(target, TCon) or tname in ("Unit", "Never", "Word"):
             self.error("E0221", f"cannot implement `{d.trait}` for `{show(target)}`", d.target.span,
-                       hint="impls are written for Int, Float, Bool, Str and non-generic `type`/`enum` declarations "
-                            "(generic impls are planned)")
+                       hint="impls are written for Int, Float, Bool, Str, Bytes, `type`/`enum` declarations and "
+                            "List, Map, Option, Result")
+            return d, target, None, trait
+        params = self.type_param_names(tname)
+        if params:
+            names = [a.name for a in target.args if isinstance(a, TParam)]
+            if len(names) != len(target.args) or len(set(names)) != len(names) or \
+                    sorted(names) != sorted(d.type_params):
+                ps = ", ".join(d.type_params if len(d.type_params) == len(params) else params)
+                self.error("E0221", f"cannot implement `{d.trait}` for `{show(target)}`", d.target.span,
+                           hint=f"an impl covers every `{tname}`: write `impl[{ps}] {d.trait} for {tname}[{ps}]`")
+                return d, target, None, trait
+        elif d.type_params:
+            self.error("E0221", f"`{tname}` has no type parameters for the impl's `{d.type_params[0]}`", d.target.span,
+                       hint=f"write `impl {d.trait} for {tname}`")
             return d, target, None, trait
         type_owner = self.universe.owner(tname)
         if trait.module != self.module and type_owner != self.module:
@@ -470,7 +508,7 @@ class Checker:
             prev = self.universe.impls[(d.trait, tname)]
             self.error("E0222", f"`{tname}` already implements `{d.trait}` (at {prev.span.short()})", d.span)
             return d, target, None, trait
-        info = ImplInfo(d.trait, tname, self.module, d.span)
+        info = ImplInfo(d.trait, tname, self.module, d.span, target, d.type_params, d.resolved_bounds)
         d.info = info
         self.universe.impls[(d.trait, tname)] = info
         return d, target, info, trait
@@ -479,7 +517,7 @@ class Checker:
         info = d.info
         trait = self.traits[info.trait]
         tname = info.type_name
-        target = TCon(tname)
+        target = info.target
         for m, sig in info.methods.items():
             span = d.method_spans[d.methods.index(m)] if m in d.methods else d.span
             if m not in trait.methods:
@@ -570,12 +608,32 @@ class Checker:
                             self.error("E0220", f"type parameter `{t.name}` must implement `{tr}` to call `{name}`",
                                        span, hint=f"add the bound to the type parameter: `[{t.name}: {tr}]`")
                         continue
-                    h = head(t)
-                    if h is None or t.args or not self.universe.implements(h, tr):
-                        methods = ", ".join(f"`{self.show_method(s, t)}`" for s in self.traits[tr].methods.values()
-                                            if s.name.split(".")[-1] not in self.traits[tr].defaults)
+                    miss = self.universe.missing_impl(t, tr, ctx_bounds)
+                    if miss is None:
+                        continue
+                    if miss != (t, tr):
                         self.error("E0220", f"`{show(t)}` does not implement trait `{tr}` (needed by `{name}`)", span,
-                                   hint=f"add `impl {tr} for {show(t)} {{ ... }}`" + (f" with {methods}" if methods else ""))
+                                   hint=f"`{show(t)}` implements `{tr}` only if `{show(miss[0])}` implements "
+                                        f"`{miss[1]}`")
+                        continue
+                    h = head(t)
+                    params = self.type_param_names(h)
+                    for_t = show(t) if not params else f"{h}[{', '.join(params)}]"
+                    gen = f"[{', '.join(params)}]" if params else ""
+                    methods = ", ".join(f"`{self.show_method(s, t)}`" for s in self.traits[tr].methods.values()
+                                        if s.name.split(".")[-1] not in self.traits[tr].defaults)
+                    self.error("E0220", f"`{show(t)}` does not implement trait `{tr}` (needed by `{name}`)", span,
+                               hint=f"add `impl{gen} {tr} for {for_t} {{ ... }}`" + (f" with {methods}" if methods else ""))
+
+    def type_param_names(self, tname):
+        """The type parameters of a generic type (`List` → [T]); [] for other types."""
+        if tname in GENERIC_ARITY:
+            return {"List": ["T"], "Map": ["K", "V"], "Option": ["T"], "Result": ["T", "E"]}[tname]
+        if tname in self.records:
+            return list(self.records[tname].tparams)
+        if tname in self.enums:
+            return list(self.enums[tname].tparams)
+        return []
 
     def not_imported(self, name, span):
         owner = self.universe.owner(name)

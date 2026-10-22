@@ -267,7 +267,9 @@ What the compiler checks:
 | E0224 | a trait used as a type (`fn f(s: Shape)`) |
 
 The rules are simple. Trait methods always take `self` first. Inside a trait, `Self` means "the type that
-implements it". Impls are written for `Int`, `Float`, `Bool`, `Str` and your own `type`s and `enum`s. For a list
+implements it". Impls are written for `Int`, `Float`, `Bool`, `Str`, `Bytes` and your own `type`s and `enum`s. For
+generic types the impl is generic too: `impl[T: Show] Show for List[T]` gives `show()` to every list whose elements
+can `show()`, and `impl[T] Show for Box[T]` to every `Box`. For a list
 of different shapes, declare an `enum` with one variant per shape and implement the trait for it: each method
 is one `match`.
 
