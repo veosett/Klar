@@ -51,14 +51,36 @@ fn byte_of(v: Int, k: Int) -> Int {
   return u.shift_right(8 * k).bit_and(255)
 }
 
-/// The code with its fixups patched.
+/// The little-endian 32-bit word at pos.
+fn word_at(code: Bytes, pos: Int) -> Int {
+  var v = 0
+  var k = 3
+  while k >= 0 {
+    v = v * 256 + code.get_or(pos + k, 0)
+    k = k - 1
+  }
+  return v
+}
+
+/// The code with its fixups patched: rel32 fields on x86-64; on arm64 the page of an ADRP and the low 12 bits of
+/// the ADD after it.
 fn patched_code(x: Exe, l: Layout) -> Bytes {
   var code = x.code
   for fx in x.fixups {
-    let rel = addr(x: x, l: l, name: fx.target) + fx.add - (l.code_base + fx.pos + 4)
+    let target = addr(x: x, l: l, name: fx.target)
+    var v = target + fx.add - (l.code_base + fx.pos + 4)
+    if fx.kind == "page" {
+      var delta = target.shift_right(12) - (l.code_base + fx.pos).shift_right(12)
+      if delta < 0 {
+        delta = delta + 2097152
+      }
+      v = word_at(code, fx.pos).bit_or(delta.bit_and(3) * 536870912).bit_or(delta.shift_right(2) * 32)
+    } else if fx.kind == "lo12" {
+      v = word_at(code, fx.pos).bit_or(target.bit_and(4095) * 1024)
+    }
     var k = 0
     while k < 4 {
-      code = code.set(fx.pos + k, byte_of(rel, k))
+      code = code.set(fx.pos + k, byte_of(v, k))
       k = k + 1
     }
   }
@@ -105,7 +127,13 @@ fn text(b: Bytes, s: Str) -> Bytes {
 
 pub fn write_elf(x: Exe) -> Bytes {
   let base = 4194304
-  let page = 4096
+  let arm = x.machine == "aarch64"
+  var page = 4096
+  var machine = 62
+  if arm {
+    page = 65536                                    // (arm64 kernels may use 64 KB pages)
+    machine = 183
+  }
   let text_off = page
   let text_vaddr = base + text_off
   let data_off = align(text_off + x.code.len(), page)
@@ -117,7 +145,7 @@ pub fn write_elf(x: Exe) -> Bytes {
   var h = text(bytes_of([127]), "ELF")
   h = bytes_of(h.to_list().concat([2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
   h = le(b: h, v: 2, n: 2)
-  h = le(b: h, v: 62, n: 2)
+  h = le(b: h, v: machine, n: 2)
   h = le(b: h, v: 1, n: 4)
   h = le(b: h, v: addr(x: x, l: l, name: x.entry), n: 8)
   h = le(b: h, v: 64, n: 8)

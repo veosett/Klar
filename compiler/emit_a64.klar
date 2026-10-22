@@ -1,0 +1,1424 @@
+// KIR -> AArch64 machine code plus the Linux (arm64) system-call layer, written in Klar (self-hosting). Mirrors
+// klar/native/emit_a64.py instruction for instruction: tests/selfhost.py compares the finished executables byte for
+// byte.
+//
+// The Klar calling convention is the one of x86-64: the caller reserves an argument area of 8*n bytes (rounded up
+// to 16) at [sp] and branches with BL; the callee pushes FP and LR and reads argument i at [x29+16+8*i]. The result
+// comes back in X0. X19–X27 are callee-saved, X9–X15 caller-saved (regalloc.klar), X28 counts the call depth,
+// X0–X8, X16 and X17 are scratch; floats live in D16–D31, D0/D1 are scratch.
+//
+// The structure is the one of emit.klar: each KIR instruction, out-of-line block and OS stub is a chunk (a64.klar),
+// out-of-line paths are data (`Cold`) emitted after the function body, and `emit_a64` appends the chunks.
+use a64.{A64, AL64, FP, LR, SP, X16, X17, add_sp, addsub_imm, adr_sym, bcc, bl, blr, br, cbnz, cbz, cmp_ri, cmp_rr}
+use a64.{cset, fcmp, fcvtzs, fits_imm12, fload, fmov_dd, fmov_dx, fmov_xd, fop, fresh64, fsqrt, fstore, invert}
+use a64.{label64, ldp_post, load, mem, mov_ri, mov_rr, msub, mul, neg, new_a64, new_label64, op3, ret, scvtf, shift_i}
+use a64.{site64, smulh, stp_pre, store, svc, tst1, udf, umulh, word}
+use emit.{Cold, ColdItem, Exe, MAX_DEPTH, OS_FUNCS, Then, YL, align16, bit_length, has_reg, iat, is_pow2, lat, sat}
+use emit.{sat_or, sdiv_magic, sdiv_magic64, soft_helper, trace_table, udiv_magic, udiv_magic_simple}
+use lower.{Img, Ins, KFn, Lw, add_bss, rt_names}
+use opt.{defs, inline_calls, optimize, used_regs}
+use regalloc.{Alloc, a64_regs, allocate}
+use x64.{Fix}
+
+const X0: Int = 0
+const X1: Int = 1
+const X2: Int = 2
+const X3: Int = 3
+const X4: Int = 4
+const X5: Int = 5
+const X8: Int = 8
+const X28: Int = 28
+const D0: Int = 0
+const D1: Int = 1
+const AT_FDCWD: Int = -100
+
+/// The caller-saved registers the allocator hands out (regalloc.klar, a64_regs).
+const CALLER_SAVED: List[Int] = [15, 14, 13, 12, 11, 10, 9]
+
+/// Instructions that know where floats live in D registers.
+const D_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun", "fpow"]
+
+// ---- emitter state --------------------------------------------------------------------------------------------
+
+/// The function being emitted (see emit.klar's Em64).
+type Em64 {
+  a: A64,
+  rt: Map[Str, Str],
+  nparams: Int,
+  loc: Map[Int, Int],
+  xloc: Map[Int, Int],
+  saved: List[Int],
+  save_off: List[Int],
+  scratch_off: Int,
+  xmm_used: List[Int],
+  xsave_off: List[Int],
+  csave_off: Map[Int, Int],
+  caller_used: List[Int],
+  allsave_off: Map[Int, Int],
+  slot_needed: Map[Int, Bool],
+  user: Bool,
+  site: Str,
+  saves: List[Int],
+  next: Str,
+  cold: List[ColdItem],
+}
+
+/// A register together with the code that put the value there.
+type AR64 { a: A64, r: Int }
+
+fn with_a(e: Em64, a: A64) -> Em64 {
+  return e with { a: a }
+}
+
+fn add_cold(e: Em64, a: A64, c: Cold) -> Em64 {
+  return e with { a: a, cold: e.cold.push(ColdItem { c: c, saves: e.saves }) }
+}
+
+fn label_of(e: Em64, hint: Str) -> AL64 {
+  return new_label64(e.a, hint)
+}
+
+// ---- locations ------------------------------------------------------------------------------------------------
+
+fn slot(e: Em64, v: Int) -> Int {
+  if v < e.nparams {
+    return 16 + 8 * v
+  }
+  return -8 * (v - e.nparams + 1)
+}
+
+fn ld(a: A64, e: Em64, reg: Int, v: Int) -> A64 {
+  return match e.loc.get(v) {
+    Some(r) => mov_rr(a: a, rd: reg, rn: r),
+    None => load(a: a, rt: reg, rn: FP, off: slot(e, v)),
+  }
+}
+
+fn st(a: A64, e: Em64, v: Int, reg: Int) -> A64 {
+  return match e.loc.get(v) {
+    Some(r) => mov_rr(a: a, rd: r, rn: reg),
+    None => store(a: a, rn: FP, off: slot(e, v), rt: reg),
+  }
+}
+
+fn src(a: A64, e: Em64, v: Int, scratch: Int) -> AR64 {
+  return match e.loc.get(v) {
+    Some(r) => AR64 { a: a, r: r },
+    None => AR64 { a: load(a: a, rt: scratch, rn: FP, off: slot(e, v)), r: scratch },
+  }
+}
+
+fn dst(e: Em64, v: Int, scratch: Int) -> Int {
+  return e.loc.get(v).unwrap_or(scratch)
+}
+
+fn fin(a: A64, e: Em64, v: Int, reg: Int) -> A64 {
+  if e.loc.has(v) {
+    return a
+  }
+  return store(a: a, rn: FP, off: slot(e, v), rt: reg)
+}
+
+fn sub_sp(a: A64, n: Int) -> A64 {
+  if n == 0 {
+    return a
+  }
+  if fits_imm12(n) {
+    return addsub_imm(a: a, op: "sub", rd: SP, rn: SP, imm: n)
+  }
+  return word(mov_ri(a: a, rd: X16, imm: n), 3407896576 + 65536 * X16 + 32 * SP + SP)        // sub sp, sp, x16, uxtx
+}
+
+fn add_sp_imm(a: A64, n: Int) -> A64 {
+  if n == 0 {
+    return a
+  }
+  if fits_imm12(n) {
+    return addsub_imm(a: a, op: "add", rd: SP, rn: SP, imm: n)
+  }
+  return word(mov_ri(a: a, rd: X16, imm: n), 2334154752 + 65536 * X16 + 32 * SP + SP)        // add sp, sp, x16, uxtx
+}
+
+/// cmp rx, #imm (through X17 when the immediate does not fit).
+fn cmp_imm(a: A64, rx: Int, imm: Int) -> A64 {
+  if fits_imm12(imm) {
+    return cmp_ri(a: a, rn: rx, imm: imm)
+  }
+  return cmp_rr(a: mov_ri(a: a, rd: X17, imm: imm), rn: rx, rm: X17)
+}
+
+// ---- calls ----------------------------------------------------------------------------------------------------
+
+fn save_live(a0: A64, e: Em64) -> A64 {
+  var a = a0
+  for r in e.saves {
+    a = store(a: a, rn: FP, off: e.csave_off.get(r).unwrap_or(0), rt: r)
+  }
+  return a
+}
+
+fn restore_live(a0: A64, e: Em64) -> A64 {
+  var a = a0
+  for r in e.saves {
+    a = load(a: a, rt: r, rn: FP, off: e.csave_off.get(r).unwrap_or(0))
+  }
+  return a
+}
+
+fn save_floats(a0: A64, e: Em64) -> A64 {
+  var a = a0
+  var k = 0
+  for x in e.xmm_used {
+    a = fstore(a: a, rn: FP, off: e.xsave_off.get(k).unwrap_or(0), dt: x)
+    k = k + 1
+  }
+  return a
+}
+
+fn restore_floats(a0: A64, e: Em64) -> A64 {
+  var a = a0
+  var k = 0
+  for x in e.xmm_used {
+    a = fload(a: a, dt: x, rn: FP, off: e.xsave_off.get(k).unwrap_or(0))
+    k = k + 1
+  }
+  return a
+}
+
+fn note_site(a: A64, e: Em64) -> A64 {
+  if not e.user {
+    return a
+  }
+  let l = new_label64(a, "ra")
+  return site64(a: label64(l.a, l.l), ra: l.l, span: e.site)
+}
+
+fn emit_call(e: Em64, target: Str, args: List[Int], ind: Int) -> A64 {
+  let area = align16(8 * args.len())
+  var a = sub_sp(save_live(e.a, e), area)
+  var i = 0
+  for v in args {
+    let s = src(a: a, e: e, v: v, scratch: X0)
+    a = store(a: s.a, rn: SP, off: 8 * i, rt: s.r)
+    i = i + 1
+  }
+  if ind >= 0 {
+    a = blr(ld(a: a, e: e, reg: X17, v: ind), X17)
+  } else {
+    a = bl(a, target)
+  }
+  return restore_live(add_sp_imm(note_site(a, e), area), e)
+}
+
+fn rt_target(e: Em64, name: Str) -> Str {
+  return match e.rt.get(name) {
+    Some(t) => t,
+    None => fail("emit_a64: no runtime helper {name}"),
+  }
+}
+
+fn call_rt(a0: A64, e: Em64, name: Str, regs: List[Int]) -> A64 {
+  let area = align16(8 * regs.len())
+  var a = sub_sp(save_live(save_floats(a0, e), e), area)
+  var i = 0
+  for r in regs {
+    a = store(a: a, rn: SP, off: 8 * i, rt: r)
+    i = i + 1
+  }
+  a = add_sp_imm(note_site(bl(a, rt_target(e, name)), e), area)
+  return restore_floats(restore_live(a, e), e)
+}
+
+/// A general-purpose register holding the bits of v (a float vreg possibly in a D register).
+fn bits_of(a: A64, e: Em64, v: Int, scratch: Int) -> AR64 {
+  return match e.xloc.get(v) {
+    Some(x) => AR64 { a: fmov_xd(a: a, xd: scratch, dn: x), r: scratch },
+    None => src(a: a, e: e, v: v, scratch: scratch),
+  }
+}
+
+/// A call of a software math function (rt/softmath.klar) on a path the allocator treats as call-free: everything
+/// live in a caller-saved register is saved around it. Arguments and the result are the bits of doubles.
+fn soft_call(e: Em64, helper: Str, args: List[Int], d: Int) -> A64 {
+  var a = save_floats(e.a, e)
+  for r in e.caller_used {
+    a = store(a: a, rn: FP, off: e.allsave_off.get(r).unwrap_or(0), rt: r)
+  }
+  let area = align16(8 * args.len())
+  a = sub_sp(a, area)
+  var i = 0
+  for v in args {
+    let s = bits_of(a: a, e: e, v: v, scratch: X0)
+    a = store(a: s.a, rn: SP, off: 8 * i, rt: s.r)
+    i = i + 1
+  }
+  a = add_sp_imm(note_site(bl(a, rt_target(e, helper)), e), area)
+  for r in e.caller_used {
+    a = load(a: a, rt: r, rn: FP, off: e.allsave_off.get(r).unwrap_or(0))
+  }
+  a = restore_floats(a, e)
+  return match e.xloc.get(d) {
+    Some(xd) => {
+      let a1 = fmov_dx(a: a, dd: xd, xn: X0)
+      if e.slot_needed.has(d) {
+        return store(a: a1, rn: FP, off: slot(e, d), rt: X0)
+      }
+      return a1
+    },
+    None => st(a: a, e: e, v: d, reg: X0),
+  }
+}
+
+// ---- branches -------------------------------------------------------------------------------------------------
+
+fn branch(a: A64, e: Em64, cc: Str, tg: Pair[Str, Str]) -> A64 {
+  let lt = tg.first
+  let lf = tg.second
+  if e.next == lf {
+    return bcc(a: a, cc: cc, target: lt)
+  }
+  if e.next == lt {
+    return bcc(a: a, cc: invert(cc), target: lf)
+  }
+  return br(bcc(a: a, cc: cc, target: lt), lf)
+}
+
+fn targets(ins: Ins, k: Int) -> Pair[Str, Str] {
+  return Pair { first: sat(ins, k), second: sat(ins, k + 1) }
+}
+
+fn ccs(cc: Str) -> Str {
+  return match cc {
+    "eq" => "eq",
+    "ne" => "ne",
+    "lt" => "lt",
+    "le" => "le",
+    "gt" => "gt",
+    "ge" => "ge",
+    "ult" => "lo",
+    "ule" => "ls",
+    "ugt" => "hi",
+    "uge" => "hs",
+    _ => fail("emit_a64: unknown comparison {cc}"),
+  }
+}
+
+/// After FCMP an unordered result (NaN) makes every comparison false except !=.
+fn fcc(cc: Str) -> Str {
+  return match cc {
+    "lt" => "mi",
+    "le" => "ls",
+    "gt" => "gt",
+    "ge" => "ge",
+    "eq" => "eq",
+    "ne" => "ne",
+    _ => fail("emit_a64: unknown float comparison {cc}"),
+  }
+}
+
+// ---- floats in D registers ------------------------------------------------------------------------------------
+
+fn slot_needed(f: KFn, xloc: Map[Int, Int]) -> Map[Int, Bool] {
+  var need: Map[Int, Bool] = Map {}
+  if xloc.is_empty() {
+    return need
+  }
+  for ins in f.code {
+    if not ["fbin", "fcmp", "fbr", "f2i", "mov", "fun", "fpow"].contains(sat(ins, 0)) {
+      for u in used_regs(ins) {
+        if xloc.has(u) {
+          need = need.set(u, true)
+        }
+      }
+    }
+  }
+  return need
+}
+
+fn xsrc(a: A64, e: Em64, v: Int, scratch: Int) -> AR64 {
+  match e.xloc.get(v) {
+    Some(x) => {
+      return AR64 { a: a, r: x }
+    },
+    None => {},
+  }
+  return match e.loc.get(v) {
+    None => AR64 { a: fload(a: a, dt: scratch, rn: FP, off: slot(e, v)), r: scratch },
+    Some(r) => AR64 { a: fmov_dx(a: a, dd: scratch, xn: r), r: scratch },
+  }
+}
+
+fn xfin(a: A64, e: Em64, d: Int, x: Int) -> A64 {
+  match e.xloc.get(d) {
+    Some(xd) => {
+      let a1 = fmov_dd(a: a, dd: xd, dn: x)
+      if e.slot_needed.has(d) {
+        return fstore(a: a1, rn: FP, off: slot(e, d), dt: xd)
+      }
+      return a1
+    },
+    None => {},
+  }
+  return match e.loc.get(d) {
+    None => fstore(a: a, rn: FP, off: slot(e, d), dt: x),
+    Some(r) => fmov_xd(a: a, xd: r, dn: x),
+  }
+}
+
+// ---- instructions ---------------------------------------------------------------------------------------------
+
+fn i_const(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let imm = iat(ins, 2)
+  match e.xloc.get(d) {
+    Some(xd) => {
+      var a = fmov_dx(a: mov_ri(a: e.a, rd: X0, imm: imm), dd: xd, xn: X0)
+      if e.slot_needed.has(d) {
+        a = store(a: a, rn: FP, off: slot(e, d), rt: X0)
+      }
+      return with_a(e, a)
+    },
+    None => {},
+  }
+  let r = dst(e: e, v: d, scratch: X0)
+  return with_a(e, fin(a: mov_ri(a: e.a, rd: r, imm: imm), e: e, v: d, reg: r))
+}
+
+fn i_mov(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let s = iat(ins, 2)
+  if d == s {
+    return e
+  }
+  if e.xloc.has(d) or e.xloc.has(s) {
+    if e.xloc.has(d) {
+      let xs = xsrc(a: e.a, e: e, v: s, scratch: D0)
+      return with_a(e, xfin(a: xs.a, e: e, d: d, x: xs.r))
+    }
+    let x = e.xloc.get(s).unwrap_or(0)
+    return match e.loc.get(d) {
+      Some(rd) => with_a(e, fmov_xd(a: e.a, xd: rd, dn: x)),
+      None => with_a(e, fstore(a: e.a, rn: FP, off: slot(e, d), dt: x)),
+    }
+  }
+  return match e.loc.get(d) {
+    Some(rd) => with_a(e, ld(a: e.a, e: e, reg: rd, v: s)),
+    None => {
+      let sc = src(a: e.a, e: e, v: s, scratch: X0)
+      return with_a(e, st(a: sc.a, e: e, v: d, reg: sc.r))
+    },
+  }
+}
+
+fn i_addr(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let r = dst(e: e, v: d, scratch: X0)
+  return with_a(e, fin(a: adr_sym(a: e.a, rd: r, target: sat(ins, 2)), e: e, v: d, reg: r))
+}
+
+fn i_bin(e: Em64, ins: Ins) -> Em64 {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let sx = src(a: e.a, e: e, v: iat(ins, 3), scratch: X0)
+  let sy = src(a: sx.a, e: e, v: iat(ins, 4), scratch: X1)
+  let r = dst(e: e, v: d, scratch: X2)
+  var a = sy.a
+  if ["add", "sub", "and", "or", "xor", "sdiv", "udiv", "shl", "shr", "sar"].contains(opn) {
+    a = op3(a: a, op: opn, rd: r, rn: sx.r, rm: sy.r)
+  } else if opn == "mul" {
+    a = mul(a: a, rd: r, rn: sx.r, rm: sy.r)
+  } else if opn == "srem" or opn == "urem" {
+    var div = "udiv"
+    if opn == "srem" {
+      div = "sdiv"
+    }
+    a = msub(a: op3(a: a, op: div, rd: X17, rn: sx.r, rm: sy.r), rd: r, rn: X17, rm: sy.r, ra: sx.r)
+  } else if opn == "umulhi" {
+    a = umulh(a: a, rd: r, rn: sx.r, rm: sy.r)
+  } else {
+    return fail("emit_a64: unknown operation {opn}")
+  }
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_bini(e: Em64, ins: Ins) -> Em64 {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let imm = iat(ins, 4)
+  let sx = src(a: e.a, e: e, v: iat(ins, 3), scratch: X0)
+  let r = dst(e: e, v: d, scratch: X0)
+  var a = sx.a
+  if opn == "shl" or opn == "shr" or opn == "sar" {
+    a = shift_i(a: a, op: opn, rd: r, rn: sx.r, n0: imm)
+  } else if (opn == "add" or opn == "sub") and fits_imm12(imm) {
+    a = addsub_imm(a: a, op: opn, rd: r, rn: sx.r, imm: imm)
+  } else {
+    a = mov_ri(a: a, rd: X1, imm: imm)
+    if opn == "mul" {
+      a = mul(a: a, rd: r, rn: sx.r, rm: X1)
+    } else {
+      a = op3(a: a, op: opn, rd: r, rn: sx.r, rm: X1)
+    }
+  }
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+/// Division / remainder by a positive constant: multiply by the rounded reciprocal.
+fn i_bink(e: Em64, ins: Ins) -> Em64 {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let c = iat(ins, 4)
+  var a = ld(a: e.a, e: e, reg: X1, v: iat(ins, 3))
+  if opn == "sdiv" or opn == "srem" {
+    if is_pow2(c) {
+      let k = bit_length(c) - 1
+      a = mov_rr(a: a, rd: X0, rn: X1)
+      if k != 0 {
+        a = shift_i(a: a, op: "sar", rd: X0, rn: X0, n0: 63)
+        a = shift_i(a: a, op: "shr", rd: X0, rn: X0, n0: 64 - k)
+        a = op3(a: a, op: "add", rd: X0, rn: X0, rm: X1)
+        a = shift_i(a: a, op: "sar", rd: X0, rn: X0, n0: k)
+      }
+    } else {
+      let ms = sdiv_magic64(c)
+      a = smulh(a: mov_ri(a: a, rd: X0, imm: ms.m), rd: X2, rn: X0, rm: X1)
+      if ms.m < 0 {
+        a = op3(a: a, op: "add", rd: X2, rn: X2, rm: X1)
+      }
+      if ms.s != 0 {
+        a = shift_i(a: a, op: "sar", rd: X2, rn: X2, n0: ms.s)
+      }
+      a = shift_i(a: a, op: "shr", rd: X0, rn: X2, n0: 63)
+      a = op3(a: a, op: "add", rd: X0, rn: X0, rm: X2)
+    }
+  } else {
+    if is_pow2(c) {
+      let k = bit_length(c) - 1
+      if opn == "udiv" {
+        a = shift_i(a: a, op: "shr", rd: X1, rn: X1, n0: k)
+      } else {
+        a = op3(a: mov_ri(a: a, rd: X0, imm: c - 1), op: "and", rd: X1, rn: X1, rm: X0)
+      }
+      return with_a(e, st(a: a, e: e, v: d, reg: X1))
+    }
+    match udiv_magic_simple(c) {
+      Some(ms) => {
+        a = umulh(a: mov_ri(a: a, rd: X0, imm: ms.m), rd: X0, rn: X0, rm: X1)
+        if ms.s != 0 {
+          a = shift_i(a: a, op: "shr", rd: X0, rn: X0, n0: ms.s)
+        }
+      },
+      None => {
+        let ml = udiv_magic(c)
+        a = umulh(a: mov_ri(a: a, rd: X0, imm: ml.m), rd: X2, rn: X0, rm: X1)          // t
+        a = op3(a: a, op: "sub", rd: X0, rn: X1, rm: X2)
+        a = shift_i(a: a, op: "shr", rd: X0, rn: X0, n0: 1)
+        a = op3(a: a, op: "add", rd: X0, rn: X0, rm: X2)
+        a = shift_i(a: a, op: "shr", rd: X0, rn: X0, n0: ml.s - 1)
+      },
+    }
+  }
+  if opn == "sdiv" or opn == "udiv" {
+    return with_a(e, st(a: a, e: e, v: d, reg: X0))
+  }
+  a = msub(a: mov_ri(a: a, rd: X2, imm: c), rd: X1, rn: X0, rm: X2, ra: X1)       // x - q*c
+  return with_a(e, st(a: a, e: e, v: d, reg: X1))
+}
+
+fn i_cmp(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 2)
+  let sx = src(a: e.a, e: e, v: iat(ins, 3), scratch: X0)
+  let sy = src(a: sx.a, e: e, v: iat(ins, 4), scratch: X1)
+  let r = dst(e: e, v: d, scratch: X0)
+  let a = cset(a: cmp_rr(a: sy.a, rn: sx.r, rm: sy.r), rd: r, cc: ccs(sat(ins, 1)))
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_cmpi(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 2)
+  let sx = src(a: e.a, e: e, v: iat(ins, 3), scratch: X0)
+  let r = dst(e: e, v: d, scratch: X0)
+  let a = cset(a: cmp_imm(a: sx.a, rx: sx.r, imm: iat(ins, 4)), rd: r, cc: ccs(sat(ins, 1)))
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_brc(e: Em64, ins: Ins) -> Em64 {
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: X0)
+  let sy = src(a: sx.a, e: e, v: iat(ins, 3), scratch: X1)
+  return with_a(e, branch(a: cmp_rr(a: sy.a, rn: sx.r, rm: sy.r), e: e, cc: ccs(sat(ins, 1)), tg: targets(ins, 4)))
+}
+
+fn i_brci(e: Em64, ins: Ins) -> Em64 {
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: X0)
+  let a = cmp_imm(a: sx.a, rx: sx.r, imm: iat(ins, 3))
+  return with_a(e, branch(a: a, e: e, cc: ccs(sat(ins, 1)), tg: targets(ins, 4)))
+}
+
+fn i_brti(e: Em64, ins: Ins) -> Em64 {
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: X0)
+  let a = op3(a: mov_ri(a: sx.a, rd: X17, imm: iat(ins, 3)), op: "ands", rd: 31, rn: sx.r, rm: X17)
+  return with_a(e, branch(a: a, e: e, cc: "ne", tg: targets(ins, 4)))
+}
+
+fn i_fbin(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 2)
+  let xa = xsrc(a: e.a, e: e, v: iat(ins, 3), scratch: D0)
+  let xb = xsrc(a: xa.a, e: e, v: iat(ins, 4), scratch: D1)
+  let t = e.xloc.get(d).unwrap_or(D0)
+  return with_a(e, xfin(a: fop(a: xb.a, op: sat(ins, 1), dd: t, dn: xa.r, dm: xb.r), e: e, d: d, x: t))
+}
+
+fn i_fcmp(e: Em64, ins: Ins) -> Em64 {
+  let xa = xsrc(a: e.a, e: e, v: iat(ins, 3), scratch: D0)
+  let xb = xsrc(a: xa.a, e: e, v: iat(ins, 4), scratch: D1)
+  let a = cset(a: fcmp(a: xb.a, dn: xa.r, dm: xb.r), rd: X0, cc: fcc(sat(ins, 1)))
+  return with_a(e, st(a: a, e: e, v: iat(ins, 2), reg: X0))
+}
+
+fn i_fbr(e: Em64, ins: Ins) -> Em64 {
+  let xa = xsrc(a: e.a, e: e, v: iat(ins, 2), scratch: D0)
+  let xb = xsrc(a: xa.a, e: e, v: iat(ins, 3), scratch: D1)
+  return with_a(e, branch(a: fcmp(a: xb.a, dn: xa.r, dm: xb.r), e: e, cc: fcc(sat(ins, 1)), tg: targets(ins, 4)))
+}
+
+fn i_i2f(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let t = e.xloc.get(d).unwrap_or(D0)
+  let sx = src(a: e.a, e: e, v: iat(ins, 2), scratch: X0)
+  return with_a(e, xfin(a: scvtf(a: sx.a, dd: t, xn: sx.r), e: e, d: d, x: t))
+}
+
+fn i_f2i(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let xa = xsrc(a: e.a, e: e, v: iat(ins, 2), scratch: D0)
+  let r = dst(e: e, v: d, scratch: X0)
+  return with_a(e, fin(a: fcvtzs(a: xa.a, xd: r, dn: xa.r), e: e, v: d, reg: r))
+}
+
+fn i_fun(e: Em64, ins: Ins) -> Em64 {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  if opn == "sqrt" {
+    let t = e.xloc.get(d).unwrap_or(D0)
+    let xs = xsrc(a: e.a, e: e, v: x, scratch: D1)
+    return with_a(e, xfin(a: fsqrt(a: xs.a, dd: t, dn: xs.r), e: e, d: d, x: t))
+  }
+  return with_a(e, soft_call(e: e, helper: soft_helper(opn), args: [x], d: d))
+}
+
+fn i_fpow(e: Em64, ins: Ins) -> Em64 {
+  return with_a(e, soft_call(e: e, helper: "soft_pow", args: [iat(ins, 2), iat(ins, 3)], d: iat(ins, 1)))
+}
+
+// ---- tagged Int fast paths ------------------------------------------------------------------------------------
+
+fn div_check(e: Em64, span: Str, divisor: Int) -> Em64 {
+  let bad = label_of(e, "dz")
+  let a = bcc(a: cmp_ri(a: bad.a, rn: divisor, imm: 1), cc: "eq", target: bad.l)      // tagged zero == 1
+  return add_cold(e: e, a: a, c: Cold.DivZero(lab: bad.l, span: span))
+}
+
+/// X2 = X0 * X1 (64-bit); to `slow` when the full product does not fit.
+fn mul_overflow_check(a0: A64, slow: Str) -> A64 {
+  let a = smulh(a: mul(a: a0, rd: X2, rn: X0, rm: X1), rd: X3, rn: X0, rm: X1)
+  return bcc(a: word(a, 3951099007 + X2 * 65536), cc: "ne", target: slow)        // cmp x3, x2, asr #63
+}
+
+fn i_iop(e0: Em64, ins: Ins) -> Em64 {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let y = iat(ins, 4)
+  let done = label_of(e0, "idone")
+  let slow = new_label64(done.a, "islow")
+  var e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Reg(v: y), done: done.l))
+  e = with_a(e, ld(a: ld(a: e.a, e: e, reg: X0, v: x), e: e, reg: X1, v: y))
+  if opn == "div" or opn == "mod" {
+    e = div_check(e: e, span: sat_or(ins, 5), divisor: X1)
+  }
+  var a = op3(a: e.a, op: "and", rd: X2, rn: X0, rm: X1)
+  a = bcc(a: tst1(a, X2), cc: "eq", target: slow.l)
+  if opn == "add" or opn == "sub" {
+    a = addsub_imm(a: a, op: "sub", rd: X1, rn: X1, imm: 1)
+    a = bcc(a: op3(a: a, op: opn + "s", rd: X0, rn: X0, rm: X1), cc: "vs", target: slow.l)
+  } else if opn == "mul" {
+    a = shift_i(a: a, op: "sar", rd: X0, rn: X0, n0: 1)
+    a = addsub_imm(a: a, op: "sub", rd: X1, rn: X1, imm: 1)
+    a = addsub_imm(a: mul_overflow_check(a, slow.l), op: "add", rd: X0, rn: X2, imm: 1)
+  } else if opn == "div" or opn == "mod" {
+    a = shift_i(a: a, op: "sar", rd: X0, rn: X0, n0: 1)
+    a = shift_i(a: a, op: "sar", rd: X1, rn: X1, n0: 1)
+    a = op3(a: a, op: "sdiv", rd: X2, rn: X0, rm: X1)
+    if opn == "mod" {
+      a = msub(a: a, rd: X2, rn: X2, rm: X1, ra: X0)
+    }
+    a = bcc(a: op3(a: a, op: "adds", rd: X0, rn: X2, rm: X2), cc: "vs", target: slow.l)
+    a = addsub_imm(a: a, op: "add", rd: X0, rn: X0, imm: 1)
+  }
+  return with_a(e, label64(st(a: a, e: e, v: d, reg: X0), done.l))
+}
+
+/// Tagged Int op with the constant small Int t (already tagged: 2c+1).
+fn i_iopi(e0: Em64, ins: Ins) -> Em64 {
+  let opn = sat(ins, 1)
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let t = iat(ins, 4)
+  let done = label_of(e0, "idone")
+  let slow = new_label64(done.a, "islow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Imm(t: t), done: done.l))
+  let sx = src(a: e.a, e: e, v: x, scratch: X0)
+  let rx = sx.r
+  var a = bcc(a: tst1(sx.a, rx), cc: "eq", target: slow.l)
+  if opn == "add" or opn == "sub" {
+    var r = e.loc.get(d).unwrap_or(X0)
+    if not e.loc.has(d) or e.loc.get(d) == e.loc.get(x) {
+      r = X0
+    }
+    if fits_imm12(t - 1) {
+      a = addsub_imm(a: a, op: opn + "s", rd: r, rn: rx, imm: t - 1)
+    } else {
+      a = op3(a: mov_ri(a: a, rd: X17, imm: t - 1), op: opn + "s", rd: r, rn: rx, rm: X17)
+    }
+    a = bcc(a: a, cc: "vs", target: slow.l)     // (the slow path recomputes from x, which is untouched)
+    if r == X0 {
+      a = st(a: a, e: e, v: d, reg: X0)
+    }
+    return with_a(e, label64(a, done.l))
+  }
+  let c = t.shift_right(1)
+  if opn == "mul" {
+    a = shift_i(a: a, op: "sar", rd: X0, rn: rx, n0: 1)
+    a = mul_overflow_check(mov_ri(a: a, rd: X1, imm: t - 1), slow.l)
+    a = addsub_imm(a: a, op: "add", rd: X0, rn: X2, imm: 1)
+  } else if (opn == "div" or opn == "mod") and c.abs() >= 2 {
+    a = const_divmod(a0: mov_rr(a: a, rd: X0, rn: rx), opn: opn, c: c)
+  } else if opn == "div" or opn == "mod" {
+    a = shift_i(a: a, op: "sar", rd: X0, rn: rx, n0: 1)
+    a = op3(a: mov_ri(a: a, rd: X1, imm: c), op: "sdiv", rd: X2, rn: X0, rm: X1)
+    if opn == "mod" {
+      a = msub(a: a, rd: X2, rn: X2, rm: X1, ra: X0)
+    }
+    a = bcc(a: op3(a: a, op: "adds", rd: X0, rn: X2, rm: X2), cc: "vs", target: slow.l)
+    a = addsub_imm(a: a, op: "add", rd: X0, rn: X0, imm: 1)
+  }
+  return with_a(e, label64(st(a: a, e: e, v: d, reg: X0), done.l))
+}
+
+/// X0 = tagged small Int -> tagged (X0 / c) or (X0 % c), truncating; |c| >= 2 (reciprocal multiply).
+fn const_divmod(a0: A64, opn: Str, c: Int) -> A64 {
+  var a = shift_i(a: a0, op: "sar", rd: X1, rn: X0, n0: 1)          // X1 = a
+  let ac = c.abs()
+  if is_pow2(ac) {
+    let k = bit_length(ac) - 1
+    a = shift_i(a: a, op: "sar", rd: X0, rn: X1, n0: 63)
+    a = shift_i(a: a, op: "shr", rd: X0, rn: X0, n0: 64 - k)
+    a = op3(a: a, op: "add", rd: X0, rn: X0, rm: X1)
+    a = shift_i(a: a, op: "sar", rd: X0, rn: X0, n0: k)
+  } else {
+    let ms = sdiv_magic(ac)
+    a = smulh(a: mov_ri(a: a, rd: X2, imm: ms.m), rd: X3, rn: X1, rm: X2)
+    if ms.s != 0 {
+      a = shift_i(a: a, op: "sar", rd: X3, rn: X3, n0: ms.s)
+    }
+    a = shift_i(a: a, op: "shr", rd: X0, rn: X1, n0: 63)
+    a = op3(a: a, op: "add", rd: X0, rn: X0, rm: X3)
+  }
+  if c < 0 {
+    a = neg(a: a, rd: X0, rm: X0)
+  }
+  if opn == "mod" {
+    a = msub(a: mov_ri(a: a, rd: X2, imm: c), rd: X0, rn: X0, rm: X2, ra: X1)       // a - q*c
+  }
+  return addsub_imm(a: op3(a: a, op: "add", rd: X0, rn: X0, rm: X0), op: "add", rd: X0, rn: X0, imm: 1)
+}
+
+fn i_ineg(e0: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let x = iat(ins, 2)
+  let done = label_of(e0, "ndone")
+  let slow = new_label64(done.a, "nslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.NegSlow(lab: slow.l, d: d, x: x, done: done.l))
+  var a = bcc(a: tst1(ld(a: e.a, e: e, reg: X1, v: x), X1), cc: "eq", target: slow.l)
+  a = op3(a: mov_ri(a: a, rd: X0, imm: 2), op: "subs", rd: X0, rn: X0, rm: X1)
+  a = bcc(a: a, cc: "vs", target: slow.l)
+  return with_a(e, label64(st(a: a, e: e, v: d, reg: X0), done.l))
+}
+
+type Both64 { a: A64, x: Int, y: Int }
+
+fn both_small(a: A64, e: Em64, xy: Pair[Int, Int], slow: Str) -> Both64 {
+  let sx = src(a: a, e: e, v: xy.first, scratch: X0)
+  let sy = src(a: sx.a, e: e, v: xy.second, scratch: X1)
+  let a1 = bcc(a: tst1(op3(a: sy.a, op: "and", rd: X2, rn: sx.r, rm: sy.r), X2), cc: "eq", target: slow)
+  return Both64 { a: a1, x: sx.r, y: sy.r }
+}
+
+fn i_icmp(e0: Em64, ins: Ins) -> Em64 {
+  let cc = ccs(sat(ins, 1))
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let y = iat(ins, 4)
+  let done = label_of(e0, "cdone")
+  let slow = new_label64(done.a, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Reg(v: y), then: Then.SetTo(cc: cc, d: d,
+    done: done.l)))
+  let bs = both_small(a: e.a, e: e, xy: Pair { first: x, second: y }, slow: slow.l)
+  let r = dst(e: e, v: d, scratch: X0)
+  let a = cset(a: cmp_rr(a: bs.a, rn: bs.x, rm: bs.y), rd: r, cc: cc)
+  return with_a(e, label64(fin(a: a, e: e, v: d, reg: r), done.l))
+}
+
+fn i_icmpi(e0: Em64, ins: Ins) -> Em64 {
+  let cc = ccs(sat(ins, 1))
+  let d = iat(ins, 2)
+  let x = iat(ins, 3)
+  let t = iat(ins, 4)
+  let done = label_of(e0, "cdone")
+  let slow = new_label64(done.a, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Imm(t: t), then: Then.SetTo(cc: cc, d: d,
+    done: done.l)))
+  let sx = src(a: e.a, e: e, v: x, scratch: X0)
+  var a = bcc(a: tst1(sx.a, sx.r), cc: "eq", target: slow.l)
+  let r = dst(e: e, v: d, scratch: X0)
+  a = cset(a: cmp_imm(a: a, rx: sx.r, imm: t), rd: r, cc: cc)
+  return with_a(e, label64(fin(a: a, e: e, v: d, reg: r), done.l))
+}
+
+fn i_ibr(e0: Em64, ins: Ins) -> Em64 {
+  let cc = ccs(sat(ins, 1))
+  let x = iat(ins, 2)
+  let y = iat(ins, 3)
+  let tg = targets(ins, 4)
+  let slow = label_of(e0, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Reg(v: y), then: Then.Far(cc: cc,
+    lt: tg.first, lf: tg.second)))
+  let bs = both_small(a: e.a, e: e, xy: Pair { first: x, second: y }, slow: slow.l)
+  return with_a(e, branch(a: cmp_rr(a: bs.a, rn: bs.x, rm: bs.y), e: e, cc: cc, tg: tg))
+}
+
+fn i_ibri(e0: Em64, ins: Ins) -> Em64 {
+  let cc = ccs(sat(ins, 1))
+  let x = iat(ins, 2)
+  let t = iat(ins, 3)
+  let tg = targets(ins, 4)
+  let slow = label_of(e0, "cslow")
+  let e = add_cold(e: e0, a: slow.a, c: Cold.CSlow(lab: slow.l, x: x, y: YL.Imm(t: t), then: Then.Far(cc: cc,
+    lt: tg.first, lf: tg.second)))
+  let sx = src(a: e.a, e: e, v: x, scratch: X0)
+  let a = cmp_imm(a: bcc(a: tst1(sx.a, sx.r), cc: "eq", target: slow.l), rx: sx.r, imm: t)
+  return with_a(e, branch(a: a, e: e, cc: cc, tg: tg))
+}
+
+// ---- memory ---------------------------------------------------------------------------------------------------
+
+fn load_op(o: Str) -> Str {
+  return match o {
+    "load" => "ldr",
+    "load8" => "ldrb",
+    _ => "ldrw",
+  }
+}
+
+fn store_op(o: Str) -> Str {
+  return match o {
+    "store" => "str",
+    "store8" => "strb",
+    _ => "strw",
+  }
+}
+
+fn i_load(e: Em64, ins: Ins) -> Em64 {
+  let d = iat(ins, 1)
+  let sb = src(a: e.a, e: e, v: iat(ins, 2), scratch: X1)
+  let r = dst(e: e, v: d, scratch: X0)
+  let a = mem(a: sb.a, op: load_op(sat(ins, 0)), rt: r, rn: sb.r, off: iat(ins, 3))
+  return with_a(e, fin(a: a, e: e, v: d, reg: r))
+}
+
+fn i_store(e: Em64, ins: Ins) -> Em64 {
+  let sb = src(a: e.a, e: e, v: iat(ins, 1), scratch: X1)
+  let sv = src(a: sb.a, e: e, v: iat(ins, 3), scratch: X0)
+  return with_a(e, mem(a: sv.a, op: store_op(sat(ins, 0)), rt: sv.r, rn: sb.r, off: iat(ins, 2)))
+}
+
+// ---- reference counting ---------------------------------------------------------------------------------------
+
+fn i_retain(e: Em64, ins: Ins) -> Em64 {
+  let skip = label_of(e, "rs")
+  let sr = src(a: skip.a, e: e, v: iat(ins, 2), scratch: X0)
+  var a = sr.a
+  if sat(ins, 1) == "int" {
+    a = bcc(a: tst1(a, sr.r), cc: "ne", target: skip.l)
+  }
+  a = bcc(a: cmp_ri(a: load(a: a, rt: X1, rn: sr.r, off: 0), rn: X1, imm: 0), cc: "lt", target: skip.l)
+  a = store(a: addsub_imm(a: a, op: "add", rd: X1, rn: X1, imm: 1), rn: sr.r, off: 0, rt: X1)
+  return with_a(e, label64(a, skip.l))
+}
+
+fn i_release(e: Em64, ins: Ins) -> Em64 {
+  let v = iat(ins, 2)
+  let skip = label_of(e, "rl")
+  let free = new_label64(skip.a, "rf")
+  let sr = src(a: free.a, e: e, v: v, scratch: X0)
+  var a = sr.a
+  if sat(ins, 1) == "int" {
+    a = bcc(a: tst1(a, sr.r), cc: "ne", target: skip.l)
+  }
+  a = bcc(a: cmp_ri(a: load(a: a, rt: X1, rn: sr.r, off: 0), rn: X1, imm: 0), cc: "lt", target: skip.l)
+  a = store(a: addsub_imm(a: a, op: "subs", rd: X1, rn: X1, imm: 1), rn: sr.r, off: 0, rt: X1)
+  a = label64(bcc(a: a, cc: "eq", target: free.l), skip.l)
+  return add_cold(e: e, a: a, c: Cold.Free(lab: free.l, v: v, skip: skip.l))
+}
+
+// ---- calls & control ------------------------------------------------------------------------------------------
+
+fn i_call(e: Em64, ins: Ins) -> Em64 {
+  var target = sat(ins, 2)
+  let cold = target.starts_with("cold:")
+  var e1 = e
+  if cold {
+    target = target.slice(5, target.len())
+    e1 = with_a(e, save_floats(e.a, e))
+  }
+  if OS_FUNCS.contains(target) {
+    target = "__" + target
+  }
+  var a = emit_call(e: e1, target: target, args: lat(ins, 3), ind: -1)
+  if cold {
+    a = restore_floats(a, e)
+  }
+  if has_reg(ins, 1) {
+    a = st(a: a, e: e, v: iat(ins, 1), reg: X0)
+  }
+  return with_a(e, a)
+}
+
+fn i_callind(e: Em64, ins: Ins) -> Em64 {
+  var a = emit_call(e: e, target: "", args: lat(ins, 3), ind: iat(ins, 2))
+  if has_reg(ins, 1) {
+    a = st(a: a, e: e, v: iat(ins, 1), reg: X0)
+  }
+  return with_a(e, a)
+}
+
+fn i_jmp(e: Em64, ins: Ins) -> Em64 {
+  let name = sat(ins, 1)
+  if e.next == name {
+    return e
+  }
+  return with_a(e, br(e.a, name))
+}
+
+fn i_br(e: Em64, ins: Ins) -> Em64 {
+  let sc = src(a: e.a, e: e, v: iat(ins, 1), scratch: X0)
+  return with_a(e, branch(a: cmp_ri(a: sc.a, rn: sc.r, imm: 0), e: e, cc: "ne", tg: targets(ins, 2)))
+}
+
+fn i_ret(e: Em64, ins: Ins) -> Em64 {
+  var a = e.a
+  if has_reg(ins, 1) {
+    a = ld(a: a, e: e, reg: X0, v: iat(ins, 1))
+  }
+  var k = 0
+  for r in e.saved {
+    a = load(a: a, rt: r, rn: FP, off: e.save_off.get(k).unwrap_or(0))
+    k = k + 1
+  }
+  return with_a(e, ret(ldp_post(a: mov_rr(a: a, rd: SP, rn: FP), rt: FP, rt2: LR, rn: SP, off: 16)))
+}
+
+fn i_enter(e: Em64) -> Em64 {
+  let over = label_of(e, "dep")
+  var a = addsub_imm(a: over.a, op: "add", rd: X28, rn: X28, imm: 1)      // X28: call depth (reserved register)
+  a = cmp_rr(a: mov_ri(a: a, rd: X17, imm: MAX_DEPTH), rn: X28, rm: X17)
+  a = bcc(a: a, cc: "gt", target: over.l)
+  return add_cold(e: e, a: a, c: Cold.Depth(lab: over.l))
+}
+
+fn instruction(e: Em64, ins: Ins) -> Em64 {
+  let o = sat(ins, 0)
+  return match o {
+    "const" => i_const(e, ins),
+    "mov" => i_mov(e, ins),
+    "addr" => i_addr(e, ins),
+    "bin" => i_bin(e, ins),
+    "bini" => i_bini(e, ins),
+    "bink" => i_bink(e, ins),
+    "cmp" => i_cmp(e, ins),
+    "cmpi" => i_cmpi(e, ins),
+    "brc" => i_brc(e, ins),
+    "brci" => i_brci(e, ins),
+    "brti" => i_brti(e, ins),
+    "fbin" => i_fbin(e, ins),
+    "fcmp" => i_fcmp(e, ins),
+    "fbr" => i_fbr(e, ins),
+    "i2f" => i_i2f(e, ins),
+    "f2i" => i_f2i(e, ins),
+    "fun" => i_fun(e, ins),
+    "fpow" => i_fpow(e, ins),
+    "iop" => i_iop(e, ins),
+    "iopi" => i_iopi(e, ins),
+    "ineg" => i_ineg(e, ins),
+    "icmp" => i_icmp(e, ins),
+    "icmpi" => i_icmpi(e, ins),
+    "ibr" => i_ibr(e, ins),
+    "ibri" => i_ibri(e, ins),
+    "load" => i_load(e, ins),
+    "load8" => i_load(e, ins),
+    "load32" => i_load(e, ins),
+    "store" => i_store(e, ins),
+    "store8" => i_store(e, ins),
+    "store32" => i_store(e, ins),
+    "retain" => i_retain(e, ins),
+    "release" => i_release(e, ins),
+    "call" => i_call(e, ins),
+    "callind" => i_callind(e, ins),
+    "label" => with_a(e, label64(e.a, sat(ins, 1))),
+    "jmp" => i_jmp(e, ins),
+    "br" => i_br(e, ins),
+    "ret" => i_ret(e, ins),
+    "enter" => i_enter(e),
+    "leave" => with_a(e, addsub_imm(a: e.a, op: "sub", rd: X28, rn: X28, imm: 1)),
+    "site" => e with { site: sat_or(ins, 1) },
+    "fp" => with_a(e, st(a: e.a, e: e, v: iat(ins, 1), reg: FP)),
+    _ => fail("emit_a64: unknown KIR instruction {o}"),
+  }
+}
+
+/// Loads X1 for the slow path of an Int operation.
+fn load_y(a: A64, e: Em64, y: YL) -> A64 {
+  return match y {
+    YL.Reg(v) => ld(a: a, e: e, reg: X1, v: v),
+    YL.Imm(t) => mov_ri(a: a, rd: X1, imm: t),
+  }
+}
+
+fn emit_cold(e: Em64, c: Cold) -> A64 {
+  return match c {
+    Cold.ISlow(lab, opn, d, x, y, done) => {
+      let a = load_y(a: ld(a: label64(e.a, lab), e: e, reg: X0, v: x), e: e, y: y)
+      let a2 = call_rt(a0: a, e: e, name: "int_" + opn, regs: [X0, X1])
+      return br(st(a: a2, e: e, v: d, reg: X0), done)
+    },
+    Cold.DivZero(lab, span) => {
+      var a = label64(e.a, lab)
+      if span != "" {
+        a = adr_sym(a: a, rd: X0, target: span)
+      } else {
+        a = mov_ri(a: a, rd: X0, imm: 0)
+      }
+      return udf(call_rt(a0: a, e: e, name: "div_zero", regs: [X0]))
+    },
+    Cold.NegSlow(lab, d, x, done) => {
+      let a = call_rt(a0: ld(a: label64(e.a, lab), e: e, reg: X1, v: x), e: e, name: "int_neg", regs: [X1])
+      return br(st(a: a, e: e, v: d, reg: X0), done)
+    },
+    Cold.CSlow(lab, x, y, then) => {
+      let a = load_y(a: ld(a: label64(e.a, lab), e: e, reg: X0, v: x), e: e, y: y)
+      let a2 = cmp_ri(a: call_rt(a0: a, e: e, name: "int_cmp", regs: [X0, X1]), rn: X0, imm: 0)
+      return match then {
+        Then.SetTo(cc, d, done) => br(st(a: cset(a: a2, rd: X0, cc: cc), e: e, v: d, reg: X0), done),
+        Then.Far(cc, lt, lf) => br(bcc(a: a2, cc: cc, target: lt), lf),
+      }
+    },
+    Cold.Free(lab, v, skip) => {
+      let a = call_rt(a0: ld(a: label64(e.a, lab), e: e, reg: X0, v: v), e: e, name: "free", regs: [X0])
+      return br(a, skip)
+    },
+    Cold.Depth(lab) => udf(call_rt(a0: label64(e.a, lab), e: e, name: "stack_overflow", regs: [])),
+  }
+}
+
+// ---- functions ------------------------------------------------------------------------------------------------
+
+/// The chunks of one function (or of the OS layer), the label counter after them, and for a Klar function with a
+/// frame its trace-table row (start label, end label, name symbol).
+type Part64 { chunks: List[A64], n: Int, row: List[Str] }
+
+fn sorted_saves(al: Alloc, k: Int) -> List[Int] {
+  return al.call_saves.get(k).unwrap_or([]).sort()
+}
+
+fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part64 {
+  let f = optimize(f0)
+  let al = allocate(f, a64_regs())
+  var enter: Option[Str] = None
+  for ins in f.code {
+    if enter == None and sat(ins, 0) == "enter" {
+      enter = Some(sat_or(ins, 1))
+    }
+  }
+  let user = enter != None
+  let base = 8 * f.nregs.max(f.nparams) - 8 * f.nparams
+  var save_off: List[Int] = []
+  var k = 0
+  for _r in al.used {
+    save_off = save_off.push(0 - (base + 8 * (k + 1)))
+    k = k + 1
+  }
+  let scratch_off = 0 - (base + 8 * (al.used.len() + 1))
+  let xmm_used = al.xloc.values().unique().sort()
+  var xsave_off: List[Int] = []
+  k = 0
+  for _x in xmm_used {
+    xsave_off = xsave_off.push(scratch_off - 16 - 8 * k)
+    k = k + 1
+  }
+  var csave: List[Int] = []
+  for regs in al.call_saves.values() {
+    for r in regs {
+      if not csave.contains(r) {
+        csave = csave.push(r)
+      }
+    }
+  }
+  csave = csave.sort()
+  let first = scratch_off - 16 - 8 * xmm_used.len()
+  var csave_off: Map[Int, Int] = Map {}
+  k = 0
+  for r in csave {
+    csave_off = csave_off.set(r, first - 8 * k)
+    k = k + 1
+  }
+  // software math calls save every live caller-saved register (the allocator counts them as non-calls)
+  let soft = f.code.any(fn(ins) => sat(ins, 0) == "fpow" or (sat(ins, 0) == "fun" and sat(ins, 1) != "sqrt"))
+  var caller_used: List[Int] = []
+  if soft {
+    caller_used = al.loc.values().filter(fn(x) => CALLER_SAVED.contains(x)).unique().sort()
+  }
+  let first2 = first - 8 * csave.len()
+  var allsave_off: Map[Int, Int] = Map {}
+  k = 0
+  for r in caller_used {
+    allsave_off = allsave_off.set(r, first2 - 8 * k)
+    k = k + 1
+  }
+  let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len() + caller_used.len()))
+  var a = stp_pre(a: label64(new_a64(n), f.name), rt: FP, rt2: LR, rn: SP, off: -16)
+  a = sub_sp(mov_rr(a: a, rd: FP, rn: SP), frame)
+  k = 0
+  for r in al.used {
+    a = store(a: a, rn: FP, off: save_off.get(k).unwrap_or(0), rt: r)
+    k = k + 1
+  }
+  var e = Em64 {
+    a: a,
+    rt: rt,
+    nparams: f.nparams,
+    loc: al.loc,
+    xloc: al.xloc,
+    saved: al.used,
+    save_off: save_off,
+    scratch_off: scratch_off,
+    xmm_used: xmm_used,
+    xsave_off: xsave_off,
+    csave_off: csave_off,
+    caller_used: caller_used,
+    allsave_off: allsave_off,
+    slot_needed: slot_needed(f, al.xloc),
+    user: user,
+    site: "",
+    saves: [],
+    next: "",
+    cold: [],
+  }
+  var p = 0
+  while p < f.nparams {
+    match e.loc.get(p) {
+      Some(r) => {
+        e = with_a(e, load(a: e.a, rt: r, rn: FP, off: slot(e, p)))
+      },
+      None => {},
+    }
+    p = p + 1
+  }
+  var chunks: List[A64] = []
+  let code = f.code
+  var i = 0
+  for ins in code {
+    var nxt = ""
+    match code.get(i + 1) {
+      Some(nx) => {
+        if sat(nx, 0) == "label" {
+          nxt = sat(nx, 1)
+        }
+      },
+      None => {},
+    }
+    e = instruction(e with { next: nxt, saves: sorted_saves(al, i) }, ins)
+    if not e.xloc.is_empty() and not D_AWARE.contains(sat(ins, 0)) {
+      for dv in defs(ins) {
+        match e.xloc.get(dv) {
+          Some(xd) => {
+            e = with_a(e, fload(a: e.a, dt: xd, rn: FP, off: slot(e, dv)))
+          },
+          None => {},
+        }
+      }
+    }
+    chunks = chunks.push(e.a)
+    e = with_a(e, fresh64(e.a))
+    i = i + 1
+  }
+  e = with_a(e with { next: "" }, udf(e.a))
+  for item in e.cold {
+    var es = e
+    if not item.saves.is_empty() {
+      es = e with { saves: item.saves }
+    }
+    chunks = chunks.push(e.a)
+    e = with_a(e, emit_cold(es with { a: fresh64(e.a) }, item.c))
+  }
+  var a2 = udf(e.a)
+  var row: List[Str] = []
+  if user {
+    let end = ".fnend." + f.name
+    a2 = label64(a2, end)
+    row = [f.name, end, enter.unwrap_or("")]
+  }
+  chunks = chunks.push(a2)
+  return Part64 { chunks: chunks, n: a2.n, row: row }
+}
+
+// ---- the Linux (arm64) system-call layer ----------------------------------------------------------------------
+
+fn arg(a: A64, reg: Int, i: Int) -> A64 {
+  return load(a: a, rt: reg, rn: FP, off: 16 + 8 * i)
+}
+
+fn stub_begin(a: A64, name: Str) -> A64 {
+  return mov_rr(a: stp_pre(a: label64(a, "__" + name), rt: FP, rt2: LR, rn: SP, off: -16), rd: FP, rn: SP)
+}
+
+fn stub_end(a: A64) -> A64 {
+  return ret(ldp_post(a: mov_rr(a: a, rd: SP, rn: FP), rt: FP, rt2: LR, rn: SP, off: 16))
+}
+
+fn syscall(a: A64, nr: Int) -> A64 {
+  return svc(mov_ri(a: a, rd: X8, imm: nr))
+}
+
+fn sys_stub(a0: A64, name: Str, nr: Int, nargs: Int) -> A64 {
+  var a = stub_begin(a0, name)
+  var i = 0
+  while i < nargs {
+    a = arg(a: a, reg: i, i: i)
+    i = i + 1
+  }
+  return stub_end(syscall(a, nr))
+}
+
+/// mmap(0, size in X1, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0)
+fn mmap_rest(a0: A64) -> A64 {
+  var a = mov_ri(a: a0, rd: X2, imm: 3)
+  a = mov_ri(a: a, rd: X3, imm: 16418)
+  a = mov_ri(a: a, rd: X4, imm: -1)
+  a = mov_ri(a: a, rd: X5, imm: 0)
+  return syscall(a, 222)
+}
+
+fn linux_layer(a0: A64, main_entry: Str) -> A64 {
+  var a = sys_stub(a0: a0, name: "os_write", nr: 64, nargs: 3)
+  a = sys_stub(a0: a, name: "os_read", nr: 63, nargs: 3)
+  a = sys_stub(a0: a, name: "os_close", nr: 57, nargs: 1)
+  a = udf(syscall(arg(a: stub_begin(a, "os_exit"), reg: X0, i: 0), 94))          // exit_group
+  a = mov_ri(a: stub_begin(a, "os_alloc"), rd: X0, imm: 0)
+  a = stub_end(mmap_rest(arg(a: a, reg: X1, i: 0)))
+  for clock in [Pair { first: "os_time_ns", second: 1 }, Pair { first: "os_wall_ns", second: 0 }] {
+    a = addsub_imm(a: stub_begin(a, clock.first), op: "sub", rd: SP, rn: SP, imm: 16)
+    a = mov_rr(a: mov_ri(a: a, rd: X0, imm: clock.second), rd: X1, rn: SP)
+    a = load(a: syscall(a, 113), rt: X0, rn: SP, off: 0)                          // clock_gettime
+    a = mul(a: mov_ri(a: a, rd: X1, imm: 1000000000), rd: X0, rn: X0, rm: X1)
+    a = op3(a: load(a: a, rt: X1, rn: SP, off: 8), op: "add", rd: X0, rn: X0, rm: X1)
+    a = stub_end(a)
+  }
+  a = arg(a: arg(a: stub_begin(a, "os_open"), reg: X1, i: 0), reg: X2, i: 1)
+  let skip = new_label64(a, "om")
+  a = cbz(a: skip.a, rt: X2, target: skip.l)
+  a = label64(mov_ri(a: a, rd: X2, imm: 577), skip.l)                             // O_WRONLY | O_CREAT | O_TRUNC
+  a = mov_ri(a: mov_ri(a: a, rd: X3, imm: 420), rd: X0, imm: AT_FDCWD)
+  a = stub_end(syscall(a, 56))                                                    // openat
+  a = addsub_imm(a: stub_begin(a, "os_file_exists"), op: "sub", rd: SP, rn: SP, imm: 144)
+  a = arg(a: mov_ri(a: a, rd: X0, imm: AT_FDCWD), reg: X1, i: 0)
+  a = mov_ri(a: mov_rr(a: a, rd: X2, rn: SP), rd: X3, imm: 0)
+  a = syscall(a, 79)                                                              // newfstatat
+  let no = new_label64(a, "fe")
+  a = cbnz(a: no.a, rt: X0, target: no.l)
+  a = mem(a: a, op: "ldrw", rt: X0, rn: SP, off: 16)                              // st_mode
+  a = op3(a: mov_ri(a: a, rd: X1, imm: 61440), op: "and", rd: X0, rn: X0, rm: X1)
+  a = cmp_rr(a: mov_ri(a: a, rd: X1, imm: 32768), rn: X0, rm: X1)
+  a = stub_end(cset(a: a, rd: X0, cc: "eq"))
+  a = stub_end(mov_ri(a: label64(a, no.l), rd: X0, imm: 0))
+  a = adr_sym(a: stub_begin(a, "os_argc"), rd: X0, target: "g_argp")
+  a = stub_end(load(a: load(a: a, rt: X0, rn: X0, off: 0), rt: X0, rn: X0, off: 0))
+  a = adr_sym(a: stub_begin(a, "os_argv"), rd: X1, target: "g_argp")
+  a = arg(a: load(a: a, rt: X1, rn: X1, off: 0), reg: X0, i: 0)
+  a = op3(a: shift_i(a: a, op: "shl", rd: X0, rn: X0, n0: 3), op: "add", rd: X1, rn: X1, rm: X0)
+  a = stub_end(load(a: a, rt: X0, rn: X1, off: 8))
+  for name in ["os_cmdline", "os_platform", "os_getenv"] {
+    a = stub_end(mov_ri(a: stub_begin(a, name), rd: X0, imm: 0))
+  }
+  // os_spawn(argv): clone (like fork); the child execve(argv[0], argv, envp), the parent waits
+  a = addsub_imm(a: stub_begin(a, "os_spawn"), op: "sub", rd: SP, rn: SP, imm: 16)
+  a = mov_ri(a: a, rd: X0, imm: 17)                                               // SIGCHLD
+  for r in [X1, X2, X3, X4] {
+    a = mov_ri(a: a, rd: r, imm: 0)
+  }
+  a = syscall(a, 220)                                                             // clone
+  let done = new_label64(a, "sd")
+  let parent = new_label64(done.a, "sp")
+  a = bcc(a: bcc(a: cmp_ri(a: parent.a, rn: X0, imm: 0), cc: "lt", target: done.l), cc: "ne", target: parent.l)
+  a = load(a: arg(a: a, reg: X1, i: 0), rt: X0, rn: X1, off: 0)
+  a = load(a: load(a: adr_sym(a: a, rd: X3, target: "g_argp"), rt: X3, rn: X3, off: 0), rt: X2, rn: X3, off: 0)
+  a = op3(a: shift_i(a: a, op: "shl", rd: X2, rn: X2, n0: 3), op: "add", rd: X2, rn: X3, rm: X2)
+  a = addsub_imm(a: a, op: "add", rd: X2, rn: X2, imm: 16)                       // envp = &argv[argc + 1]
+  a = syscall(a, 221)                                                             // execve
+  a = syscall(mov_ri(a: a, rd: X0, imm: 127), 94)
+  a = mov_rr(a: label64(a, parent.l), rd: X1, rn: SP)
+  a = mov_ri(a: mov_ri(a: a, rd: X2, imm: 0), rd: X3, imm: 0)
+  a = syscall(a, 260)                                                             // wait4(pid, &status, 0, 0)
+  a = bcc(a: cmp_ri(a: a, rn: X0, imm: 0), cc: "lt", target: done.l)
+  a = label64(mem(a: a, op: "ldrw", rt: X0, rn: SP, off: 0), done.l)
+  a = stub_end(a)
+  a = arg(a: mov_ri(a: stub_begin(a, "os_chmod"), rd: X0, imm: AT_FDCWD), reg: X1, i: 0)
+  a = mov_ri(a: arg(a: a, reg: X2, i: 1), rd: X3, imm: 0)
+  a = stub_end(syscall(a, 53))                                                    // fchmodat
+  a = test_index_stub(a)
+  // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
+  a = mov_rr(a: label64(a, "_start"), rd: X0, rn: SP)
+  a = store(a: adr_sym(a: a, rd: X1, target: "g_argp"), rn: X1, off: 0, rt: X0)
+  a = mov_ri(a: mov_ri(a: a, rd: X0, imm: 0), rd: X1, imm: 536870912)
+  a = mmap_rest(a)
+  a = op3(a: mov_ri(a: a, rd: X1, imm: 536870848), op: "add", rd: X0, rn: X0, rm: X1)
+  a = mov_rr(a: mov_rr(a: a, rd: SP, rn: X0), rd: FP, rn: SP)
+  a = bl(mov_ri(a: a, rd: X28, imm: 0), main_entry)
+  return syscall(a, 94)
+}
+
+/// test_index_arg(): decimal value of the last command-line word (test executables).
+fn test_index_stub(a0: A64) -> A64 {
+  var a = mov_rr(a: stp_pre(a: label64(a0, "test_index_arg"), rt: FP, rt2: LR, rn: SP, off: -16), rd: FP, rn: SP)
+  a = load(a: adr_sym(a: a, rd: X1, target: "g_argp"), rt: X1, rn: X1, off: 0)
+  a = load(a: a, rt: X0, rn: X1, off: 0)                                          // argc
+  a = op3(a: shift_i(a: a, op: "shl", rd: X0, rn: X0, n0: 3), op: "add", rd: X1, rn: X1, rm: X0)
+  a = mov_ri(a: load(a: a, rt: X1, rn: X1, off: 0), rd: X0, imm: 0)               // argv[argc-1]
+  let loop = new_label64(a, "d")
+  let done = new_label64(loop.a, "dd")
+  a = label64(done.a, loop.l)
+  a = mem(a: a, op: "ldrb", rt: X2, rn: X1, off: 0)
+  a = bcc(a: addsub_imm(a: a, op: "subs", rd: X2, rn: X2, imm: 48), cc: "lt", target: done.l)
+  a = bcc(a: cmp_ri(a: a, rn: X2, imm: 9), cc: "gt", target: done.l)
+  a = mul(a: mov_ri(a: a, rd: X3, imm: 10), rd: X0, rn: X0, rm: X3)
+  a = op3(a: a, op: "add", rd: X0, rn: X0, rm: X2)
+  a = br(addsub_imm(a: a, op: "add", rd: X1, rn: X1, imm: 1), loop.l)
+  return stub_end(label64(a, done.l))
+}
+
+// ---- the program ----------------------------------------------------------------------------------------------
+
+/// The word at pos with `field` added (fields of branch instructions are zero before patching).
+fn patch_word(code: Bytes, pos: Int, field: Int) -> Bytes {
+  var v = 0
+  var k = 3
+  while k >= 0 {
+    v = v * 256 + code.get_or(pos + k, 0)
+    k = k - 1
+  }
+  v = v.bit_or(field)
+  var out = code
+  k = 0
+  while k < 4 {
+    out = out.set(pos + k, v.shift_right(8 * k).bit_and(255))
+    k = k + 1
+  }
+  return out
+}
+
+/// Emits the machine code for the lowered program `w` (target "linux-arm64").
+pub fn emit_a64(w: Lw) -> Exe {
+  let rt = rt_names(w)
+  var img = add_bss(img: w.img, name: "g_depth", size: 8)
+  img = add_bss(img: img, name: "g_frames", size: 16 * (MAX_DEPTH + 2))
+  img = add_bss(img: img, name: "g_argp", size: 8)
+  img = add_bss(img: img, name: "g_scratch", size: 256)
+  let fns = inline_calls(w.fns)
+  var code = bytes_of([])
+  var labels: Map[Str, Int] = Map {}
+  var fixups: List[Fix] = []
+  var sites: List[List[Str]] = []
+  var fn_rows: List[List[Str]] = []
+  var n = 0
+  var i = -1
+  while i < fns.len() {
+    var part = Part64 { chunks: [], n: n, row: [] }
+    if i < 0 {
+      let os = linux_layer(new_a64(0), rt.get("main_entry").unwrap_or("main_entry"))
+      part = Part64 { chunks: [os], n: os.n, row: [] }
+    } else {
+      part = function_part(f0: fns.get(i).unwrap_or(KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [],
+        labels: 0 }), rt: rt, n: n)
+    }
+    n = part.n
+    if not part.row.is_empty() {
+      fn_rows = fn_rows.push(part.row)
+    }
+    for ch in part.chunks {
+      let base = code.len()
+      let bytes = ch.code
+      let m = bytes.len()
+      var j = 0
+      while j < m {
+        code = code.push(bytes.get_or(j, 0))
+        j = j + 1
+      }
+      for l in ch.labels {
+        if labels.has(l.name) {
+          return fail("emit_a64: duplicate label {l.name}")
+        }
+        labels = labels.set(l.name, base + l.pos)
+      }
+      for fx in ch.fixups {
+        fixups = fixups.push(fx with { pos: base + fx.pos })
+      }
+      for s in ch.sites {
+        sites = sites.push([s.label, s.span])
+      }
+    }
+    i = i + 1
+  }
+  img = trace_table(img: img, name: "g_fn_table", rows: fn_rows)
+  img = trace_table(img: img, name: "g_site_table", rows: sites)
+  // branches to labels are resolved here; ADRP/ADD pairs are left to the linker
+  var rest: List[Fix] = []
+  for fx in fixups {
+    if fx.kind == "b26" or fx.kind == "b19" {
+      let at = match labels.get(fx.target) {
+        Some(p) => p,
+        None => fail("emit_a64: unresolved code label {fx.target}"),
+      }
+      var delta = (at - fx.pos) / 4
+      if fx.kind == "b26" {
+        if delta < -33554432 or delta >= 33554432 {
+          return fail("emit_a64: branch out of range")
+        }
+        if delta < 0 {
+          delta = delta + 67108864
+        }
+        code = patch_word(code: code, pos: fx.pos, field: delta)
+      } else {
+        if delta < -262144 or delta >= 262144 {
+          return fail("emit_a64: conditional branch to {fx.target} out of range")
+        }
+        if delta < 0 {
+          delta = delta + 524288
+        }
+        code = patch_word(code: code, pos: fx.pos, field: delta * 32)
+      }
+    } else {
+      rest = rest.push(fx)
+    }
+  }
+  return Exe { code: code, labels: labels, fixups: rest, img: img, imports: [], entry: "_start", machine: "aarch64" }
+}

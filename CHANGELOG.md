@@ -14,6 +14,17 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   `klar new --lib` a library package. New errors: E0607 (a name is both a dependency and a file), E0608 (one name,
   different sources), E0609 (dependency not fetched / not a package), E0610 (invalid klar.toml). Both compilers
   resolve dependencies the same way: `compiler/manifest.klar` reads the manifests for `klarc`.
+- ARM64 backend: `klar build --target linux-arm64` (and the default on an arm64 host) writes a static AArch64 ELF for
+  Linux. Same frames and calling convention as on x86-64 (`stp x29, x30`, arguments at `[fp+16+8i]`), X28 counts the
+  call depth, floats live in D16–D31; data is reached PC-relatively (ADRP + ADD, patched by the linker); 64 KB
+  segment alignment. Both compilers have it (`klar/native/a64.py`, `emit_a64.py`; `compiler/a64.klar`,
+  `emit_a64.klar`) and `tests/selfhost.py` compares their arm64 executables byte for byte; `klarc build --target
+  linux-arm64` cross-compiles. `tests/native_diff.py --arm64` runs every native test under qemu-aarch64.
+
+### Changed
+- `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm
+  algorithms with an exact reduction of huge arguments) on every target instead of x87 instructions: results are the
+  same on x86-64 and arm64 and closer to correctly rounded.
 
 ## [0.7.0] — 2026-10-22
 

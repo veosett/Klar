@@ -1,0 +1,452 @@
+// A small AArch64 (ARM64) assembler written in Klar (self-hosting). Mirrors klar/native/a64.py encoding for
+// encoding: tests/selfhost.py compares the finished executables byte for byte.
+//
+// Like x64.klar it assembles *chunks* (the code of one KIR instruction, one out-of-line block or one OS stub):
+// labels, fixups and call sites are recorded relative to the chunk and rebased by emit_a64.klar. Branches to labels
+// are fixups of kind "b26" / "b19", resolved when the whole program is assembled; references to data symbols are an
+// ADRP + ADD pair with fixups "page" and "lo12" for the linker.
+use x64.{Fix, Lab, Site}
+
+pub const X16: Int = 16
+pub const X17: Int = 17
+pub const FP: Int = 29
+pub const LR: Int = 30
+pub const SP: Int = 31
+pub const XZR: Int = 31
+
+/// The chunk being assembled; `n` numbers the generated labels of the whole program.
+pub type A64 { code: Bytes, labels: List[Lab], fixups: List[Fix], sites: List[Site], n: Int }
+
+/// A new label name together with the assembler that made it.
+pub type AL64 { a: A64, l: Str }
+
+pub fn new_a64(n: Int) -> A64 {
+  return A64 { code: bytes_of([]), labels: [], fixups: [], sites: [], n: n }
+}
+
+/// The same assembler with an empty chunk (the label counter carries on).
+pub fn fresh64(a: A64) -> A64 {
+  return new_a64(a.n)
+}
+
+pub fn cond(cc: Str) -> Int {
+  return match cc {
+    "eq" => 0,
+    "ne" => 1,
+    "hs" => 2,
+    "lo" => 3,
+    "mi" => 4,
+    "pl" => 5,
+    "vs" => 6,
+    "vc" => 7,
+    "hi" => 8,
+    "ls" => 9,
+    "ge" => 10,
+    "lt" => 11,
+    "gt" => 12,
+    "le" => 13,
+    "al" => 14,
+    _ => fail("a64: unknown condition {cc}"),
+  }
+}
+
+/// The opposite condition (the low bit flips).
+pub fn invert(cc: Str) -> Str {
+  let names = ["eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al"]
+  return names.get_or(cond(cc).bit_xor(1), "nv")
+}
+
+// ---- labels ---------------------------------------------------------------------------------------------------
+
+pub fn new_label64(a: A64, hint: Str) -> AL64 {
+  let n = a.n + 1
+  return AL64 { a: a with { n: n }, l: ".{hint}{n}" }
+}
+
+pub fn label64(a: A64, name: Str) -> A64 {
+  return a with { labels: a.labels.push(Lab { name: name, pos: a.code.len() }) }
+}
+
+/// Records the call site that ends here (a return address inside a Klar function).
+pub fn site64(a: A64, ra: Str, span: Str) -> A64 {
+  return a with { sites: a.sites.push(Site { label: ra, span: span }) }
+}
+
+fn w(a: A64, v: Int) -> A64 {
+  return a with { code: a.code.push_le(v.bit_and(4294967295), 4) }
+}
+
+/// Emits a raw instruction word.
+pub fn word(a: A64, v: Int) -> A64 {
+  return w(a, v)
+}
+
+fn fix(a: A64, target: Str, kind: Str) -> A64 {
+  return a with { fixups: a.fixups.push(Fix { pos: a.code.len(), target: target, add: 0, kind: kind }) }
+}
+
+// ---- moves ----------------------------------------------------------------------------------------------------
+
+pub fn mov_rr(a: A64, rd: Int, rn: Int) -> A64 {
+  if rd == rn {
+    return a
+  }
+  if rd == SP or rn == SP {
+    return w(a, 2432696320 + rn * 32 + rd)                        // add rd, rn, #0
+  }
+  return w(a, 2852127712 + rn * 65536 + rd)                       // orr rd, xzr, rn
+}
+
+/// Any 64-bit constant: MOVZ/MOVN + MOVKs (the shortest of the two).
+pub fn mov_ri(a: A64, rd: Int, imm: Int) -> A64 {
+  var v = imm
+  if v < 0 {
+    v = v + 18446744073709551616
+  }
+  var parts: List[Int] = []
+  var k = 0
+  while k < 4 {
+    parts = parts.push(v.shift_right(16 * k).bit_and(65535))
+    k = k + 1
+  }
+  let inv = parts.map(fn(p) => p.bit_xor(65535))
+  let nz = parts.filter(fn(p) => p != 0).len()
+  let nn = inv.filter(fn(p) => p != 0).len()
+  var out = a
+  if nz == 0 {
+    return w(out, 3531603968 + rd)                                  // movz rd, #0
+  }
+  if nn == 0 {
+    return w(out, 2457862144 + rd)                                  // movn rd, #0 (all ones)
+  }
+  if nn < nz {
+    var lead = 0
+    while inv.get_or(lead, 0) == 0 {
+      lead = lead + 1
+    }
+    out = w(out, 2457862144 + lead * 2097152 + inv.get_or(lead, 0) * 32 + rd)        // movn
+    k = 0
+    while k < 4 {
+      if k != lead and inv.get_or(k, 0) != 0 {
+        out = w(out, 4068474880 + k * 2097152 + parts.get_or(k, 0) * 32 + rd)          // movk
+      }
+      k = k + 1
+    }
+    return out
+  }
+  var first = 0
+  while parts.get_or(first, 0) == 0 {
+    first = first + 1
+  }
+  out = w(out, 3531603968 + first * 2097152 + parts.get_or(first, 0) * 32 + rd)          // movz
+  k = 0
+  while k < 4 {
+    if k != first and parts.get_or(k, 0) != 0 {
+      out = w(out, 4068474880 + k * 2097152 + parts.get_or(k, 0) * 32 + rd)            // movk
+    }
+    k = k + 1
+  }
+  return out
+}
+
+// ---- arithmetic -----------------------------------------------------------------------------------------------
+
+fn reg3(op: Str) -> Int {
+  return match op {
+    "add" => 2332033024,
+    "adds" => 2868903936,
+    "sub" => 3405774848,
+    "subs" => 3942645760,
+    "and" => 2315255808,
+    "ands" => 3925868544,
+    "or" => 2852126720,
+    "xor" => 3388997632,
+    "sdiv" => 2596277248,
+    "udiv" => 2596276224,
+    "shl" => 2596282368,
+    "shr" => 2596283392,
+    "sar" => 2596284416,
+    _ => fail("a64: unknown operation {op}"),
+  }
+}
+
+pub fn op3(a: A64, op: Str, rd: Int, rn: Int, rm: Int) -> A64 {
+  return w(a, reg3(op) + rm * 65536 + rn * 32 + rd)
+}
+
+pub fn mul(a: A64, rd: Int, rn: Int, rm: Int) -> A64 {
+  return w(a, 2600500224 + rm * 65536 + rn * 32 + rd)                // madd rd, rn, rm, xzr
+}
+
+/// rd = ra - rn*rm
+pub fn msub(a: A64, rd: Int, rn: Int, rm: Int, ra: Int) -> A64 {
+  return w(a, 2600501248 + rm * 65536 + ra * 1024 + rn * 32 + rd)
+}
+
+pub fn smulh(a: A64, rd: Int, rn: Int, rm: Int) -> A64 {
+  return w(a, 2604694528 + rm * 65536 + rn * 32 + rd)
+}
+
+pub fn umulh(a: A64, rd: Int, rn: Int, rm: Int) -> A64 {
+  return w(a, 2613083136 + rm * 65536 + rn * 32 + rd)
+}
+
+fn imm_op(op: Str) -> Int {
+  return match op {
+    "add" => 2432696320,
+    "adds" => 2969567232,
+    "sub" => 3506438144,
+    "subs" => 4043309056,
+    _ => fail("a64: unknown immediate operation {op}"),
+  }
+}
+
+fn opposite(op: Str) -> Str {
+  return match op {
+    "add" => "sub",
+    "sub" => "add",
+    "adds" => "subs",
+    _ => "adds",
+  }
+}
+
+/// add/sub with a 12-bit (optionally <<12) immediate; rn/rd may be SP (not for the flag forms' rd).
+pub fn addsub_imm(a: A64, op: Str, rd: Int, rn: Int, imm: Int) -> A64 {
+  var o = op
+  var v = imm
+  if v < 0 {
+    o = opposite(op)
+    v = 0 - v
+  }
+  if v < 4096 {
+    return w(a, imm_op(o) + v * 1024 + rn * 32 + rd)
+  }
+  if v.bit_and(4095) == 0 and v < 16777216 {
+    return w(a, imm_op(o) + 4194304 + v.shift_right(12) * 1024 + rn * 32 + rd)
+  }
+  return fail("a64: immediate too large")
+}
+
+pub fn fits_imm12(imm: Int) -> Bool {
+  let v = imm.abs()
+  return v < 4096 or (v.bit_and(4095) == 0 and v < 16777216)
+}
+
+pub fn shift_i(a: A64, op: Str, rd: Int, rn: Int, n0: Int) -> A64 {
+  let n = n0.bit_and(63)
+  if op == "shl" {
+    return w(a, 3544186880 + (64 - n).bit_and(63) * 65536 + (63 - n) * 1024 + rn * 32 + rd)     // ubfm
+  }
+  if op == "shr" {
+    return w(a, 3544186880 + n * 65536 + 63 * 1024 + rn * 32 + rd)                         // ubfm
+  }
+  return w(a, 2470445056 + n * 65536 + 63 * 1024 + rn * 32 + rd)                           // sbfm
+}
+
+pub fn neg(a: A64, rd: Int, rm: Int) -> A64 {
+  return w(a, 3405775840 + rm * 65536 + rd)                         // sub rd, xzr, rm
+}
+
+pub fn cmp_rr(a: A64, rn: Int, rm: Int) -> A64 {
+  return op3(a: a, op: "subs", rd: XZR, rn: rn, rm: rm)
+}
+
+pub fn cmp_ri(a: A64, rn: Int, imm: Int) -> A64 {
+  return addsub_imm(a: a, op: "subs", rd: XZR, rn: rn, imm: imm)
+}
+
+/// tst rn, #1 (the Int tag bit)
+pub fn tst1(a: A64, rn: Int) -> A64 {
+  return w(a, 4064280607 + rn * 32)
+}
+
+pub fn cset(a: A64, rd: Int, cc: Str) -> A64 {
+  return w(a, 2594113504 + cond(invert(cc)) * 4096 + rd)               // csinc rd, xzr, xzr, !cc
+}
+
+// ---- memory ---------------------------------------------------------------------------------------------------
+
+fn mem_size(op: Str) -> Int
+  ensures result > 0
+{
+  return match op {
+    "ldr" => 8,
+    "str" => 8,
+    "ldrd" => 8,
+    "strd" => 8,
+    "ldrw" => 4,
+    "strw" => 4,
+    _ => 1,
+  }
+}
+
+fn mem_uns(op: Str) -> Int {
+  return match op {
+    "ldr" => 4181721088,
+    "str" => 4177526784,
+    "ldrw" => 3107979264,
+    "strw" => 3103784960,
+    "ldrb" => 960495616,
+    "strb" => 956301312,
+    "ldrd" => 4248829952,
+    "strd" => 4244635648,
+    _ => fail("a64: unknown memory operation {op}"),
+  }
+}
+
+fn mem_unscaled(op: Str) -> Int {
+  return match op {
+    "ldr" => 4164943872,
+    "str" => 4160749568,
+    "ldrw" => 3091202048,
+    "strw" => 3087007744,
+    "ldrb" => 943718400,
+    "strb" => 939524096,
+    "ldrd" => 4232052736,
+    "strd" => 4227858432,
+    _ => fail("a64: unknown memory operation {op}"),
+  }
+}
+
+/// A load or store of rt at [rn + off] (X16 computes the address of offsets no form encodes).
+pub fn mem(a: A64, op: Str, rt: Int, rn: Int, off: Int) -> A64 {
+  let size = mem_size(op)
+  if off >= 0 and off < 4096 * size and off % size == 0 {
+    return w(a, mem_uns(op) + off / size * 1024 + rn * 32 + rt)
+  }
+  if off >= -256 and off < 256 {
+    return w(a, mem_unscaled(op) + off.bit_and(511) * 4096 + rn * 32 + rt)
+  }
+  if rn == X16 or (rt == X16 and (op == "str" or op == "strw" or op == "strb")) {
+    return fail("a64: X16 is the address scratch register")
+  }
+  var a1 = mov_ri(a: a, rd: X16, imm: off)
+  if rn == SP {
+    a1 = add_sp(a1, X16)
+  } else {
+    a1 = op3(a: a1, op: "add", rd: X16, rn: rn, rm: X16)
+  }
+  return w(a1, mem_uns(op) + X16 * 32 + rt)
+}
+
+/// rd = sp + rd (extended-register form)
+pub fn add_sp(a: A64, rd: Int) -> A64 {
+  return w(a, 2334154752 + rd * 65536 + SP * 32 + rd)
+}
+
+pub fn load(a: A64, rt: Int, rn: Int, off: Int) -> A64 {
+  return mem(a: a, op: "ldr", rt: rt, rn: rn, off: off)
+}
+
+pub fn store(a: A64, rn: Int, off: Int, rt: Int) -> A64 {
+  return mem(a: a, op: "str", rt: rt, rn: rn, off: off)
+}
+
+pub fn stp_pre(a: A64, rt: Int, rt2: Int, rn: Int, off: Int) -> A64 {
+  return w(a, 2843738112 + (off / 8).bit_and(127) * 32768 + rt2 * 1024 + rn * 32 + rt)
+}
+
+pub fn ldp_post(a: A64, rt: Int, rt2: Int, rn: Int, off: Int) -> A64 {
+  return w(a, 2831155200 + (off / 8).bit_and(127) * 32768 + rt2 * 1024 + rn * 32 + rt)
+}
+
+/// rd = address of a data/code symbol (ADRP + ADD, patched by the linker)
+pub fn adr_sym(a: A64, rd: Int, target: Str) -> A64 {
+  let a1 = w(fix(a: a, target: target, kind: "page"), 2415919104 + rd)
+  return w(fix(a: a1, target: target, kind: "lo12"), 2432696320 + rd * 32 + rd)
+}
+
+// ---- branches -------------------------------------------------------------------------------------------------
+
+pub fn br(a: A64, target: Str) -> A64 {
+  return w(fix(a: a, target: target, kind: "b26"), 335544320)
+}
+
+pub fn bl(a: A64, target: Str) -> A64 {
+  return w(fix(a: a, target: target, kind: "b26"), 2483027968)
+}
+
+pub fn bcc(a: A64, cc: Str, target: Str) -> A64 {
+  return w(fix(a: a, target: target, kind: "b19"), 1409286144 + cond(cc))
+}
+
+pub fn cbz(a: A64, rt: Int, target: Str) -> A64 {
+  return w(fix(a: a, target: target, kind: "b19"), 3019898880 + rt)
+}
+
+pub fn cbnz(a: A64, rt: Int, target: Str) -> A64 {
+  return w(fix(a: a, target: target, kind: "b19"), 3036676096 + rt)
+}
+
+pub fn blr(a: A64, rn: Int) -> A64 {
+  return w(a, 3594452992 + rn * 32)
+}
+
+pub fn ret(a: A64) -> A64 {
+  return w(a, 3596551104)
+}
+
+pub fn svc(a: A64) -> A64 {
+  return w(a, 3556769793)
+}
+
+pub fn udf(a: A64) -> A64 {
+  return w(a, 0)
+}
+
+// ---- floating point (double) ----------------------------------------------------------------------------------
+
+fn fop_code(op: Str) -> Int {
+  return match op {
+    "add" => 509618176,
+    "sub" => 509622272,
+    "mul" => 509609984,
+    "div" => 509614080,
+    _ => fail("a64: unknown float operation {op}"),
+  }
+}
+
+pub fn fop(a: A64, op: Str, dd: Int, dn: Int, dm: Int) -> A64 {
+  return w(a, fop_code(op) + dm * 65536 + dn * 32 + dd)
+}
+
+pub fn fsqrt(a: A64, dd: Int, dn: Int) -> A64 {
+  return w(a, 509722624 + dn * 32 + dd)
+}
+
+pub fn fmov_dd(a: A64, dd: Int, dn: Int) -> A64 {
+  if dd == dn {
+    return a
+  }
+  return w(a, 509624320 + dn * 32 + dd)
+}
+
+/// d <- x (bits)
+pub fn fmov_dx(a: A64, dd: Int, xn: Int) -> A64 {
+  return w(a, 2657550336 + xn * 32 + dd)
+}
+
+/// x <- d (bits)
+pub fn fmov_xd(a: A64, xd: Int, dn: Int) -> A64 {
+  return w(a, 2657484800 + dn * 32 + xd)
+}
+
+pub fn fcmp(a: A64, dn: Int, dm: Int) -> A64 {
+  return w(a, 509616128 + dm * 65536 + dn * 32)
+}
+
+pub fn scvtf(a: A64, dd: Int, xn: Int) -> A64 {
+  return w(a, 2657222656 + xn * 32 + dd)
+}
+
+pub fn fcvtzs(a: A64, xd: Int, dn: Int) -> A64 {
+  return w(a, 2658664448 + dn * 32 + xd)
+}
+
+pub fn fload(a: A64, dt: Int, rn: Int, off: Int) -> A64 {
+  return mem(a: a, op: "ldrd", rt: dt, rn: rn, off: off)
+}
+
+pub fn fstore(a: A64, rn: Int, off: Int, dt: Int) -> A64 {
+  return mem(a: a, op: "strd", rt: dt, rn: rn, off: off)
+}

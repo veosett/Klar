@@ -6,11 +6,14 @@
 
 All three must be the same bytes, the Windows build of klarc made by klarc2 must equal the one made by `klar build`,
 and klarc3 must build and run working programs (also a project with a dependency), run test blocks and report
-errors like `klar check`. Linux x86-64 only (it runs the binaries).
+errors like `klar check`. The arm64 build of klarc made by klarc2 must equal the one made by `klar build`; with
+qemu-aarch64 installed it also runs: the arm64 compiler builds the same program bytes as klarc3. Linux x86-64 only
+(it runs the binaries).
 
     python tests/bootstrap.py
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -66,6 +69,24 @@ def main():
                 read(win_k) != read(win_py):
             bad += 1
             print("DIFF klarc.exe built by klarc2 != klarc.exe built by klar build")
+        # the arm64 build of the compiler, and (under qemu) the arm64 compiler at work
+        a64_py, a64_k = os.path.join(d, "klarc_py.a64"), os.path.join(d, "klarc_k.a64")
+        build(KLARC, out=a64_py, target="linux-arm64")
+        if klarc(stage[1], ["build", KLARC, "--target", "linux-arm64", "-o", a64_k]).returncode != 0 or \
+                read(a64_k) != read(a64_py):
+            bad += 1
+            print("DIFF arm64 klarc built by klarc2 != arm64 klarc built by klar build")
+        elif shutil.which("qemu-aarch64-static") or shutil.which("qemu-aarch64"):
+            qemu = shutil.which("qemu-aarch64-static") or shutil.which("qemu-aarch64")
+            src = os.path.join("examples", "shapes.klar")
+            out_a, out_x = os.path.join(d, "shapes_a"), os.path.join(d, "shapes_x")
+            got = run([qemu, a64_k, "build", src, "-o", out_a, "--lib", LIB])
+            if got.returncode != 0 or klarc(stage[2], ["build", src, "-o", out_x]).returncode != 0 or \
+                    read(out_a) != read(out_x):
+                bad += 1
+                print(f"DIFF the arm64 klarc (qemu) built {src} differently: exit {got.returncode} {got.stdout[:300]}")
+            else:
+                print("bootstrap: the arm64 compiler (qemu) builds the same bytes")
         # klarc3 builds programs that behave like the Python compiler's
         for name in ("hello", "bank", "shapes"):
             src = os.path.join("examples", f"{name}.klar")

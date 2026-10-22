@@ -522,6 +522,9 @@ def check_lowering(interp, tests=False):
     return bad
 
 
+TARGETS = (("linux", "elf"), ("windows", "exe"), ("linux-arm64", "a64"))
+
+
 def check_emit(interp):
     """Executables built by the Klar backend (compiler/dump_exe.klar) == executables built by `klar build`."""
     from klar.native.build import build
@@ -532,7 +535,7 @@ def check_emit(interp):
         want = {}
         for k, path in enumerate(files):
             try:
-                for target, ext in (("linux", "elf"), ("windows", "exe")):
+                for target, ext in TARGETS:
                     build(path, out=os.path.join(d, f"py{k}.{ext}"), target=target)
                 want[path] = k
             except (NativeUnsupported, SystemExit):
@@ -541,7 +544,7 @@ def check_emit(interp):
         out = run_driver("dump_exe.klar", [os.path.join(ROOT, "klar"), d] + files, interp)
         got = dict(line.split("\t") for line in out.splitlines())
         for path in files:
-            for ext in ("elf", "exe"):
+            for _, ext in TARGETS:
                 with open(os.path.join(d, f"py{want[path]}.{ext}"), "rb") as f:
                     w = f.read()
                 n_bytes += len(w)
@@ -557,7 +560,8 @@ def check_emit(interp):
                         k = next((i for i, (x, y) in enumerate(zip(w, h)) if x != y), min(len(w), len(h)))
                         print(f"DIFF {short(path)}.{ext}: first difference at byte {k:#x} (python {len(w)} bytes, "
                               f"klar {len(h)} bytes)")
-    print(f"emit: {2 * len(files) - bad}/{2 * len(files)} executables identical ({n_bytes} bytes)")
+    n = len(TARGETS) * len(files)
+    print(f"emit: {n - bad}/{n} executables identical ({n_bytes} bytes)")
     return bad
 
 

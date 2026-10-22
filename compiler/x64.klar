@@ -23,8 +23,9 @@ pub const R15: Int = 15
 pub const XMM0: Int = 0
 pub const XMM1: Int = 1
 
-/// A rel32 field at `pos` that must hold `target + add - (pos + 4)`.
-pub type Fix { pos: Int, target: Str, add: Int }
+/// A field at `pos` that refers to `target`. On x86-64 (kind "") a rel32 that must hold `target + add - (pos + 4)`;
+/// on arm64 (a64.klar) kind is "b26" / "b19" (branches) or "page" / "lo12" (ADRP + ADD).
+pub type Fix { pos: Int, target: Str, add: Int, kind: Str }
 
 pub type Lab { name: Str, pos: Int }
 
@@ -141,7 +142,7 @@ fn imm8(a: Asm, v: Int) -> Asm {
 }
 
 fn rel32(a: Asm, target: Str, add: Int) -> Asm {
-  let f = Fix { pos: a.code.len(), target: target, add: add }
+  let f = Fix { pos: a.code.len(), target: target, add: add, kind: "" }
   return d32(a with { fixups: a.fixups.push(f) }, 0)
 }
 

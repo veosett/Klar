@@ -18,12 +18,12 @@ use x64.{imul_rri, jcc, jmp, label, lea, lea_rip, load, load32, load8, load_rip,
 use x64.{movq_xr, movsd_load, movsd_store, mul, neg, new_asm, new_label, pop, push, ret, setcc, shift_cl, shift_i}
 use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_rr, ucomisd, ud2}
 
-const MAX_DEPTH: Int = 10000
+pub const MAX_DEPTH: Int = 10000
 
 /// The caller-saved registers the allocator hands out (regalloc.klar).
 const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
 
-const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
+pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
@@ -38,7 +38,7 @@ const TWO64: Int = 18446744073709551616
 
 // ---- magic numbers for division by constants ------------------------------------------------------------------
 
-fn bit_length(x: Int) -> Int {
+pub fn bit_length(x: Int) -> Int {
   var n = 0
   var v = x
   while v > 0 {
@@ -59,10 +59,10 @@ fn ceil_div(x: Int, d: Int) -> Int {
   return (x + d - 1) / d
 }
 
-type MS { m: Int, s: Int }
+pub type MS { m: Int, s: Int }
 
 /// (m, l) with x // d == (t + ((x - t) >> 1)) >> (l - 1), t = mulhi(m, x), for all 64-bit x (d >= 3).
-fn udiv_magic(d: Int) -> MS {
+pub fn udiv_magic(d: Int) -> MS {
   let l = bit_length(d - 1)
   if d == 0 {
     return fail("emit: division by zero")
@@ -71,7 +71,7 @@ fn udiv_magic(d: Int) -> MS {
 }
 
 /// (m, s) with x // d == mulhi(m, x) >> s for all 64-bit x, when such an m < 2^64 exists.
-fn udiv_magic_simple(d: Int) -> Option[MS] {
+pub fn udiv_magic_simple(d: Int) -> Option[MS] {
   var s = 0
   while s < 64 {
     let m = ceil_div(pow2(64 + s), d)
@@ -87,7 +87,7 @@ fn udiv_magic_simple(d: Int) -> Option[MS] {
 }
 
 /// Hacker's Delight signed magic number for 64-bit division by d >= 3 (not a power of two).
-fn sdiv_magic64(d: Int) -> MS {
+pub fn sdiv_magic64(d: Int) -> MS {
   let two63 = pow2(63)
   if d == 0 {
     return fail("emit: division by zero")
@@ -127,29 +127,29 @@ fn sdiv_magic64(d: Int) -> MS {
 }
 
 /// (m, s): floor(a*m / 2^(64+s)) == floor(a / d) for |a| <= 2^62, d >= 3 not a power of two.
-fn sdiv_magic(d: Int) -> MS {
+pub fn sdiv_magic(d: Int) -> MS {
   let p = 62 + bit_length(d - 1)
   return MS { m: ceil_div(pow2(p), d), s: p - 64 }
 }
 
-fn align16(n: Int) -> Int {
+pub fn align16(n: Int) -> Int {
   return (n + 15) / 16 * 16
 }
 
-fn is_pow2(c: Int) -> Bool {
+pub fn is_pow2(c: Int) -> Bool {
   return c > 0 and c.bit_and(c - 1) == 0
 }
 
 // ---- KIR fields ---------------------------------------------------------------------------------------------
 
-fn iat(ins: Ins, k: Int) -> Int {
+pub fn iat(ins: Ins, k: Int) -> Int {
   return match ins.get(k) {
     Some(KV.I(v)) => v,
     _ => fail("emit: field {k} of a KIR instruction is not a number"),
   }
 }
 
-fn sat(ins: Ins, k: Int) -> Str {
+pub fn sat(ins: Ins, k: Int) -> Str {
   return match ins.get(k) {
     Some(KV.S(s)) => s,
     _ => fail("emit: field {k} of a KIR instruction is not a name"),
@@ -157,21 +157,21 @@ fn sat(ins: Ins, k: Int) -> Str {
 }
 
 /// A name field that may be missing (None in Python): "".
-fn sat_or(ins: Ins, k: Int) -> Str {
+pub fn sat_or(ins: Ins, k: Int) -> Str {
   return match ins.get(k) {
     Some(KV.S(s)) => s,
     _ => "",
   }
 }
 
-fn has_reg(ins: Ins, k: Int) -> Bool {
+pub fn has_reg(ins: Ins, k: Int) -> Bool {
   return match ins.get(k) {
     Some(KV.I(_)) => true,
     _ => false,
   }
 }
 
-fn lat(ins: Ins, k: Int) -> List[Int] {
+pub fn lat(ins: Ins, k: Int) -> List[Int] {
   return match ins.get(k) {
     Some(KV.L(regs)) => regs,
     _ => fail("emit: field {k} of a KIR instruction is not a list"),
@@ -181,19 +181,19 @@ fn lat(ins: Ins, k: Int) -> List[Int] {
 // ---- emitter state --------------------------------------------------------------------------------------------
 
 /// How the slow path of an Int comparison or operation gets its second operand into RCX.
-enum YL {
+pub enum YL {
   Reg(v: Int),
   Imm(t: Int),
 }
 
 /// What an out-of-line Int comparison does with the flags of `cmp rax, 0`.
-enum Then {
+pub enum Then {
   SetTo(cc: Str, d: Int, done: Str),
   Far(cc: Str, lt: Str, lf: Str),
 }
 
 /// Out-of-line code, emitted after the function body.
-enum Cold {
+pub enum Cold {
   ISlow(lab: Str, opn: Str, d: Int, x: Int, y: YL, done: Str),
   DivZero(lab: Str, span: Str),
   NegSlow(lab: Str, d: Int, x: Int, done: Str),
@@ -203,7 +203,7 @@ enum Cold {
 }
 
 /// A cold block and the registers live across the call it makes (empty: those of the function's last instruction).
-type ColdItem { c: Cold, saves: List[Int] }
+pub type ColdItem { c: Cold, saves: List[Int] }
 
 /// The function being emitted. `a` is the chunk under construction; everything else is fixed for the function
 /// except `site`, `saves`, `next` and `cold`.
@@ -791,7 +791,7 @@ fn i_f2i(e: Em, ins: Ins) -> Em {
   return with_a(e, fin(a: cvttsd2si(a: xa.a, r: r, x: xa.r), e: e, v: d, reg: r))
 }
 
-fn soft_helper(opn: Str) -> Str {
+pub fn soft_helper(opn: Str) -> Str {
   return match opn {
     "sin" => "soft_sin",
     "cos" => "soft_cos",
@@ -1726,7 +1726,16 @@ fn test_index_stub(a0: Asm, target: Str) -> Asm {
 // ---- the program ----------------------------------------------------------------------------------------------
 
 /// Machine code with its labels and unresolved fixups (to data, bss and import slots), plus the data image.
-pub type Exe { code: Bytes, labels: Map[Str, Int], fixups: List[Fix], img: Img, imports: List[Str], entry: Str }
+pub type Exe {
+  code: Bytes,
+  labels: Map[Str, Int],
+  fixups: List[Fix],
+  img: Img,
+  imports: List[Str],
+  entry: Str,
+  /// "x86_64" or "aarch64" (emit_a64.klar)
+  machine: Str,
+}
 
 fn os_part(target: Str, rt: Map[Str, Str]) -> Part {
   let main_entry = rt.get("main_entry").unwrap_or("main_entry")
@@ -1740,7 +1749,7 @@ fn os_part(target: Str, rt: Map[Str, Str]) -> Part {
 }
 
 /// A table [n][row...]*n of 8-byte words: symbols become absolute addresses, "" is 0.
-fn trace_table(img: Img, name: Str, rows: List[List[Str]]) -> Img {
+pub fn trace_table(img: Img, name: Str, rows: List[List[Str]]) -> Img {
   var payload = bytes_of([]).push_le(rows.len(), 8)
   var rel: List[Pair[Int, Str]] = []
   for row in rows {
@@ -1812,7 +1821,7 @@ pub fn emit_program(w: Lw, target: Str) -> Exe {
         labels = labels.set(l.name, base + l.pos)
       }
       for fx in ch.fixups {
-        fixups = fixups.push(Fix { pos: base + fx.pos, target: fx.target, add: fx.add })
+        fixups = fixups.push(fx with { pos: base + fx.pos })
       }
       for s in ch.sites {
         sites = sites.push([s.label, s.span])
@@ -1842,5 +1851,5 @@ pub fn emit_program(w: Lw, target: Str) -> Exe {
   if target == "windows" {
     imports = WIN_IMPORTS
   }
-  return Exe { code: code, labels: labels, fixups: rest, img: img, imports: imports, entry: "_start" }
+  return Exe { code: code, labels: labels, fixups: rest, img: img, imports: imports, entry: "_start", machine: "x86_64" }
 }

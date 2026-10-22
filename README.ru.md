@@ -176,7 +176,8 @@ flowchart TB
 | Языковой сервер (`klar lsp`) и расширение VS Code: ошибки при наборе, наведение, определения, ссылки, переименование, дополнение | ✅ 0.5 |
 | Компилятор на самом Klar: `compiler/klarc.klar` собирает, запускает и тестирует программы и собирает сам себя (stage1 == stage2 == stage3 побайтно), быстрее Python-реализации | ✅ 0.6 |
 | Обобщённые `impl` (`impl[T: Show] Show for List[T]`), newtype с инвариантами (`type Percent = new Int` + `requires`), проверка простых контрактов при компиляции, `klar patch` (проверенные правки по имени) | ✅ 0.7 |
-| ARM64, macOS, пакетный менеджер | 🔜 1.0 |
+| пакетный менеджер, ARM64 (Linux) | ✅ 1.0 (в работе) |
+| macOS, параллелизм | 🔜 1.0 |
 
 ## Быстрый старт
 
@@ -189,6 +190,7 @@ git clone https://github.com/veosett/Klar.git && cd Klar
 python -m klar run examples/hello.klar          # компиляция в машинный код (с кэшем) и запуск
 python -m klar build examples/shapes.klar       # один исполняемый файл без зависимостей
 python -m klar build app.klar --target windows  # .exe из Linux (и наоборот)
+python -m klar build app.klar --target linux-arm64  # статический ELF для AArch64
 python -m klar dev examples/bank.klar --json    # один шаг цикла ИИ: проверка + тесты + запуск
 python -m klar test examples/bank.klar          # тесты, doc-тесты, property-тесты
 python -m klar fix examples/mistakes.klar       # применить все безопасные исправления

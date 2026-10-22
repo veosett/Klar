@@ -19,7 +19,7 @@ exactly; the compiler rejects everything else with a coded error (`klar explain 
    clone; `klar deps --json` shows the tree.
 4. Failures show values, both sides of `assert`, the Klar call stack, minimal property counterexamples.
 5. `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
-   `.exe`/ELF (`--target windows|linux`); `klar profile file.klar` shows where time goes.
+   `.exe`/ELF (`--target windows|linux|linux-arm64`); `klar profile file.klar` shows where time goes.
 
 ## Lexical
 - One statement per line. NO semicolons. Blocks use `{ }`. Comments: `// ...`, doc comments: `/// ...`.

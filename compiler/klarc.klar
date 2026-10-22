@@ -1,7 +1,7 @@
 // klarc — the Klar compiler written in Klar (self-hosting, stage 5). It checks a program and builds a standalone
-// x86-64 executable for Linux (ELF) or Windows (PE) with no Python involved:
+// executable for Linux (ELF, x86-64 or arm64) or Windows (PE, x86-64) with no Python involved:
 //
-//     klarc build app.klar [-o app] [--target linux|windows] [--lib <dir of klar/>] [--time]
+//     klarc build app.klar [-o app] [--target linux|windows|linux-arm64] [--lib <dir of klar/>] [--time]
 //     klarc run app.klar [--lib <dir>] [-- args...]     build into a temporary file and run it
 //     klarc test app.klar [--lib <dir>]                 build the `test` blocks and run each one
 //     klarc check app.klar [--lib <dir of klar/>]
@@ -12,14 +12,17 @@
 use ast.{Decl}
 use checker.{Diag}
 use emit.{emit_program}
+use emit_a64.{emit_a64}
 use link.{write_elf, write_pe}
 use loader.{Ld, Module, load_program, load_runtime}
 use lower.{fnv1a, lower_program}
 
+const TARGETS: List[Str] = ["linux", "windows", "linux-arm64"]
+
 type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, args: List[Str] }
 
 fn usage() -> Never uses io {
-  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows] [--lib <dir>] [--time]")
+  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64] [--lib <dir>] [--time]")
   print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
   print("       klarc test <file.klar> [--lib <dir>]")
   print("       klarc check <file.klar> [--lib <dir>]")
@@ -55,10 +58,9 @@ fn parse_args(args: List[Str]) -> Options uses io {
       return usage()
     }
   }
-  if not ["build", "run", "test", "check"].contains(o.cmd) or o.file == "" or (o.target != "linux" and o.target !=
-      "windows") {
-      return usage()
-    }
+  if not ["build", "run", "test", "check"].contains(o.cmd) or o.file == "" or not TARGETS.contains(o.target) {
+    return usage()
+  }
   return o
 }
 
@@ -199,7 +201,12 @@ fn main() uses io, fs, time, proc {
   }
   let w = lower_program(ld: ld, main_path: o.file, tests: tests)
   let t2 = lap(o: o, phase: "lower", start: t1)
-  let x = emit_program(w, o.target)
+  var x = emit_program(w, "linux")
+  if o.target == "linux-arm64" {
+    x = emit_a64(w)
+  } else if o.target == "windows" {
+    x = emit_program(w, "windows")
+  }
   let t3 = lap(o: o, phase: "optimize + allocate + emit", start: t2)
   var image = bytes_of([])
   if o.target == "windows" {
@@ -235,12 +242,5 @@ fn main() uses io, fs, time, proc {
     }
     return
   }
-  let path = out_path(o)
-  match write_bytes(path, image) {
-    Ok(_) => {},
-    Err(e) => {
-      print("klarc: {e}")
-      exit(1)
-    },
-  }
+  write_exe(out_path(o), image)
 }

@@ -186,7 +186,8 @@ flowchart TB
 | Language server (`klar lsp`) and VS Code extension: diagnostics, hover, definition, references, rename, completion | ✅ 0.5 |
 | Self-hosted compiler: `compiler/klarc.klar` builds, runs and tests programs and builds itself (stage1 == stage2 == stage3, byte for byte), faster than the Python implementation | ✅ 0.6 |
 | Generic impls (`impl[T: Show] Show for List[T]`), newtypes with invariants (`type Percent = new Int` + `requires`), simple contracts checked at compile time, `klar patch` (verified edits by name) | ✅ 0.7 |
-| ARM64, macOS, package manager | 🔜 1.0 |
+| package manager, ARM64 (Linux) | ✅ 1.0 (in progress) |
+| macOS, concurrency | 🔜 1.0 |
 
 ## Quick start
 
@@ -198,6 +199,7 @@ git clone https://github.com/veosett/Klar.git && cd Klar
 python -m klar run examples/hello.klar          # compile to machine code (cached) and run
 python -m klar build examples/shapes.klar       # standalone executable
 python -m klar build app.klar --target windows  # cross-compile a .exe from Linux (or the reverse)
+python -m klar build app.klar --target linux-arm64  # a static AArch64 ELF
 python -m klar dev examples/bank.klar --json    # one AI-loop step: check + tests + run
 python -m klar test examples/bank.klar          # tests, doc-tests, properties
 python -m klar fix examples/mistakes.klar       # apply all safe fixes
