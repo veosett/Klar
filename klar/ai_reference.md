@@ -30,7 +30,7 @@ type Point { x: Int, y: Int }                       // record (all fields requir
 enum Shape { Circle(radius: Float), Square(side: Float), Empty }   // variant fields are named
 fn area(s: Shape) -> Float { ... }                  // param types + return type required
 fn first[T](xs: List[T]) -> Option[T] { ... }       // generics in [ ]
-fn save(p: Point) -> Result[Unit, Str] uses io { ... }   // effects: io time rand fs net
+fn save(p: Point) -> Result[Unit, Str] uses io { ... }   // effects: io time rand fs net proc
 fn div(a: Int, b: Int) -> Int
   requires b != 0                                   // precondition (pure Bool)
   ensures result * b <= a                           // postcondition; `result` = return value
@@ -147,7 +147,8 @@ collections: `let xs: List[Int] = []`.
 A function without `uses` is pure. Calling something with an effect requires declaring it:
 `print`/`read_line`/`cli_args`/`dbg` → `io`, `now_ms` (wall clock, ms since 1970 UTC)/`now_ns` (monotonic, for measuring) → `time`, `random_int` → `rand`,
 `read_file`/`write_file`/`file_exists` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
-`exit(code)` (type `Never`, flushes output) → `io`. Contracts and constants must be
+`exit(code)` (type `Never`, flushes output) → `io`; `run_command(["prog", "arg"])` → `Result[Int, Str]` (exit code;
+inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
 pure. Tests may use only `io`.
 Lambdas inherit the effects of the enclosing function.
 

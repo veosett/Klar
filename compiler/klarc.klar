@@ -2,28 +2,33 @@
 // x86-64 executable for Linux (ELF) or Windows (PE) with no Python involved:
 //
 //     klarc build app.klar [-o app] [--target linux|windows] [--lib <dir of klar/>] [--time]
+//     klarc run app.klar [--lib <dir>] [-- args...]     build into a temporary file and run it
+//     klarc test app.klar [--lib <dir>]                 build the `test` blocks and run each one
 //     klarc check app.klar [--lib <dir of klar/>]
 //
 // The library directory holds the runtime (`rt/`) and the standard library (`std/`); it defaults to $KLAR_LIB, then
 // `klar`. Bootstrap: `klar build compiler/klarc.klar` (the Python compiler) gives klarc1; klarc1 builds klarc2 from the
 // same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
+use ast.{Decl}
 use checker.{Diag}
 use emit.{emit_program}
 use link.{write_elf, write_pe}
-use loader.{Ld, load_program, load_runtime}
-use lower.{lower_program}
+use loader.{Ld, Module, load_program, load_runtime}
+use lower.{fnv1a, lower_program}
 
-type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool }
+type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, args: List[Str] }
 
 fn usage() -> Never uses io {
   print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows] [--lib <dir>] [--time]")
+  print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
+  print("       klarc test <file.klar> [--lib <dir>]")
   print("       klarc check <file.klar> [--lib <dir>]")
   return exit(2)
 }
 
 fn parse_args(args: List[Str]) -> Options uses io {
   var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "linux", lib: env_var("KLAR_LIB").unwrap_or(
-    "klar"), time: false }
+    "klar"), time: false, args: [] }
   var i = 1
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -37,6 +42,9 @@ fn parse_args(args: List[Str]) -> Options uses io {
     } else if a == "--lib" {
       o = o with { lib: v }
       i = i + 2
+    } else if a == "--" {
+      o = o with { args: args.drop(i + 1) }
+      i = args.len()
     } else if a == "--time" {
       o = o with { time: true }
       i = i + 1
@@ -47,9 +55,10 @@ fn parse_args(args: List[Str]) -> Options uses io {
       return usage()
     }
   }
-  if (o.cmd != "build" and o.cmd != "check") or o.file == "" or (o.target != "linux" and o.target != "windows") {
-    return usage()
-  }
+  if not ["build", "run", "test", "check"].contains(o.cmd) or o.file == "" or (o.target != "linux" and o.target !=
+      "windows") {
+      return usage()
+    }
   return o
 }
 
@@ -105,7 +114,67 @@ fn lap(o: Options, phase: Str, start: Int) -> Int uses io, time {
   return t
 }
 
-fn main() uses io, fs, time {
+/// A file for a temporary executable: in %TEMP% on Windows, $TMPDIR or /tmp elsewhere.
+fn temp_exe(o: Options, what: Str) -> Str uses io {
+  let tag = fnv1a(o.file + "|" + what)
+  let name = "klarc-{what}-{tag}"
+  let win = env_var("TEMP").unwrap_or("")
+  if win.contains("\\") {
+    return "{win}\\{name}.exe"
+  }
+  let dir = env_var("TMPDIR").unwrap_or("/tmp")
+  return "{dir}/{name}"
+}
+
+/// The names of the `test` blocks of the main module, in order.
+fn test_names(ld: Ld, file: Str) -> List[Str] {
+  var out: List[Str] = []
+  let decls = match ld.by_path.get(file) {
+    Some(m) => match m.checker {
+      Some(c) => c.decls,
+      None => [],
+    },
+    None => [],
+  }
+  for d in decls {
+    match d {
+      Decl.Test(_, name, _) => {
+        out = out.push(name)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn write_exe(path: Str, image: Bytes) uses io, fs {
+  match write_bytes(path, image) {
+    Ok(_) => {},
+    Err(e) => {
+      print("klarc: {e}")
+      exit(1)
+    },
+  }
+  match set_executable(path) {
+    Ok(_) => {},
+    Err(e) => {
+      print("klarc: {e}")
+      exit(1)
+    },
+  }
+}
+
+fn run_or_fail(cmd: List[Str]) -> Int uses io, proc {
+  return match run_command(cmd) {
+    Ok(code) => code,
+    Err(e) => {
+      print("klarc: {e}")
+      return exit(1)
+    },
+  }
+}
+
+fn main() uses io, fs, time, proc {
   let o = parse_args(cli_args())
   let t0 = now_ms()
   if not file_exists(o.file) {
@@ -121,7 +190,14 @@ fn main() uses io, fs, time {
     print("ok: no problems found")
     return
   }
-  let w = lower_program(ld, o.file)
+  let tests = o.cmd == "test"
+  let names = test_names(ld, o.file)
+  if tests and names.is_empty() {
+    print("no tests found")
+    print("\n0 passed, 0 failed")
+    return
+  }
+  let w = lower_program(ld: ld, main_path: o.file, tests: tests)
   let t2 = lap(o: o, phase: "lower", start: t1)
   let x = emit_program(w, o.target)
   let t3 = lap(o: o, phase: "optimize + allocate + emit", start: t2)
@@ -132,6 +208,33 @@ fn main() uses io, fs, time {
     image = write_elf(x)
   }
   let _ = lap(o: o, phase: "link", start: t3)
+  if o.cmd == "run" {
+    let exe = temp_exe(o, "run")
+    write_exe(exe, image)
+    exit(run_or_fail([exe].concat(o.args)))
+  }
+  if tests {
+    let exe = temp_exe(o, "test")
+    write_exe(exe, image)
+    var passed = 0
+    var failed = 0
+    var i = 0
+    for name in names {
+      if run_or_fail([exe, i.to_str()]) == 0 {
+        print("  PASS  {name}")
+        passed = passed + 1
+      } else {
+        print("  FAIL  {name}")
+        failed = failed + 1
+      }
+      i = i + 1
+    }
+    print("\n{passed} passed, {failed} failed")
+    if failed > 0 {
+      exit(1)
+    }
+    return
+  }
   let path = out_path(o)
   match write_bytes(path, image) {
     Ok(_) => {},

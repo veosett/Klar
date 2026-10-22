@@ -39,7 +39,7 @@ test "character codes" {
   assert "héllo".codes().map(fn(c) => c.to_char().unwrap_or("?")).join("") == "héllo"
 }
 
-fn main() uses io {
+fn main() uses io, proc {
   var acc = 0
   for i in range(0, 200) {
     acc = acc.bit_xor(i.shift_left(i % 70)).bit_and(1.shift_left(80) - 1)
@@ -47,6 +47,9 @@ fn main() uses io {
   print(acc)
   print(mix(-12345678901234567890123, 98765))
   print(env_var("KLAR_SURELY_NOT_SET_42").is_none())
+  print(run_command(["klar-surely-not-a-program-42"]))
+  let none: List[Str] = []
+  print(run_command(none))
   print("bye")
   exit(3)
 }

@@ -42,6 +42,12 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   record and updates the field in place (`klar/native/own.py`, `compiler/own.klar`). `Bytes.concat` and `push`/`set`
   on temporaries update in place too. The self-hosted compiler builds itself in 8 s instead of 35 s.
 - `tests/native/ownership.klar`: unique and shared values through calls, records, closures and `match`.
+- `run_command(["prog", "arg"]) -> Result[Int, Str]` (new effect `proc`): runs a program found in `PATH` with
+  inherited stdin/stdout/stderr and returns its exit code — fork/execve/wait4 on Linux, `CreateProcessA` on
+  Windows, `subprocess` in the interpreter. `set_executable(path)` (`fs`): chmod 755 (nothing to do on Windows).
+- `klarc run app.klar [-- args]` and `klarc test app.klar`: the self-hosted compiler builds into a temporary file
+  and runs the program, or builds the `test` blocks and runs each one in its own process (PASS/FAIL, summary, exit
+  code). The test-executable lowering is now in Klar too; `tests/selfhost.py` compares it with the Python one.
 - `Float.to_bits()` and `float_from_bits(bits)`: the IEEE-754 bits of a Float as a signed 64-bit Int, and back
   (the Klar backend needs them for float constants).
 - The Klar loader loads the runtime (`klar/rt`, one module of several files); the Klar checker records what the

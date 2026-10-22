@@ -176,7 +176,7 @@ CODES = {
     # effects / values
     "E0401": ("missing effect", "Functions must declare effects they use: `fn f() uses io { ... }`. Contracts are pure; tests may only use `io`."),
     "E0402": ("unhandled Result", "A `Result` may carry an error and must be handled with `?`, `match`, or discarded explicitly with `let _ = ...`."),
-    "E0403": ("unknown effect", "Known effects: io, time, rand, fs, net."),
+    "E0403": ("unknown effect", "Known effects: io, time, rand, fs, net, proc."),
     "E0405": ("discarded immutable update",
               "Values are immutable. Methods like `push`, `set`, `concat`, `with` return a NEW value; "
               "assign it: `xs = xs.push(1)` (requires `var xs`)."),

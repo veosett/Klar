@@ -5,7 +5,7 @@
     stage 3  klarc2 build compiler/klarc.klar        (Klar compiled by Klar)    -> klarc3
 
 All three must be the same bytes, the Windows build of klarc made by klarc2 must equal the one made by `klar build`,
-and klarc3 must build working programs and report errors like `klar check`. Linux x86-64 only (it runs the binaries).
+and klarc3 must build and run working programs, run test blocks and report errors like `klar check`. Linux x86-64 only (it runs the binaries).
 
     python tests/bootstrap.py
 """
@@ -79,6 +79,17 @@ def main():
                 bad += 1
                 print(f"DIFF {src}: klarc3's executable printed {got.stdout[:200]!r}, the interpreter "
                       f"{want.stdout[:200]!r}")
+        # klarc run / klarc test: build into a temporary file and run it (no Python involved)
+        src = os.path.join("examples", "shapes.klar")
+        got = run([stage[2], "run", src, "--lib", LIB])
+        want = run([sys.executable, "-m", "klar", "run", "--interp", src])
+        if (got.stdout, got.returncode) != (want.stdout, want.returncode):
+            bad += 1
+            print(f"DIFF klarc3 run {src}: {got.stdout[:200]!r} / interpreter {want.stdout[:200]!r}")
+        got = run([stage[2], "test", os.path.join("examples", "bank.klar"), "--lib", LIB])
+        if got.returncode != 0 or "4 passed, 0 failed" not in got.stdout:
+            bad += 1
+            print(f"DIFF klarc3 test examples/bank.klar: exit {got.returncode}\n{got.stdout[-500:]}")
         # and reports errors
         proc = run([stage[2], "check", os.path.join("examples", "mistakes.klar"), "--lib", LIB])
         if proc.returncode != 1 or "error[E" not in proc.stdout:

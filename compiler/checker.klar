@@ -194,7 +194,7 @@ fn settle_types(c: Ck) -> Ck {
 /// A result together with the updated checker state.
 pub type Res[T] { c: Ck, v: T }
 
-const KNOWN_EFFECTS: List[Str] = ["io", "time", "rand", "fs", "net"]
+const KNOWN_EFFECTS: List[Str] = ["io", "time", "rand", "fs", "net", "proc"]
 const PRIMS: List[Str] = ["Int", "Float", "Bool", "Str", "Bytes", "Unit", "Never"]
 const GENERICS: List[Str] = ["List", "Map", "Option", "Result"]
 
@@ -1108,7 +1108,7 @@ fn resolve_fn_sig(ck: Ck, f: FnDecl, idx: Int) -> Ck {
   for e in f.effects {
     if not KNOWN_EFFECTS.contains(e) {
       c = error(c: c, code: "E0403", msg: "unknown effect `{e}`", span: eff_span,
-        hint: or_hint(did_you_mean(e, KNOWN_EFFECTS), "known effects: io, time, rand, fs, net"))
+        hint: or_hint(did_you_mean(e, KNOWN_EFFECTS), "known effects: io, time, rand, fs, net, proc"))
     }
   }
   let b = resolve_bounds(c, f)
@@ -1178,7 +1178,7 @@ fn method_sig(ck: Ck, f: FnDecl, self_type: Type, idx: Int) -> Res[Sig] {
   for e in f.effects {
     if not KNOWN_EFFECTS.contains(e) {
       c = error(c: c, code: "E0403", msg: "unknown effect `{e}`", span: eff_span,
-        hint: Some("known effects: io, time, rand, fs, net"))
+        hint: Some("known effects: io, time, rand, fs, net, proc"))
     }
   }
   let bounds = match f.owner_kind == Some("default") {

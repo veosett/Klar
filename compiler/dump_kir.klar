@@ -69,13 +69,19 @@ pub fn program_json(w: Lw) -> Json {
 fn main() uses io, fs {
   let args = cli_args()
   let lib = args.get_or(0, "klar")
-  for path in args.drop(1) {
+  // `+tests` first: lower the test blocks instead of main
+  let tests = args.get_or(1, "") == "+tests"
+  var first = 1
+  if tests {
+    first = 2
+  }
+  for path in args.drop(first) {
     print(json_text(json_object([Pair { first: "file", second: Json.Text(value: path) }])))
     let ld = load_runtime(load_program(path, lib))
     if ld.diags.any(fn(d) => d.severity == "error") {
       print(json_text(json_object([Pair { first: "error", second: Json.Text(value: "the program has errors") }])))
     } else {
-      print(json_text(program_json(lower_program(ld, path))))
+      print(json_text(program_json(lower_program(ld: ld, main_path: path, tests: tests))))
     }
   }
 }

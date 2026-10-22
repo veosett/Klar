@@ -284,7 +284,7 @@ class Parser:
         if self.at_kw("uses"):
             eff_start = self.advance().span
             while True:
-                effects.append(self.expect_ident("effect name (io, time, rand, fs, net)").value)
+                effects.append(self.expect_ident("effect name (io, time, rand, fs, net, proc)").value)
                 if not self.accept_op(","):
                     break
             eff_span = self.span_from(eff_start)

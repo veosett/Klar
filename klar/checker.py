@@ -13,7 +13,7 @@ from .diagnostics import Diagnostic, Span
 from .types import (ANY, BOOL, FLOAT, INT, NEVER, STR, UNIT, TCon, TFn, TParam, TVar,
                     head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify)
 
-KNOWN_EFFECTS = {"io", "time", "rand", "fs", "net"}
+KNOWN_EFFECTS = {"io", "time", "rand", "fs", "net", "proc"}
 PRIMS = {"Int", "Float", "Bool", "Str", "Bytes", "Unit", "Never"}
 GENERIC_ARITY = {"List": 1, "Map": 2, "Option": 1, "Result": 2}
 PASCAL = re.compile(r"^[A-Z][A-Za-z0-9]*$")
@@ -360,7 +360,7 @@ class Checker:
                     if e not in KNOWN_EFFECTS:
                         h, fx = self.did_you_mean(e, KNOWN_EFFECTS, d.effects_span)
                         self.error("E0403", f"unknown effect `{e}`", d.effects_span,
-                                   hint=h or "known effects: io, time, rand, fs, net")
+                                   hint=h or "known effects: io, time, rand, fs, net, proc")
                 self.fns[d.name] = Sig(d.name, d.type_params, params, ret, d.effects, decl=d, user=True,
                                        module=self.module, bounds=self.resolve_bounds(d))
         self.collect_traits(own_traits)
@@ -394,7 +394,7 @@ class Checker:
         ret = self.resolve(d.ret, tps) if d.ret else UNIT
         for e in d.effects:
             if e not in KNOWN_EFFECTS:
-                self.error("E0403", f"unknown effect `{e}`", d.effects_span, hint="known effects: io, time, rand, fs, net")
+                self.error("E0403", f"unknown effect `{e}`", d.effects_span, hint="known effects: io, time, rand, fs, net, proc")
         return Sig(d.name, list(d.type_params), params, ret, d.effects, decl=d, user=True, module=self.module,
                    bounds={"Self": [d.trait]} if d.owner_kind == "default" else {})
 

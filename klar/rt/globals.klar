@@ -324,3 +324,174 @@ fn b_env_var(name: Word, rtd: Word) -> Word {
   block_free(buf)
   return some_new(rtd, s)
 }
+
+// ---- processes --------------------------------------------------------------------------------------------------
+
+fn spawn_error(prog: Word, code: Word, rtd: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "cannot run '")
+  sb_add_str(b, prog)
+  sb_add_cstr(b, "': ")
+  io_error_text(b, code)
+  return err_new(rtd, sb_finish(b))
+}
+
+fn has_byte(s: Word, c: Word) -> Bool {
+  var i: Word = 0
+  let n = peek(s + 16)
+  while i < n {
+    if peek8(s + 32 + i) == c {
+      return true
+    }
+    i = i + 1
+  }
+  return false
+}
+
+// Linux: the program file for a name: itself when it contains '/', else the first match in PATH (0: none)
+fn find_program(prog: Word) -> Word {
+  if has_byte(prog, 47) {
+    if not os_file_exists(prog + 32) {
+      return 0
+    }
+    rc_inc(prog)
+    return prog
+  }
+  let name = bits("PATH")
+  var i = os_argc() + 1
+  var p = os_argv(i)
+  while p != 0 {
+    if bytes_eq(p, name + 32, 4) and peek8(p + 4) == 61 {
+      var start = p + 5
+      var q = start
+      var going = true
+      while going {
+        let c = peek8(q)
+        if c == 58 or c == 0 {
+          if q > start {
+            let b = sb_new()
+            sb_add_bytes(b, start, q - start)
+            sb_add_byte(b, 47)
+            sb_add_str(b, prog)
+            let cand = sb_finish(b)
+            if os_file_exists(cand + 32) {
+              return cand
+            }
+            rc_dec(cand)
+          }
+          if c == 0 {
+            going = false
+          }
+          start = q + 1
+        }
+        q = q + 1
+      }
+      return 0
+    }
+    i = i + 1
+    p = os_argv(i)
+  }
+  return 0
+}
+
+// Windows: one argument of a command line, quoted when it is empty or has spaces, tabs or quotes
+fn add_win_arg(b: Word, s: Word) {
+  let n = peek(s + 16)
+  let quote = n == 0 or has_byte(s, 32) or has_byte(s, 9) or has_byte(s, 34)
+  if not quote {
+    sb_add_str(b, s)
+    return
+  }
+  sb_add_byte(b, 34)
+  var i: Word = 0
+  var slashes: Word = 0
+  while i < n {
+    let c = peek8(s + 32 + i)
+    if c == 92 {
+      slashes = slashes + 1
+    } else {
+      if c == 34 {
+        var k: Word = 0
+        while k < slashes + 1 {
+          sb_add_byte(b, 92)
+          k = k + 1
+        }
+      }
+      slashes = 0
+    }
+    sb_add_byte(b, c)
+    i = i + 1
+  }
+  var k2: Word = 0
+  while k2 < slashes {
+    sb_add_byte(b, 92)
+    k2 = k2 + 1
+  }
+  sb_add_byte(b, 34)
+}
+
+fn b_run_command(args: Word, rtd: Word) -> Word {
+  let n = peek(args + 16)
+  if n == 0 {
+    return err_new(rtd, bits("run_command: no program given"))
+  }
+  flush_out()
+  let prog = list_at(args, 0)
+  if os_platform() == 0 {
+    let path = find_program(prog)
+    if path == 0 {
+      return spawn_error(prog, -2, rtd)
+    }
+    let argv = alloc(8 * (n + 1))
+    poke(argv, path + 32)
+    var i: Word = 1
+    while i < n {
+      poke(argv + 8 * i, list_at(args, i) + 32)
+      i = i + 1
+    }
+    poke(argv + 8 * n, 0)
+    let st = os_spawn(argv)
+    block_free(argv)
+    rc_dec(path)
+    if st < 0 {
+      return spawn_error(prog, st, rtd)
+    }
+    var code = w_and(w_shr(st, 8), 255)
+    if w_and(st, 127) != 0 {
+      code = 128 + w_and(st, 127)
+    }
+    return ok_new(rtd, bits(tag(code)))
+  }
+  let b = sb_new()
+  var j: Word = 0
+  while j < n {
+    if j > 0 {
+      sb_add_byte(b, 32)
+    }
+    add_win_arg(b, list_at(args, j))
+    j = j + 1
+  }
+  let cl = sb_finish(b)
+  let r = os_spawn(cl + 32)
+  rc_dec(cl)
+  if r < 0 {
+    return spawn_error(prog, -2, rtd)
+  }
+  return ok_new(rtd, bits(tag(r)))
+}
+
+fn b_set_executable(path: Word, rtd: Word) -> Word {
+  if os_platform() != 0 {
+    return ok_new(rtd, 0)
+  }
+  let r = os_chmod(path + 32, 493)
+  if r < 0 {
+    let b = sb_new()
+    sb_add_cstr(b, "cannot change '")
+    sb_add_str(b, path)
+    sb_add_cstr(b, "': ")
+    io_error_text(b, r)
+    return err_new(rtd, sb_finish(b))
+  }
+  return ok_new(rtd, 0)
+}

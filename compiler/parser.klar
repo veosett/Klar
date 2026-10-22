@@ -969,7 +969,7 @@ fn parse_fn(p: Ps, i: Int, doc: Option[Str], with_body: Bool, is_method: Bool) -
     let eff_start = span_of(tk(p, j))
     j = next(p, j)
     while true {
-      let e = expect_ident(p: p, i: j, what: "effect name (io, time, rand, fs, net)")?
+      let e = expect_ident(p: p, i: j, what: "effect name (io, time, rand, fs, net, proc)")?
       effects = effects.push(e.value.text)
       j = e.pos
       if not is_op(tk(p, j), ",") {

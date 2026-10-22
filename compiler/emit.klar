@@ -21,11 +21,12 @@ use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_r
 const MAX_DEPTH: Int = 10000
 
 const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
-  "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv"]
+  "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
-  "GetCommandLineA", "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime"]
+  "GetCommandLineA", "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
+  "WaitForSingleObject", "GetExitCodeProcess"]
 
 /// Instructions that know where floats live in XMM registers.
 const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun"]
@@ -1510,6 +1511,24 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   for name in ["os_cmdline", "os_platform", "os_getenv"] {      // Linux reads envp directly (rt/globals.klar)
     a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: 0))
   }
+  // os_spawn(argv): fork; the child execve(argv[0], argv, envp), the parent waits -> wait status (or -errno)
+  a = syscall(mov_ri(a: alu_ri(a: stub_begin(a, "os_spawn"), op: "sub", dst: RSP, imm: 16), dst: RAX, imm: 57))
+  let done = new_label(a, "sd")
+  let parent = new_label(done.a, "sp")
+  a = jcc(a: jcc(a: test_rr(a: parent.a, x: RAX, y: RAX), cc: "l", target: done.l), cc: "ne", target: parent.l)
+  a = load(a: arg(a: a, reg: RSI, i: 0), dst: RDI, base: RSI, disp: 0)
+  a = load(a: load_rip(a: a, dst: RCX, target: "g_argp"), dst: RAX, base: RCX, disp: 0)      // argc
+  a = alu_rr(a: shift_i(a: a, kind: "shl", r: RAX, n: 3), op: "add", dst: RCX, src: RAX)
+  a = mov_rr(a: alu_ri(a: a, op: "add", dst: RCX, imm: 16), dst: RDX, src: RCX)             // envp = &argv[argc + 1]
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 59))                                               // execve
+  a = syscall(mov_ri(a: mov_ri(a: a, dst: RDI, imm: 127), dst: RAX, imm: 231))               // could not run it
+  a = mov_rr(a: label(a, parent.l), dst: RDI, src: RAX)
+  a = mov_ri(a: mov_ri(a: mov_rr(a: a, dst: RSI, src: RSP), dst: RDX, imm: 0), dst: R10, imm: 0)
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 61))                                               // wait4
+  a = jcc(a: test_rr(a: a, x: RAX, y: RAX), cc: "l", target: done.l)
+  a = stub_end(label(load32(a: a, dst: RAX, base: RSP, disp: 0), done.l))
+  a = arg(a: arg(a: stub_begin(a, "os_chmod"), reg: RDI, i: 0), reg: RSI, i: 1)
+  a = stub_end(syscall(mov_ri(a: a, dst: RAX, imm: 90)))
   a = test_index_stub(a, "linux")
   // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
   a = store_rip(a: label(a, "_start"), target: "g_argp", src: RSP)
@@ -1608,6 +1627,36 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
     a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: 0))
   }
   a = stub_end(mov_ri(a: stub_begin(a, "os_platform"), dst: RAX, imm: 1))
+  // os_spawn(command line) -> exit code (-1: could not start); STARTUPINFOA at [rsp+80], PROCESS_INFORMATION at
+  // [rsp+184], the exit code at [rsp+208]
+  a = mov_ri(a: win_begin(a: a, name: "os_spawn", extra: 160), dst: RAX, imm: 0)
+  var k = 0
+  while k < 17 {
+    a = store(a: a, base: RSP, disp: 80 + 8 * k, src: RAX)
+    k = k + 1
+  }
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 104), base: RSP, disp: 80, src: RAX)               // cb
+  a = arg(a: mov_ri(a: a, dst: RCX, imm: 0), reg: RDX, i: 0)
+  a = mov_ri(a: mov_ri(a: a, dst: R8, imm: 0), dst: R9, imm: 0)
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 1), base: RSP, disp: 32, src: RAX)                 // inherit handles
+  a = mov_ri(a: a, dst: RAX, imm: 0)
+  a = store(a: store(a: store(a: a, base: RSP, disp: 40, src: RAX), base: RSP, disp: 48, src: RAX), base: RSP, disp: 56,
+    src: RAX)
+  a = store(a: lea(a: a, dst: RAX, base: RSP, disp: 80), base: RSP, disp: 64, src: RAX)
+  a = store(a: lea(a: a, dst: RAX, base: RSP, disp: 184), base: RSP, disp: 72, src: RAX)
+  a = win_call(a, "CreateProcessA")
+  let failed = new_label(a, "sf")
+  a = alu_rr(a: mov_ri(a: failed.a, dst: RCX, imm: 4294967295), op: "and", dst: RAX, src: RCX)
+  a = jcc(a: a, cc: "e", target: failed.l)
+  a = mov_ri(a: load(a: a, dst: RCX, base: RSP, disp: 184), dst: RDX, imm: 4294967295)      // INFINITE
+  a = win_call(a, "WaitForSingleObject")
+  a = lea(a: load(a: a, dst: RCX, base: RSP, disp: 184), dst: RDX, base: RSP, disp: 208)
+  a = win_call(a, "GetExitCodeProcess")
+  a = win_call(load(a: a, dst: RCX, base: RSP, disp: 184), "CloseHandle")
+  a = win_call(load(a: a, dst: RCX, base: RSP, disp: 192), "CloseHandle")
+  a = win_end(load32(a: a, dst: RAX, base: RSP, disp: 208))
+  a = win_end(mov_ri(a: label(a, failed.l), dst: RAX, imm: -1))
+  a = stub_end(mov_ri(a: stub_begin(a, "os_chmod"), dst: RAX, imm: 0))
   a = test_index_stub(a, "windows")
   a = alu_ri(a: alu_ri(a: label(a, "_start"), op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
   a = win_call(mov_ri(a: a, dst: RCX, imm: 65001), "SetConsoleOutputCP")

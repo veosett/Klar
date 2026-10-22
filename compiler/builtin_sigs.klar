@@ -18,6 +18,8 @@ pub fn global_sigs() -> List[Str] {
     "fn write_file(path: Str, content: Str) -> Result[Unit, Str] uses fs",
     "fn file_exists(path: Str) -> Bool uses fs",
     "fn exit(code: Int) -> Never uses io",
+    "fn run_command(args: List[Str]) -> Result[Int, Str] uses proc",
+    "fn set_executable(path: Str) -> Result[Unit, Str] uses fs",
     "fn env_var(name: Str) -> Option[Str] uses io",
     "fn cli_args() -> List[Str] uses io",
     "fn Some[T](value: T) -> Option[T]",
@@ -227,6 +229,8 @@ pub fn sys_sigs() -> List[Str] {
     "fn os_cmdline() -> Word",
     "fn os_platform() -> Word",
     "fn os_getenv(name: Word, buf: Word, cap: Word) -> Word",
+    "fn os_spawn(p: Word) -> Word",
+    "fn os_chmod(path: Word, mode: Word) -> Word",
   ]
 }
 

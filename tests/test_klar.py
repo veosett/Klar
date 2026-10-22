@@ -186,6 +186,25 @@ fn main() uses io {
                 with open(os.path.join(d, "data.bin"), "rb") as f:
                     self.assertEqual(f.read()[:4], bytes([0, 255, 0, 1]))
 
+    @unittest.skipIf(os.name == "nt", "uses sh and chmod")
+    def test_processes_on_every_backend(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "p.klar")
+            script = os.path.join(d, "s.sh").replace("\\", "/")
+            with open(script, "w", encoding="utf-8") as f:
+                f.write("#!/bin/sh\nexit 7\n")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('fn main() uses io, fs, proc {\n  print(run_command(["sh", "-c", "exit 4"]))\n'
+                        f'  print(run_command(["{script}"]))\n  print(set_executable("{script}"))\n'
+                        f'  print(run_command(["{script}"]))\n  print(run_command(["klar-not-a-program-42"]))\n'
+                        '  print(set_executable("/klar/missing/file").is_err())\n}\n')
+            want = ("Ok(4)\nOk(127)\nOk(())\nOk(7)\n"
+                    "Err(\"cannot run 'klar-not-a-program-42': No such file or directory\")\ntrue\n")
+            for flag in (["--interp"], ["--py"], []):
+                os.chmod(script, 0o644)
+                code, out, err = cli("run", *flag, path)
+                self.assertEqual((code, out), (0, want), (flag, err))
+
     def test_lambdas_cannot_capture_vars(self):
         assign = "fn main() uses io {\n var counter = 0\n let bump = fn(n: Int) {\n counter = counter + n\n }\n bump(5)\n}"
         self.assertEqual(errors(assign), ["E0216"])

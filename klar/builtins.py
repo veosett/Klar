@@ -128,6 +128,42 @@ def _exit(it, a, sp):
     raise KlarExit(max(0, min(255, a[0])), sp)
 
 
+@glob("fn run_command(args: List[Str]) -> Result[Int, Str] uses proc")
+def _run_command(it, a, sp):
+    """Runs a program (searched in PATH) with inherited stdin/stdout/stderr; Ok(exit code)."""
+    import os
+    import subprocess
+    import sys
+    args = list(a[0])
+    if not args:
+        return err("run_command: no program given")
+    for stream in (getattr(it, "out", None), sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "flush"):
+            stream.flush()
+    import shutil
+    if shutil.which(args[0]) is None and not os.path.isfile(args[0]):
+        return err(f"cannot run '{args[0]}': No such file or directory")
+    try:
+        code = subprocess.run(args).returncode
+    except OSError:
+        return ok(127)            # found but not runnable: the exit code of a shell that cannot run it
+    return ok(128 - code if code < 0 else code)
+
+
+@glob("fn set_executable(path: Str) -> Result[Unit, Str] uses fs")
+def _set_executable(it, a, sp):
+    """Marks a file as executable (chmod 755); nothing to do on Windows."""
+    import os
+    if os.name == "nt":
+        return ok(UNIT)
+    try:
+        os.chmod(a[0], 0o755)
+        return ok(UNIT)
+    except OSError as ex:
+        reason = ex.strerror if ex.strerror in ("No such file or directory", "Permission denied") else "I/O error"
+        return err(f"cannot change '{a[0]}': {reason}")
+
+
 @glob("fn env_var(name: Str) -> Option[Str] uses io")
 def _env_var(it, a, sp):
     import os

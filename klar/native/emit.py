@@ -16,11 +16,12 @@ from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11,
 MAX_DEPTH = 10000
 
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
-            "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv"]
+            "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
-               "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime"]
+               "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
+               "WaitForSingleObject", "GetExitCodeProcess"]
 
 
 def udiv_magic(d):
@@ -1106,6 +1107,46 @@ class Emitter:
         self.stub_begin("os_getenv")          # Linux reads envp directly (rt/globals.klar)
         a.mov_ri(RAX, 0)
         self.stub_end()
+        # os_spawn(argv): fork; the child execve(argv[0], argv, envp), the parent waits -> wait status (or -errno)
+        self.stub_begin("os_spawn")
+        a.alu_ri("sub", RSP, 16)
+        a.mov_ri(RAX, 57)              # fork
+        a.syscall()
+        done, parent = a.new_label("sd"), a.new_label("sp")
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.jcc("ne", parent)
+        self.arg(RSI, 0)
+        a.load(RDI, RSI, 0)
+        a.load_rip(RCX, "g_argp")
+        a.load(RAX, RCX, 0)            # argc
+        a.shift_i("shl", RAX, 3)
+        a.alu_rr("add", RCX, RAX)
+        a.alu_ri("add", RCX, 16)       # envp = &argv[argc + 1]
+        a.mov_rr(RDX, RCX)
+        a.mov_ri(RAX, 59)              # execve
+        a.syscall()
+        a.mov_ri(RDI, 127)             # could not run it
+        a.mov_ri(RAX, 231)
+        a.syscall()
+        a.label(parent)
+        a.mov_rr(RDI, RAX)
+        a.mov_rr(RSI, RSP)
+        a.mov_ri(RDX, 0)
+        a.mov_ri(R10, 0)
+        a.mov_ri(RAX, 61)              # wait4
+        a.syscall()
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.load32(RAX, RSP, 0)
+        a.label(done)
+        self.stub_end()
+        self.stub_begin("os_chmod")
+        self.arg(RDI, 0)
+        self.arg(RSI, 1)
+        a.mov_ri(RAX, 90)
+        a.syscall()
+        self.stub_end()
         self.test_index_stub()
         # entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
         a.label("_start")
@@ -1285,6 +1326,51 @@ class Emitter:
             self.stub_end()
         self.stub_begin("os_platform")
         a.mov_ri(RAX, 1)
+        self.stub_end()
+        # os_spawn(command line) -> exit code (-1: could not start); STARTUPINFOA at [rsp+80], PROCESS_INFORMATION at
+        # [rsp+184], the exit code at [rsp+208]
+        win_begin("os_spawn", 160)
+        a.mov_ri(RAX, 0)
+        for k in range(17):
+            a.store(RSP, 80 + 8 * k, RAX)
+        a.mov_ri(RAX, 104)
+        a.store(RSP, 80, RAX)          # cb
+        a.mov_ri(RCX, 0)
+        self.arg(RDX, 0)
+        a.mov_ri(R8, 0)
+        a.mov_ri(R9, 0)
+        a.mov_ri(RAX, 1)
+        a.store(RSP, 32, RAX)          # inherit handles
+        a.mov_ri(RAX, 0)
+        a.store(RSP, 40, RAX)
+        a.store(RSP, 48, RAX)
+        a.store(RSP, 56, RAX)
+        a.lea(RAX, RSP, 80)
+        a.store(RSP, 64, RAX)
+        a.lea(RAX, RSP, 184)
+        a.store(RSP, 72, RAX)
+        call("CreateProcessA")
+        fail = a.new_label("sf")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)
+        a.jcc("e", fail)
+        a.load(RCX, RSP, 184)
+        a.mov_ri(RDX, 0xFFFFFFFF)      # INFINITE
+        call("WaitForSingleObject")
+        a.load(RCX, RSP, 184)
+        a.lea(RDX, RSP, 208)
+        call("GetExitCodeProcess")
+        a.load(RCX, RSP, 184)
+        call("CloseHandle")
+        a.load(RCX, RSP, 192)
+        call("CloseHandle")
+        a.load32(RAX, RSP, 208)
+        win_end()
+        a.label(fail)
+        a.mov_ri(RAX, -1)
+        win_end()
+        self.stub_begin("os_chmod")
+        a.mov_ri(RAX, 0)
         self.stub_end()
         self.test_index_stub()
 

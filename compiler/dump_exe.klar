@@ -23,7 +23,7 @@ fn main() uses io, fs {
     if ld.diags.any(fn(d) => d.severity == "error") {
       print("{path}\terror")
     } else {
-      let w = lower_program(ld, path)
+      let w = lower_program(ld: ld, main_path: path, tests: false)
       save("{out}/{k}.elf", write_elf(emit_program(w, "linux")))
       save("{out}/{k}.exe", write_pe(emit_program(w, "windows")))
       print("{path}\t{k}")

@@ -3098,8 +3098,32 @@ pub fn rt_names(w: Lw) -> Map[Str, Str] {
   return out
 }
 
-/// Lowers a whole program (loaded with its runtime) to KIR functions and the data image.
-pub fn lower_program(ld: Ld, main_path: Str) -> Lw {
+fn zero_span() -> Span {
+  return Span { line: 0, col: 0, end_line: 0, end_col: 0 }
+}
+
+/// A `test` block of the main module, lowered as `__test<index>`.
+fn lower_test(w0: Lw, m: Module, name: Str, body: Block, index: Int) -> LR[Str] {
+  let fname = "__test{index}"
+  let label_text = "test \"" + name + "\""
+  let f = KFn { name: fname, klar_name: label_text, nparams: 0, nregs: 0, code: [], labels: 0 }
+  var w = begin_fn(w0 with { m: m, file: m.display, env: Map {}, is_rt: false }, f) with { in_test: true, ret_t: unit_t(),
+    decl: None, posts: [] }
+  w = push_scope(w)
+  w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of([], Body.BlockBody(block:
+    body)), no_move: [], b: body) }
+  let s = str_obj(w, label_text)
+  w = block_body(emit(s.w, [op("enter"), KV.S(s: s.v)]), body)
+  if not w.dead {
+    let u = unit_v(w)
+    w = do_return(u.w, u.v)
+  }
+  return lr(finish_fn(w), fname)
+}
+
+/// Lowers a whole program (loaded with its runtime) to KIR functions and the data image. With `tests`, the
+/// executable runs the main module's test block number argv[last] instead of `main`.
+pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
   let rt_mod = match ld.runtime {
     Some(m) => m,
     None => fail("native: the runtime is not loaded"),
@@ -3189,12 +3213,13 @@ pub fn lower_program(ld: Ld, main_path: Str) -> Lw {
     }
   }
   w = w with { owned: infer_owned(ofns) }
-  // __user_main calls main
+  // __user_main calls main (or the test the command line selects)
   w = begin_fn(w, um0)
   let rr = reg(w)
   w = rr.w
   var main_idx = -1
   var main_decl: Option[FnDecl] = None
+  var test_blocks: List[Decl] = []
   k = 0
   for d in checker_of(main_mod).decls {
     match d {
@@ -3204,17 +3229,69 @@ pub fn lower_program(ld: Ld, main_path: Str) -> Lw {
           main_idx = k
         }
       },
+      Decl.Test(_, _, _) => {
+        test_blocks = test_blocks.push(d)
+      },
       _ => {},
     }
     k = k + 1
   }
-  let md = match main_decl {
-    Some(f) => f,
-    None => fail("native: no main"),
+  var md = FnDecl { span: zero_span(), name: "", name_span: zero_span(), type_params: [], params: [], ret: None,
+    effects: [], effects_span: None, sig_end: zero_span(), pre: [], post: [], body: None, doc: None, bounds: [],
+    owner_kind: None, owner: None, trait_name: None, method_name: None, public: false }
+  var main_span = zero_span()
+  if tests {
+    w = finish_fn(w)
+    var names: List[Str] = []
+    var ti = 0
+    for d in test_blocks {
+      match d {
+        Decl.Test(sp, test_name, body) => {
+          if ti == 0 {
+            main_span = sp
+          }
+          let t = lower_test(w0: w, m: main_mod, name: test_name, body: body, index: ti)
+          w = t.w
+          names = names.push(t.v)
+          ti = ti + 1
+        },
+        _ => {},
+      }
+    }
+    if names.is_empty() {
+      return fail("native: no tests")
+    }
+    w = w with { cur: w.fns.get_or(0, um0), cur_index: 0, dead: false, m: main_mod, file: main_mod.display, scopes: [],
+      in_test: false }
+    let sel = reg(w)
+    w = emit_always(sel.w, [op("call"), r(sel.v), KV.S(s: "test_index_arg"), KV.L(regs: [])])
+    ti = 0
+    for nm in names {
+      let c = reg(w)
+      let kr = reg(c.w)
+      let yes = label(kr.w, "t")
+      let no = label(yes.w, "n")
+      w = emit_always(no.w, [op("const"), r(kr.v), r(ti)])
+      w = emit_always(w, [op("cmp"), op("eq"), r(c.v), r(sel.v), r(kr.v)])
+      w = emit_always(w, [op("br"), r(c.v), KV.S(s: yes.v), KV.S(s: no.v)])
+      w = emit_always(w, [op("label"), KV.S(s: yes.v)])
+      w = emit_always(w, [op("call"), r(rr.v), KV.S(s: nm), KV.L(regs: [])])
+      w = emit_always(w, [op("ret"), r(rr.v)])
+      w = emit_always(w, [op("label"), KV.S(s: no.v)])
+      ti = ti + 1
+    }
+    w = emit_always(emit_always(w, [op("const"), r(rr.v), r(0)]), [op("ret"), r(rr.v)])
+    w = finish_fn(w)
+  } else {
+    md = match main_decl {
+      Some(f) => f,
+      None => fail("native: no main"),
+    }
+    main_span = md.name_span
+    let main_name = instance(w: w, md: main_mod, decl: md, idx: main_idx, type_args: [], kind: "user")
+    w = emit_always(main_name.w, [op("call"), r(rr.v), KV.S(s: main_name.v), KV.L(regs: [])])
+    w = finish_fn(emit_always(w, [op("ret"), r(rr.v)]))
   }
-  let main_name = instance(w: w, md: main_mod, decl: md, idx: main_idx, type_args: [], kind: "user")
-  w = emit_always(main_name.w, [op("call"), r(rr.v), KV.S(s: main_name.v), KV.L(regs: [])])
-  w = finish_fn(emit_always(w, [op("ret"), r(rr.v)]))
   // constants initialiser: the runtime's own constants first, then the program's modules in dependency order
   w = begin_fn(w, KFn { name: "__init_consts", klar_name: "__init_consts", nparams: 0, nregs: 0, code: [], labels: 0 })
   for m in ordered {
@@ -3264,13 +3341,12 @@ pub fn lower_program(ld: Ld, main_path: Str) -> Lw {
   let sl = str_word(w, "List")
   w = words(w: sl.w, name: "td_ListStr", ws: [W.N(v: K_LIST), sl.v, W.A(sym: "td_Str", add: 0), W.N(v: 0), W.N(v: 0),
     W.N(v: 0)])
-  let main_sig = sig_of(main_mod, md)
-  let kind = match tname(zonk(main_sig.ret, Map {})) == "Result" {
-    true => 1,
-    false => 0,
+  var kind = 0
+  if not tests and tname(zonk(sig_of(main_mod, md).ret, Map {})) == "Result" {
+    kind = 1
   }
   w = words(w: w, name: "main_kind", ws: [W.N(v: kind)])
-  let ms = span_sym(w, md.name_span)
+  let ms = span_sym(w, main_span)
   w = alias_sym(w: ms.w, name: "main_span", sym: ms.v)
   return w with { img: add_bss(img: add_bss(img: add_bss(img: w.img, name: "g_rt", size: 8 * 4096), name: "g_outbuf",
     size: 65536), name: "g_inbuf", size: 65536) }

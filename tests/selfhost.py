@@ -8,8 +8,9 @@ the Python implementation, on every .klar file of the repository and on error sn
 * stage 4a/b, the checker, loader and safety analysis (compiler/checker.klar, loader.klar, safety.klar): the same
   diagnostics, and the same annotations (the type of every expression, the resolution and type arguments of every
   call) on every repository file and on the programs of tests/selfhost_cases.txt;
-* stage 4c, the backend middle (compiler/lower.klar, opt.klar, regalloc.klar): the same KIR, data image and register
-  allocation for every program with a `main`;
+* stage 4c, the backend middle (compiler/lower.klar, own.klar, opt.klar, regalloc.klar): the same KIR, data image
+  and register allocation for every program with a `main`, and for the test executable of every file with `test`
+  blocks;
 * stage 4d, the x86-64 emitter and the linkers (compiler/x64.klar, emit.klar, link.klar): byte-identical ELF and PE
   executables for every program with a `main`.
 
@@ -407,8 +408,9 @@ def check_checker(files, interp):
     return bad
 
 
-def python_kir(path):
-    """The KIR and data image of klar/native/lower.py for a program (None if it has errors or is unsupported)."""
+def python_kir(path, tests=False):
+    """The KIR and data image of klar/native/lower.py for a program (None if it has errors or is unsupported); with
+    `tests`, of its test executable (the `test` blocks of the main module; None without any)."""
     from klar.loader import load_path
     from klar.native.link import Image
     from klar.native.lower import NativeUnsupported, lower_program
@@ -418,8 +420,13 @@ def python_kir(path):
     img = Image()
     from klar.native.opt import inline_calls, optimize
     from klar.native.regalloc import allocate
+    blocks = None
+    if tests:
+        blocks = [d for d in loaded.main.program.decls if isinstance(d, N.TestDecl)]
+        if not blocks:
+            return None
     try:
-        prog, _ = lower_program(loaded, img, None)
+        prog, _ = lower_program(loaded, img, blocks)
     except NativeUnsupported:
         return None
     out = {"fns": [[f.name, f.klar_name, f.nparams, f.nregs, [list(ins) for ins in f.code]] for f in prog.fns],
@@ -448,11 +455,11 @@ def lowering_files():
     return out
 
 
-def check_lowering(interp):
-    files = lowering_files()
-    want = {p: python_kir(p) for p in files}
+def check_lowering(interp, tests=False):
+    files = lowering_files() if not tests else list(klar_files())
+    want = {p: python_kir(p, tests) for p in files}
     files = [p for p in files if want[p] is not None]
-    out = run_driver("dump_kir.klar", [os.path.join(ROOT, "klar")] + files, interp)
+    out = run_driver("dump_kir.klar", [os.path.join(ROOT, "klar")] + (["+tests"] if tests else []) + files, interp)
     got, cur = {}, None
     for line in out.splitlines():
         obj = json.loads(line)
@@ -507,7 +514,8 @@ def check_lowering(interp):
                         else:
                             print(f"DIFF {short(path)}: {what[k]} of {a[0]}: python {a[k]}, klar {b[k]}")
                         break
-    print(f"lowering: {len(files) - bad}/{len(files)} programs identical ({n_ins} KIR instructions)")
+    what = "test executables" if tests else "programs"
+    print(f"lowering: {len(files) - bad}/{len(files)} {what} identical ({n_ins} KIR instructions)")
     return bad
 
 
@@ -565,6 +573,7 @@ def main(argv=None):
             bad += check_parser(parse_files, interp)
         if not only or "lowering" in only:
             bad += check_lowering(interp)
+            bad += check_lowering(interp, tests=True)
         if not only or "emit" in only:
             bad += check_emit(interp)
         if not only or "checker" in only:
