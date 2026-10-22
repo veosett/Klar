@@ -1,0 +1,79 @@
+// JSON text exactly as Python's json.dumps writes it (`ensure_ascii=False`): compact with `separators=(",", ":")`,
+// or pretty with `indent=2` — what the `--json` modes of the `klar` commands print.
+
+/// A JSON value.
+pub enum J {
+  JNull,
+  JBool(b: Bool),
+  JInt(i: Int),
+  JStr(s: Str),
+  JArr(items: List[J]),
+  JObj(fields: List[Pair[Str, J]]),
+}
+
+/// A JSON string.
+pub fn json_str(s: Str) -> Str {
+  var out = "\""
+  for c in s.chars() {
+    let code = c.codes().get_or(0, 0)
+    if c == "\"" {
+      out = out + "\\\""
+    } else if c == "\\" {
+      out = out + "\\\\"
+    } else if c == "\n" {
+      out = out + "\\n"
+    } else if c == "\r" {
+      out = out + "\\r"
+    } else if c == "\t" {
+      out = out + "\\t"
+    } else if code == 8 {
+      out = out + "\\b"
+    } else if code == 12 {
+      out = out + "\\f"
+    } else if code < 32 {
+      out = out + "\\u00" + hex2(code)
+    } else {
+      out = out + c
+    }
+  }
+  return out + "\""
+}
+
+fn hex2(v: Int) -> Str {
+  let digits = "0123456789abcdef"
+  return digits.slice(v / 16, v / 16 + 1) + digits.slice(v % 16, v % 16 + 1)
+}
+
+pub fn json_list(xs: List[Str]) -> Str {
+  return "[" + xs.map(json_str).join(",") + "]"
+}
+
+/// Compact JSON (`separators=(",", ":")`).
+pub fn compact(j: J) -> Str {
+  return match j {
+    J.JNull => "null",
+    J.JBool(b) => b.to_str(),
+    J.JInt(i) => i.to_str(),
+    J.JStr(s) => json_str(s),
+    J.JArr(items) => "[" + items.map(compact).join(",") + "]",
+    J.JObj(fields) => "\{" + fields.map(fn(f) => json_str(f.first) + ":" + compact(f.second)).join(",") + "\}",
+  }
+}
+
+/// Pretty JSON (`indent=2`), starting at nesting level `level`.
+pub fn pretty(j: J, level: Int) -> Str {
+  let inner = "  ".repeat(level + 1)
+  let outer = "  ".repeat(level)
+  return match j {
+    J.JArr(items) => match items.is_empty() {
+      true => "[]",
+      false => "[\n" + items.map(fn(x) => inner + pretty(x, level + 1)).join(",\n") + "\n" + outer + "]",
+    },
+    J.JObj(fields) => match fields.is_empty() {
+      true => "\{\}",
+      false => "\{\n" + fields.map(fn(f) => inner + json_str(f.first) + ": " + pretty(f.second, level + 1)).join(
+        ",\n") + "\n" + outer + "\}",
+    },
+    _ => compact(j),
+  }
+}

@@ -177,6 +177,21 @@ coverage of bank.klar: 83.3% of statements (10/12), 4 tests
 
 `--main` дополнительно запускает `main`, `--min 90` возвращает код 1 ниже порога (удобно для CI).
 
+## klarc — те же команды без Python
+
+`klarc` (компилятор на Klar, `compiler/klarc.klar`) постепенно получает все команды `klar`. Каждая перенесённая
+команда выдаёт **тот же текст**, что Python-версия, — это проверяет `tests/selfhost.py` на всех файлах репозитория и
+сотнях случаев с ошибками:
+
+| команда | статус |
+|---|---|
+| `klarc build / run / test` | ✅ (`--target linux / windows / linux-arm64`) |
+| `klarc check [--json]` | ✅ тот же отчёт и JSON, что у `klar check` |
+| `klarc fix [--dry-run] [--all] [--warnings] [--json]` | ✅ |
+| `klarc fmt [--check] [--json]` | ✅ |
+| `klarc explain CODE`, `klarc --version` | ✅ |
+| остальные (`new`, `outline`, `doc`, `refs`, `rename`, `patch`, пакеты, `lsp`, `view`, …) | 🔜 |
+
 ## Редакторы
 
 `editors/vscode/` — расширение для VS Code. Оно даёт:

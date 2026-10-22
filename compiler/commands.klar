@@ -1,6 +1,11 @@
 // The developer tools of `klarc` (the counterparts of klar/tools/commands.py), written in Klar. Their output is the
 // output of the Python commands, line for line.
 use fmt.{format_checked}
+use builtin_sigs.{diag_codes}
+use checker.{Diag, FixEdit}
+use jsonout.{J, json_list, pretty}
+use loader.{load_program}
+use report.{edit_file, render_report, user_diags}
 
 /// The .klar files of the given paths: files as given, directories walked in sorted order (files of a directory
 /// before its subdirectories; hidden directories, `build`, `__pycache__` and `node_modules` skipped).
@@ -41,43 +46,6 @@ fn walk(dir: Str) -> List[Str] uses fs {
     files = files.concat(walk(d))
   }
   return files
-}
-
-/// A JSON string (like Python's json.dumps with ensure_ascii=False).
-pub fn json_str(s: Str) -> Str {
-  var out = "\""
-  for c in s.chars() {
-    let code = c.codes().get_or(0, 0)
-    if c == "\"" {
-      out = out + "\\\""
-    } else if c == "\\" {
-      out = out + "\\\\"
-    } else if c == "\n" {
-      out = out + "\\n"
-    } else if c == "\r" {
-      out = out + "\\r"
-    } else if c == "\t" {
-      out = out + "\\t"
-    } else if code == 8 {
-      out = out + "\\b"
-    } else if code == 12 {
-      out = out + "\\f"
-    } else if code < 32 {
-      out = out + "\\u00" + hex2(code)
-    } else {
-      out = out + c
-    }
-  }
-  return out + "\""
-}
-
-fn hex2(v: Int) -> Str {
-  let digits = "0123456789abcdef"
-  return digits.slice(v / 16, v / 16 + 1) + digits.slice(v % 16, v % 16 + 1)
-}
-
-pub fn json_list(xs: List[Str]) -> Str {
-  return "[" + xs.map(json_str).join(",") + "]"
 }
 
 /// `klarc fmt [paths] [--check] [--json]`: the exit code.
@@ -144,4 +112,213 @@ pub fn fmt_command(args: List[Str]) -> Int uses io, fs {
     return 1
   }
   return 0
+}
+
+// ---- fix ------------------------------------------------------------------------------------------------------
+
+/// The offset of (line, col) in the text (1-based, columns in characters).
+fn offset_of(lines: List[Str], line: Int, col: Int) -> Int {
+  var n = 0
+  var k = 0
+  while k < line - 1 {
+    n = n + lines.get_or(k, "").len() + 1
+    k = k + 1
+  }
+  return n + col - 1
+}
+
+/// Applies non-overlapping edits (later edits first; an edit overlapping one already applied waits for the next
+/// round).
+pub fn apply_edits(text: Str, edits: List[FixEdit]) -> Str {
+  let lines = text.split("\n")
+  var ranges: List[Edit3] = []
+  for e in edits {
+    ranges = ranges.push(Edit3 { start: offset_of(lines: lines, line: e.span.line, col: e.span.col),
+      end: offset_of(lines: lines, line: e.span.end_line, col: e.span.end_col), text: e.text })
+  }
+  // by (start, end), last first; equal keys keep their order (like Python's sort with reverse=True)
+  ranges = ranges.sort_by(fn(r) => 0 - (r.start * 1000000000 + r.end))
+  var out = text
+  var last_start = -1
+  for r in ranges {
+    if last_start < 0 or r.end <= last_start {
+      out = out.slice(0, r.start) + r.text + out.slice(r.end, out.len())
+      last_start = r.start
+    }
+  }
+  return out
+}
+
+type Edit3 { start: Int, end: Int, text: Str }
+
+type Applied { code: Str, at: Str, message: Str }
+
+fn short_at(d: Diag) -> Str {
+  return "{d.file}:{d.span.line}:{d.span.col}"
+}
+
+/// `klar dev`'s compact form of a diagnostic (klar/cli.py, compact).
+pub fn compact_diag(d: Diag) -> J {
+  var out = [Pair { first: "code", second: J.JStr(d.code) }, Pair { first: "msg", second: J.JStr(d.message) }, Pair {
+    first: "at", second: J.JStr(short_at(d)) }]
+  match d.hint {
+    Some(h) => {
+      if h != "" {
+        out = out.push(Pair { first: "hint", second: J.JStr(h) })
+      }
+    },
+    None => {},
+  }
+  match d.fix {
+    Some(f) => {
+      let edits = f.edits.map(fn(e) => J.JObj([Pair { first: "at", second: J.JStr("{e.span.line}:{e.span.col}-" +
+          "{e.span.end_line}:{e.span.end_col}") }, Pair { first: "text", second: J.JStr(e.text) }]))
+      out = out.push(Pair { first: "fix", second: J.JArr(edits) })
+      out = out.push(Pair { first: "auto", second: J.JBool(f.safe) })
+    },
+    None => {},
+  }
+  return J.JObj(out)
+}
+
+fn dir_of(path: Str) -> Str {
+  let p = path.replace("\\", "/")
+  return match p.split("/").len() > 1 {
+    true => p.slice(0, p.len() - p.split("/").last().unwrap_or("").len() - 1),
+    false => ".",
+  }
+}
+
+fn read_text(path: Str) -> Str uses fs {
+  return read_file(path).unwrap_or("").replace("\r\n", "\n").replace("\r", "\n")
+}
+
+/// The arguments that are not options (`--lib` takes a value).
+pub fn positional(args: List[Str]) -> List[Str] {
+  var out: List[Str] = []
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--lib" {
+      i = i + 2
+    } else {
+      if not a.starts_with("--") {
+        out = out.push(a)
+      }
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/// `klarc fix FILE [--dry-run] [--all] [--warnings] [--json]`: applies the machine fixes of the diagnostics until
+/// nothing changes; the exit code.
+pub fn fix_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  let file = positional(args).get_or(0, "")
+  let dry = args.contains("--dry-run")
+  let all = args.contains("--all")
+  let warnings = args.contains("--warnings")
+  let json = args.contains("--json")
+  let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let root = dir_of(file)
+  var applied: List[Applied] = []
+  var round = 0
+  while round < 50 {
+    let ld = load_program(file, lib)
+    var names: List[Str] = []
+    var per_file: Map[Str, List[Pair[Diag, FixEdit]]] = Map {}
+    for d in user_diags(ld, shown) {
+      match d.fix {
+        Some(f) => {
+          if (d.severity == "error" or warnings) and (f.safe or all) {
+            for e in f.edits {
+              let fname = edit_file(e.file, d.file)
+              if not fname.starts_with("std/") and not fname.starts_with("rt/") and fname != "prelude.klar" {
+                if not per_file.has(fname) {
+                  names = names.push(fname)
+                }
+                per_file = per_file.set(fname, per_file.get(fname).unwrap_or([]).push(Pair { first: d, second: e }))
+              }
+            }
+          }
+        },
+        None => {},
+      }
+    }
+    if names.is_empty() {
+      round = 50
+    } else {
+      var changed = false
+      for fname in names {
+        let pairs = per_file.get(fname).unwrap_or([])
+        let path = root + "/" + fname
+        let text = read_text(path)
+        let new_text = apply_edits(text, pairs.map(fn(p) => p.second))
+        if new_text != text {
+          changed = true
+          var seen: List[Diag] = []
+          for p in pairs {
+            if not seen.contains(p.first) {
+              seen = seen.push(p.first)
+            }
+          }
+          applied = applied.concat(seen.map(fn(d) => Applied { code: d.code, at: short_at(d), message: d.message }))
+          if not dry {
+            match write_file(path, new_text) {
+              Ok(_) => {},
+              Err(e) => {
+                eprint(e)
+              },
+            }
+          }
+        }
+      }
+      if not changed or dry {
+        round = 50
+      }
+    }
+    round = round + 1
+  }
+  let ld = load_program(file, lib)
+  let remaining = user_diags(ld, shown)
+  let errors = ld.diags.any(fn(d) => d.severity == "error")
+  if json {
+    let done = applied.map(fn(a) => J.JObj([Pair { first: "code", second: J.JStr(a.code) }, Pair { first: "at",
+      second: J.JStr(a.at) }, Pair { first: "message", second: J.JStr(a.message) }]))
+    print(pretty(J.JObj([Pair { first: "ok", second: J.JBool(not errors) }, Pair { first: "applied",
+      second: J.JArr(done) }, Pair { first: "remaining", second: J.JArr(remaining.map(compact_diag)) }]), 0))
+  } else {
+    for a in applied {
+      print("fixed  {a.code}  {a.at}  {a.message}")
+    }
+    if applied.is_empty() {
+      print("nothing to fix automatically")
+    }
+    if remaining.is_empty() {
+      print("ok: no problems left")
+    } else {
+      print("")
+      let text = render_report(ld, remaining)
+      print(text.slice(0, text.len() - 1))
+    }
+  }
+  if errors {
+    return 1
+  }
+  return 0
+}
+
+// ---- explain --------------------------------------------------------------------------------------------------
+
+/// The text of `klar explain CODE`.
+pub fn explain(code0: Str) -> Str {
+  let code = code0.upper()
+  for row in diag_codes() {
+    if row.get_or(0, "") == code {
+      let title = row.get_or(1, "")
+      let text = row.get_or(2, "")
+      return "{code}: {title}\n\n{text}"
+    }
+  }
+  return "unknown code {code}. Known: " + diag_codes().map(fn(r) => r.get_or(0, "")).sort().join(", ")
 }

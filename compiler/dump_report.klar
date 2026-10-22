@@ -1,0 +1,16 @@
+// Prints `klar check`'s report of each program given on the command line, as the Klar compiler renders it (used by
+// tests/selfhost.py). Arguments: the directory of `klar/`, then the programs; each report, and then its JSON form, ends with a NUL character.
+use loader.{load_program}
+use report.{check_json, render_report, user_diags}
+
+fn main() uses io, fs {
+  let args = cli_args()
+  let lib = args.get_or(0, "klar")
+  for path in args.drop(1) {
+    let ld = load_program(path, lib)
+    let shown = path.split("/").last().unwrap_or(path)
+    let diags = user_diags(ld, shown)
+    print(render_report(ld, diags) + "\0")
+    print(check_json(ld, diags) + "\0")
+  }
+}

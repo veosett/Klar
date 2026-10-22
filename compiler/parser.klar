@@ -9,7 +9,19 @@ use ast.{Pattern, Program, Span, Stmt, StrPiece, TypeExpr, VariantDecl, body_spa
 use lexer.{LexError, StrPart, TokKind, Token, tokenize_at}
 
 /// A syntax error, positioned like the Python parser's (the token where it was found).
-pub type ParseError { code: Str, message: Str, hint: Option[Str], line: Int, col: Int }
+/// A machine-applicable fix of a syntax error: replace `span` with `text`.
+pub type ParseFix { span: Span, text: Str }
+
+pub type ParseError {
+  code: Str,
+  message: Str,
+  hint: Option[Str],
+  line: Int,
+  col: Int,
+  end_line: Int,
+  end_col: Int,
+  fix: Option[ParseFix],
+}
 
 /// A parsed node and the position of the next token.
 type Got[T] { value: T, pos: Int }
@@ -76,7 +88,8 @@ fn describe(t: Token) -> Str {
 }
 
 fn error_at(t: Token, code: Str, message: Str) -> ParseError {
-  return ParseError { code: code, message: message, hint: None, line: t.line, col: t.col }
+  return ParseError { code: code, message: message, hint: None, line: t.line, col: t.col, end_line: t.end_line,
+    end_col: t.end_col, fix: None }
 }
 
 fn bad[T](t: Token, message: Str) -> Result[T, ParseError] {
@@ -93,7 +106,9 @@ fn from_lex(e: LexError) -> ParseError {
     true => None,
     false => Some(e.hint),
   }
-  return ParseError { code: e.code, message: e.message, hint: hint, line: e.line, col: e.col }
+  let span = Span { line: e.line, col: e.col, end_line: e.line, end_col: e.col + e.width }
+  return ParseError { code: e.code, message: e.message, hint: hint, line: e.line, col: e.col, end_line: e.line,
+    end_col: e.col + e.width, fix: e.replacement.map(fn(r) => ParseFix { span: span, text: r }) }
 }
 
 fn expect_op(p: Ps, i: Int, v: Str, ctx: Str) -> Result[Int, ParseError] {
@@ -371,8 +386,11 @@ fn parse_unary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
     if (lit.kind == TokKind.IntLit or lit.kind == TokKind.FloatLit) and after.kind == TokKind.Op and
       (after.text == "." or after.text == "?") {
       let shown = number_text(lit)
-      return bad_h(t: tk(p, i), message: "`-{shown}.method()` is ambiguous: the method runs before the minus",
-        hint: "write `(-{shown}).method()` for the negative number, or `-({shown}.method())`")
+      let minus = tk(p, i)
+      let sp = Span { line: minus.line, col: minus.col, end_line: lit.end_line, end_col: lit.end_col }
+      let e = error_at(t: minus, code: "E0003", message: "`-{shown}.method()` is ambiguous: the method runs before the minus")
+      return Err(e with { hint: Some("write `(-{shown}).method()` for the negative number, or `-({shown}.method())`"),
+        fix: Some(ParseFix { span: sp, text: "(-{shown})" }) })
     }
     let start = span_of(tk(p, i))
     let operand = parse_unary(p, next(p, i))?
@@ -551,6 +569,7 @@ fn parse_primary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
     if t.text == "null" or t.text == "nil" or t.text == "undefined" {
       return Err(error_at(t: t, code: "E0201", message: "Klar has no `{t.text}`") with {
         hint: Some("use `Option[T]`: `None` / `Some(value)`"),
+        fix: Some(ParseFix { span: span_of(t), text: "None" }),
       })
     }
     return Ok(Got { value: Expr.Name(span: start, name: t.text), pos: j })
@@ -758,9 +777,11 @@ fn parse_lambda(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   if is_op(tk(q, j), "=>") {
     let arrow = tk(q, j)
     if is_op(tk(q, j + 1), "\{") {
-      return bad_h(t: arrow, message: "a lambda with a block body has no `=>`",
-        hint: "write `fn(x) \{ return value \}` (statements on their own lines), or keep `=>` with one expression: " +
-          "`fn(x) => x * 2`")
+      let brace = tk(q, j + 1)
+      let e = error_at(t: arrow, code: "E0003", message: "a lambda with a block body has no `=>`")
+      return Err(e with { hint: Some("write `fn(x) \{ return value \}` (statements on their own lines), or keep `=>` " +
+          "with one expression: `fn(x) => x * 2`"), fix: Some(ParseFix { span: Span { line: arrow.line, col: arrow.col,
+          end_line: brace.line, end_col: brace.col }, text: "" }) })
     }
     let e = parse_expr(q, next(q, j))?
     return Ok(Got { value: Expr.Lambda(span: span_from(p: q, start: start, i: e.pos), params: params.value, ret: ret,

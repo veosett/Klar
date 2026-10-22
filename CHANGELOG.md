@@ -33,6 +33,12 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - `klarc fmt [paths] [--check] [--json]`: the formatter written in Klar (`compiler/fmt.klar`); `tests/selfhost.py`
   checks that it formats every file of the repository, and a damaged copy of each, exactly like `klar fmt`. First
   step of moving all `klar` commands into `klarc`.
+- `klarc check [--json]`, `klarc fix [--dry-run] [--all] [--warnings] [--json]`, `klarc explain CODE`,
+  `klarc --version`: the same output as the Python commands, character for character — the Klar checker now
+  produces the full diagnostics (end positions, notes, machine fixes; `compiler/report.klar` renders them with the
+  code frame). `tests/selfhost.py` compares the report and `--json` of every checker case (340/340) and runs `fix` in
+  three modes on each of them (747/747 identical outputs and files). `klarc build` prints the `built ...` line and
+  `klarc run` shows warnings, like `klar`.
 
 ### Changed
 - `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm

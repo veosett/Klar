@@ -33,8 +33,8 @@ pub type Token {
   parts: List[StrPart],
 }
 
-/// A lexical error, positioned like the Python lexer's.
-pub type LexError { code: Str, message: Str, hint: Str, line: Int, col: Int, width: Int }
+/// A lexical error, positioned like the Python lexer's; `replacement`: the text that fixes it (`klar fix`).
+pub type LexError { code: Str, message: Str, hint: Str, line: Int, col: Int, width: Int, replacement: Option[Str] }
 
 pub const KEYWORDS: List[Str] = [
   "module", "use", "fn", "type", "enum", "let", "var", "return", "if", "else", "while", "for", "in", "break",
@@ -194,7 +194,7 @@ fn next_line_continues(b: Bytes, start: Int) -> Bool {
 }
 
 fn lex_error(code: Str, message: Str, hint: Str, line: Int, col: Int) -> LexError {
-  return LexError { code: code, message: message, hint: hint, line: line, col: col, width: 1 }
+  return LexError { code: code, message: message, hint: hint, line: line, col: col, width: 1, replacement: None }
 }
 
 /// A number token starting at `start`: Ok(end byte) — `float` tells whether it has a fractional part.
@@ -266,7 +266,8 @@ fn scan_string(b: Bytes, start: Int, line: Int, col: Int) -> Result[StrScan, Lex
           _ => char_at(b, i + 1),
         }
         return Err(LexError { code: "E0004", message: "invalid escape `\\{shown}`",
-          hint: "valid escapes: \\n \\t \\\\ \\\" \\\{ \\\} \\0", line: line, col: c_col, width: 2 })
+          hint: "valid escapes: \\n \\t \\\\ \\\" \\\{ \\\} \\0", line: line, col: c_col, width: 2,
+          replacement: None })
       }
       buf = buf.push(escape_of(e))
       i = i + 2
@@ -411,8 +412,14 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
       let two = one + text(b: b, a: i + one.to_bytes().len(), z: i + one.to_bytes().len() + 1)
       if FOREIGN.has(two) and not TWO_CHAR.contains(two) {
         let fix = FOREIGN.get(two).unwrap_or("")
+        let replacement = match two {
+          "&&" => Some("and"),
+          "||" => Some("or"),
+          "::" => Some("."),
+          _ => None,
+        }
         return Err(LexError { code: "E0001", message: "`{two}` is not a Klar operator", hint: fix, line: line,
-          col: col, width: 2 })
+          col: col, width: 2, replacement: replacement })
       }
       if TWO_CHAR.contains(two) {
         toks = toks.push(token(kind: TokKind.Op, value: two, pos: [line, col, line, col + 2]))
@@ -428,8 +435,21 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
         i = i + 1
         col = col + 1
       } else {
+        var replacement = match one {
+          ";" => Some(""),
+          "!" => Some("not "),
+          _ => None,
+        }
+        var after = ""
+        if i + one.to_bytes().len() < b.len() {
+          after = char_at(b, i + one.to_bytes().len())
+        }
+        // `a; b` on one line needs a line break, not a deletion
+        if one == ";" and not ["\n", "\r", "", " ", "\t", "/"].contains(after) {
+          replacement = None
+        }
         return Err(lex_error(code: "E0001", message: "unexpected character `{one}`",
-          hint: FOREIGN.get(one).unwrap_or(""), line: line, col: col))
+          hint: FOREIGN.get(one).unwrap_or(""), line: line, col: col) with { replacement: replacement })
       }
     }
   }

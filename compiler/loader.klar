@@ -8,9 +8,9 @@
 // a dependency: `use geo.{Point}` loads `<geo>/lib.klar`, `use geo.shapes.{Circle}` `<geo>/shapes.klar`.
 use ast.{Decl, Program, Span}
 use builtin_sigs.{rt_files}
-use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, load_builtins, new_checker}
-use checker.{private_decl}
-use parser.{parse_program}
+use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, fix_at, load_builtins, new_checker}
+use checker.{DiagFix, FixEdit, private_decl}
+use parser.{ParseError, parse_program}
 use safety.{analyze}
 use similar.{closest}
 use manifest.{Dep, Manifest, describe, parse_manifest}
@@ -152,8 +152,15 @@ fn add_error(ld: Ld, file: Str, d: Diag) -> Ld {
   return ld with { diags: ld.diags.push(d with { file: file }) }
 }
 
+/// A syntax error as a diagnostic (with its fix, if it has one).
+fn parse_diag(e: ParseError) -> Diag {
+  let sp = Span { line: e.line, col: e.col, end_line: e.end_line, end_col: e.end_col }
+  return diag(code: e.code, msg: e.message, span: sp, hint: e.hint) with { fix: e.fix.map(fn(f) => DiagFix { edits: [
+    FixEdit { span: f.span, text: f.text, file: "" }], safe: true }) }
+}
+
 fn diag(code: Str, msg: Str, span: Span, hint: Option[Str]) -> Diag {
-  return Diag { code: code, severity: "error", message: msg, file: "", span: span, hint: hint }
+  return Diag { code: code, severity: "error", message: msg, file: "", span: span, hint: hint, notes: [], fix: None }
 }
 
 fn zero_span() -> Span {
@@ -383,8 +390,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
   let prog = match parse_program(source) {
     Ok(p) => p,
     Err(e) => {
-      let sp = Span { line: e.line, col: e.col, end_line: e.line, end_col: e.col }
-      ld = add_error(ld: ld, file: display, d: diag(code: e.code, msg: e.message, span: sp, hint: e.hint))
+      ld = add_error(ld: ld, file: display, d: parse_diag(e))
       return Loaded { ld: ld with { by_path: ld.by_path.set(path, failed_module(name: name, path: path, display: display,
         is_sys: is_sys)) }, path: Some(path) }
     },
@@ -492,8 +498,12 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
                       }
                       match private {
                         Some(p) => {
-                          ld = add_error(ld: ld, file: display, d: diag(code: "E0606", msg: "`{item}` is private to module " +
-                              "`{dep_name}`", span: sp, hint: Some("mark it public in {dep.display}: `pub {p.first} {item}`")))
+                          let at = p.second
+                          let pd = diag(code: "E0606", msg: "`{item}` is private to module `{dep_name}`", span: sp,
+                            hint: Some("mark it public in {dep.display}: `pub {p.first} {item}`"))
+                          ld = add_error(ld: ld, file: display, d: pd with { fix: Some(DiagFix { edits: [FixEdit {
+                            span: Span { line: at.line, col: at.col, end_line: at.line, end_col: at.col }, text: "pub ",
+                            file: dep.display }], safe: true }) })
                         },
                         None => {
                           let names = dep.exports.keys()
@@ -582,8 +592,7 @@ pub fn load_runtime(ld0: Ld) -> Ld uses fs {
         }
       },
       Err(e) => {
-        let sp = Span { line: e.line, col: e.col, end_line: e.line, end_col: e.col }
-        ld = add_error(ld: ld, file: display, d: diag(code: e.code, msg: e.message, span: sp, hint: e.hint))
+        ld = add_error(ld: ld, file: display, d: parse_diag(e))
         failed = true
       },
     }

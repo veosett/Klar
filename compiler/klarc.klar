@@ -10,8 +10,9 @@
 // `klar`. Bootstrap: `klar build compiler/klarc.klar` (the Python compiler) gives klarc1; klarc1 builds klarc2 from the
 // same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
 use ast.{Decl}
-use checker.{Diag}
-use commands.{fmt_command}
+use builtin_sigs.{klar_version}
+use commands.{explain, fix_command, fmt_command}
+use report.{check_json, render_report, user_diags}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
 use link.{write_elf, write_pe}
@@ -20,20 +21,30 @@ use lower.{fnv1a, lower_program}
 
 const TARGETS: List[Str] = ["linux", "windows", "linux-arm64"]
 
-type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, args: List[Str] }
+type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, args: List[Str] }
 
 fn usage() -> Never uses io {
   print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64] [--lib <dir>] [--time]")
   print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
   print("       klarc test <file.klar> [--lib <dir>]")
-  print("       klarc check <file.klar> [--lib <dir>]")
+  print("       klarc check <file.klar> [--lib <dir>] [--json]")
   print("       klarc fmt [files or directories] [--check] [--json]")
+  print("       klarc explain <code>")
+  print("       klarc fix <file.klar> [--dry-run] [--all] [--warnings] [--json] [--lib <dir>]")
   return exit(2)
+}
+
+/// The library directory: `--lib`, else $KLAR_LIB, else `klar`.
+fn lib_dir(args: List[Str]) -> Str uses io {
+  return match args.index_of("--lib") {
+    Some(k) => args.get_or(k + 1, "klar"),
+    None => env_var("KLAR_LIB").unwrap_or("klar"),
+  }
 }
 
 fn parse_args(args: List[Str]) -> Options uses io {
   var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "linux", lib: env_var("KLAR_LIB").unwrap_or(
-    "klar"), time: false, args: [] }
+    "klar"), time: false, json: false, args: [] }
   var i = 1
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -53,6 +64,9 @@ fn parse_args(args: List[Str]) -> Options uses io {
     } else if a == "--time" {
       o = o with { time: true }
       i = i + 1
+    } else if a == "--json" {
+      o = o with { json: true }
+      i = i + 1
     } else if o.file == "" and not a.starts_with("-") {
       o = o with { file: a }
       i = i + 1
@@ -66,32 +80,17 @@ fn parse_args(args: List[Str]) -> Options uses io {
   return o
 }
 
-fn show_diag(d: Diag) -> Str {
-  var s = "{d.severity}[{d.code}]: {d.message}\n  --> {d.file}:{d.span.line}:{d.span.col}"
-  match d.hint {
-    Some(h) => {
-      s = s + "\n  hint: {h}"
-    },
-    None => {},
+/// Prints a report of `render_report` (it ends with a newline, which `print` adds).
+fn show_report(text: Str, to_stderr: Bool) uses io {
+  if text == "" {
+    return
   }
-  return s
-}
-
-/// Prints the diagnostics of the program (the runtime's own lints stay quiet); true when one of them is an error.
-fn report(ld: Ld) -> Bool uses io {
-  var errors = 0
-  for d in ld.diags {
-    if d.file != "rt" and not d.file.starts_with("rt/") {
-      print(show_diag(d))
-    }
-    if d.severity == "error" {
-      errors = errors + 1
-    }
+  let body = text.slice(0, text.len() - 1)
+  if to_stderr {
+    eprint(body)
+  } else {
+    print(body)
   }
-  if errors > 0 {
-    print("{errors} error(s)")
-  }
-  return errors > 0
 }
 
 /// The output path: `-o`, else the source path without `.klar` (+ `.exe` for Windows).
@@ -183,20 +182,50 @@ fn main() uses io, fs, time, proc {
   if argv.get_or(0, "") == "fmt" {
     exit(fmt_command(argv.drop(1)))
   }
+  if argv.get_or(0, "") == "explain" and argv.len() == 2 {
+    print(explain(argv.get_or(1, "")))
+    return
+  }
+  if argv.get_or(0, "") == "--version" {
+    print("klarc {klar_version()}")
+    return
+  }
+  if argv.get_or(0, "") == "fix" {
+    exit(fix_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
   let o = parse_args(argv)
   let t0 = now_ms()
   if not file_exists(o.file) {
     print("klarc: cannot read {o.file}")
     exit(1)
   }
+  let shown = o.file.replace("\\", "/").split("/").last().unwrap_or(o.file)
+  if o.cmd == "check" {
+    let checked = load_program(o.file, o.lib)
+    let diags = user_diags(checked, shown)
+    if o.json {
+      print(check_json(checked, diags))
+    } else {
+      show_report(text: render_report(checked, diags), to_stderr: false)
+      if diags.is_empty() {
+        print("ok: no problems found")
+      }
+    }
+    if diags.any(fn(d) => d.severity == "error") {
+      exit(1)
+    }
+    return
+  }
   let ld = load_runtime(load_program(o.file, o.lib))
   let t1 = lap(o: o, phase: "parse + check", start: t0)
-  if report(ld) {
+  let diags = user_diags(ld, shown)
+  if ld.diags.any(fn(d) => d.severity == "error") {
+    show_report(text: render_report(ld, diags), to_stderr: true)
     exit(1)
   }
-  if o.cmd == "check" {
-    print("ok: no problems found")
-    return
+  if o.cmd == "run" {
+    let warnings = diags.filter(fn(d) => d.severity == "warning")
+    show_report(text: render_report(ld, warnings), to_stderr: true)
   }
   let tests = o.cmd == "test"
   let names = test_names(ld, o.file)
@@ -248,5 +277,7 @@ fn main() uses io, fs, time, proc {
     }
     return
   }
-  write_exe(out_path(o), image)
+  let out = out_path(o)
+  write_exe(out, image)
+  print("built {out} ({o.target}, {image.len() / 1024} KB, no runtime dependencies)")
 }

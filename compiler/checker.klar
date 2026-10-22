@@ -13,7 +13,28 @@ use types.{Subst, Type, args_of, con, head, is_unit, list_of, map_of, option_of,
 use types.{unify}
 
 /// A diagnostic: an error or a warning at a position of a file.
-pub type Diag { code: Str, severity: Str, message: Str, file: Str, span: Span, hint: Option[Str] }
+/// One change of a machine-applicable fix.
+/// `file`: the file the edit changes when it is not the diagnostic's own ("" otherwise).
+pub type FixEdit { span: Span, text: Str, file: Str }
+
+/// A fix of a diagnostic: its edits, and whether `klar fix` may apply it without asking ("maybe" otherwise).
+pub type DiagFix { edits: List[FixEdit], safe: Bool }
+
+pub type Diag {
+  code: Str,
+  severity: Str,
+  message: Str,
+  file: Str,
+  span: Span,
+  hint: Option[Str],
+  notes: List[Str],
+  fix: Option[DiagFix],
+}
+
+/// A fix that replaces `span` with `text`.
+pub fn fix_at(span: Span, text: Str, safe: Bool) -> Option[DiagFix] {
+  return Some(DiagFix { edits: [FixEdit { span: span, text: text, file: "" }], safe: safe })
+}
 
 /// The signature of a function: built-in, declared, imported, or a trait/impl method.
 pub type Sig {
@@ -523,20 +544,32 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
   }
 
 fn error(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str]) -> Ck {
-  return c with {
-    diags: c.diags.push(Diag { code: code, severity: "error", message: msg, file: c.cur_file, span: span, hint: hint }),
-  }
+  return error_fix(c: c, code: code, msg: msg, span: span, hint: hint, fix: None)
+}
+
+/// An error with a machine-applicable fix.
+fn error_fix(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str], fix: Option[DiagFix]) -> Ck {
+  return c with { diags: c.diags.push(Diag { code: code, severity: "error", message: msg, file: c.cur_file, span: span,
+    hint: hint, notes: [], fix: fix }) }
 }
 
 fn warn(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str]) -> Ck {
-  return c with {
-    diags: c.diags.push(Diag { code: code, severity: "warning", message: msg, file: c.cur_file, span: span, hint: hint }),
-  }
+  return warn_fix(c: c, code: code, msg: msg, span: span, hint: hint, fix: None)
+}
+
+fn warn_fix(c: Ck, code: Str, msg: Str, span: Span, hint: Option[Str], fix: Option[DiagFix]) -> Ck {
+  return c with { diags: c.diags.push(Diag { code: code, severity: "warning", message: msg, file: c.cur_file, span: span,
+    hint: hint, notes: [], fix: fix }) }
 }
 
 /// `did you mean `x`?` for the closest candidate.
 fn did_you_mean(name: Str, candidates: List[Str]) -> Option[Str] {
   return closest(name, candidates).map(fn(s) => "did you mean `{s}`?")
+}
+
+/// The fix that goes with `did_you_mean`: replace the name (not applied automatically).
+fn dym_fix(name: Str, candidates: List[Str], span: Span) -> Option[DiagFix] {
+  return closest(name, candidates).map(fn(s) => DiagFix { edits: [FixEdit { span: span, text: s, file: "" }], safe: false })
 }
 
 fn or_hint(h: Option[Str], other: Str) -> Option[Str] {
@@ -899,7 +932,11 @@ fn resolve(ck: Ck, te: TypeExpr, tps: Map[Str, Type]) -> Res[Type] {
     Some(k) => Some("Klar calls this type `{k}`"),
     None => did_you_mean(name, cands),
   }
-  c = error(c: c, code: "E0104", msg: "unknown type `{name}`", span: span, hint: hint)
+  let fix = match foreign_type(name) {
+    Some(k) => fix_at(span: span, text: k, safe: true),
+    None => dym_fix(name: name, candidates: cands, span: span),
+  }
+  c = error_fix(c: c, code: "E0104", msg: "unknown type `{name}`", span: span, hint: hint, fix: fix)
   return Res { c: c, v: Type.Any }
 }
 
@@ -1254,7 +1291,8 @@ fn resolve_bounds_of(ck: Ck, type_params: List[Str], bounds: List[Pair[Str, List
             if c.uni.records.has(tname) or c.uni.enums.has(tname) or PRIMS.contains(tname) {
               hint = Some("`{tname}` is a type; a bound names a trait (`trait Name \{ ... \}`)")
             }
-            c = error(c: c, code: "E0104", msg: "unknown trait `{tname}`", span: sp, hint: hint)
+            c = error_fix(c: c, code: "E0104", msg: "unknown trait `{tname}`", span: sp, hint: hint,
+              fix: dym_fix(name: tname, candidates: visible_traits(c), span: sp))
           } else {
             if not c.visible.has(tname) {
               c = not_imported(c: c, name: tname, span: sp)
@@ -1451,7 +1489,8 @@ fn collect_impl(ck: Ck, d: Decl, idx: Int) -> Res[ImplHead] {
       if c.uni.records.has(trait_name) or c.uni.enums.has(trait_name) {
         hint = Some("`{trait_name}` is a type; `impl` needs a trait: `impl Trait for {trait_name}`")
       }
-      c = error(c: c, code: "E0104", msg: "unknown trait `{trait_name}`", span: trait_span, hint: hint)
+      c = error_fix(c: c, code: "E0104", msg: "unknown trait `{trait_name}`", span: trait_span, hint: hint,
+        fix: dym_fix(name: trait_name, candidates: visible_traits(c), span: trait_span))
       return Res { c: c, v: invalid }
     },
   }
@@ -1611,9 +1650,9 @@ fn finish_impl(ck: Ck, d: Decl, key: Str) -> Ck {
       None => dspan,
     }
     if not tr.methods.has(m) {
-      c = error(c: c, code: "E0221", msg: "`{m}` is not a method of trait `{info.trait_name}`", span: span,
+      c = error_fix(c: c, code: "E0221", msg: "`{m}` is not a method of trait `{info.trait_name}`", span: span,
         hint: or_hint(did_you_mean(m, tr.methods.keys()), "methods of `{info.trait_name}`: {commas(tr.methods.keys())}; " +
-            "other functions go outside the impl"))
+            "other functions go outside the impl"), fix: dym_fix(name: m, candidates: tr.methods.keys(), span: span))
     } else if m == "to_str" or builtin_methods_of(c, Some(tname)).has(m) {
       c = error(c: c, code: "E0221", msg: "`{tname}` already has a built-in method `{m}`", span: span,
         hint: Some("rename the trait method"))
@@ -1636,8 +1675,12 @@ fn finish_impl(ck: Ck, d: Decl, key: Str) -> Ck {
     let snap = c
     let shown = missing.map(fn(m) => "`" + show_method(c: snap, sig: tr.methods.get(m).unwrap_or(info.methods.get(m)
         .unwrap_or(snap.globals.get("print").unwrap_or(builtin_sig("fn x()")))), self_type: target) + "`")
-    c = error(c: c, code: "E0221", msg: "`impl {info.trait_name} for {tname}` is missing {ticked(missing)}", span: dspan,
-      hint: Some("add " + shown.join(", ")))
+    let stubs = missing.map(fn(m) => "  " + show_method(c: snap, sig: tr.methods.get(m).unwrap_or(snap.globals.get(
+      "print").unwrap_or(builtin_sig("fn x()"))), self_type: target) + " \{\n    return todo(\"" + m +
+        "\")\n  \}\n").join("")
+    let at = Span { line: dspan.end_line, col: dspan.end_col - 1, end_line: dspan.end_line, end_col: dspan.end_col - 1 }
+    c = error_fix(c: c, code: "E0221", msg: "`impl {info.trait_name} for {tname}` is missing {ticked(missing)}",
+      span: dspan, hint: Some("add " + shown.join(", ")), fix: fix_at(span: at, text: stubs, safe: true))
   }
   let empty: Map[Str, Pair[Str, Sig]] = Map {}
   var table = c.uni.type_methods.get(tname).unwrap_or(empty)
@@ -2158,7 +2201,11 @@ fn stmt(ck: Ck, st: Stmt) -> Ck {
               true => "declare it with `var` instead of `let`",
               false => "copy it into a new variable: `var {name}_2 = {name}`",
             }
-            c = error(c: c, code: "E0207", msg: msg, span: span, hint: Some(hint))
+            let fix = match v.kw_span {
+              Some(kw) => fix_at(span: kw, text: "var", safe: true),
+              None => None,
+            }
+            c = error_fix(c: c, code: "E0207", msg: msg, span: span, hint: Some(hint), fix: fix)
           }
           return expr(ck: c, e: value, exp: Some(v.ty)).c
         },
@@ -2279,9 +2326,15 @@ fn expr_stmt(ck: Ck, e: Expr) -> Ck {
           Expr.Name(_, n) => n,
           _ => "x",
         }
-        return error(c: c, code: "E0405", msg: "the result of `.{d.second}` is discarded — values are immutable, " +
-            "so `{target}` is NOT modified", span: expr_span(e),
-          hint: Some("assign the new value: `{target} = <this expression>` (declare `var {target}`)"))
+        let es = expr_span(e)
+        let fix = match d.first {
+          Expr.Name(_, _) => fix_at(span: Span { line: es.line, col: es.col, end_line: es.line, end_col: es.col },
+            text: "{target} = ", safe: true),
+          _ => None,
+        }
+        return error_fix(c: c, code: "E0405", msg: "the result of `.{d.second}` is discarded — values are immutable, " +
+            "so `{target}` is NOT modified", span: es,
+          hint: Some("assign the new value: `{target} = <this expression>` (declare `var {target}`)"), fix: fix)
       }
     },
     None => {},
@@ -2675,7 +2728,14 @@ fn e_name(ck: Ck, span: Span, name: Str) -> Res[Type] {
     },
     None => did_you_mean(name, visible_names(c)),
   }
-  return ok(error(c: c, code: "E0201", msg: "unknown name `{name}`", span: span, hint: hint), Type.Any)
+  let fix = match foreign {
+    Some(rep) => match rep.is_empty() {
+      true => None,
+      false => fix_at(span: span, text: rep, safe: true),
+    },
+    None => dym_fix(name: name, candidates: visible_names(c), span: span),
+  }
+  return ok(error_fix(c: c, code: "E0201", msg: "unknown name `{name}`", span: span, hint: hint, fix: fix), Type.Any)
 }
 
 fn e_unary(ck: Ck, span: Span, op: Str, operand: Expr) -> Res[Type] {
@@ -2976,8 +3036,19 @@ fn check_effects(ck: Ck, sig: Sig, span: Span) -> Ck {
       hint: Some("pass the time/random/file value as a parameter so the code under test stays deterministic"))
   }
   let allowed = union(ck.ctx.effects, missing).sort()
-  return error(c: ck, code: "E0401", msg: "calling `{sig.name}` requires effect `{effs}`, but `{ck.ctx.name}` " +
-      "does not declare it", span: span, hint: Some("add `uses {commas(allowed)}` to the signature of `{ck.ctx.name}`"))
+  var fix: Option[DiagFix] = None
+  match ck.ctx.sig_end {
+    Some(se) => {
+      if ck.ctx.effects.is_empty() {
+        fix = fix_at(span: Span { line: se.end_line, col: se.end_col, end_line: se.end_line, end_col: se.end_col },
+          text: " uses " + commas(allowed), safe: true)
+      }
+    },
+    None => {},
+  }
+  return error_fix(c: ck, code: "E0401", msg: "calling `{sig.name}` requires effect `{effs}`, but `{ck.ctx.name}` " +
+      "does not declare it", span: span, hint: Some("add `uses {commas(allowed)}` to the signature of `{ck.ctx.name}`"),
+    fix: fix)
 }
 
 /// A call of a function with a signature (`self_type`: the receiver of a method call).
@@ -3047,8 +3118,21 @@ fn call_sig(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Type
     let names = params.map(fn(p) => p.first)
     if sig.user and sig.params.len() >= 3 and not positional.is_empty() and not c.sys {
       let example = names.map(fn(n) => "{n}: ...").join(", ")
-      c = error(c: c, code: "E0208", msg: "`{display}` has {sig.params.len()} parameters, so arguments must be named",
-        span: span, hint: Some("write `{display}({example})`"))
+      var edits: List[FixEdit] = []
+      var k = 0
+      for a in positional {
+        if k < names.len() {
+          edits = edits.push(FixEdit { span: Span { line: a.span.line, col: a.span.col, end_line: a.span.line,
+            end_col: a.span.col }, text: names.get_or(k, "") + ": ", file: "" })
+        }
+        k = k + 1
+      }
+      var fix: Option[DiagFix] = None
+      if not edits.is_empty() {
+        fix = Some(DiagFix { edits: edits, safe: true })
+      }
+      c = error_fix(c: c, code: "E0208", msg: "`{display}` has {sig.params.len()} parameters, so arguments must be named",
+        span: span, hint: Some("write `{display}({example})`"), fix: fix)
     }
     var assigned: Map[Str, Arg] = Map {}
     var i = 0
@@ -3226,7 +3310,11 @@ fn e_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
             None => did_you_mean(name, visible_names(c)),
           },
         }
-        c = error(c: c, code: "E0201", msg: "unknown function `{name}`", span: cspan, hint: hint)
+        var fix: Option[DiagFix] = None
+        if owners.is_empty() and special_hint(name) == None {
+          fix = dym_fix(name: name, candidates: visible_names(c), span: cspan)
+        }
+        c = error_fix(c: c, code: "E0201", msg: "unknown function `{name}`", span: cspan, hint: hint, fix: fix)
       }
       return ok(args_any(c, args), Type.Any)
     },
@@ -3285,16 +3373,17 @@ fn e_method_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
         let variants = variants_list(c, tn)
         match variant_fields(c: c, enum_name: tn, variant: m) {
           None => {
-            c = error(c: c, code: "E0302", msg: "enum `{tn}` has no variant `{m}`", span: mspan,
-              hint: or_hint(did_you_mean(m, variants), "variants: {commas(variants)}"))
+            c = error_fix(c: c, code: "E0302", msg: "enum `{tn}` has no variant `{m}`", span: mspan,
+              hint: or_hint(did_you_mean(m, variants), "variants: {commas(variants)}"), fix: dym_fix(name: m,
+                candidates: variants, span: mspan))
             c = args_any(c, args)
             let inst = fresh_instance(ck: c, name: tn, tparams: enum_tparams(c, tn))
             return ok(inst.c, inst.v.first)
           },
           Some(fields) => {
             if fields.is_empty() {
-              c = error(c: c, code: "E0206", msg: "variant `{tn}.{m}` has no fields; write it without parentheses",
-                span: span, hint: None)
+              c = error_fix(c: c, code: "E0206", msg: "variant `{tn}.{m}` has no fields; write it without parentheses",
+                span: span, hint: None, fix: fix_at(span: span, text: "{tn}.{m}", safe: true))
               let inst = fresh_instance(ck: c, name: tn, tparams: enum_tparams(c, tn))
               return ok(inst.c, inst.v.first)
             }
@@ -3498,10 +3587,12 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
     }
   }
   var hint: Option[Str] = None
+  var fix: Option[DiagFix] = None
   match c.b.foreign.get(m) {
     Some(target) => {
       if target != "" and cands.contains(target) {
         hint = Some("Klar calls this method `{target}`")
+        fix = fix_at(span: mspan, text: target, safe: true)
       } else {
         hint = c.b.notes.get(m)
       }
@@ -3510,6 +3601,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
   }
   if hint == None {
     hint = did_you_mean(m, cands)
+    fix = dym_fix(name: m, candidates: cands, span: mspan)
   }
   let is_field = match h {
     Some(hn) => c.uni.records.get(hn).map(fn(i) => i.fields.has(m)).unwrap_or(false),
@@ -3521,7 +3613,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
   if hint == None {
     hint = Some("methods of `{sh(c, rt)}`: " + cands.sort().join(", "))
   }
-  c = error(c: c, code: "E0204", msg: "type `{sh(c, rt)}` has no method `{m}`", span: mspan, hint: hint)
+  c = error_fix(c: c, code: "E0204", msg: "type `{sh(c, rt)}` has no method `{m}`", span: mspan, hint: hint, fix: fix)
   return ok(args_any(c, args), Type.Any)
 }
 
@@ -3545,8 +3637,9 @@ fn e_field_access(ck: Ck, e: Expr) -> Res[Type] {
         let variants = variants_list(c, tn)
         match variant_fields(c: c, enum_name: tn, variant: name) {
           None => {
-            c = error(c: c, code: "E0302", msg: "enum `{tn}` has no variant `{name}`", span: nspan,
-              hint: or_hint(did_you_mean(name, variants), "variants: {commas(variants)}"))
+            c = error_fix(c: c, code: "E0302", msg: "enum `{tn}` has no variant `{name}`", span: nspan,
+              hint: or_hint(did_you_mean(name, variants), "variants: {commas(variants)}"), fix: dym_fix(name: name,
+                candidates: variants, span: nspan))
           },
           Some(fields) => {
             if not fields.is_empty() {
@@ -3579,8 +3672,9 @@ fn e_field_access(ck: Ck, e: Expr) -> Res[Type] {
             },
             None => {},
           }
-          c = error(c: c, code: "E0203", msg: "record `{hn}` has no field `{name}`", span: nspan,
-            hint: or_hint(did_you_mean(name, info.fields.keys()), "fields: {commas(info.fields.keys())}"))
+          c = error_fix(c: c, code: "E0203", msg: "record `{hn}` has no field `{name}`", span: nspan,
+            hint: or_hint(did_you_mean(name, info.fields.keys()), "fields: {commas(info.fields.keys())}"),
+            fix: dym_fix(name: name, candidates: info.fields.keys(), span: nspan))
           return ok(c, Type.Any)
         },
         None => {},
@@ -4414,7 +4508,7 @@ fn walk_names_body(b: Body) -> List[Str] {
 }
 
 /// The names a declaration refers to (Python: the `N.Name` nodes of `N.walk(decl)`).
-fn walk_names(e: Expr) -> List[Str] {
+pub fn walk_names(e: Expr) -> List[Str] {
   return match e {
     Expr.Name(_, n) => [n],
     Expr.StrLit(_, parts) => parts.flat_map(fn(p) => match p {
@@ -4514,8 +4608,13 @@ fn unused_private_functions(ck: Ck) -> Ck {
   for entry in own.entries() {
     if not used.has(entry.key) {
       let span = fn_sig(c, entry.key).map(fn(s) => s.name_span).unwrap_or(no_span())
-      c = warn(c: c, code: "W0406", msg: "function `{entry.key}` is never used", span: span,
-        hint: Some("remove it, call it, or mark it `pub` if other modules should use it"))
+      let at = match c.decls.get(entry.value) {
+        Some(Decl.Fn(f)) => f.span,
+        _ => span,
+      }
+      c = warn_fix(c: c, code: "W0406", msg: "function `{entry.key}` is never used", span: span,
+        hint: Some("remove it, call it, or mark it `pub` if other modules should use it"), fix: fix_at(span: Span {
+          line: at.line, col: at.col, end_line: at.line, end_col: at.col }, text: "pub ", safe: false))
     }
   }
   return c
@@ -4571,7 +4670,17 @@ pub fn check_module(ck: Ck) -> Ck {
     }
   }
   c = unused_private_functions(settle_types(c) with { cur_file: c.file })
-  return c
+  // by position, diagnostics of other files last (a stable sort, like the Python checker's)
+  let own = c.file
+  return c with { diags: c.diags.sort_by(fn(d) => diag_rank(d, own)) }
+}
+
+fn diag_rank(d: Diag, own: Str) -> Int {
+  var other = 0
+  if d.file != own {
+    other = 1
+  }
+  return other * 1000000000000 + d.span.line * 1000000 + d.span.col
 }
 
 /// The declaration named `name` if this module declares it without `pub` (for a precise import error): its

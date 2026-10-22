@@ -14,7 +14,7 @@
 // threads its state (`Sf`) through every function, because Klar values are immutable.
 use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Pattern, Span, Stmt}
 use ast.{StrPiece, expr_span}
-use checker.{Ck, Diag, Resolution, span_key}
+use checker.{Ck, Diag, DiagFix, Resolution, fix_at, span_key, walk_names}
 use types.{Type, show}
 
 const NEG: Int = 1
@@ -39,6 +39,16 @@ enum CVal {
   F(value: Float),
   B(value: Bool),
   S(value: Str),
+}
+
+/// A constant as the Python analysis shows it (`str()` of the value).
+fn show_cval(v: CVal) -> Str {
+  return match v {
+    CVal.I(i) => i.to_str(),
+    CVal.F(f) => f.to_str(),
+    CVal.B(b) => b.to_str(),
+    CVal.S(t) => "\"" + t + "\"",
+  }
 }
 
 /// The analysis state of one module.
@@ -392,9 +402,12 @@ fn plain_text(parts: List[StrPiece]) -> Option[Str] {
 }
 
 fn add_error(sf: Sf, code: Str, msg: Str, span: Span, hint: Str) -> Sf {
-  return sf with {
-    diags: sf.diags.push(Diag { code: code, severity: "error", message: msg, file: sf.ck.file, span: span, hint: Some(hint) }),
-  }
+  return add_error_full(sf: sf, code: code, msg: msg, span: span, hint: Some(hint), notes: [], fix: None)
+}
+
+fn add_error_full(sf: Sf, code: Str, msg: Str, span: Span, hint: Option[Str], notes: List[Str], fix: Option[DiagFix]) -> Sf {
+  return sf with { diags: sf.diags.push(Diag { code: code, severity: "error", message: msg, file: sf.ck.file, span: span,
+    hint: hint, notes: notes, fix: fix }) }
 }
 
 // ---- constant evaluation --------------------------------------------------------------------------------
@@ -1231,10 +1244,21 @@ fn check_divisor(sf: Sf, e: Expr, facts: Facts) -> Sf {
       Expr.Name(_, n) => s.params.contains(n) and s.decl != None,
       _ => false,
     }
+    var fix: Option[DiagFix] = None
     if is_param {
       hint = hint + ", or make it the caller's job: `requires {text} != 0`"
+      match s.decl {
+        Some(d) => {
+          let se = d.effects_span.unwrap_or(d.sig_end)
+          fix = fix_at(span: Span { line: se.end_line, col: se.end_col, end_line: se.end_line, end_col: se.end_col },
+            text: " requires {text} != 0", safe: false)
+        },
+        None => {},
+      }
     }
-    return add_error(sf: s, code: "E0701", msg: "{what} by `{text}`, which may be zero", span: expr_span(right), hint: hint)
+    return add_error_full(sf: s, code: "E0701", msg: "{what} by `{text}`, which may be zero", span: expr_span(right),
+      hint: Some(hint), notes: ["Klar rejects Int division that could fail at run time; the compiler accepts literals, " +
+          "checked values, `requires` and `var`s that stay non-zero"], fix: fix)
   }
   return s
 }
@@ -1516,8 +1540,15 @@ fn check_contract(sf: Sf, e: Expr, facts: Facts) -> Sf {
         Some(_) => callee.name.split(".").last().unwrap_or(callee.name),
         None => callee.name,
       }
-      return add_error(sf: sf, code: "E0703", msg: "this call always violates `requires {source_text(r)}` of `{shown_name}`",
-        span: expr_span(e), hint: "pass arguments that satisfy the precondition")
+      let used = walk_names(r)
+      let shown = values.entries().filter(fn(v) => used.contains(v.key)).map(fn(v) => v.key + " = " + show_cval(v.value))
+      var notes: List[Str] = []
+      if not shown.is_empty() {
+        notes = ["values: " + shown.join(", ")]
+      }
+      return add_error_full(sf: sf, code: "E0703", msg: "this call always violates `requires {source_text(r)}` of " +
+          "`{shown_name}`", span: expr_span(e), hint: Some("pass arguments that satisfy the precondition"), notes: notes,
+        fix: None)
     }
   }
   // simple contracts against the signs known here (`if n <= 0 \{ f(n) \}` with `requires n > 0`)
@@ -1816,9 +1847,10 @@ fn check_recursion(sf: Sf, d: FnDecl) -> Sf {
     }
     match found {
       Some(span) => {
-        return add_error(sf: sf, code: "E0702", msg: "`{name}` calls itself on every path: the recursion never ends",
-          span: span, hint: "add a base case at the start of `{name}` that returns without calling it " +
-            "(e.g. `if n <= 1 \{ return 1 \}`)")
+        return add_error_full(sf: sf, code: "E0702", msg: "`{name}` calls itself on every path: the recursion never ends",
+          span: span, hint: Some("add a base case at the start of `{name}` that returns without calling it " +
+              "(e.g. `if n <= 1 \{ return 1 \}`)"), notes: ["at run time this would be a stack overflow (R0006)"],
+          fix: None)
       },
       None => {},
     }

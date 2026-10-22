@@ -1,0 +1,194 @@
+// How `klarc` shows diagnostics: the text `klar check` prints (klar/diagnostics.py, klar/cli.py), written in Klar.
+// tests/selfhost.py compares both, character for character.
+use ast.{Span}
+use checker.{Diag}
+use jsonout.{J, pretty}
+use loader.{Ld}
+
+/// The diagnostics a user sees, in the order `klar check` shows them: the main file's first, then by file and
+/// position (a stable sort); never the prelude's, the runtime's only when they are errors.
+pub fn user_diags(ld: Ld, main: Str) -> List[Diag] {
+  let sorted = ld.diags.sort_by(fn(d) => sort_key(d, main))
+  return sorted.filter(fn(d) => d.file != "prelude.klar" and not (d.file.starts_with("rt/") and d.severity != "error"))
+}
+
+fn sort_key(d: Diag, main: Str) -> Str {
+  var other = "0"
+  if d.file != main {
+    other = "1"
+  }
+  return other + d.file + "\0" + d.span.line.to_str().pad_left(10, "0") + d.span.col.to_str().pad_left(10, "0")
+}
+
+/// The source line of the span with the span underlined.
+pub fn code_frame(source: Str, span: Span) -> Str {
+  if source == "" or span.line <= 0 {
+    return ""
+  }
+  let lines = source.split("\n")
+  if span.line > lines.len() {
+    return ""
+  }
+  var text = lines.get_or(span.line - 1, "")
+  while text.ends_with("\r") {
+    text = text.slice(0, text.len() - 1)
+  }
+  let num = span.line.to_str()
+  let pad = " ".repeat(num.len())
+  let start = (span.col - 1).max(0)
+  var width = (text.len() - start).max(1)
+  if span.end_line == span.line {
+    width = (span.end_col - span.col).max(1)
+  }
+  let gap = " ".repeat(start)
+  let marks = "^".repeat(width)
+  return "  {pad} |\n  {num} | {text}\n  {pad} | {gap}{marks}"
+}
+
+/// Python's repr() of a string (how fixes show their text).
+pub fn py_repr(s: Str) -> Str {
+  var quote = "'"
+  if s.contains("'") and not s.contains("\"") {
+    quote = "\""
+  }
+  var out = quote
+  for c in s.chars() {
+    let code = c.codes().get_or(0, 0)
+    if c == quote or c == "\\" {
+      out = out + "\\" + c
+    } else if c == "\n" {
+      out = out + "\\n"
+    } else if c == "\r" {
+      out = out + "\\r"
+    } else if c == "\t" {
+      out = out + "\\t"
+    } else if code < 32 or code == 127 {
+      out = out + "\\x" + hex(code, 2)
+    } else {
+      out = out + c
+    }
+  }
+  return out + quote
+}
+
+fn hex(v: Int, digits: Int) -> Str {
+  let all = "0123456789abcdef"
+  var out = ""
+  var x = v
+  var k = 0
+  while k < digits {
+    out = all.slice(x % 16, x % 16 + 1) + out
+    x = x / 16
+    k = k + 1
+  }
+  return out
+}
+
+/// One diagnostic as `klar check` shows it.
+pub fn render_diag(d: Diag, source: Str) -> Str {
+  var out = ["{d.severity}[{d.code}]: {d.message}", "  --> {d.file}:{d.span.line}:{d.span.col}"]
+  let frame = code_frame(source, d.span)
+  if frame != "" {
+    out = out.push(frame)
+  }
+  for n in d.notes {
+    out = out.push("  note: {n}")
+  }
+  match d.hint {
+    Some(h) => {
+      if h != "" {
+        out = out.push("  hint: {h}")
+      }
+    },
+    None => {},
+  }
+  match d.fix {
+    Some(f) => {
+      var label = "maybe:"
+      if f.safe {
+        label = "fix: "
+      }
+      for e in f.edits {
+        let sp = e.span
+        var place = "replace {sp.line}:{sp.col}-{sp.end_line}:{sp.end_col} with"
+        if sp.line == sp.end_line and sp.col == sp.end_col {
+          place = "insert at {sp.line}:{sp.col}"
+        }
+        out = out.push("  {label} {place} {py_repr(e.text)}")
+      }
+      if f.safe {
+        out = out.push("        (apply automatically with `klar fix`)")
+      }
+    },
+    None => {},
+  }
+  return out.join("\n")
+}
+
+/// The report of `klar check` for these diagnostics (empty when there are none).
+pub fn render_report(ld: Ld, diags: List[Diag]) -> Str {
+  var out = ""
+  var errors = 0
+  var warnings = 0
+  for d in diags {
+    out = out + render_diag(d, ld.sources.get(d.file).unwrap_or("")) + "\n\n"
+    if d.severity == "error" {
+      errors = errors + 1
+    } else if d.severity == "warning" {
+      warnings = warnings + 1
+    }
+  }
+  if not diags.is_empty() {
+    out = out + "{errors} error(s), {warnings} warning(s)\n"
+  }
+  return out
+}
+
+fn span_json(file: Str, sp: Span) -> J {
+  return J.JObj([Pair { first: "file", second: J.JStr(file) }, Pair { first: "line", second: J.JInt(sp.line) },
+    Pair { first: "col", second: J.JInt(sp.col) }, Pair { first: "end_line", second: J.JInt(sp.end_line) },
+    Pair { first: "end_col", second: J.JInt(sp.end_col) }])
+}
+
+/// A diagnostic as JSON (klar/diagnostics.py, Diagnostic.to_dict).
+pub fn diag_json(d: Diag) -> J {
+  var out = [Pair { first: "code", second: J.JStr(d.code) }, Pair { first: "severity", second: J.JStr(d.severity) },
+    Pair { first: "message", second: J.JStr(d.message) }, Pair { first: "span", second: span_json(file: d.file,
+      sp: d.span) }]
+  match d.hint {
+    Some(h) => {
+      if h != "" {
+        out = out.push(Pair { first: "hint", second: J.JStr(h) })
+      }
+    },
+    None => {},
+  }
+  match d.fix {
+    Some(f) => {
+      let edits = f.edits.map(fn(e) => J.JObj([Pair { first: "span", second: span_json(file: edit_file(e.file, d.file),
+        sp: e.span) }, Pair { first: "text", second: J.JStr(e.text) }]))
+      out = out.push(Pair { first: "fix", second: J.JObj([Pair { first: "safe", second: J.JBool(f.safe) }, Pair {
+        first: "edits", second: J.JArr(edits) }]) })
+    },
+    None => {},
+  }
+  if not d.notes.is_empty() {
+    out = out.push(Pair { first: "notes", second: J.JArr(d.notes.map(fn(n) => J.JStr(n))) })
+  }
+  return J.JObj(out)
+}
+
+/// The file an edit changes ("" means the diagnostic's own).
+pub fn edit_file(file: Str, own: Str) -> Str {
+  if file == "" {
+    return own
+  }
+  return file
+}
+
+/// `klar check --json`.
+pub fn check_json(ld: Ld, diags: List[Diag]) -> Str {
+  let ok = not ld.diags.any(fn(d) => d.severity == "error")
+  return pretty(J.JObj([Pair { first: "ok", second: J.JBool(ok) }, Pair { first: "diagnostics",
+    second: J.JArr(diags.map(diag_json)) }]), 0)
+}
