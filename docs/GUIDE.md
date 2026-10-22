@@ -57,6 +57,7 @@ flowchart TB
     M --> M2["Result[T, E] — Ok(v) или Err(e)"]
     U --> U1["type — запись с полями"]
     U --> U2["enum — один из вариантов"]
+    U --> U3["type X = new T — отдельный тип над T"]
 ```
 
 ```klar
@@ -72,6 +73,22 @@ fn main() uses io {
   let _shape = Shape.Circle(radius: 2.0)                // `_` в начале имени: «пока не используется»
   let big = 2.pow(100)                                  // Int не переполняется
   print("{p.x} {big}")
+}
+```
+
+Когда у числа есть смысл, дайте ему свой тип — **newtype**. Метры не сложатся с секундами, а процент не выйдет за
+границы: строки `requires` проверяет конструктор, и другого способа получить значение нет.
+
+```klar
+type Meters = new Float
+
+type Percent = new Int
+  requires value >= 0 and value <= 100
+
+fn main() uses io {
+  let d = Meters(2.5)                                   // построить: Meters(x); прочитать: d.value
+  let p = Percent(42)                                   // Percent(150) — ошибка компиляции E0703
+  print("{d.value} m, {p.value}%")
 }
 ```
 
@@ -411,6 +428,7 @@ sequenceDiagram
 | строка с числом | `"total: {n}"` |
 | преобразовать | `n.to_float()`, `f.round()`, `s.to_int()` → `Option[Int]`, `x.to_str()` |
 | обновить поле записи | `p with { x: 2.0 }` |
+| число со смыслом и границами | `type Percent = new Int` + `requires value <= 100`, `Percent(5)`, `p.value` |
 | значение по умолчанию | `opt.unwrap_or(0)` |
 | пробросить ошибку | `let v = parse(s)?` |
 | лямбда | `xs.map(fn(x) => x * 2)` |

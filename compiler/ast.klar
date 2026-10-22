@@ -122,6 +122,8 @@ pub type FnDecl {
   trait_name: Option[Str],
   method_name: Option[Str],
   public: Bool,
+  /// the constructor of a newtype (`type Meters = new Float` gives `fn Meters(value: Float) -> Meters`): its type
+  constructs: Option[Str],
 }
 
 pub enum Decl {

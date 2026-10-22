@@ -58,6 +58,7 @@ flowchart TB
     M --> M2["Result[T, E] — Ok(v) or Err(e)"]
     U --> U1["type — a record with fields"]
     U --> U2["enum — one of several variants"]
+    U --> U3["type X = new T — a distinct type over T"]
 ```
 
 ```klar
@@ -73,6 +74,22 @@ fn main() uses io {
   let _shape = Shape.Circle(radius: 2.0)                // a leading `_` means "not used yet"
   let big = 2.pow(100)                                  // Int never overflows
   print("{p.x} {big}")
+}
+```
+
+When a number has a meaning, give it a type of its own — a **newtype**. Meters will not add to seconds, and a
+percentage stays in range: the constructor checks the `requires` lines, and there is no other way to get a value.
+
+```klar
+type Meters = new Float
+
+type Percent = new Int
+  requires value >= 0 and value <= 100
+
+fn main() uses io {
+  let d = Meters(2.5)                                   // build: Meters(x); read: d.value
+  let p = Percent(42)                                   // Percent(150) is a compile error (E0703)
+  print("{d.value} m, {p.value}%")
 }
 ```
 
@@ -410,6 +427,7 @@ sequenceDiagram
 | a string with a number | `"total: {n}"` |
 | convert | `n.to_float()`, `f.round()`, `s.to_int()` → `Option[Int]`, `x.to_str()` |
 | update a record field | `p with { x: 2.0 }` |
+| a number with a meaning and bounds | `type Percent = new Int` + `requires value <= 100`, `Percent(5)`, `p.value` |
 | a default value | `opt.unwrap_or(0)` |
 | pass an error on | `let v = parse(s)?` |
 | a lambda | `xs.map(fn(x) => x * 2)` |

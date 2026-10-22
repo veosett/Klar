@@ -43,7 +43,8 @@ pub type Resolution { kind: Str, owner: Str, name: Str, sig: Option[Sig] }
 /// its type parameters were instantiated with.
 pub type CallInfo { sig: Sig, inst: Map[Str, Type] }
 
-pub type RecordInfo { name: Str, tparams: List[Str], mod_name: Str, fields: Map[Str, Type] }
+/// `newtype`: declared `type X = new T`, built only by its constructor `X(value)`.
+pub type RecordInfo { name: Str, tparams: List[Str], mod_name: Str, fields: Map[Str, Type], newtype: Bool }
 
 pub type EnumInfo { name: Str, tparams: List[Str], mod_name: Str, variants: Map[Str, List[Pair[Str, Type]]] }
 
@@ -464,6 +465,9 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       match entry.value {
         Export.FnE(sig) => {
           fns = fns.set(entry.key, Some(sig))
+          if sig.fdecl.map(fn(f) => f.constructs != None).unwrap_or(false) {
+            visible = visible.set(entry.key, true)        // a newtype: its constructor and its type
+          }
         },
         Export.ConstE(t) => {
           consts = consts.set(entry.key, Some(t))
@@ -964,7 +968,8 @@ fn collect(ck: Ck) -> Ck {
         if not r.v {
           c = c with {
             uni: c.uni with {
-              records: c.uni.records.set(name, RecordInfo { name: name, tparams: tparams, mod_name: c.mod_name, fields: Map {} }),
+              records: c.uni.records.set(name, RecordInfo { name: name, tparams: tparams, mod_name: c.mod_name, fields: Map {},
+                newtype: false }),
             },
             visible: c.visible.set(name, true),
           }
@@ -1030,9 +1035,23 @@ fn collect(ck: Ck) -> Ck {
             }
             c = error(c: c, code: "E0101", msg: "function `{f.name}` is {what}", span: f.name_span, hint: None)
           } else {
-            if not is_snake(f.name) {
-              c = warn(c: c, code: "W0104", msg: "function name `{f.name}` should be snake_case", span: f.name_span,
-                hint: Some("rename it to `{to_snake(f.name)}`"))
+            match f.constructs {
+              Some(tn) => {
+                match c.uni.records.get(tn) {
+                  Some(info) => {
+                    if info.mod_name == c.mod_name {
+                      c = c with { uni: c.uni with { records: c.uni.records.set(tn, info with { newtype: true }) } }
+                    }
+                  },
+                  None => {},
+                }
+              },
+              None => {
+                if not is_snake(f.name) {
+                  c = warn(c: c, code: "W0104", msg: "function name `{f.name}` should be snake_case", span: f.name_span,
+                    hint: Some("rename it to `{to_snake(f.name)}`"))
+                }
+              },
             }
             c = c with { fns: c.fns.set(f.name, None) }
           }
@@ -1100,7 +1119,8 @@ fn resolve_type_decl(ck: Ck, d: Decl) -> Ck {
     Decl.TypeD(_, name, tparams, fields, _, _) => {
       let tps = tparam_map(tparams)
       for f in fields {
-        let info = c.uni.records.get(name).unwrap_or(RecordInfo { name: name, tparams: [], mod_name: "", fields: Map {} })
+        let info = c.uni.records.get(name).unwrap_or(RecordInfo { name: name, tparams: [], mod_name: "", fields: Map {},
+          newtype: false })
         if info.fields.has(f.name) {
           c = error(c: c, code: "E0101", msg: "duplicate field `{f.name}` in `{name}`", span: f.span, hint: None)
         }
@@ -1853,7 +1873,9 @@ fn declare(ck: Ck, name: Str, t: Type, mutable: Bool, span: Span, kind: Str, kw:
     return c
   }
   let prev = lookup(c, name)
-  if prev != None or c.fns.has(name) or c.globals.has(name) or c.consts.has(name) {
+  if kind == "newtype_value" {
+    // the `value` of a newtype's constructor: the name is fixed by the language
+  } else if prev != None or c.fns.has(name) or c.globals.has(name) or c.consts.has(name) {
     let where = match prev {
       Some(p) => " (first declared at {short(c.file, p.span)})",
       None => match c.consts.has(name) {
@@ -1945,7 +1967,10 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
     // a trait fixes the parameters of its methods: unused ones are not a smell there
     let kind = match f.owner_kind {
       Some(_) => "method_param",
-      None => "param",
+      None => match f.constructs {
+        Some(_) => "newtype_value",
+        None => "param",
+      },
     }
     c = declare(ck: c, name: p.first, t: p.second, mutable: false, span: pspan, kind: kind, kw: None)
     k = k + 1
@@ -2394,6 +2419,25 @@ fn args_any(ck: Ck, args: List[Arg]) -> Ck {
   return c
 }
 
+fn is_newtype(c: Ck, h: Option[Str]) -> Bool {
+  return match h {
+    Some(n) => c.uni.records.get(n).map(fn(i) => i.newtype).unwrap_or(false),
+    None => false,
+  }
+}
+
+/// The type of the `value` of a newtype (`Id[User]` → its wrapped type).
+fn newtype_value(c: Ck, t: Type) -> Type {
+  return match hd(c, t) {
+    Some(n) => match c.uni.records.get(n) {
+      Some(info) => sub(c: c, t: info.fields.get("value").unwrap_or(Type.Any), m: args_map(c: c, tparams: info.tparams,
+        t: t)),
+      None => Type.Any,
+    },
+    None => Type.Any,
+  }
+}
+
 fn mismatch(ck: Ck, expected: Type, found: Type, span: Span) -> Ck {
   var c = ck
   let ex = pr(c, expected)
@@ -2438,7 +2482,14 @@ fn mismatch(ck: Ck, expected: Type, found: Type, span: Span) -> Ck {
       c = u.c
       if u.v {
         hint = Some("the value may be an error: use `?`, `match`, or `.unwrap_or(default)`")
+        done = true
       }
+    }
+    let he_name = he.unwrap_or("")
+    if not done and is_newtype(c, he) and sh(c, newtype_value(c, ex)) == sh(c, fo) {
+      hint = Some("wrap the value: `{he_name}(value)`")
+    } else if not done and is_newtype(c, hf) and sh(c, newtype_value(c, fo)) == sh(c, ex) {
+      hint = Some("read the wrapped value: `.value`")
     }
   }
   return error(c: c, code: "E0202", msg: "expected `{sh(c, ex)}`, found `{sh(c, fo)}`", span: span, hint: hint)
@@ -2524,7 +2575,7 @@ fn expr_kind(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     Expr.FieldAccess(_, _, _, _) => e_field_access(c, e),
     Expr.Try(span, x) => e_try(ck: c, span: span, x: x),
     Expr.RecordLit(_, _, _) => e_record(ck: c, e: e, exp: exp),
-    Expr.WithExpr(_, base, fields) => e_with(ck: c, base: base, fields: fields),
+    Expr.WithExpr(sp, base, fields) => e_with(ck: c, e_span: sp, base: base, fields: fields),
     Expr.Lambda(_, _, _, _) => e_lambda(ck: c, e: e, exp: exp),
     Expr.Match(_, _, _) => e_match(ck: c, e: e, exp: exp),
   }
@@ -3539,6 +3590,10 @@ fn e_record(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     },
   }
   c = check_type_visible(c: c, name: name, span: span)
+  if info.newtype and c.ctx.name != name {
+    c = error(c: c, code: "E0217", msg: "`{name}` is a newtype: construct it with `{name}(...)`", span: span,
+      hint: Some("a newtype is built only by its constructor, which checks the type's `requires`"))
+  }
   let inst = fresh_instance(ck: c, name: name, tparams: info.tparams)
   c = inst.c
   let t = inst.v.first
@@ -3576,7 +3631,7 @@ fn e_record(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
   return ok(c, t)
 }
 
-fn e_with(ck: Ck, base: Expr, fields: List[FieldInit]) -> Res[Type] {
+fn e_with(ck: Ck, e_span: Span, base: Expr, fields: List[FieldInit]) -> Res[Type] {
   var c = ck
   let r = expr(ck: c, e: base, exp: None)
   c = r.c
@@ -3595,6 +3650,10 @@ fn e_with(ck: Ck, base: Expr, fields: List[FieldInit]) -> Res[Type] {
     None => ok(error(c: c, code: "E0202", msg: "`with` needs a record value, found `{sh(c, bt)}`", span: expr_span(base),
       hint: None), Type.Any),
     Some(i) => {
+      if i.newtype {
+        c = error(c: c, code: "E0217", msg: "`with` cannot change a newtype (`{i.name}`)", span: e_span,
+          hint: Some("build a new value with its constructor: `{i.name}(...)`"))
+      }
       let m = args_map(c: c, tparams: i.tparams, t: bt)
       for f in fields {
         match i.fields.get(f.name) {
@@ -4283,7 +4342,7 @@ fn unused_private_functions(ck: Ck) -> Ck {
   for d in c.decls {
     match d {
       Decl.Fn(f) => {
-        if f.owner_kind == None and not f.public and f.name != "main" {
+        if f.owner_kind == None and f.constructs == None and not f.public and f.name != "main" {
           match fn_sig(c, f.name) {
             Some(s) => {
               if s.decl == idx and s.mod_name == c.mod_name {

@@ -16,6 +16,12 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   inside its methods and are checked recursively at use (`List[Box[Str]]: Show` needs `Str: Show`, E0220 names the
   missing piece). All back-ends dispatch statically (native: the impl's type parameters come from the receiver's
   type), in both the Python and the self-hosted compiler. `klar outline` shows impl headers as written.
+- Newtypes: `type Meters = new Float` declares a distinct type (no mixing with `Float` or other newtypes; E0202 hints
+  "wrap the value: `Meters(value)`" / "read the wrapped value: `.value`"). It is built only by its constructor
+  `Meters(x)` — a function the parser adds after the declaration — whose `requires` lines are the type's invariant
+  (`type Percent = new Int` / `requires value >= 0 and value <= 100`): checked at run time (R0002) and at compile time
+  for known arguments (E0703). Record literals and `with` on a newtype are rejected (E0217). Generic newtypes
+  (`type Id[T] = new Int`), impls and `pub` work; `use m.{Meters}` imports the type and its constructor.
 
 ## [0.6.0] — 2026-10-22
 

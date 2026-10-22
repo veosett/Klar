@@ -26,7 +26,7 @@ program     = [ "module" ident { "." ident } NL ] { use_decl NL } { [ doc ] [ "p
                                                      (* pub: fn, type, enum, const, trait *)
 use_decl    = "use" ident { "." ident } "." "{" ident { "," ident } "}" ;   (* только явные имена *)
 doc         = { "///" text NL } ;                    (* строки "/// >>> stmt" — doc-тесты *)
-decl        = fn_decl | type_decl | alias_decl | enum_decl | trait_decl | impl_decl | const_decl | test_decl
+decl        = fn_decl | type_decl | alias_decl | newtype_decl | enum_decl | trait_decl | impl_decl | const_decl | test_decl
             | property_decl ;
 
 fn_decl     = "fn" ident [ tparams ]
@@ -42,7 +42,8 @@ impl_decl   = "impl" [ type_params ] Ident "for" type "{" { [ doc ] method_sig b
 method_sig  = "fn" ident "(" "self" { "," param } ")" [ "->" type ] [ "uses" ident { "," ident } ]
               { NL? ( "requires" expr | "ensures" expr ) } ;    (* в сигнатурах доступен тип Self *)
 type_decl   = "type" Ident [ tparams ] "{" { ident ":" type [","] } "}" ;
-alias_decl  = "type" Ident "=" type ;
+alias_decl  = "type" Ident [ tparams ] "=" type ;
+newtype_decl = "type" Ident [ tparams ] "=" "new" type { NL "requires" expr } ;   (* `new` here is not a keyword *)
 enum_decl   = "enum" Ident [ tparams ] "{" { Ident [ "(" ident ":" type { "," ident ":" type } ")" ] [","] } "}" ;
 const_decl  = "const" UPPER_IDENT ":" type "=" expr ;                    (* чистое выражение *)
 test_decl   = "test" string block ;
@@ -109,6 +110,16 @@ pattern     = "_" | ident | int | float | string | "true" | "false" | "-" int
 | `type X {..}` | `X { f: v }` | номинальная запись; может быть обобщённой: `type Box[T] { value: T }` |
 | `enum E {..}` | `E.V`, `E.V(f: v)` | номинальная сумма; может быть обобщённой и рекурсивной |
 | `type A = B` | — | прозрачный алиас |
+| `type M = new B` | `M(v)` | newtype: отдельный номинальный тип над `B`, значение — `m.value` |
+
+**Newtype.** `type Meters = new Float` объявляет новый тип: `Meters` и `Float` не взаимозаменяемы (E0202 с подсказкой
+«оберните: `Meters(value)`» или «прочитайте `.value`»). Это запись с одним полем `value`, но построить её можно только
+конструктором `Meters(x)` (или `Meters(value: x)`): литерал `Meters { value: x }` и `m with { ... }` — ошибка E0217.
+Строки `requires` после объявления — инвариант типа, это предусловие конструктора: каждое значение `Percent` из
+`type Percent = new Int` + `requires value >= 0` + `requires value <= 100` проверено (R0002 при запуске, E0703 при
+компиляции, если аргумент известен). Newtype может быть обобщённым (`type Id[T] = new Int`: `Id[User]` и `Id[Order]` не
+смешиваются), иметь `impl` и `pub`; `use m.{Meters}` импортирует и тип, и конструктор. Печатается как запись:
+`Meters { value: 3.5 }`. Ключом `Map` newtype быть не может (как и любая запись).
 
 Прелюдия (доступна всегда): `Pair[A, B] { first, second }`, `Entry[K, V] { key, value }`, `Indexed[T] { index, value }`, константы `PI`, `E`.
 

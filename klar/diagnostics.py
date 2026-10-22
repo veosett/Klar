@@ -153,6 +153,9 @@ CODES = {
     "E0215": ("values are not ordered", "`sort`, `min`, `max` (and the keys of `sort_by`/`min_by`/`max_by`) need Int, "
               "Float or Str. Sort records by a field: `xs.sort_by(fn(p) => p.age)`."),
     # traits
+    "E0217": ("newtype built without its constructor",
+              "A newtype (`type Meters = new Float`) is built only by its constructor `Meters(x)`, which checks the "
+              "type's `requires`; a record literal or `with` would skip that check. Read the value with `.value`."),
     "E0220": ("trait not implemented",
               "A generic function with a bound (`fn f[T: Shape](x: T)`) can only be called with a type that has "
               "`impl Shape for ThatType`, or with a type parameter that carries the same bound."),

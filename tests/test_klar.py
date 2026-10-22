@@ -793,6 +793,42 @@ fn main() uses io {
             self.assertIn("E0221", errs(target + body), target)
         self.assertIn("E0104", errs("impl[T: Nope] Shape for Pile[T]" + body))
 
+    def test_newtypes(self):
+        src = """type Meters = new Float
+
+type Percent = new Int
+  requires value >= 0 and value <= 100
+
+fn total(xs: List[Meters]) -> Meters {
+  return Meters(xs.map(fn(m) => m.value).sum_float())
+}
+
+fn main() uses io {
+  print(total([Meters(1.5), Meters(value: 2.0)]))
+  print(Percent(40).value + 2)
+}
+"""
+        self.assertEqual(run(src), "Meters { value: 3.5 }\n42\n")
+        self.assertEqual(errors(src), [])
+        def errs(extra):
+            return errors(src.replace("fn main() uses io {", "fn main() uses io {\n" + extra))
+        self.assertIn("E0217", errs("  let _a = Meters { value: 1.0 }"))
+        self.assertIn("E0217", errs("  let _a = Meters(1.0) with { value: 2.0 }"))
+        self.assertIn("E0703", errs("  let _a = Percent(101)"))
+        ds = [d for d in diags(src.replace("fn main() uses io {", "fn main() uses io {\n  let _a: Meters = 1.0"))
+              if d.code == "E0202"]
+        self.assertEqual(ds[0].hint, "wrap the value: `Meters(value)`")
+        ds = [d for d in diags(src.replace("fn main() uses io {", "fn main() uses io {\n  let _a: Float = Meters(1.0)"))
+              if d.code == "E0202"]
+        self.assertEqual(ds[0].hint, "read the wrapped value: `.value`")
+        bad = src.replace("print(Percent(40).value + 2)", "let n = 140\n  print(Percent(n).value)")
+        with self.assertRaises(KlarRuntimeError) as cm:
+            run(bad)
+        self.assertEqual(cm.exception.code, "R0002")
+        # the constructor's `value` does not clash with a function named `value`, and needs no snake_case
+        self.assertEqual([d.code for d in diags(src + "\nfn value() -> Int {\n  return 1\n}\n")
+                          if d.code in ("E0102", "W0104")], [])
+
     def test_missing_methods_are_stubbed_by_fix(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "t.klar")

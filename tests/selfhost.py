@@ -65,6 +65,8 @@ PARSE_SNIPPETS = [
     "fn f(x: fn(Int) Int) {}\n", "fn f() {\n  match x {\n    Some x => 1\n  }\n}\n",
     "fn f() {\n  match x {\n    E.A(1, => 1\n  }\n}\n", "fn f() {\n  match x {\n    + => 1\n  }\n}\n",
     "fn f() {\n  let x = * 2\n}\n", "fn f() {\n  let x = 0xff\n}\n",
+    "type X = new Int\n  ensures value > 0\n", "type X = new\n", "type X = new Int requires\n",
+    "type X[T] = new fn(T) -> Int\n  requires true\n\nfn f() {}\n", "impl[T: A + B, U] S for P[T, U] {\n}\n",
 ]
 
 CASES = os.path.join(ROOT, "tests", "selfhost_cases.txt")

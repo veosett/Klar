@@ -3,6 +3,7 @@
 Precedence (low -> high):
   or < and < not < comparison (non-chaining) < + - < * / % < unary - < postfix (call . ? with)
 """
+import copy
 from typing import List
 
 from . import nodes as N
@@ -18,6 +19,7 @@ class Parser:
         self.p = 0
         self.file = file
         self.no_struct = False  # disables `Name { ... }` literals in conditions
+        self.ctor = None        # the constructor of the newtype just parsed (added after its declaration)
 
     # ---- token helpers ----------------------------------------------------
     @property
@@ -157,6 +159,10 @@ class Parser:
                 if pub_tok is not None:
                     d.public = True
                 decls.append(d)
+                if self.ctor is not None:              # a newtype's constructor follows it
+                    self.ctor.public = d.public
+                    decls.append(self.ctor)
+                    self.ctor = None
                 doctest = self.doctest(docs, d)
                 if doctest is not None:
                     decls.append(doctest)
@@ -471,6 +477,10 @@ class Parser:
         if self.accept_op("="):
             if self.at_op("{"):
                 self.fail("record types are declared without `=`", hint=f"write `type {name.value} {{ field: Int }}`")
+            if self.at("IDENT") and self.cur.value == "new" and \
+                    (self.peek().kind == "IDENT" or self.peek().value == "fn"):
+                self.advance()
+                return self.parse_newtype(start, name, tparams, doc)
             target = self.parse_type()
             return N.AliasDecl(span=self.span_from(start), name=name.value, type_params=tparams, target=target, doc=doc)
         self.expect_op("{", f" after `type {name.value}`",
@@ -478,6 +488,35 @@ class Parser:
         fields = self.parse_field_decls("}")
         self.expect_op("}")
         return N.TypeDecl(span=self.span_from(start), name=name.value, type_params=tparams, fields=fields, doc=doc)
+
+    def parse_newtype(self, start, name, tparams, doc) -> N.TypeDecl:
+        """`type Meters = new Float [requires <condition on value>]`: a record with one field `value` that is built only
+        by its constructor `Meters(x)`, a function the parser adds after the type (in `self.ctor`) and whose
+        `requires` is the invariant of every value of the type."""
+        target = self.parse_type()
+        requires = []
+        while True:
+            save = self.p
+            self.skip_nl()
+            if self.accept_kw("requires"):
+                requires.append(self.parse_expr_ns())
+            elif self.at_kw("ensures"):
+                self.fail("a newtype has no `ensures`", hint="state its invariant with `requires <condition on value>`")
+            else:
+                self.p = save
+                break
+        span = self.span_from(start)
+        ts = target.span
+        ret = N.TypeName(span=name.span, name=name.value,
+                         args=[N.TypeName(span=name.span, name=t, args=[]) for t in tparams])
+        value = N.RecordLit(span=span, type_name=name.value,
+                            fields=[N.FieldInit(span=ts, name="value", value=N.Name(span=ts, name="value"))])
+        self.ctor = N.FnDecl(span=span, name=name.value, name_span=name.span, type_params=list(tparams),
+                             params=[N.Param(span=ts, name="value", type=copy.deepcopy(target))], ret=ret, effects=[],
+                             effects_span=None, sig_end=ts, requires=requires, ensures=[],
+                             body=N.Block(span=span, stmts=[N.Return(span=span, value=value)]), constructs=name.value)
+        return N.TypeDecl(span=span, name=name.value, type_params=tparams,
+                          fields=[N.FieldDecl(span=ts, name="value", type=target)], doc=doc)
 
     def parse_enum_decl(self, doc) -> N.EnumDecl:
         start = self.advance().span

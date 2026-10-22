@@ -38,6 +38,7 @@ class RecordInfo:
     def __init__(self, name, tparams, module, span):
         self.name, self.tparams, self.module, self.span = name, tparams, module, span
         self.fields = {}
+        self.newtype = False      # `type X = new T`: built only by its constructor `X(value)`
 
 
 class EnumInfo:
@@ -201,6 +202,8 @@ class Checker:
             self.imported.add(name)
             if kind == "fn":
                 self.fns[name] = value
+                if value.decl is not None and value.decl.constructs:
+                    self.visible.add(name)          # a newtype: its constructor and its type
             elif kind == "const":
                 self.consts[name] = value
             elif kind == "type":
@@ -252,7 +255,7 @@ class Checker:
         if self.all_public():
             return
         own = {d.name: d for d in self.program.decls
-               if isinstance(d, N.FnDecl) and not d.owner_kind and not d.public and d.name != "main"
+               if isinstance(d, N.FnDecl) and not d.owner_kind and not d.constructs and not d.public and d.name != "main"
                and isinstance(self.fns.get(d.name), Sig) and self.fns[d.name].decl is d}
         if not own:
             return
@@ -323,7 +326,10 @@ class Checker:
                             "imported" if d.name in self.imported else "already defined")
                     self.error("E0101", f"function `{d.name}` is {what}", d.name_span)
                     continue
-                if not SNAKE.match(d.name):
+                if d.constructs:
+                    if d.constructs in self.records and self.records[d.constructs].module == self.module:
+                        self.records[d.constructs].newtype = True
+                elif not SNAKE.match(d.name):
                     self.warn("W0104", f"function name `{d.name}` should be snake_case", d.name_span,
                               hint=f"rename it to `{to_snake(d.name)}`")
                 self.fns[d.name] = None  # placeholder
@@ -779,7 +785,9 @@ class Checker:
         if name == "_":
             return
         prev = self.lookup(name)
-        if prev is not None or name in self.fns or name in self.globals or name in self.consts:
+        if kind == "newtype_value":
+            pass            # the `value` of a newtype's constructor: the name is fixed by the language
+        elif prev is not None or name in self.fns or name in self.globals or name in self.consts:
             if prev is not None:
                 where = f" (first declared at {prev.span.short()})"
             elif name in self.consts:
@@ -821,7 +829,8 @@ class Checker:
         self.push()
         for (pname, pt), p in zip(sig.params, d.params):
             # a trait fixes the parameters of its methods: unused ones are not a smell there
-            self.declare(pname, pt, False, p.span, "method_param" if d.owner_kind else "param")
+            self.declare(pname, pt, False, p.span, "newtype_value" if d.constructs else
+                         "method_param" if d.owner_kind else "param")
         # contracts are pure and see the parameters (+ `result` in ensures)
         self.ctx = Ctx(d.name, sig.ret, set(), purpose="contract")
         for r in d.requires:
@@ -1082,10 +1091,19 @@ class Checker:
             hint = "the value may be missing: use `?`, `match`, or `.unwrap_or(default)`"
         elif hf == "Result" and unify(ex, fo.args[0]):
             hint = "the value may be an error: use `?`, `match`, or `.unwrap_or(default)`"
+        elif he in self.records and self.records[he].newtype and show(self.newtype_value(ex)) == show(fo):
+            hint = f"wrap the value: `{he}(value)`"
+        elif hf in self.records and self.records[hf].newtype and show(self.newtype_value(fo)) == show(ex):
+            hint = "read the wrapped value: `.value`"
         msg = f"expected `{show(ex)}`, found `{show(fo)}`"
         if what:
             msg = f"{what}: {msg}"
         self.error("E0202", msg, span, hint=hint, fix=fix)
+
+    def newtype_value(self, t):
+        """The type of the `value` of a newtype (`Id[User]` → its wrapped type)."""
+        info = self.records[head(t)]
+        return subst(info.fields.get("value", ANY), self.args_map(info, t))
 
     def e_IntLit(self, e, exp):
         if self.sys and exp is not None and head(prune(exp)) == "Word":
@@ -1652,6 +1670,9 @@ class Checker:
             return ANY
         self.check_type_visible(name, e.span)
         info = self.records[name]
+        if info.newtype and not (self.ctx is not None and self.ctx.name == name):
+            self.error("E0217", f"`{name}` is a newtype: construct it with `{name}(...)`", e.span,
+                       hint="a newtype is built only by its constructor, which checks the type's `requires`")
         t, mapping = self.fresh(info)
         if exp is not None:
             unify(t, exp)
@@ -1686,6 +1707,9 @@ class Checker:
             self.error("E0202", f"`with` needs a record value, found `{show(bt)}`", e.base.span)
             return ANY
         info = self.records[h]
+        if info.newtype:
+            self.error("E0217", f"`with` cannot change a newtype (`{h}`)", e.span,
+                       hint=f"build a new value with its constructor: `{h}(...)`")
         mapping = self.args_map(info, bt)
         for f in e.fields:
             if f.name not in info.fields:

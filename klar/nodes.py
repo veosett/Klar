@@ -61,6 +61,8 @@ class FnDecl(Node):
     owner: Optional[str] = None       # the implementing type (impl) / the trait (default)
     trait: Optional[str] = None
     method: Optional[str] = None      # the unqualified method name
+    # the constructor of a newtype (`type Meters = new Float` gives `fn Meters(value: Float) -> Meters`): its type
+    constructs: Optional[str] = None
 
 
 @dataclass(eq=False)

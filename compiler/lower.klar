@@ -3267,7 +3267,7 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
   }
   var md = FnDecl { span: zero_span(), name: "", name_span: zero_span(), type_params: [], params: [], ret: None,
     effects: [], effects_span: None, sig_end: zero_span(), pre: [], post: [], body: None, doc: None, bounds: [],
-    owner_kind: None, owner: None, trait_name: None, method_name: None, public: false }
+    owner_kind: None, owner: None, trait_name: None, method_name: None, public: false, constructs: None }
   var main_span = zero_span()
   if tests {
     w = finish_fn(w)

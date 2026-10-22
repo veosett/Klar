@@ -1,0 +1,72 @@
+// Newtypes (`type Meters = new Float`): distinct types built only by their constructor, which checks the
+// type's `requires`. Every back-end must print what the interpreter prints.
+
+/// A distance.
+type Meters = new Float
+
+type Seconds = new Float
+  requires value > 0.0
+
+pub type Percent = new Int
+  requires value >= 0
+  requires value <= 100
+
+/// A typed id: `Id[User]` and `Id[Order]` do not mix.
+type Id[T] = new Int
+
+type User { id: Id[User], name: Str, score: Percent }
+
+type Callback = new fn(Int) -> Int
+
+trait Describe {
+  fn describe(self) -> Str
+}
+
+impl Describe for Meters {
+  fn describe(self) -> Str {
+    return "{self.value} m"
+  }
+}
+
+impl[T] Describe for Id[T] {
+  fn describe(self) -> Str {
+    return "#{self.value}"
+  }
+}
+
+fn speed(d: Meters, t: Seconds) -> Float {
+  return d.value / t.value
+}
+
+fn add(a: Meters, b: Meters) -> Meters {
+  return Meters(a.value + b.value)
+}
+
+fn clamp_percent(x: Int) -> Percent {
+  if x < 0 {
+    return Percent(0)
+  }
+  return Percent(x.min(100))
+}
+
+fn main() uses io {
+  let m = add(Meters(2.5), Meters(value: 1.0))
+  print(m)
+  print("{m.value} {m == Meters(3.5)} {m.describe()}")
+  print(speed(m, Seconds(2.0)))
+  let users = [User { id: Id(1), name: "ann", score: clamp_percent(120) }, User { id: Id(2), name: "bob",
+    score: clamp_percent(-5) }]
+  for u in users {
+    print("{u.id.describe()} {u.name} {u.score.value}%")
+  }
+  print(users.map(fn(u) => u.score))
+  let inc = Callback(fn(x) => x + 1)
+  print(inc.value(41))
+  let by_id = users.fold(Map {}, fn(acc, u) => acc.set(u.id.value, u.name))
+  print(by_id)
+}
+
+test "newtype invariants" {
+  assert clamp_percent(55).value == 55
+  assert add(Meters(1.0), Meters(2.0)) == Meters(3.0)
+}

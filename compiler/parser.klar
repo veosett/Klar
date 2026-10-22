@@ -939,6 +939,7 @@ fn plain_fn(span: Span, name: Token) -> FnDecl {
     trait_name: None,
     method_name: None,
     public: false,
+    constructs: None,
   }
 }
 
@@ -1045,7 +1046,10 @@ fn parse_field_decls(p: Ps, i: Int, closer: Str) -> Result[Got[List[FieldDecl]],
   return Ok(Got { value: fields, pos: j })
 }
 
-fn parse_type_decl(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseError] {
+type TypeDeclResult = Result[Got[Pair[Decl, Option[FnDecl]]], ParseError]
+
+/// A type declaration, and the constructor function of a newtype (added after it, as by the Python parser).
+fn parse_type_decl(p: Ps, i: Int, doc: Option[Str]) -> TypeDeclResult {
   let start = span_of(tk(p, i))
   let name = expect_ident(p: p, i: next(p, i), what: "type name")?
   let tps = parse_type_params(p: p, i: name.pos, allow_bounds: false)?
@@ -1055,17 +1059,71 @@ fn parse_type_decl(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseEr
       return bad_h(t: tk(p, j + 1), message: "record types are declared without `=`",
         hint: "write `type {name.value.text} \{ field: Int \}`")
     }
-    let target = parse_type(p, next(p, j))?
-    return Ok(Got { value: Decl.Alias(span: span_from(p: p, start: start, i: target.pos), name: name.value.text,
-      type_params: tps.value.names, target: target.value, doc: doc, public: false), pos: target.pos })
+    let after = next(p, j)
+    let wrapped = tk(p, after + 1)
+    let is_new = is_kind(tk(p, after), TokKind.Ident) and tk(p, after).text == "new"
+    if is_new and (is_kind(wrapped, TokKind.Ident) or wrapped.text == "fn") {
+      return parse_newtype(p: p, i: next(p, after), start: start, name: name.value, tparams: tps.value.names, doc: doc)
+    }
+    let target = parse_type(p, after)?
+    return Ok(Got { value: Pair { first: Decl.Alias(span: span_from(p: p, start: start, i: target.pos),
+      name: name.value.text, type_params: tps.value.names, target: target.value, doc: doc, public: false), second: None },
+      pos: target.pos })
   }
   let tn = name.value.text
   j = expect_op_h(p: p, i: j, v: "\{", ctx: " after `type {tn}`",
     hint: "records: `type {tn} \{ x: Int \}`; aliases: `type {tn} = Int`")?
   let fields = parse_field_decls(p: p, i: j, closer: "\}")?
   j = expect_op(p: p, i: fields.pos, v: "\}", ctx: "")?
-  return Ok(Got { value: Decl.TypeD(span: span_from(p: p, start: start, i: j), name: name.value.text,
-    type_params: tps.value.names, fields: fields.value, doc: doc, public: false), pos: j })
+  return Ok(Got { value: Pair { first: Decl.TypeD(span: span_from(p: p, start: start, i: j), name: name.value.text,
+    type_params: tps.value.names, fields: fields.value, doc: doc, public: false), second: None }, pos: j })
+}
+
+fn type_expr_span(te: TypeExpr) -> Span {
+  return match te {
+    TypeExpr.Named(s, _, _) => s,
+    TypeExpr.FnType(s, _, _) => s,
+  }
+}
+
+/// `type Meters = new Float [requires <condition on value>]` (from the type after `new`): a record with one field
+/// `value` that is built only by its constructor `Meters(x)`, whose `requires` is the invariant of the type.
+fn parse_newtype(p: Ps, i: Int, start: Span, name: Token, tparams: List[Str], doc: Option[Str]) -> TypeDeclResult {
+  let target = parse_type(p, i)?
+  var j = target.pos
+  var pre: List[Expr] = []
+  while true {
+    let k = skip_nl(p, j)
+    if is_kw(tk(p, k), "requires") {
+      let c = parse_expr_ns(p, next(p, k))?
+      pre = pre.push(c.value)
+      j = c.pos
+    } else if is_kw(tk(p, k), "ensures") {
+      return bad_h(t: tk(p, k), message: "a newtype has no `ensures`",
+        hint: "state its invariant with `requires <condition on value>`")
+    } else {
+      break
+    }
+  }
+  let span = span_from(p: p, start: start, i: j)
+  let ts = type_expr_span(target.value)
+  let ns = span_of(name)
+  let targs = tparams.map(fn(t) => TypeExpr.Named(span: ns, name: t, args: []))
+  let ret = TypeExpr.Named(span: ns, name: name.text, args: targs)
+  let init = FieldInit { span: ts, name: "value", value: Expr.Name(span: ts, name: "value") }
+  let value = Expr.RecordLit(span: span, type_name: name.text, fields: [init])
+  let ctor = plain_fn(span, name) with {
+    type_params: tparams,
+    params: [Param { span: ts, name: "value", ty: Some(target.value) }],
+    ret: Some(ret),
+    sig_end: ts,
+    pre: pre,
+    body: Some(Block { span: span, stmts: [Stmt.Return(span: span, value: Some(value))] }),
+    constructs: Some(name.text),
+  }
+  let field = FieldDecl { span: ts, name: "value", ty: target.value }
+  let decl = Decl.TypeD(span: span, name: name.text, type_params: tparams, fields: [field], doc: doc, public: false)
+  return Ok(Got { value: Pair { first: decl, second: Some(ctor) }, pos: j })
 }
 
 fn parse_enum_decl(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseError] {
@@ -1492,13 +1550,15 @@ pub fn parse_program(src: Str) -> Result[Program, ParseError] {
         continue
       }
       var d = Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] })
+      var ctor: Option[FnDecl] = None
       if is_kw(tk(p, j), "fn") {
         let f = parse_fn(p: p, i: j, doc: doc, with_body: true, is_method: false)?
         d = Decl.Fn(decl: f.value)
         j = f.pos
       } else if is_kw(tk(p, j), "type") {
         let t = parse_type_decl(p: p, i: j, doc: doc)?
-        d = t.value
+        d = t.value.first
+        ctor = t.value.second
         j = t.pos
       } else if is_kw(tk(p, j), "enum") {
         let t = parse_enum_decl(p: p, i: j, doc: doc)?
@@ -1527,6 +1587,12 @@ pub fn parse_program(src: Str) -> Result[Program, ParseError] {
         d = make_public(d)
       }
       decls = decls.push(d)
+      match ctor {
+        Some(f) => {
+          decls = decls.push(Decl.Fn(decl: f with { public: public }))     // a newtype's constructor follows it
+        },
+        None => {},
+      }
       match doctest(docs, decl_name(d))? {
         Some(t) => {
           decls = decls.push(t)

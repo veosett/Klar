@@ -224,6 +224,7 @@ fn fn_json(f: FnDecl) -> Json {
     field(name: "owner", value: opt_text(f.owner)),
     field(name: "trait", value: opt_text(f.trait_name)),
     field(name: "method", value: opt_text(f.method_name)),
+    field(name: "constructs", value: opt_text(f.constructs)),
   ])
 }
 

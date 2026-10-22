@@ -38,9 +38,9 @@ def type_text(src_lines, t):
     return line[sp.col - 1:sp.end_col - 1] if sp.line == sp.end_line else line[sp.col - 1:].strip()
 
 
-def sig_text(src_lines, d):
-    """The declaration's text up to (not including) its body, on one line."""
-    if isinstance(d, N.TypeDecl):
+def sig_text(src_lines, d, newtype=False):
+    """The declaration's text up to (not including) its body, on one line (a newtype: as written)."""
+    if isinstance(d, N.TypeDecl) and not newtype:
         tp = f"[{', '.join(d.type_params)}]" if d.type_params else ""
         return f"type {d.name}{tp} {{ " + ", ".join(f"{f.name}: {type_text(src_lines, f.type)}" for f in d.fields) + " }"
     if isinstance(d, N.EnumDecl):
@@ -79,9 +79,10 @@ def outline(loaded, all_modules=False):
         lines = source_lines(loaded, m.display)
         items = []
         decls = m.program.decls
+        newtypes = {d.constructs for d in decls if isinstance(d, N.FnDecl) and d.constructs}
         for i, d in enumerate(decls):
             kind = DECL_KINDS.get(type(d))
-            if kind is None or (kind == "fn" and d.owner_kind):
+            if kind is None or (kind == "fn" and (d.owner_kind or d.constructs)):
                 continue
             item = {"kind": kind, "line": d.span.line}
             if kind == "trait":
@@ -105,7 +106,8 @@ def outline(loaded, all_modules=False):
                 item["items"] = list(d.items)
             else:
                 item["name"] = d.name
-                item["signature"] = ("pub " if getattr(d, "public", False) else "") + sig_text(lines, d)
+                item["signature"] = ("pub " if getattr(d, "public", False) else "") + \
+                    sig_text(lines, d, isinstance(d, N.TypeDecl) and d.name in newtypes)
                 if getattr(d, "public", False):
                     item["public"] = True
             doc = getattr(d, "doc", None)

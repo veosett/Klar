@@ -2910,3 +2910,49 @@ impl[K, V] Show for Map[K, V] {
     return 0
   }
 }
+=== newtypes: constructors, invariants and misuse across modules
+use units.{Meters, Hidden}
+
+type Seconds = new Float
+
+fn speed(d: Meters, t: Seconds) -> Float {
+  return d.value / t.value
+}
+
+fn main() uses io {
+  let d = Meters(10.0)
+  let t = Seconds(2.0)
+  print(speed(d, t))
+  print(speed(t, d))
+  let x = Meters { value: 1.0 }
+  let y = d with { value: 3.0 }
+  let z: Meters = 2.0
+  print(Seconds(1))
+}
+--- units.klar
+pub type Meters = new Float
+  requires value >= 0.0
+
+type Hidden = new Int
+=== newtypes: syntax variants and unused private newtypes
+type Celsius = new Float
+  requires value >= -273.15
+
+type Handler = new fn(Int) -> Int
+
+type Tag[T] = new Str
+
+type Code = new Int
+
+fn value() -> Int {
+  return 1
+}
+
+fn main() uses io {
+  let c = Celsius(21.5)
+  let h = Handler(fn(x) => x + 1)
+  let t: Tag[Int] = Tag("a")
+  let u = Tag("b")
+  print("{c.value} {h.value(1)} {t.value} {Celsius(-300.0)}")
+  let n: Int = Code(3)
+}

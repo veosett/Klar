@@ -205,13 +205,13 @@ def collect(loaded, trace=None):
     targets = trait_targets_of(loaded)
     for m in mods:
         for d in m.program.decls:
-            if isinstance(d, N.FnDecl):
+            if isinstance(d, N.FnDecl) and not d.constructs:      # (a newtype's constructor is shown with its type)
                 user_fns.add(d.name)
     for m in mods:
         lines = source_lines(loaded, m.display)
         own = m is loaded.main
         for d in m.program.decls:
-            if isinstance(d, N.FnDecl):
+            if isinstance(d, N.FnDecl) and not d.constructs:
                 calls = calls_in(d.body, user_fns, targets)
                 calls += [c for r in d.requires + d.ensures for c in calls_in(r, user_fns, targets)
                           if c not in calls]

@@ -47,6 +47,9 @@ use std.math.{gcd, mean}                            // standard modules: std.mat
 type Pair2[A, B] { left: A, right: B }              // generic record (prelude already has Pair/Entry/Indexed)
 enum Tree[T] { Leaf, Node(left: Tree[T], value: T, right: Tree[T]) }   // generic, recursive enum
 type UserId = Int                                   // alias (transparent)
+type Meters = new Float                             // newtype: a distinct type; build `Meters(2.5)`, read `m.value`
+type Percent = new Int                              // its `requires` lines are the invariant, checked by `Percent(x)`
+  requires value >= 0 and value <= 100              // (no `Percent { value: 5 }` / `with` on newtypes: E0217)
 const MAX_USERS: Int = 100                          // constant: UPPER_SNAKE_CASE, typed, pure
 /// Doc comment. Lines starting with >>> are doc-tests run by `klar test`:
 /// >>> assert double(2) == 4

@@ -39,7 +39,8 @@ def decl_targets(prog):
     out = {}
     for d in prog.decls:
         if isinstance(d, N.FnDecl):
-            out[d.name] = d
+            if not d.constructs:                    # a newtype's constructor: the type is the target
+                out[d.name] = d
         elif isinstance(d, (N.TypeDecl, N.EnumDecl, N.ConstDecl, N.AliasDecl, N.TraitDecl)):
             out[d.name] = d
         elif isinstance(d, N.TestDecl):

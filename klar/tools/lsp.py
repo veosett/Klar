@@ -620,7 +620,7 @@ class Server:
             kind = DECL_KINDS.get(type(d))
             if kind in (None, "use") or (kind == "test" and d.name.startswith("doc: ")):
                 continue
-            if kind == "fn" and d.owner_kind:
+            if kind == "fn" and (d.owner_kind or d.constructs):
                 continue
             name = d.name if kind != "impl" else f"impl {d.trait} for {getattr(d.target, 'name', '?')}"
             sel = a.name_span(d) if not isinstance(d, (N.TestDecl, N.PropertyDecl, N.ImplDecl)) else None
