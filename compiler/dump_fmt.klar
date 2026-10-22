@@ -1,0 +1,28 @@
+// Formats each file given on the command line with the formatter written in Klar and writes `<out>/<k>.fmt`: the
+// formatted text, or `!` and the error message (used by tests/selfhost.py to compare with `klar fmt`). Arguments:
+// the output directory, then the files.
+use fmt.{format_checked}
+
+fn save(path: Str, text: Str) uses fs {
+  match write_file(path, text) {
+    Ok(_) => {},
+    Err(e) => fail(e),
+  }
+}
+
+fn main() uses io, fs {
+  let args = cli_args()
+  let out = args.get_or(0, ".")
+  var k = 0
+  for path in args.drop(1) {
+    let src = match read_file(path) {
+      Ok(s) => s,
+      Err(e) => fail(e),
+    }
+    match format_checked(src) {
+      Ok(text) => save("{out}/{k}.fmt", text),
+      Err(msg) => save("{out}/{k}.fmt", "!" + msg),
+    }
+    k = k + 1
+  }
+}

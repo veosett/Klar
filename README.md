@@ -215,6 +215,7 @@ python -m klar build compiler/klarc.klar -o klarc   # stage 1: the Python compil
 ./klarc build examples/hello.klar --lib klar        # check + compile a program, no Python involved
 ./klarc run examples/shapes.klar -- arg1 arg2       # build into a temporary file and run it
 ./klarc test examples/bank.klar                     # build the `test` blocks and run each one
+./klarc fmt . --check                               # the formatter, written in Klar
 ```
 
 `pip install -e .` installs a `klar` command. On Windows `klar.bat run examples\hello.klar` works from the

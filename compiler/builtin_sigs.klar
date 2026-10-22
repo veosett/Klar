@@ -6,6 +6,7 @@
 pub fn global_sigs() -> List[Str] {
   return [
     "fn print[T](value: T) -> Unit uses io",
+    "fn eprint[T](value: T) -> Unit uses io",
     "fn read_line() -> Option[Str] uses io",
     "fn fail(message: Str) -> Never",
     "fn range(start: Int, end: Int) -> List[Int]",
@@ -17,6 +18,8 @@ pub fn global_sigs() -> List[Str] {
     "fn read_file(path: Str) -> Result[Str, Str] uses fs",
     "fn write_file(path: Str, content: Str) -> Result[Unit, Str] uses fs",
     "fn file_exists(path: Str) -> Bool uses fs",
+    "fn list_dir(path: Str) -> Result[List[Str], Str] uses fs",
+    "fn is_dir(path: Str) -> Bool uses fs",
     "fn exit(code: Int) -> Never uses io",
     "fn run_command(args: List[Str]) -> Result[Int, Str] uses proc",
     "fn set_executable(path: Str) -> Result[Unit, Str] uses fs",
@@ -237,6 +240,11 @@ pub fn sys_sigs() -> List[Str] {
     "fn os_wait(pid: Word) -> Word",
     "fn os_kill(pid: Word, sig: Word) -> Word",
     "fn os_cpu_mask(buf: Word, n: Word) -> Word",
+    "fn os_is_dir(path: Word) -> Bool",
+    "fn os_getdents(fd: Word, buf: Word, n: Word) -> Word",
+    "fn os_find_first(pattern: Word, data: Word) -> Word",
+    "fn os_find_next(h: Word, data: Word) -> Word",
+    "fn os_find_close(h: Word) -> Word",
   ]
 }
 

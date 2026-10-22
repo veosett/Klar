@@ -398,6 +398,53 @@ fn main() uses io, fs {{
                 self.assertEqual(out, 'false\ntrue\nOk("data")\ntrue\n')
         self.assertIn("E0401", errors('fn f() -> Bool { return file_exists("x") }'))
 
+    def test_eprint_goes_to_stderr(self):
+        from klar.native.build import build, host_target
+        src = 'fn main() uses io {\n  print("out")\n  eprint("err {1 + 1}")\n  eprint([1, 2])\n}\n'
+        loaded = load_source(src, "t.klar")
+        for runner in (Interpreter, CompiledProgram):
+            out, err = io.StringIO(), io.StringIO()
+            run_with_big_stack(runner(loaded, out=out, inp=io.StringIO(""), err_stream=err, cli_args=()).run_main)
+            self.assertEqual((out.getvalue(), err.getvalue()), ("out\n", "err 2\n[1, 2]\n"))
+        if host_target() == "linux":
+            with tempfile.TemporaryDirectory() as d:
+                path, exe = os.path.join(d, "t.klar"), os.path.join(d, "t")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(src)
+                build(path, out=exe, target="linux")
+                r = subprocess.run([exe], capture_output=True, text=True)
+                self.assertEqual((r.stdout, r.stderr), ("out\n", "err 2\n[1, 2]\n"))
+
+    def test_directories(self):
+        from klar.native.build import build, host_target
+        src = """
+fn main() uses io, fs {{
+  print(list_dir("{d}"))
+  print(list_dir("{d}/missing").is_err())
+  print(list_dir("{d}/b.txt"))
+  print([is_dir("{d}"), is_dir("{d}/sub"), is_dir("{d}/b.txt"), is_dir("{d}/nope")])
+}}"""
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("b.txt", "a.klar", "é.txt"):
+                with open(os.path.join(d, name), "w") as f:
+                    f.write("x")
+            os.mkdir(os.path.join(d, "sub"))
+            root = d.replace("\\", "/")
+            want = (f'Ok(["a.klar", "b.txt", "sub", "é.txt"])\ntrue\n'
+                    f'Err("cannot list \'{root}/b.txt\': Not a directory")\n[true, true, false, false]\n')
+            program = src.format(d=root)
+            for compiled in (False, True):
+                out, ex = _run_backend(load_source(program, "t.klar"), compiled, "", ())
+                self.assertIsNone(ex)
+                self.assertEqual(out, want)
+            if host_target() == "linux":
+                with tempfile.TemporaryDirectory() as b:
+                    path, exe = os.path.join(b, "t.klar"), os.path.join(b, "t")
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(program)
+                    build(path, out=exe, target="linux")
+                    self.assertEqual(subprocess.run([exe], capture_output=True, text=True).stdout, want)
+
     def test_dbg_and_todo(self):
         loaded = load_source("fn main() uses io { let x = dbg(2 + 3)\n print(x) }", "t.klar")
         out, err = io.StringIO(), io.StringIO()

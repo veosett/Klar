@@ -64,6 +64,11 @@ SYS_SIGNATURES = [
     "fn os_wait(pid: Word) -> Word",
     "fn os_kill(pid: Word, sig: Word) -> Word",
     "fn os_cpu_mask(buf: Word, n: Word) -> Word",
+    "fn os_is_dir(path: Word) -> Bool",
+    "fn os_getdents(fd: Word, buf: Word, n: Word) -> Word",
+    "fn os_find_first(pattern: Word, data: Word) -> Word",
+    "fn os_find_next(h: Word, data: Word) -> Word",
+    "fn os_find_close(h: Word) -> Word",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

@@ -1,0 +1,147 @@
+// The developer tools of `klarc` (the counterparts of klar/tools/commands.py), written in Klar. Their output is the
+// output of the Python commands, line for line.
+use fmt.{format_checked}
+
+/// The .klar files of the given paths: files as given, directories walked in sorted order (files of a directory
+/// before its subdirectories; hidden directories, `build`, `__pycache__` and `node_modules` skipped).
+pub fn klar_files(paths: List[Str]) -> List[Str] uses fs {
+  var out: List[Str] = []
+  for p in paths {
+    if is_dir(p) {
+      out = out.concat(walk(p))
+    } else {
+      out = out.push(p)
+    }
+  }
+  return out
+}
+
+fn join_path(dir: Str, name: Str) -> Str {
+  if dir.ends_with("/") or dir.ends_with("\\") {
+    return dir + name
+  }
+  return dir + "/" + name
+}
+
+fn walk(dir: Str) -> List[Str] uses fs {
+  let names = list_dir(dir).unwrap_or([])
+  var files: List[Str] = []
+  var dirs: List[Str] = []
+  for name in names {
+    let path = join_path(dir, name)
+    if is_dir(path) {
+      if not name.starts_with(".") and not ["build", "__pycache__", "node_modules"].contains(name) {
+        dirs = dirs.push(path)
+      }
+    } else if name.ends_with(".klar") {
+      files = files.push(path)
+    }
+  }
+  for d in dirs {
+    files = files.concat(walk(d))
+  }
+  return files
+}
+
+/// A JSON string (like Python's json.dumps with ensure_ascii=False).
+pub fn json_str(s: Str) -> Str {
+  var out = "\""
+  for c in s.chars() {
+    let code = c.codes().get_or(0, 0)
+    if c == "\"" {
+      out = out + "\\\""
+    } else if c == "\\" {
+      out = out + "\\\\"
+    } else if c == "\n" {
+      out = out + "\\n"
+    } else if c == "\r" {
+      out = out + "\\r"
+    } else if c == "\t" {
+      out = out + "\\t"
+    } else if code == 8 {
+      out = out + "\\b"
+    } else if code == 12 {
+      out = out + "\\f"
+    } else if code < 32 {
+      out = out + "\\u00" + hex2(code)
+    } else {
+      out = out + c
+    }
+  }
+  return out + "\""
+}
+
+fn hex2(v: Int) -> Str {
+  let digits = "0123456789abcdef"
+  return digits.slice(v / 16, v / 16 + 1) + digits.slice(v % 16, v % 16 + 1)
+}
+
+pub fn json_list(xs: List[Str]) -> Str {
+  return "[" + xs.map(json_str).join(",") + "]"
+}
+
+/// `klarc fmt [paths] [--check] [--json]`: the exit code.
+pub fn fmt_command(args: List[Str]) -> Int uses io, fs {
+  let check = args.contains("--check")
+  let json = args.contains("--json")
+  var paths = args.filter(fn(a) => not a.starts_with("--"))
+  if paths.is_empty() {
+    paths = ["."]
+  }
+  var changed: List[Str] = []
+  var failed: List[Str] = []
+  for path in klar_files(paths) {
+    match read_file(path) {
+      Err(e) => {
+        failed = failed.push(path)
+        if not json {
+          eprint("{path}: {e}")
+        }
+      },
+      Ok(raw) => {
+        // (like Python's text mode: \r\n and \r read as \n)
+        let src = raw.replace("\r\n", "\n").replace("\r", "\n")
+        match format_checked(src) {
+          Err(msg) => {
+            failed = failed.push(path)
+            if not json {
+              eprint("{path}: {msg}")
+            }
+          },
+          Ok(text) => {
+            if text != src {
+              changed = changed.push(path)
+              if not check {
+                match write_file(path, text) {
+                  Ok(_) => {},
+                  Err(e) => {
+                    eprint("{path}: {e}")
+                  },
+                }
+              }
+            }
+          },
+        }
+      },
+    }
+  }
+  if json {
+    let ok = failed.is_empty() and not (check and not changed.is_empty())
+    print("\{\"ok\":{ok},\"changed\":{json_list(changed)},\"failed\":{json_list(failed)}\}")
+  } else {
+    var verb = "formatted"
+    if check {
+      verb = "would reformat"
+    }
+    for p in changed {
+      print("{verb} {p}")
+    }
+    if changed.is_empty() and failed.is_empty() {
+      print("all files are formatted")
+    }
+  }
+  if not failed.is_empty() or (check and not changed.is_empty()) {
+    return 1
+  }
+  return 0
+}

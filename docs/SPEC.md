@@ -190,7 +190,7 @@ Doc-тесты (`/// >>>`) — это тесты. `property` запускает�
 
 ## 7. Стандартная библиотека
 
-Генерируется командой `klar spec` из сигнатур в `klar/builtins.py`. Глобальные функции: `print`, `read_line`, `cli_args`, `dbg`, `fail`, `todo`, `range`, `now_ms`, `now_ns`, `random_int`, `read_file`, `write_file`, `file_exists`, `Some`, `Ok`, `Err`. Методы есть у `Int`, `Float`, `Str`, `List`, `Map`, `Option`, `Result` (~110 всего); `.to_str()` есть у всех значений. Модули на Klar: `std.math`, `std.text`, `std.list`, `std.result`.
+Генерируется командой `klar spec` из сигнатур в `klar/builtins.py`. Глобальные функции: `print`, `read_line`, `cli_args`, `dbg`, `fail`, `todo`, `range`, `now_ms`, `now_ns`, `random_int`, `read_file`, `write_file`, `file_exists`, `list_dir`, `is_dir`, `read_bytes`, `write_bytes`, `set_executable`, `run_command`, `env_var`, `exit`, `eprint`, `Some`, `Ok`, `Err`. Методы есть у `Int`, `Float`, `Str`, `List`, `Map`, `Option`, `Result` (~110 всего); `.to_str()` есть у всех значений. Модули на Klar: `std.math`, `std.text`, `std.list`, `std.result`.
 
 ## 8. Модель исполнения
 

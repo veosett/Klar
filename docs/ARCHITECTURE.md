@@ -299,6 +299,7 @@ sequenceDiagram
 | 4г | KIR → x86-64 и линкеры ELF/PE на Klar (`compiler/x64.klar`, `emit.klar`, `link.klar`) | ✅ побайтно те же исполняемые файлы Linux и Windows, что у `klar build`, для всех 23 программ с `main`, включая сам компилятор на Klar |
 | 5 | Bootstrap: Python-компилятор собирает `klarc` (`compiler/klarc.klar`), затем `klarc` собирает сам себя; сравнение бинарников stage1 == stage2 | ✅ stage1 == stage2 == stage3 побайтно (4,5 МБ), `klarc` собирает и Windows-версию себя, рабочие программы и выдаёт те же ошибки (`tests/bootstrap.py`) |
 | 5б | `klarc` как самостоятельный инструмент: `klarc run` (сборка во временный файл и запуск), `klarc test` (блоки `test`, каждый в своём процессе); в язык — запуск программ `run_command` (эффект `proc`) и `set_executable` | ✅ test-исполняемые файлы обоих компиляторов совпадают (22 файла), `klarc run`/`test` проверяет `tests/bootstrap.py` |
+| 5в | Инструменты в `klarc`: `klarc fmt` (`compiler/fmt.klar`, `commands.klar`); в язык — `list_dir`, `is_dir`, `eprint` | ✅ тот же текст или тот же отказ, что у `klar fmt`, на всех файлах репозитория и их «испорченных» копиях (`tests/selfhost.py fmt`); дальше — остальные команды `klar`, чтобы `klarc` заменил Python-инструмент целиком |
 | 6 | Python-реализация остаётся эталонным интерпретатором для дифференциальных тестов | — |
 
 Как проверяется каждый переписанный на Klar этап: оба компилятора получают одни и те же файлы, а сравниваются

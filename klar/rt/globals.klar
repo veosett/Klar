@@ -12,6 +12,16 @@ fn b_print(v: Word, td_T: Word) {
   out_byte(10)
 }
 
+// print to stderr (stdout is flushed first, so the two streams stay in order)
+fn b_eprint(v: Word, td_T: Word) {
+  flush_out()
+  let b = sb_new()
+  show_into(b, v, td_T, true)
+  sb_add_byte(b, 10)
+  err_bytes(peek(b + 32), peek(b + 16))
+  rc_dec(b)
+}
+
 fn b_range(lo: Int, hi: Int, rtd: Word) -> Word {
   if not is_small(lo) or not is_small(hi) {
     fail_msg("R0009", "range: bounds too large", current_span())
@@ -169,6 +179,8 @@ fn io_error_text(b: Word, code: Word) {
     sb_add_cstr(b, "Permission denied")
   } else if code == -21 {
     sb_add_cstr(b, "Is a directory")
+  } else if code == -20 {
+    sb_add_cstr(b, "Not a directory")
   } else {
     sb_add_cstr(b, "I/O error")
   }
@@ -494,4 +506,86 @@ fn b_set_executable(path: Word, rtd: Word) -> Word {
     return err_new(rtd, sb_finish(b))
   }
   return ok_new(rtd, 0)
+}
+
+// ---------------------------------------------------------------------------
+// directories
+// ---------------------------------------------------------------------------
+fn b_is_dir(path: Word) -> Bool {
+  return os_is_dir(path + 32)
+}
+
+fn list_dir_error(path: Word, code: Word, rtd: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "cannot list '")
+  sb_add_str(b, path)
+  sb_add_cstr(b, "': ")
+  io_error_text(b, code)
+  return err_new(rtd, sb_finish(b))
+}
+
+// adds the entry name at p (a C string) unless it is "." or ".."
+fn add_entry(names: Word, p: Word) -> Word {
+  let n = cstr_len(p)
+  if peek8(p) == 46 and (n == 1 or (n == 2 and peek8(p + 1) == 46)) {
+    return names
+  }
+  return list_push_owned_raw(names, str_from(p, n))
+}
+
+fn b_list_dir(path: Word, rtd: Word) -> Word {
+  var names = list_new_str()
+  if os_platform() == 1 {
+    let b = sb_new()
+    sb_add_str(b, path)
+    sb_add_cstr(b, "\\*")
+    let pattern = sb_finish(b)
+    let data = alloc(320)
+    let h = os_find_first(pattern + 32, data)
+    rc_dec(pattern)
+    if h == -1 {
+      block_free(data)
+      rc_dec(names)
+      return list_dir_error(path, -2, rtd)
+    }
+    var more = true
+    while more {
+      names = add_entry(names, data + 44)
+      more = os_find_next(h, data) != 0
+    }
+    os_find_close(h)
+    block_free(data)
+  } else {
+    let fd = os_open(path + 32, 0)
+    if fd < 0 {
+      rc_dec(names)
+      return list_dir_error(path, fd, rtd)
+    }
+    let buf = alloc(32768)
+    var failed: Word = 0
+    var reading = true
+    while reading {
+      let n = os_getdents(fd, buf, 32768)
+      if n <= 0 {
+        failed = n
+        reading = false
+      } else {
+        // struct linux_dirent64: ino, off, reclen (16 bits), type (8 bits), name
+        var off: Word = 0
+        while off < n {
+          names = add_entry(names, buf + off + 19)
+          off = off + w_and(peek32(buf + off + 16), 65535)
+        }
+      }
+    }
+    os_close(fd)
+    block_free(buf)
+    if failed < 0 {
+      rc_dec(names)
+      return list_dir_error(path, failed, rtd)
+    }
+  }
+  let sorted = List_sort(names, 0)
+  rc_dec(names)
+  return ok_new(rtd, sorted)
 }

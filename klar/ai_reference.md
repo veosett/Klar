@@ -156,8 +156,8 @@ collections: `let xs: List[Int] = []`.
 
 ## Effects
 A function without `uses` is pure. Calling something with an effect requires declaring it:
-`print`/`read_line`/`cli_args`/`dbg` → `io`, `now_ms` (wall clock, ms since 1970 UTC)/`now_ns` (monotonic, for measuring) → `time`, `random_int` → `rand`,
-`read_file`/`write_file`/`file_exists` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
+`print`/`eprint` (stderr)/`read_line`/`cli_args`/`dbg` → `io`, `now_ms` (wall clock, ms since 1970 UTC)/`now_ns` (monotonic, for measuring) → `time`, `random_int` → `rand`,
+`read_file`/`write_file`/`file_exists`/`list_dir` (sorted names)/`is_dir` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
 `exit(code)` (type `Never`, flushes output) → `io`; `run_command(["prog", "arg"])` → `Result[Int, Str]` (exit code;
 inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
 pure. Tests may use only `io`.

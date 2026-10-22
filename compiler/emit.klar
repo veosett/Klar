@@ -25,12 +25,13 @@ const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
 
 pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
-  "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"]
+  "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir", "os_getdents", "os_find_first",
+  "os_find_next", "os_find_close"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
   "GetCommandLineA", "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
-  "WaitForSingleObject", "GetExitCodeProcess"]
+  "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose"]
 
 /// Instructions that know where floats live in XMM registers.
 const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun", "fpow"]
@@ -1564,6 +1565,21 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   a = mov_ri(a: stub_begin(a, "os_cpu_mask"), dst: RDI, imm: 0)              // sched_getaffinity(0, n, buf)
   a = arg(a: arg(a: a, reg: RSI, i: 1), reg: RDX, i: 0)
   a = stub_end(syscall(mov_ri(a: a, dst: RAX, imm: 204)))
+  // directories (list_dir / is_dir)
+  a = alu_ri(a: stub_begin(a, "os_is_dir"), op: "sub", dst: RSP, imm: 160)
+  a = mov_rr(a: arg(a: a, reg: RDI, i: 0), dst: RSI, src: RSP)
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 4))          // stat
+  let dn = new_label(a, "dn")
+  a = jcc(a: test_rr(a: dn.a, x: RAX, y: RAX), cc: "ne", target: dn.l)
+  a = load32(a: a, dst: RAX, base: RSP, disp: 24)      // st_mode
+  a = alu_ri(a: a, op: "and", dst: RAX, imm: 61440)
+  a = alu_ri(a: a, op: "cmp", dst: RAX, imm: 16384)
+  a = stub_end(setcc(a: a, cc: "e", r: RAX))
+  a = stub_end(mov_ri(a: label(a, dn.l), dst: RAX, imm: 0))
+  a = sys_stub(a0: a, name: "os_getdents", nr: 217, nargs: 3)
+  for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
+    a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
+  }
   a = test_index_stub(a, "linux")
   // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
   a = store_rip(a: label(a, "_start"), target: "g_argp", src: RSP)
@@ -1695,6 +1711,21 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
   for name in ["os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"] {      // no worker processes here
     a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
   }
+  a = win_call(arg(a: win_begin(a: a, name: "os_is_dir", extra: 0), reg: RCX, i: 0), "GetFileAttributesA")
+  let dx = new_label(a, "dx")
+  a = mov_ri(a: dx.a, dst: RCX, imm: 4294967295)
+  a = alu_rr(a: alu_rr(a: a, op: "and", dst: RAX, src: RCX), op: "cmp", dst: RAX, src: RCX)
+  a = jcc(a: a, cc: "e", target: dx.l)
+  a = alu_ri(a: alu_ri(a: a, op: "and", dst: RAX, imm: 16), op: "cmp", dst: RAX, imm: 0)   // FILE_ATTRIBUTE_DIRECTORY
+  a = win_end(setcc(a: a, cc: "ne", r: RAX))
+  a = win_end(mov_ri(a: label(a, dx.l), dst: RAX, imm: 0))
+  a = stub_end(mov_ri(a: stub_begin(a, "os_getdents"), dst: RAX, imm: -1))           // (Linux)
+  a = arg(a: arg(a: win_begin(a: a, name: "os_find_first", extra: 0), reg: RCX, i: 0), reg: RDX, i: 1)
+  a = win_end(win_call(a, "FindFirstFileA"))
+  a = arg(a: arg(a: win_begin(a: a, name: "os_find_next", extra: 0), reg: RCX, i: 0), reg: RDX, i: 1)
+  a = mov_ri(a: win_call(a, "FindNextFileA"), dst: RCX, imm: 4294967295)
+  a = win_end(alu_rr(a: a, op: "and", dst: RAX, src: RCX))       // BOOL
+  a = win_end(win_call(arg(a: win_begin(a: a, name: "os_find_close", extra: 0), reg: RCX, i: 0), "FindClose"))
   a = test_index_stub(a, "windows")
   a = alu_ri(a: alu_ri(a: label(a, "_start"), op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
   a = win_call(mov_ri(a: a, dst: RCX, imm: 65001), "SetConsoleOutputCP")

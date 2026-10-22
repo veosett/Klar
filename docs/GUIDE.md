@@ -305,7 +305,7 @@ flowchart TB
 | эффект | что разрешает |
 |---|---|
 | `io` | печать, чтение ввода, `dbg` |
-| `fs` | файлы (`read_file`, `write_file` возвращают `Result`) |
+| `fs` | файлы (`read_file`, `write_file`, `list_dir` возвращают `Result`; `file_exists`, `is_dir`) |
 | `time` | часы (`now_ms`, `now_ns`) |
 | `rand` | случайные числа |
 | `net` | сеть (зарезервировано) |

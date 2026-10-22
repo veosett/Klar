@@ -304,7 +304,7 @@ flowchart TB
 | effect | allows |
 |---|---|
 | `io` | printing, reading input, `dbg` |
-| `fs` | files (`read_file`, `write_file` return `Result`) |
+| `fs` | files (`read_file`, `write_file`, `list_dir` return `Result`; `file_exists`, `is_dir`) |
 | `time` | the clock (`now_ms`, `now_ns`) |
 | `rand` | random numbers |
 | `net` | network (reserved) |

@@ -1302,6 +1302,22 @@ fn linux_layer(a0: A64, main_entry: Str) -> A64 {
   a = sys_stub(a0: a, name: "os_kill", nr: 129, nargs: 2)
   a = arg(a: mov_ri(a: stub_begin(a, "os_cpu_mask"), rd: X0, imm: 0), reg: X1, i: 1)   // sched_getaffinity
   a = stub_end(syscall(arg(a: a, reg: X2, i: 0), 123))
+  // directories (list_dir / is_dir)
+  a = addsub_imm(a: stub_begin(a, "os_is_dir"), op: "sub", rd: SP, rn: SP, imm: 144)
+  a = arg(a: mov_ri(a: a, rd: X0, imm: AT_FDCWD), reg: X1, i: 0)
+  a = mov_ri(a: mov_rr(a: a, rd: X2, rn: SP), rd: X3, imm: 0)
+  a = syscall(a, 79)                                                              // newfstatat
+  let dn = new_label64(a, "dn")
+  a = cbnz(a: dn.a, rt: X0, target: dn.l)
+  a = mem(a: a, op: "ldrw", rt: X0, rn: SP, off: 16)                              // st_mode
+  a = op3(a: mov_ri(a: a, rd: X1, imm: 61440), op: "and", rd: X0, rn: X0, rm: X1)
+  a = cmp_rr(a: mov_ri(a: a, rd: X1, imm: 16384), rn: X0, rm: X1)
+  a = stub_end(cset(a: a, rd: X0, cc: "eq"))
+  a = stub_end(mov_ri(a: label64(a, dn.l), rd: X0, imm: 0))
+  a = sys_stub(a0: a, name: "os_getdents", nr: 61, nargs: 3)
+  for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
+    a = stub_end(mov_ri(a: stub_begin(a, name), rd: X0, imm: -1))
+  }
   a = test_index_stub(a)
   // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
   a = mov_rr(a: label64(a, "_start"), rd: X0, rn: SP)

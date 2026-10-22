@@ -36,7 +36,7 @@ pub type Token {
 /// A lexical error, positioned like the Python lexer's.
 pub type LexError { code: Str, message: Str, hint: Str, line: Int, col: Int, width: Int }
 
-const KEYWORDS: List[Str] = [
+pub const KEYWORDS: List[Str] = [
   "module", "use", "fn", "type", "enum", "let", "var", "return", "if", "else", "while", "for", "in", "break",
   "continue", "match", "test", "assert", "requires", "ensures", "uses", "and", "or", "not", "true", "false",
   "with", "const", "property", "trait", "impl", "pub",

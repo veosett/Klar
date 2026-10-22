@@ -11,6 +11,7 @@
 // same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
 use ast.{Decl}
 use checker.{Diag}
+use commands.{fmt_command}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
 use link.{write_elf, write_pe}
@@ -26,6 +27,7 @@ fn usage() -> Never uses io {
   print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
   print("       klarc test <file.klar> [--lib <dir>]")
   print("       klarc check <file.klar> [--lib <dir>]")
+  print("       klarc fmt [files or directories] [--check] [--json]")
   return exit(2)
 }
 
@@ -177,7 +179,11 @@ fn run_or_fail(cmd: List[Str]) -> Int uses io, proc {
 }
 
 fn main() uses io, fs, time, proc {
-  let o = parse_args(cli_args())
+  let argv = cli_args()
+  if argv.get_or(0, "") == "fmt" {
+    exit(fmt_command(argv.drop(1)))
+  }
+  let o = parse_args(argv)
   let t0 = now_ms()
   if not file_exists(o.file) {
     print("klarc: cannot read {o.file}")

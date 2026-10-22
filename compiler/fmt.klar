@@ -1,0 +1,358 @@
+// `klar fmt` in Klar: the canonical layout of Klar code. Mirrors klar/tools/fmt.py exactly — tests/selfhost.py
+// compares both on every .klar file of the repository.
+//
+// The formatter keeps the author's line structure and comments; it only normalizes
+//   * indentation: 2 spaces per open `{` / `(` / `[`, +1 for `.method` chain lines and `requires`/`ensures`;
+//   * spacing between tokens (binary operators, `,`, `:`, braces, unary minus);
+//   * blank lines: at most one in a row, none right after `{` or before `}`, one between top-level declarations;
+//   * trailing whitespace and the final newline.
+// Safety net: the token stream of the result must be identical to the input's, otherwise nothing is changed.
+use lexer.{KEYWORDS, StrPart, TokKind, tokenize}
+
+/// A token of one line: kind is "word", "num", "str", "op" or "comment".
+type FTok { kind: Str, text: Str }
+
+const TWO: List[Str] = ["->", "=>", "==", "!=", "<=", ">="]
+
+const BINARY: List[Str] = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "=", "->", "=>", "and", "or"]
+
+const OPEN: List[Str] = ["(", "[", "\{"]
+
+const CLOSE: List[Str] = [")", "]", "\}"]
+
+const UNARY_BEFORE: List[Str] = ["(", "[", "\{", ",", ":", "=", "=>", "->", "+", "-", "*", "/", "%", "==", "!=", "<",
+  ">", "<=", ">=", "and", "or", "not", "return", "if", "while", "in", "match", "assert", "requires", "ensures"]
+
+const TOP_LEVEL: List[Str] = ["fn ", "type ", "enum ", "test ", "property ", "const ", "///", "use ", "module ", "pub ",
+  "trait ", "impl "]
+
+fn is_digit(c: Str) -> Bool {
+  return c >= "0" and c <= "9" and c.len() == 1
+}
+
+fn is_alpha(c: Str) -> Bool {
+  return c.len() == 1 and ((c >= "a" and c <= "z") or (c >= "A" and c <= "Z"))
+}
+
+fn is_alnum(c: Str) -> Bool {
+  return is_digit(c) or is_alpha(c)
+}
+
+fn join_chars(cs: List[Str], from: Int, to: Int) -> Str {
+  return cs.slice(from, to.min(cs.len())).join("")
+}
+
+/// The tokens of one stripped line.
+fn tokenize_line(line: Str) -> List[FTok] {
+  let cs = line.chars()
+  let n = cs.len()
+  var toks: List[FTok] = []
+  var i = 0
+  while i < n {
+    let c = cs.get_or(i, "")
+    if c == " " or c == "\t" or c == "\r" {
+      i = i + 1
+    } else if c == "/" and cs.get_or(i + 1, "") == "/" {
+      var j = i
+      while j > 0 and (cs.get_or(j - 1, "") == " " or cs.get_or(j - 1, "") == "\t") {
+        j = j - 1
+      }
+      let rest = join_chars(cs: cs, from: i, to: n).trim_end()
+      if toks.is_empty() {
+        toks = toks.push(FTok { kind: "comment", text: rest })
+      } else {
+        var pad = join_chars(cs: cs, from: j, to: i)
+        if pad == "" {
+          pad = " "
+        }
+        toks = toks.push(FTok { kind: "comment", text: pad + rest })
+      }
+      i = n
+    } else if c == "\"" {
+      var j = i + 1
+      while j < n and cs.get_or(j, "") != "\"" {
+        if cs.get_or(j, "") == "\\" {
+          j = j + 2
+        } else {
+          j = j + 1
+        }
+      }
+      toks = toks.push(FTok { kind: "str", text: join_chars(cs: cs, from: i, to: j + 1) })
+      i = j + 1
+    } else if is_digit(c) {
+      var j = i
+      var going = true
+      while going and j < n {
+        let d = cs.get_or(j, "")
+        if is_alnum(d) or d == "_" or (d == "." and j + 1 < n and is_digit(cs.get_or(j + 1, ""))) {
+          j = j + 1
+        } else {
+          going = false
+        }
+      }
+      toks = toks.push(FTok { kind: "num", text: join_chars(cs: cs, from: i, to: j) })
+      i = j
+    } else if is_alpha(c) or c == "_" {
+      var j = i
+      while j < n and (is_alnum(cs.get_or(j, "")) or cs.get_or(j, "") == "_") {
+        j = j + 1
+      }
+      toks = toks.push(FTok { kind: "word", text: join_chars(cs: cs, from: i, to: j) })
+      i = j
+    } else {
+      let two = join_chars(cs: cs, from: i, to: i + 2)
+      if TWO.contains(two) {
+        toks = toks.push(FTok { kind: "op", text: two })
+        i = i + 2
+      } else {
+        toks = toks.push(FTok { kind: "op", text: c })
+        i = i + 1
+      }
+    }
+  }
+  return toks
+}
+
+fn is_binary(t: FTok) -> Bool {
+  return BINARY.contains(t.text) and (t.kind == "op" or t.text == "and" or t.text == "or")
+}
+
+fn is_op(t: FTok, text: Str) -> Bool {
+  return t.kind == "op" and t.text == text
+}
+
+/// One line of tokens with canonical spacing.
+fn render(toks: List[FTok]) -> Str {
+  var out: List[Str] = []
+  var prev: Option[FTok] = None
+  var unary = false
+  // for each open `{`: is it an import list `use a.{x, y}`?
+  var braces: List[Bool] = []
+  for t in toks {
+    if t.kind == "comment" {
+      out = out.push(t.text)
+      prev = Some(t)
+    } else {
+      let in_import = braces.last() == Some(true)
+      var sep = ""
+      match prev {
+        Some(p) => {
+          let after_dot = t.text == "\{" and p.text == "." and t.kind == "op"
+          let import_edge = (p.text == "\{" and p.kind == "op" and in_import) or (t.text == "\}" and t.kind == "op" and
+              in_import)
+          if not after_dot and not import_edge {
+            sep = space_between(p: p, t: t, after_unary: unary)
+          }
+        },
+        None => {},
+      }
+      if is_op(t, "\{") {
+        braces = braces.push(prev.map(fn(p) => p.text == ".").unwrap_or(false))
+      } else if is_op(t, "\}") and not braces.is_empty() {
+        braces = braces.take(braces.len() - 1)
+      }
+      let prev_text = prev.map(fn(p) => p.text).unwrap_or("")
+      let is_unary = t.text == "-" and t.kind == "op" and (prev == None or UNARY_BEFORE.contains(prev_text))
+      out = out.push(sep + t.text)
+      unary = is_unary
+      prev = Some(t)
+    }
+  }
+  return out.join("")
+}
+
+fn space_between(p: FTok, t: FTok, after_unary: Bool) -> Str {
+  let pt = p.text
+  let tt = t.text
+  if after_unary {
+    return ""
+  }
+  if [")", "]", ",", ".", "?", ":"].contains(tt) and t.kind == "op" {
+    return ""
+  }
+  if ["(", "[", "."].contains(pt) and p.kind == "op" {
+    return ""
+  }
+  if tt == "-" and t.kind == "op" and UNARY_BEFORE.contains(pt) {
+    if pt == "(" or pt == "[" {
+      return ""
+    }
+    return " "
+  }
+  if is_binary(t) or is_binary(p) {
+    return " "
+  }
+  if (tt == "(" or tt == "[") and t.kind == "op" {
+    if p.kind == "str" {
+      return " "
+    }
+    let keyword = p.kind == "word" and KEYWORDS.contains(pt) and pt != "fn" and pt != "true" and pt != "false"
+    // `impl[T: Show] Show for List[T]`
+    if keyword and not (pt == "impl" and tt == "[") {
+      return " "
+    }
+    if pt == "," or pt == ":" or pt == "\{" or (p.kind == "op" and UNARY_BEFORE.contains(pt)) {
+      return " "
+    }
+    return ""
+  }
+  if tt == "\{" or pt == "\{" {
+    if pt == "\{" and tt == "\}" {
+      return ""
+    }
+    return " "
+  }
+  if tt == "\}" {
+    return " "
+  }
+  if pt == "," or pt == ":" {
+    return " "
+  }
+  if pt == "?" and p.kind == "op" {
+    if t.kind == "word" or t.kind == "num" or t.kind == "str" {
+      return " "
+    }
+    return ""
+  }
+  return " "
+}
+
+fn starts_top_level(line: Str) -> Bool {
+  return TOP_LEVEL.any(fn(p) => line.starts_with(p))
+}
+
+/// The source with the canonical layout (no safety checks: see `format_checked`).
+pub fn format_source(src: Str) -> Str {
+  let lines = src.replace("\r\n", "\n").split("\n")
+  var out: List[Str] = []
+  // indentation of the line that opened each unclosed bracket
+  var stack: List[Int] = []
+  var pending_blank = false
+  // the previous code line ended with a binary operator
+  var continued = false
+  for raw in lines {
+    let stripped = raw.trim()
+    if stripped.is_empty() {
+      pending_blank = not out.is_empty()
+    } else {
+      let toks = tokenize_line(stripped)
+      let code = toks.filter(fn(t) => t.kind != "comment")
+      // closers at the start of the line take the indentation of their opener
+      var k = 0
+      var indent = -1
+      var closing = true
+      while closing and k < code.len() {
+        let t = code.get_or(k, FTok { kind: "", text: "" })
+        if t.kind == "op" and CLOSE.contains(t.text) {
+          if not stack.is_empty() {
+            indent = stack.last().unwrap_or(0)
+            stack = stack.take(stack.len() - 1)
+          }
+          k = k + 1
+        } else {
+          closing = false
+        }
+      }
+      let top_level = stack.is_empty() and indent == -1
+      var base = -1
+      if indent == -1 {
+        indent = 0
+        if not stack.is_empty() {
+          indent = stack.last().unwrap_or(0) + 1
+        }
+        let first = code.get(0).map(fn(t) => t.text).unwrap_or("")
+        if continued {
+          // `{` at the end of a wrapped condition belongs to the statement
+          base = indent
+          indent = indent + 1
+        } else if first == "." or first == "requires" or first == "ensures" {
+          indent = indent + 1
+        }
+      }
+      for t in code.drop(k) {
+        if t.kind == "op" and OPEN.contains(t.text) {
+          if base == -1 {
+            stack = stack.push(indent)
+          } else {
+            stack = stack.push(base)
+          }
+        } else if t.kind == "op" and CLOSE.contains(t.text) and not stack.is_empty() {
+          stack = stack.take(stack.len() - 1)
+        }
+      }
+      var text = stripped
+      if not stripped.starts_with("//") {
+        text = render(toks)
+      }
+      let prev = out.last().map(fn(l) => l.trim()).unwrap_or("")
+      if pending_blank and prev != "" and not prev.ends_with("\{") and k == 0 {
+        out = out.push("")
+      } else if top_level and indent == 0 and not out.is_empty() and prev == "\}" and starts_top_level(stripped) {
+        out = out.push("")
+      }
+      pending_blank = false
+      out = out.push("  ".repeat(indent) + text)
+      continued = match code.last() {
+        Some(t) => is_binary(t) and t.text != "=>" and t.text != "->",
+        None => false,
+      }
+    }
+  }
+  while not out.is_empty() and out.last().unwrap_or("").trim() == "" {
+    out = out.take(out.len() - 1)
+  }
+  return out.join("\n") + "\n"
+}
+
+/// The tokens that must not change, without NEWLINE and with interpolated code compared without its position.
+fn token_stream(src: Str) -> Result[List[List[Str]], Str] {
+  let toks = match tokenize(src) {
+    Ok(ts) => ts,
+    Err(e) => {
+      return Err("{e.message} at fmt:{e.line}:{e.col}")
+    },
+  }
+  var out: List[List[Str]] = []
+  for t in toks {
+    if t.kind != TokKind.Newline {
+      if t.kind == TokKind.StrLit {
+        let parts = t.parts.map(fn(p) => match p {
+          StrPart.Text(value) => "t" + value,
+          StrPart.Expr(code, _, _) => "e" + code,
+        })
+        out = out.push(["str"].concat(parts))
+      } else {
+        out = out.push([t.kind.to_str(), t.text])
+      }
+    }
+  }
+  return Ok(out)
+}
+
+fn without_space(s: Str) -> Str {
+  return s.chars().filter(fn(c) => c != " " and c != "\t" and c != "\n" and c != "\r").join("")
+}
+
+/// The formatted text, or why the file is left unchanged (the code does not lex, or formatting would change it).
+pub fn format_checked(src: Str) -> Result[Str, Str] {
+  let before = match token_stream(src) {
+    Ok(ts) => ts,
+    Err(msg) => {
+      return Err("cannot format: {msg}")
+    },
+  }
+  let result = format_source(src)
+  let after = match token_stream(result) {
+    Ok(ts) => ts,
+    Err(msg) => {
+      return Err("internal formatter error ({msg}); file left unchanged")
+    },
+  }
+  if before != after {
+    return Err("internal formatter error (token stream changed); file left unchanged")
+  }
+  if without_space(src) != without_space(result) {
+    return Err("internal formatter error (non-space text changed); file left unchanged")
+  }
+  return Ok(result)
+}

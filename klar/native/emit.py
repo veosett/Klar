@@ -19,12 +19,13 @@ SOFT = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"
 
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
-            "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask"]
+            "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir",
+            "os_getdents", "os_find_first", "os_find_next", "os_find_close"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
                "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
-               "WaitForSingleObject", "GetExitCodeProcess"]
+               "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose"]
 
 
 def udiv_magic(d):
@@ -1159,6 +1160,29 @@ class Emitter:
         a.mov_ri(RAX, 204)
         a.syscall()
         self.stub_end()
+        # directories (list_dir / is_dir)
+        self.stub_begin("os_is_dir")
+        a.alu_ri("sub", RSP, 160)
+        self.arg(RDI, 0)
+        a.mov_rr(RSI, RSP)
+        a.mov_ri(RAX, 4)               # stat
+        a.syscall()
+        no = a.new_label("dn")
+        a.test_rr(RAX, RAX)
+        a.jcc("ne", no)
+        a.load32(RAX, RSP, 24)         # st_mode
+        a.alu_ri("and", RAX, 0xF000)
+        a.alu_ri("cmp", RAX, 0x4000)
+        a.setcc("e", RAX)
+        self.stub_end()
+        a.label(no)
+        a.mov_ri(RAX, 0)
+        self.stub_end()
+        sys("os_getdents", 217, 3)
+        for name in ("os_find_first", "os_find_next", "os_find_close"):     # (Windows)
+            self.stub_begin(name)
+            a.mov_ri(RAX, -1)
+            self.stub_end()
         self.test_index_stub()
         # entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
         a.label("_start")
@@ -1388,6 +1412,40 @@ class Emitter:
             self.stub_begin(name)
             a.mov_ri(RAX, -1)
             self.stub_end()
+        win_begin("os_is_dir")
+        self.arg(RCX, 0)
+        call("GetFileAttributesA")
+        no = a.new_label("dx")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)
+        a.alu_rr("cmp", RAX, RCX)
+        a.jcc("e", no)
+        a.alu_ri("and", RAX, 0x10)     # FILE_ATTRIBUTE_DIRECTORY
+        a.alu_ri("cmp", RAX, 0)
+        a.setcc("ne", RAX)
+        win_end()
+        a.label(no)
+        a.mov_ri(RAX, 0)
+        win_end()
+        self.stub_begin("os_getdents")         # (Linux)
+        a.mov_ri(RAX, -1)
+        self.stub_end()
+        win_begin("os_find_first")             # FindFirstFileA(pattern, &WIN32_FIND_DATAA) -> handle (-1: none)
+        self.arg(RCX, 0)
+        self.arg(RDX, 1)
+        call("FindFirstFileA")
+        win_end()
+        win_begin("os_find_next")
+        self.arg(RCX, 0)
+        self.arg(RDX, 1)
+        call("FindNextFileA")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)      # BOOL
+        win_end()
+        win_begin("os_find_close")
+        self.arg(RCX, 0)
+        call("FindClose")
+        win_end()
         self.test_index_stub()
 
         a.label("_start")

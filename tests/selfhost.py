@@ -565,6 +565,60 @@ def check_emit(interp):
     return bad
 
 
+def messy_variants(files, d):
+    """Badly laid out copies of the files (deterministic): the formatter must undo the damage in the same way."""
+    import random
+    rnd = random.Random(7)
+    out = []
+    for k, path in enumerate(files):
+        with open(path, encoding="utf-8", newline="") as f:
+            src = f.read()
+        lines = []
+        for line in src.split("\n"):
+            line = line.strip() if rnd.random() < 0.7 else "    " * rnd.randint(0, 3) + line.strip()
+            if '"' not in line and "//" not in line:
+                r = rnd.random()
+                if r < 0.3:
+                    line = line.replace(", ", ",")
+                elif r < 0.5:
+                    line = line.replace(" = ", "=").replace(" + ", "+")
+                elif r < 0.6:
+                    line = line.replace("(", "( ").replace(")", " )")
+            lines.append(line + (" " if rnd.random() < 0.1 else ""))
+            if rnd.random() < 0.05:
+                lines.append("")
+        p = os.path.join(d, f"messy{k}.klar")
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(("\r\n" if k % 5 == 0 else "\n").join(lines))
+        out.append(p)
+    return out
+
+
+def check_fmt(files, interp):
+    """`klar fmt` written in Klar (compiler/fmt.klar) == klar/tools/fmt.py: the text, or the same refusal."""
+    from klar.tools.fmt import FormatError, format_checked
+    bad = 0
+    with tempfile.TemporaryDirectory() as d:
+        run_driver("dump_fmt.klar", [d] + files, interp)
+        for k, path in enumerate(files):
+            with open(path, encoding="utf-8", newline="") as f:
+                src = f.read()
+            try:
+                want = format_checked(src)
+            except FormatError as ex:
+                want = "!" + str(ex)
+            out = os.path.join(d, f"{k}.fmt")
+            got = None
+            if os.path.exists(out):
+                with open(out, encoding="utf-8", newline="") as f:
+                    got = f.read()
+            if got != want:
+                bad += 1
+                print(f"DIFF fmt {short(path)}: {(got or '')[:120]!r} / {want[:120]!r}")
+    print(f"fmt: {len(files) - bad}/{len(files)} files formatted identically")
+    return bad
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     interp = "--interp" in argv
@@ -583,6 +637,8 @@ def main(argv=None):
             bad += check_lowering(interp, tests=True)
         if not only or "emit" in only:
             bad += check_emit(interp)
+        if not only or "fmt" in only:
+            bad += check_fmt(files + messy_variants(files, d), interp)
         if not only or "checker" in only:
             bad += check_checker(files + write_cases(d), interp)
     return 1 if bad else 0

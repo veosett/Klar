@@ -47,6 +47,12 @@ def _print(it, a, sp):
     return UNIT
 
 
+@glob("fn eprint[T](value: T) -> Unit uses io")
+def _eprint(it, a, sp):
+    it.err.write(show(a[0], True) + "\n")
+    return UNIT
+
+
 @glob("fn read_line() -> Option[Str] uses io")
 def _read_line(it, a, sp):
     line = it.inp.readline()
@@ -121,6 +127,21 @@ def _write_file(it, a, sp):
 def _file_exists(it, a, sp):
     import os
     return os.path.isfile(a[0])
+
+
+@glob("fn list_dir(path: Str) -> Result[List[Str], Str] uses fs")
+def _list_dir(it, a, sp):
+    import os
+    try:
+        return ok(tuple(sorted(os.listdir(a[0]))))
+    except OSError as ex:
+        return err(f"cannot list '{a[0]}': {ex.strerror}")
+
+
+@glob("fn is_dir(path: Str) -> Bool uses fs")
+def _is_dir(it, a, sp):
+    import os
+    return os.path.isdir(a[0])
 
 
 @glob("fn exit(code: Int) -> Never uses io")

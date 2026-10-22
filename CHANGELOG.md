@@ -28,6 +28,11 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   (E0406). A runtime error in `f` is reported exactly like in `map` (the first failing element); the other workers
   are stopped. On Windows and in the interpreter `par_map` is `map`. New runtime file `klar/rt/par.klar`, new
   intrinsics `os_fork`, `os_pipe`, `os_wait`, `os_kill`, `os_cpu_mask` in all three OS layers of both compilers.
+- `list_dir(path)` (sorted entry names, `Result[List[Str], Str]`), `is_dir(path)` (effect `fs`) and `eprint(value)`
+  (print to stderr, effect `io`), in every backend (Linux: getdents64; Windows: FindFirstFileA).
+- `klarc fmt [paths] [--check] [--json]`: the formatter written in Klar (`compiler/fmt.klar`); `tests/selfhost.py`
+  checks that it formats every file of the repository, and a damaged copy of each, exactly like `klar fmt`. First
+  step of moving all `klar` commands into `klarc`.
 
 ### Changed
 - `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm
