@@ -1,5 +1,6 @@
-"""AST nodes. Every node carries a span and a stable numeric id
-(useful for AI tools that want to address a node instead of a text range)."""
+"""AST nodes. Every node carries a span and a numeric id (useful for AI tools that want to address a node instead of
+a text range): `number(program)` makes the ids of a file stable — its nodes in pre-order, from 1 — as `klar ast`
+prints them and `klar patch` reads them."""
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, List, Optional
 
@@ -397,6 +398,15 @@ def to_json(n):
     if isinstance(n, Span):
         return [n.line, n.col, n.end_line, n.end_col]
     return n
+
+
+def number(program):
+    """Renumbers the nodes of a program in pre-order (walk order), from 1; returns {id: node}."""
+    out = {}
+    for i, n in enumerate((x for x in walk(program) if isinstance(x, Node)), 1):
+        n.id = i
+        out[i] = n
+    return out
 
 
 def walk(n):

@@ -18,7 +18,7 @@ ruff check klar tests bench                 # lint
 - `klar/interpreter.py` + `klar/builtins.py` reference semantics · `klar/codegen.py` Python back-end
 - `klar/native/` native compiler (`lower` + `own` (moves, in-place updates) → KIR → `opt` → `regalloc` → `emit`/`x64` → `link`) · `klar/rt/*.klar` runtime in Klar
 - `compiler/` the compiler being rewritten in Klar (self-hosting): lexer, parser, checker, loader, safety analysis, lowering, optimizer, register allocator, x86-64 emitter and ELF/PE linkers, all checked by `tests/selfhost.py` against the Python compiler (cases in `tests/selfhost_cases.txt`); `compiler/klarc.klar` is the command-line compiler (`build`, `run`, `test`, `check`), which builds itself (`tests/bootstrap.py`). Any change to `klar/native/` must be mirrored in `compiler/` (and vice versa)
-- `klar/tools/` developer tools (fmt, outline, doc, refs, rename, eval, coverage, view, new)
+- `klar/tools/` developer tools (fmt, outline, doc, refs, rename, patch, eval, coverage, view, new)
 - `klar/ai_reference.md` is what `klar spec` prints — keep it short and current
 
 ## Rules

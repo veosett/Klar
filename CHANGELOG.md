@@ -5,6 +5,13 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+### Added
+- `klar patch FILE PATCH` — the "AI patch" protocol: structured edits addressed by declaration name (`area`,
+  `Circle.area`, `test:name`), by node id (`klar ast`) or by unique text, plus renames; all edits apply to the original
+  text together, the result is formatted and checked (and tested with `--test`), and the file is written only when
+  nothing new breaks. `--dry-run`, `--force`, `--json` (diff, errors, test results).
+- `klar ast` numbers nodes per file (stable ids, pre-order from 1).
+
 ## [0.6.0] — 2026-10-22
 
 Self-hosting: the whole compiler is written in Klar (`compiler/`, ~22 000 lines) and builds itself — byte-identical

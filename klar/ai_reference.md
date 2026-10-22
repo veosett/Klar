@@ -12,6 +12,9 @@ exactly; the compiler rejects everything else with a coded error (`klar explain 
    Look things up instead of guessing: `klar doc split` / `klar doc List.sort` (signature + tested examples),
    `klar eval '"a,b".split(",")'` (value : type), `klar outline file.klar` (API of a file),
    `klar refs file.klar name`, `klar rename file.klar old new`, `klar coverage file.klar` (untested statements).
+   Edit by name, not by rewriting files: `klar patch file.klar '{"edits": [{"replace": "fname", "with": "fn ..."}]}' --test --json`
+   (also `Type.method`, `test:name`, `insert`+`after`/`before`, `delete`, `find`+`replace`+`in`, `rename`+`to`,
+   `id` from `klar ast`); it writes only if there are no new errors and the tests pass.
 4. Failures show values, both sides of `assert`, the Klar call stack, minimal property counterexamples.
 5. `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
    `.exe`/ELF (`--target windows|linux`); `klar profile file.klar` shows where time goes.

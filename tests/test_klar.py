@@ -518,6 +518,67 @@ class DeveloperTools(unittest.TestCase):
         shifted = "fn main() uses io {\nprint(\"{1 + 2}\")\n}\n"
         self.assertEqual(format_checked(shifted), "fn main() uses io {\n  print(\"{1 + 2}\")\n}\n")
 
+    def test_patch(self):
+        import tempfile
+        from klar.tools.patch import patch_file
+        src = ("/// Doubles a number.\nfn double(x: Int) -> Int {\n  return x * 2\n}\n\n"
+               "fn main() uses io {\n  print(double(3))\n}\n\n"
+               "test \"double\" {\n  assert double(2) == 4\n}\n")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "m.klar")
+
+            def reset():
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(src)
+
+            def text():
+                with open(path, encoding="utf-8") as f:
+                    return f.read()
+            reset()
+            # replace by name keeps the doc comment; insert after; find in a declaration
+            r = patch_file(path, {"edits": [
+                {"replace": "double", "with": "fn double(x: Int) -> Int {\n  return x + x\n}"},
+                {"insert": "fn triple(x: Int) -> Int {\n  return x * 3\n}", "after": "double"},
+                {"find": "double(3)", "replace": "triple(3)", "in": "main"}], "test": True})
+            self.assertTrue(r["ok"] and r["written"], r)
+            self.assertEqual(r["tests"]["passed"], 1)
+            out = text()
+            self.assertIn("/// Doubles a number.\nfn double(x: Int) -> Int {\n  return x + x\n}", out)
+            self.assertIn("fn triple", out)
+            self.assertIn("print(triple(3))", out)
+            # a type error: nothing is written
+            reset()
+            r = patch_file(path, {"edits": [{"replace": "double", "with": "fn double(x: Int) -> Int {\n"
+                                                                          "  return \"no\"\n}"}]})
+            self.assertFalse(r["ok"] or r["written"])
+            self.assertTrue(r["errors"])
+            self.assertEqual(text(), src)
+            # a failing test rejects the patch
+            r = patch_file(path, {"edits": [{"replace": "double", "with": "fn double(x: Int) -> Int {\n"
+                                                                          "  return x * 3\n}"}], "test": True})
+            self.assertFalse(r["ok"])
+            self.assertEqual(r["tests"]["failed"][0]["name"], "double")
+            self.assertEqual(text(), src)
+            # unknown targets suggest a name; overlapping edits are refused
+            r = patch_file(path, {"edits": [{"delete": "doubel"}]})
+            self.assertIn("did you mean `double`", r["error"])
+            r = patch_file(path, {"edits": [{"delete": "double"}, {"find": "x * 2", "replace": "x"}]})
+            self.assertIn("same part", r["error"])
+            # rename everywhere, delete a test, replace a node by id (dry run)
+            r = patch_file(path, {"edits": [{"rename": "double", "to": "twice"}, {"delete": "test:double"}]})
+            self.assertTrue(r["ok"], r)
+            self.assertNotIn("double", text())
+            self.assertNotIn("test ", text())
+            reset()
+            from klar import nodes as N
+            from klar.parser import parse
+            ids = N.number(parse(src, "m.klar"))
+            lit = next(i for i, n in ids.items() if isinstance(n, N.IntLit) and n.value == 3)
+            r = patch_file(path, {"edits": [{"id": lit, "with": "5"}]}, write=False)
+            self.assertTrue(r["ok"] and not r["written"])
+            self.assertIn("+  print(double(5))", r["diff"])
+            self.assertEqual(text(), src)
+
     def test_eval(self):
         from klar.tools.runtools import evaluate
         r = evaluate(['"a,b".split(",")'])

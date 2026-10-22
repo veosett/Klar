@@ -259,6 +259,8 @@ def register(sub):
     p = sub.add_parser("new", help="create a project skeleton (main.klar with tests, AGENTS.md, README)")
     p.add_argument("path")
     p.set_defaults(fn=cmd_new)
+    from .patch import register as register_patch
+    register_patch(sub)
     from .lsp import register as register_lsp
     register_lsp(sub)
     from .repl import register as register_repl

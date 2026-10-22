@@ -475,6 +475,8 @@ def cmd_ast(args):
     if loaded.program is None:
         emit_json({"ok": False, "diagnostics": [d.to_dict() for d in user_diags(loaded)]})
         return 1
+    from .nodes import number
+    number(loaded.program)
     print(json.dumps(to_json(loaded.program), ensure_ascii=False, indent=1 if args.pretty else None))
     return 0
 
