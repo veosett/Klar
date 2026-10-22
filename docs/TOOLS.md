@@ -24,7 +24,8 @@ Klar задуман так, что основной автор кода — яз
 | изменить код | `klar patch file.klar patch.json --test` | правки по имени объявления или `id` узла; пишется, только если нет новых ошибок и тесты проходят |
 | что не покрыто тестами | `klar coverage file.klar` | процент инструкций и строки, которые тесты не выполняют |
 | понять программу (человеку) | `klar view file.klar --run` | интерактивная HTML-страница: обзор → граф вызовов → функция по шагам |
-| начать проект | `klar new имя` | `main.klar` с тестом и doc-тестом, `AGENTS.md`, README, `.gitignore` |
+| начать проект | `klar new имя [--lib]` | `klar.toml`, `main.klar` (или `lib.klar` пакета) с тестом и doc-тестом, `AGENTS.md`, README, `.gitignore` |
+| зависимости | `klar add имя --git URL --tag v1`, `klar fetch`, `klar update`, `klar deps`, `klar remove имя` | `klar.toml` + `klar.lock`; git-пакеты в `.klar/deps/` |
 | тесты | `klar test file.klar` | test, doc-тесты, property-тесты со сжатием контрпримера |
 | производительность | `klar profile file.klar` | время по функциям и горячие строки |
 | сборка | `klar build file.klar [--target windows]` | один исполняемый файл без зависимостей |
@@ -147,6 +148,23 @@ flowchart LR
   `--dry-run` — только отчёт, `--force` — записать в любом случае. Отчёт `--json`: `ok`, `written`, `applied`,
   `diff`, `errors`, `tests`.
 * PATCH — путь к JSON-файлу, `-` (stdin) или сам JSON.
+
+## Пакеты: klar add / fetch / update / deps / remove
+
+Зависимости объявлены в `klar.toml` проекта (формат — в `docs/SPEC.md`, «Пакеты»). Команды работают в проекте
+текущей папки (или `--dir`):
+
+* `klar add имя --path ../dir` или `--git URL [--tag T | --rev R | --branch B]` — дописывает строку в
+  `[dependencies]` (остальной файл не трогает) и сразу получает пакет (`--no-fetch` — не получать);
+* `klar fetch` — клонирует git-зависимости в `.klar/deps/<имя>` (транзитивно) и ставит коммиты из `klar.lock`;
+  если записи нет или источник в манифесте изменился — берёт тег/ветку/коммит из манифеста и записывает коммит в
+  `klar.lock`. Противоречия (одно имя — разные источники) — ошибка, lock-файл тогда не пишется;
+* `klar update [имена]` — то же, но не держится за `klar.lock`: ветки и теги переезжают на свежие коммиты;
+* `klar deps` — дерево (`--json` для агента; помечает неполученные пакеты);
+* `klar remove имя` — убирает зависимость и обновляет `klar.lock`.
+
+`klar check`/`run`/`build` и `klarc` ничего не скачивают: они только читают `klar.toml` и уже полученные пакеты, а о
+неполученном говорят E0609 с подсказкой `klar fetch`.
 
 ## klar coverage — что не проверено
 

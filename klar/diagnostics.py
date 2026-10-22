@@ -200,6 +200,19 @@ CODES = {
               "Only declarations marked `pub` can be imported: `pub fn`, `pub type`, `pub enum`, `pub const`, "
               "`pub trait`. Everything else is private to its module, so a module's API is exactly its `pub` lines "
               "(`klar outline` shows them). `klar fix` adds the `pub`."),
+    "E0607": ("module name is ambiguous",
+              "The first part of the `use` is both a dependency in klar.toml and a file next to the importing file. "
+              "Rename the file or the dependency."),
+    "E0608": ("conflicting dependencies",
+              "Two manifests give the same dependency name different sources (another path, URL, tag, rev or branch). "
+              "A dependency name means one package in the whole program; make the manifests agree."),
+    "E0609": ("dependency not available",
+              "A git dependency is not fetched yet (run `klar fetch`), or a path dependency points to a directory "
+              "without klar.toml. A package is a directory with a klar.toml; `use name.{x}` loads its lib.klar."),
+    "E0610": ("invalid klar.toml",
+              "klar.toml has [package] (name, version, description, authors, license) and [dependencies]: "
+              "`name = { path = \"../dir\" }` or `name = { git = \"URL\", tag = \"v1\" }` (or rev/branch). "
+              "Values are strings, integers, true/false, inline tables and arrays of strings; `#` starts a comment."),
     "E0603": ("unknown import", "The module does not declare that name. Imports are explicit: `use m.{name}`."),
     "E0604": ("constant used before declaration", "A constant may only use constants declared above it."),
     "E0605": ("property input not generatable", "Property inputs must be data types (no functions or generic parameters)."),

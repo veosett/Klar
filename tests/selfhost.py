@@ -96,6 +96,7 @@ def write_cases(d):
         folder = os.path.join(d, f"case{i}")
         os.makedirs(folder)
         for fname, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(folder, fname)), exist_ok=True)
             with open(os.path.join(folder, fname), "w", encoding="utf-8") as f:
                 f.write(text)
         paths.append(os.path.join(folder, "main.klar"))

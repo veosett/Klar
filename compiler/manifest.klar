@@ -1,0 +1,409 @@
+// `klar.toml` manifests, written in Klar: the TOML subset and the checks of klar/packages.py, with the same
+// messages (the loaders of both compilers report them as E0610).
+//
+//     [package]
+//     name = "app"
+//     [dependencies]
+//     geo = { path = "../geo" }
+//     json5 = { git = "https://example.com/json5.git", tag = "v1.2.0" }
+
+/// A value of the TOML subset: a string, an integer, a boolean, an inline table or an array of strings.
+pub enum TVal {
+  TStr(value: Str),
+  TInt(value: Int),
+  TBool(value: Bool),
+  TTable(entries: List[Pair[Str, TVal]]),
+  TArr(items: List[Str]),
+}
+
+/// A problem in a manifest, on a line (0: not about one line).
+pub type ManifestErr { line: Int, message: Str }
+
+/// A key of a section with its value and line.
+pub type TKey { key: Str, value: TVal, line: Int }
+
+/// A section (`""` for the keys before the first header) with its keys in order.
+pub type TSection { name: Str, line: Int, keys: List[TKey] }
+
+/// A dependency: exactly one of `path` and `git`; for git at most one of tag/rev/branch (`ref_kind`, `ref`).
+pub type Dep { name: Str, path: Option[Str], git: Option[Str], ref_kind: Option[Str], ref: Option[Str], line: Int }
+
+pub type Manifest { root: Str, name: Option[Str], version: Option[Str], deps: List[Dep] }
+
+const RESERVED: List[Str] = ["std", "rt", "prelude"]
+
+/// The reader of one line: its characters and the position.
+type Rd { cs: List[Str], line: Int }
+
+type RR[T] { v: T, i: Int }
+
+fn rfail[T](r: Rd, msg: Str) -> Result[RR[T], ManifestErr] {
+  return Err(ManifestErr { line: r.line, message: msg })
+}
+
+fn ch(r: Rd, i: Int) -> Str {
+  return r.cs.get_or(i, "")
+}
+
+fn ws(r: Rd, i: Int) -> Int {
+  var j = i
+  while ch(r, j) == " " or ch(r, j) == "\t" {
+    j = j + 1
+  }
+  return j
+}
+
+fn expect(r: Rd, i: Int, c: Str) -> Result[Int, ManifestErr] {
+  let j = ws(r, i)
+  if ch(r, j) != c {
+    return Err(ManifestErr { line: r.line, message: "expected `{c}`" })
+  }
+  return Ok(j + 1)
+}
+
+fn is_key_char(c: Str) -> Bool {
+  return c.len() == 1 and (is_lower_char(c) or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_" or c == "-")
+}
+
+fn is_lower_char(c: Str) -> Bool {
+  return c >= "a" and c <= "z"
+}
+
+fn is_digit(c: Str) -> Bool {
+  return c.len() == 1 and c >= "0" and c <= "9"
+}
+
+fn read_key(r: Rd, i: Int) -> Result[RR[Str], ManifestErr] {
+  let j = ws(r, i)
+  if ch(r, j) == "\"" {
+    return read_string(r, j)
+  }
+  var k = j
+  while is_key_char(ch(r, k)) {
+    k = k + 1
+  }
+  if k == j {
+    return rfail(r, "expected a key")
+  }
+  return Ok(RR { v: r.cs.slice(j, k).join(""), i: k })
+}
+
+fn read_string(r: Rd, i: Int) -> Result[RR[Str], ManifestErr] {
+  var j = expect(r: r, i: i, c: "\"")?
+  var out: List[Str] = []
+  while true {
+    if j >= r.cs.len() {
+      return rfail(r, "unterminated string")
+    }
+    let c = ch(r, j)
+    j = j + 1
+    if c == "\"" {
+      return Ok(RR { v: out.join(""), i: j })
+    }
+    if c == "\\" {
+      if j >= r.cs.len() {
+        return rfail(r, "unterminated string")
+      }
+      let esc = ch(r, j)
+      j = j + 1
+      if esc == "n" {
+        out = out.push("\n")
+      } else if esc == "t" {
+        out = out.push("\t")
+      } else if esc == "\"" or esc == "\\" {
+        out = out.push(esc)
+      } else {
+        return rfail(r, "unknown escape `\\{esc}`")
+      }
+    } else {
+      out = out.push(c)
+    }
+  }
+  return rfail(r, "unterminated string")
+}
+
+fn starts_at(r: Rd, i: Int, word: Str) -> Bool {
+  return r.cs.slice(i, i + word.len()).join("") == word
+}
+
+fn read_value(r: Rd, i: Int) -> Result[RR[TVal], ManifestErr] {
+  let j = ws(r, i)
+  let c = ch(r, j)
+  if c == "\"" {
+    let s = read_string(r, j)?
+    return Ok(RR { v: TVal.TStr(value: s.v), i: s.i })
+  }
+  if c == "\{" {
+    return read_table(r, j + 1)
+  }
+  if c == "[" {
+    return read_array(r, j + 1)
+  }
+  var k = j
+  if ch(r, k) == "-" {
+    k = k + 1
+  }
+  let digits = k
+  while is_digit(ch(r, k)) {
+    k = k + 1
+  }
+  if k > digits {
+    let n = r.cs.slice(j, k).join("").to_int().unwrap_or(0)
+    return Ok(RR { v: TVal.TInt(value: n), i: k })
+  }
+  if starts_at(r: r, i: j, word: "true") {
+    return Ok(RR { v: TVal.TBool(value: true), i: j + 4 })
+  }
+  if starts_at(r: r, i: j, word: "false") {
+    return Ok(RR { v: TVal.TBool(value: false), i: j + 5 })
+  }
+  return rfail(r, "expected a value: a string, a number, true/false, `\{ ... \}` or `[ ... ]`")
+}
+
+fn read_table(r: Rd, i: Int) -> Result[RR[TVal], ManifestErr] {
+  var entries: List[Pair[Str, TVal]] = []
+  var j = ws(r, i)
+  if ch(r, j) == "\}" {
+    return Ok(RR { v: TVal.TTable(entries: entries), i: j + 1 })
+  }
+  while true {
+    let k = read_key(r, j)?
+    j = expect(r: r, i: k.i, c: "=")?
+    if entries.any(fn(e) => e.first == k.v) {
+      return rfail(r, "duplicate key `{k.v}`")
+    }
+    let v = read_value(r, j)?
+    entries = entries.push(Pair { first: k.v, second: v.v })
+    j = ws(r, v.i)
+    if ch(r, j) == "," {
+      j = j + 1
+    } else {
+      j = expect(r: r, i: j, c: "\}")?
+      return Ok(RR { v: TVal.TTable(entries: entries), i: j })
+    }
+  }
+  return rfail(r, "expected `\}`")
+}
+
+fn read_array(r: Rd, i: Int) -> Result[RR[TVal], ManifestErr] {
+  var items: List[Str] = []
+  var j = ws(r, i)
+  if ch(r, j) == "]" {
+    return Ok(RR { v: TVal.TArr(items: items), i: j + 1 })
+  }
+  while true {
+    j = ws(r, j)
+    if ch(r, j) != "\"" {
+      return rfail(r, "arrays hold strings")
+    }
+    let s = read_string(r, j)?
+    items = items.push(s.v)
+    j = ws(r, s.i)
+    if ch(r, j) == "," {
+      j = ws(r, j + 1)
+      if ch(r, j) == "]" {
+        return Ok(RR { v: TVal.TArr(items: items), i: j + 1 })
+      }
+    } else {
+      j = expect(r: r, i: j, c: "]")?
+      return Ok(RR { v: TVal.TArr(items: items), i: j })
+    }
+  }
+  return rfail(r, "expected `]`")
+}
+
+/// `[name]` (with an optional comment): the name, else None.
+fn section_header(line: Str) -> Option[Str] {
+  let close = match line.index_of("]") {
+    Some(k) => k,
+    None => {
+      return None
+    },
+  }
+  let inner = line.slice(1, close).trim()
+  let rest = line.slice(close + 1, line.len()).trim()
+  if inner.is_empty() or not (rest.is_empty() or rest.starts_with("#")) {
+    return None
+  }
+  for c in inner.chars() {
+    if not (is_key_char(c) or c == ".") {
+      return None
+    }
+  }
+  return Some(inner)
+}
+
+/// The sections of a TOML-subset text, in order (keys before the first header go to section "").
+pub fn parse_toml(text: Str) -> Result[List[TSection], ManifestErr] {
+  var sections: List[TSection] = [TSection { name: "", line: 0, keys: [] }]
+  var n = 0
+  for raw in text.split("\n") {
+    n = n + 1
+    let line = raw.trim()
+    if line.is_empty() or line.starts_with("#") {
+      continue
+    }
+    if line.starts_with("[") {
+      let name = match section_header(line) {
+        Some(h) => h,
+        None => {
+          return Err(ManifestErr { line: n, message: "a section header is `[name]`" })
+        },
+      }
+      if sections.any(fn(s) => s.name == name) {
+        return Err(ManifestErr { line: n, message: "duplicate section `[{name}]`" })
+      }
+      sections = sections.push(TSection { name: name, line: n, keys: [] })
+      continue
+    }
+    let r = Rd { cs: line.chars(), line: n }
+    let k = read_key(r, 0)?
+    let j = expect(r: r, i: k.i, c: "=")?
+    let v = read_value(r, j)?
+    let e = ws(r, v.i)
+    if e < r.cs.len() and ch(r, e) != "#" {
+      return Err(ManifestErr { line: n, message: "unexpected text after the value" })
+    }
+    let cur = sections.last().unwrap_or(TSection { name: "", line: 0, keys: [] })
+    if cur.keys.any(fn(x) => x.key == k.v) {
+      return Err(ManifestErr { line: n, message: "duplicate key `{k.v}`" })
+    }
+    sections = sections.set(sections.len() - 1, cur with { keys: cur.keys.push(TKey { key: k.v, value: v.v, line: n }) })
+  }
+  return Ok(sections)
+}
+
+/// A snake_case identifier (the name of a package or dependency).
+pub fn is_package_name(s: Str) -> Bool {
+  let cs = s.chars()
+  if cs.is_empty() or not is_lower_char(cs.get_or(0, "")) {
+    return false
+  }
+  return cs.all(fn(c) => is_lower_char(c) or is_digit(c) or c == "_")
+}
+
+fn section(secs: List[TSection], name: Str) -> TSection {
+  return secs.filter(fn(s) => s.name == name).get_or(0, TSection { name: name, line: 0, keys: [] })
+}
+
+fn merr[T](line: Int, msg: Str) -> Result[T, ManifestErr] {
+  return Err(ManifestErr { line: line, message: msg })
+}
+
+fn str_of(v: TVal) -> Option[Str] {
+  return match v {
+    TVal.TStr(s) => Some(s),
+    _ => None,
+  }
+}
+
+fn spec_str(entries: List[Pair[Str, TVal]], k: Str) -> Option[Str] {
+  return match entries.filter(fn(e) => e.first == k).get(0) {
+    Some(e) => str_of(e.second),
+    None => None,
+  }
+}
+
+/// The manifest of the package at `root` (the checks and messages of klar/packages.py).
+pub fn parse_manifest(text: Str, root: Str) -> Result[Manifest, ManifestErr] {
+  let secs = parse_toml(text)?
+  for s in secs {
+    if not ["", "package", "dependencies"].contains(s.name) {
+      return merr(s.line, "unknown section `[{s.name}]` (klar.toml has [package] and [dependencies])")
+    }
+  }
+  for k in section(secs, "").keys {
+    return merr(k.line, "`{k.key}` must be inside [package] or [dependencies]")
+  }
+  let pkg = section(secs, "package")
+  var name: Option[Str] = None
+  var version: Option[Str] = None
+  for k in pkg.keys {
+    if not ["name", "version", "description", "authors", "license"].contains(k.key) {
+      return merr(k.line, "unknown key `{k.key}` in [package] (name, version, description, authors, license)")
+    }
+  }
+  for k in pkg.keys {
+    if k.key == "name" {
+      name = str_of(k.value)
+      if not name.map(fn(x) => is_package_name(x)).unwrap_or(false) {
+        return merr(k.line, "[package] name must be a snake_case identifier")
+      }
+    }
+    if k.key == "version" {
+      version = str_of(k.value)
+    }
+  }
+  var deps: List[Dep] = []
+  for k in section(secs, "dependencies").keys {
+    let d = k.key
+    let line = k.line
+    if not is_package_name(d) or RESERVED.contains(d) {
+      return merr(line, "dependency name `{d}` must be a snake_case identifier other than std, rt and prelude " +
+          "(it is the first part of `use {d}...`)")
+    }
+    let entries = match k.value {
+      TVal.TTable(es) => es,
+      _ => {
+        return merr(line, "write `{d} = \{ path = \"...\" \}` or `{d} = \{ git = \"...\", tag = \"...\" \}`")
+      },
+    }
+    let keys = entries.map(fn(e) => e.first)
+    for key in keys {
+      if not ["path", "git", "tag", "rev", "branch"].contains(key) {
+        return merr(line, "unknown key `{key}` for dependency `{d}` (path, git, tag, rev, branch)")
+      }
+    }
+    if keys.contains("path") == keys.contains("git") {
+      return merr(line, "dependency `{d}` needs exactly one of `path` and `git`")
+    }
+    let refs = ["tag", "rev", "branch"].filter(fn(x) => keys.contains(x))
+    let first_ref = refs.get_or(0, "")
+    if not refs.is_empty() and keys.contains("path") {
+      return merr(line, "`{first_ref}` is for git dependencies, `{d}` has a path")
+    }
+    if refs.len() > 1 {
+      let second_ref = refs.get_or(1, "")
+      return merr(line, "dependency `{d}` names both `{first_ref}` and `{second_ref}`: keep one")
+    }
+    for e in entries {
+      if str_of(e.second).map(fn(x) => x.is_empty()).unwrap_or(true) {
+        return merr(line, "`{e.first}` of dependency `{d}` must be a non-empty string")
+      }
+    }
+    let ref_kind = match refs.is_empty() {
+      true => None,
+      false => Some(first_ref),
+    }
+    deps = deps.push(Dep { name: d, path: spec_str(entries, "path"), git: spec_str(entries, "git"), ref_kind: ref_kind,
+      ref: ref_kind.map(fn(rk) => spec_str(entries, rk).unwrap_or("")), line: line })
+  }
+  return Ok(Manifest { root: root, name: name, version: version, deps: deps })
+}
+
+/// `path ../geo` / `git URL (tag v1)`, as in messages.
+pub fn describe(d: Dep) -> Str {
+  return match d.path {
+    Some(p) => "path " + p,
+    None => {
+      let url = d.git.unwrap_or("")
+      let kind = d.ref_kind.unwrap_or("")
+      return match d.ref {
+        Some(r) => "git {url} ({kind} {r})",
+        None => "git " + url,
+      }
+    },
+  }
+}
+
+test "manifests" {
+  let m = parse_manifest("[package]\nname = \"app\" # c\n[dependencies]\ngeo = \{ path = \"../geo\" \}\n" +
+      "j5 = \{git=\"https://x/y.git\", tag = \"v1\"\}\n", "/r").unwrap_or(Manifest { root: "", name: None, version: None,
+      deps: [] })
+  assert m.name == Some("app")
+  assert m.deps.map(fn(d) => describe(d)) == ["path ../geo", "git https://x/y.git (tag v1)"]
+  assert parse_manifest("x = 1", "/") == Err(ManifestErr { line: 1, message: "`x` must be inside [package] or " +
+      "[dependencies]" })
+  assert parse_toml("[a]]").is_err()
+  assert parse_toml("a = [\"x\", \"y\",]\nb = -3\nc = true # yes").is_ok()
+}

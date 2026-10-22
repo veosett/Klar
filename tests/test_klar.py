@@ -1103,6 +1103,96 @@ class Modules(unittest.TestCase):
             self.assertIn("E0101", [x.code for x in load_path(main).diags])
 
 
+def write_tree(root, files):
+    for name, text in files.items():
+        path = os.path.join(root, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+
+def git_available():
+    import shutil
+    return shutil.which("git") is not None
+
+
+class Packages(unittest.TestCase):
+    """klar.toml, dependencies in `use`, and klar add / fetch / update / remove / deps."""
+
+    GEO = {"klar.toml": "[package]\nname = \"geo\"\n",
+           "lib.klar": "use shapes.{Circle, area}\n\npub fn unit_area() -> Float {\n  return area(Circle { r: 1.0 })\n}\n",
+           "shapes.klar": "pub type Circle { r: Float }\n\npub fn area(c: Circle) -> Float {\n  return 3.0 * c.r * c.r\n}\n"}
+
+    def test_path_dependencies_and_module_names(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_tree(os.path.join(d, "geo"), self.GEO)
+            write_tree(os.path.join(d, "app"), {
+                "klar.toml": "[package]\nname = \"app\"\n\n[dependencies]\ngeo = { path = \"../geo\" }\n",
+                "main.klar": "use geo.{unit_area}\nuse geo.shapes.{Circle, area}\nuse shapes.{double}\n\n"
+                             "fn main() uses io {\n  print(unit_area() + area(Circle { r: 2.0 }) + double(1.0))\n}\n",
+                "shapes.klar": "pub fn double(x: Float) -> Float {\n  return x * 2.0\n}\n"})
+            main = os.path.join(d, "app", "main.klar")
+            lp = load_path(main)
+            self.assertEqual([x.code for x in lp.diags if x.severity == "error"], [])
+            # the project's `shapes` and geo's `shapes` are different modules
+            self.assertEqual(sorted(m.name for m in lp.modules if m.name not in ("prelude",)),
+                             ["geo", "geo.shapes", "main", "shapes"])
+            self.assertEqual(cli("run", "--interp", main)[1], "17.0\n")
+            self.assertEqual(cli("run", main)[1], "17.0\n")
+
+    def test_package_errors(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_tree(d, {"klar.toml": "[dependencies]\ngeo = { path = \"geo\" }\nnet = { git = \"https://x/n.git\" }\n",
+                           "geo.klar": "pub fn f() -> Int {\n  return 1\n}\n", "geo/klar.toml": "",
+                           "main.klar": "use geo.{f}\nuse net.{g}\n\nfn main() uses io {\n  print(1)\n}\n"})
+            codes = [x.code for x in load_path(os.path.join(d, "main.klar")).diags]
+            self.assertIn("E0607", codes)
+            self.assertIn("E0609", codes)
+            write_tree(d, {"klar.toml": "[dependencies]\ngeo = { path = \"geo\", tag = \"v1\" }\n"})
+            ds = [x for x in load_path(os.path.join(d, "main.klar")).diags if x.code == "E0610"]
+            self.assertEqual((ds[0].span.file, ds[0].span.line), ("klar.toml", 2))
+
+    @unittest.skipUnless(git_available(), "needs git")
+    def test_git_dependencies_lock_and_update(self):
+        import subprocess
+
+        def git(*a, cwd):
+            subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", *a], cwd=cwd, check=True,
+                           capture_output=True)
+        with tempfile.TemporaryDirectory() as d:
+            lib = os.path.join(d, "greeter")
+            write_tree(lib, {"klar.toml": "[package]\nname = \"greeter\"\n",
+                             "lib.klar": "pub fn greet() -> Str {\n  return \"v1\"\n}\n"})
+            git("init", "-q", "-b", "main", cwd=lib)
+            git("add", "-A", cwd=lib)
+            git("commit", "-qm", "1", cwd=lib)
+            app = os.path.join(d, "app")
+            self.assertEqual(cli("new", app)[0], 0)
+            with open(os.path.join(app, "main.klar"), "w", encoding="utf-8") as f:
+                f.write("use greeter.{greet}\n\nfn main() uses io {\n  print(greet())\n}\n")
+            import pathlib
+            url = pathlib.Path(lib).as_uri()
+            self.assertEqual(cli("add", "greeter", "--git", url, "--branch", "main", "--dir", app)[0], 0)
+            main = os.path.join(app, "main.klar")
+            self.assertEqual(cli("run", "--interp", main)[1], "v1\n")
+            with open(os.path.join(app, "klar.lock"), encoding="utf-8") as f:
+                self.assertIn('ref = "branch main"', f.read())
+            # a new upstream commit: fetch keeps the locked one, update moves to it
+            with open(os.path.join(lib, "lib.klar"), "w", encoding="utf-8") as f:
+                f.write("pub fn greet() -> Str {\n  return \"v2\"\n}\n")
+            git("commit", "-qam", "2", cwd=lib)
+            self.assertEqual(cli("fetch", "--dir", app)[0], 0)
+            self.assertEqual(cli("run", "--interp", main)[1], "v1\n")
+            self.assertEqual(cli("update", "--dir", app)[0], 0)
+            self.assertEqual(cli("run", "--interp", main)[1], "v2\n")
+            code, out, _ = cli("deps", "--json", "--dir", app)
+            self.assertEqual(json.loads(out)["deps"][0]["name"], "greeter")
+            self.assertEqual(cli("remove", "greeter", "--dir", app)[0], 0)
+            self.assertFalse(os.path.exists(os.path.join(app, "klar.lock")))
+            with open(os.path.join(app, "klar.toml"), encoding="utf-8") as f:
+                self.assertNotIn("greeter", f.read())
+
+
 class Testing(unittest.TestCase):
     def test_property_finds_and_shrinks_counterexample(self):
         loaded = load_source('property "nonneg" (xs: List[Int]) { assert xs.sum() >= 0 }', "t.klar")

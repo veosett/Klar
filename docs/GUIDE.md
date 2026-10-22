@@ -401,6 +401,42 @@ pub fn dist(p: Point) -> Float { ... }
 закрытого имени — ошибка E0606, `klar fix` сам добавит `pub`. Закрытая функция, которую никто не вызывает (тесты
 считаются), — предупреждение W0406: это мёртвый код.
 
+### Пакеты
+
+Проект — это папка с `klar.toml` (`klar new` создаёт его). В нём перечислены зависимости:
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+geometry = { path = "../geometry" }                                   # папка с собственным klar.toml
+json5 = { git = "https://github.com/someone/json5.git", tag = "v1.2.0" }   # или rev = "...", branch = "main"
+```
+
+```mermaid
+flowchart LR
+    main["main.klar<br/>use geometry.{Point}<br/>use geometry.shapes.{Circle}"] --> lib["geometry/lib.klar"]
+    main --> sh["geometry/shapes.klar"]
+    lib --> j["json5/lib.klar<br/>(.klar/deps/json5)"]
+```
+
+Первая часть `use` — имя зависимости: `use geometry.{Point}` загружает `lib.klar` пакета, `use geometry.shapes.{...}`
+— его `shapes.klar`. Модули пакета называются по нему (`geometry`, `geometry.shapes`) и не пересекаются с вашими.
+Одно имя зависимости — один пакет во всей программе: если два `klar.toml` дают ему разные источники, это E0608.
+
+| хочу | команда |
+|---|---|
+| добавить зависимость | `klar add json5 --git URL --tag v1.2.0` или `klar add geometry --path ../geometry` |
+| получить зависимости после `git clone` | `klar fetch` (ставит коммиты из `klar.lock`) |
+| обновить до новых коммитов | `klar update [имя]` |
+| посмотреть дерево | `klar deps` (`--json` для агента) |
+| убрать | `klar remove имя` |
+
+git-зависимости лежат в `.klar/deps/` (в `.gitignore`), точные коммиты — в `klar.lock` (его коммитят). Центрального
+реестра нет: пакет — это git-репозиторий с `klar.toml` и `lib.klar` (`klar new имя --lib`).
+
 ## 13. Как ИИ работает с Klar
 
 ```mermaid

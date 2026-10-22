@@ -159,6 +159,8 @@ This project is written in **Klar**. Get the full language reference (≈2k toke
 4. Look things up instead of guessing: `klar doc split` (built-ins, std, this project), `klar outline main.klar`,
    `klar refs name`, `klar eval '"a,b".split(",")'`, `klar explain E0701`.
 5. Before finishing: `klar coverage main.klar` (untested statements), `klar build main.klar` (native executable).
+6. Packages: dependencies are in `klar.toml`; `klar add name --git URL --tag v1` / `--path ../dir`, then
+   `use name.{{item}}`; `klar fetch` after cloning, `klar deps` shows the tree.
 
 ## Rules that the compiler enforces
 No null/exceptions/indexing; handle `Option`/`Result`; values are immutable (`xs = xs.push(x)`);
@@ -167,17 +169,41 @@ provably non-zero divisor.
 '''
 
 
-def new_project(path):
+LIB_TEMPLATE = '''// {name}: a Klar package. Other projects use it with `klar add {pkg} --git <url>` and `use {pkg}.{{greet}}`;
+// its other files are imported as `use {pkg}.<file>.{{...}}`.
+
+/// Says hello.
+/// >>> assert greet("Ada") == "Hello, Ada!"
+pub fn greet(name: Str) -> Str {{
+  return "Hello, {{name}}!"
+}}
+
+test "greets" {{
+  assert greet("x").starts_with("Hello")
+}}
+'''
+
+
+def package_name(name):
+    """A snake_case package name from a directory name (`My-App` -> `my_app`)."""
+    out = re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_") or "app"
+    return out if out[0].isalpha() else "p_" + out
+
+
+def new_project(path, lib=False):
     name = os.path.basename(os.path.abspath(path))
+    pkg = package_name(name)
     if os.path.exists(path) and os.listdir(path):
         raise FileExistsError(f"{path} exists and is not empty")
     os.makedirs(path, exist_ok=True)
+    entry = "lib.klar" if lib else "main.klar"
+    run = f"klar test {entry}\n" if lib else "klar run main.klar\nklar test main.klar\nklar build main.klar\n"
     files = {
-        "main.klar": MAIN_TEMPLATE.format(name=name),
-        "AGENTS.md": AGENTS_TEMPLATE.format(name=name),
-        "README.md": f"# {name}\n\nWritten in [Klar](https://github.com/veosett/Klar).\n\n"
-                     f"```sh\nklar run main.klar\nklar test main.klar\nklar build main.klar\n```\n",
-        ".gitignore": "build/\n*.exe\n",
+        "klar.toml": f'[package]\nname = "{pkg}"\nversion = "0.1.0"\n\n[dependencies]\n',
+        entry: LIB_TEMPLATE.format(name=name, pkg=pkg) if lib else MAIN_TEMPLATE.format(name=name),
+        "AGENTS.md": AGENTS_TEMPLATE.format(name=name).replace("main.klar", entry),
+        "README.md": f"# {name}\n\nWritten in [Klar](https://github.com/veosett/Klar).\n\n```sh\n{run}```\n",
+        ".gitignore": "build/\n*.exe\n.klar/\n",
     }
     for fname, text in files.items():
         with open(os.path.join(path, fname), "w", encoding="utf-8") as f:

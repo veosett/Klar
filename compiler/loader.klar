@@ -4,7 +4,8 @@
 //
 // Modules are files: `use geometry.{Point}` in `dir/main.klar` loads `dir/geometry.klar`, `use std.json.{...}`
 // loads `<lib>/std/json.klar` (`lib` is the directory of the Python package `klar/`, which holds the prelude, the
-// standard library and the runtime).
+// standard library and the runtime). In a project (a directory with `klar.toml`) the first part of a `use` may name
+// a dependency: `use geo.{Point}` loads `<geo>/lib.klar`, `use geo.shapes.{Circle}` `<geo>/shapes.klar`.
 use ast.{Decl, Program, Span}
 use builtin_sigs.{rt_files}
 use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, load_builtins, new_checker}
@@ -12,6 +13,7 @@ use checker.{private_decl}
 use parser.{parse_program}
 use safety.{analyze}
 use similar.{closest}
+use manifest.{Dep, Manifest, describe, parse_manifest}
 
 pub type Module {
   name: Str,
@@ -23,6 +25,18 @@ pub type Module {
   exports: Map[Str, Export],
   /// imported name -> (the module it comes from, "fn" | "const" | "type")
   import_from: Map[Str, Pair[Str, Str]],
+  /// the root directory of the package the module belongs to (None: not in a project)
+  pkg: Option[Str],
+}
+
+/// A dependency as first registered: where it is, its declaration, and the root of the manifest that names it.
+pub type PkgReg { root: Str, dep: Dep, owner: Str }
+
+/// What is known about the manifest of a package root.
+pub enum ManState {
+  NoManifest,
+  Broken,
+  Good(m: Manifest),
 }
 
 /// The loader state.
@@ -41,6 +55,14 @@ pub type Ld {
   sources: Map[Str, Str],
   /// all runtime files as one module (`load_runtime`)
   runtime: Option[Module],
+  /// the directory of the project's klar.toml (None: no project)
+  project: Option[Str],
+  /// package root -> its manifest
+  manifests: Map[Str, ManState],
+  /// dependency name -> its registration (a name means one package in the whole program)
+  packages: Map[Str, PkgReg],
+  /// dependency root -> its name (module names inside it start with it)
+  dep_names: Map[Str, Str],
 }
 
 /// The result of loading a module: the loader state and the path of the module (None: not loaded).
@@ -165,11 +187,167 @@ fn prelude_module(ld: Ld) -> Option[Module] {
 
 fn failed_module(name: Str, path: Str, display: Str, is_sys: Bool) -> Module {
   return Module { name: name, path: path, display: display, failed: true, is_sys: is_sys, checker: None, exports: Map {},
-    import_from: Map {} }
+    import_from: Map {}, pkg: None }
+}
+
+// ---- packages -----------------------------------------------------------------------------------------------
+
+/// The nearest directory at or above `start` with a klar.toml.
+pub fn find_root(start: Str) -> Option[Str] uses fs {
+  var d = normalize(start)
+  while true {
+    if file_exists(d + "/klar.toml") {
+      return Some(d)
+    }
+    let parent = dirname(d)
+    if parent == d or d == "/" {
+      return None
+    }
+    d = parent
+  }
+  return None
+}
+
+fn dep_root(project: Str, owner: Str, d: Dep) -> Str {
+  return match d.path {
+    Some(p) => match p.starts_with("/") {
+      true => normalize(p),
+      false => normalize(owner + "/" + p),
+    },
+    None => project + "/.klar/deps/" + d.name,
+  }
+}
+
+fn same_source(a: PkgReg, root: Str, d: Dep) -> Bool {
+  return a.root == root and a.dep.git == d.git and a.dep.ref == d.ref
+}
+
+/// The manifest of the package at `root`. Reading it registers its dependencies; a name that another manifest gives
+/// a different source is reported (E0608).
+fn manifest(ld0: Ld, root: Str) -> Pair[Ld, ManState] uses fs {
+  var ld = ld0
+  match ld.manifests.get(root) {
+    Some(st) => {
+      return Pair { first: ld, second: st }
+    },
+    None => {},
+  }
+  ld = ld with { manifests: ld.manifests.set(root, ManState.NoManifest) }
+  let path = root + "/klar.toml"
+  let shown = display_of(ld, path)
+  let text = match read_file(path) {
+    Ok(t) => t,
+    Err(_) => {
+      return Pair { first: ld, second: ManState.NoManifest }
+    },
+  }
+  ld = ld with { sources: ld.sources.set(shown, text) }
+  let man = match parse_manifest(text, root) {
+    Ok(m) => m,
+    Err(e) => {
+      let line = e.line.max(1)
+      ld = add_error(ld: ld, file: shown, d: diag(code: "E0610", msg: "invalid klar.toml: {e.message}", span: Span {
+        line: line, col: 1, end_line: line, end_col: 1 }, hint: Some("see `klar explain E0610` for the format")))
+      return Pair { first: ld with { manifests: ld.manifests.set(root, ManState.Broken) }, second: ManState.Broken }
+    },
+  }
+  ld = ld with { manifests: ld.manifests.set(root, ManState.Good(m: man)) }
+  for d in man.deps {
+    let droot = dep_root(project: ld.project.unwrap_or(root), owner: root, d: d)
+    match ld.packages.get(d.name) {
+      None => {
+        ld = ld with { packages: ld.packages.set(d.name, PkgReg { root: droot, dep: d, owner: root }) }
+        if not ld.dep_names.has(droot) {
+          ld = ld with { dep_names: ld.dep_names.set(droot, d.name) }
+        }
+      },
+      Some(prev) => {
+        if not same_source(a: prev, root: droot, d: d) {
+          let there = display_of(ld, prev.owner + "/klar.toml")
+          ld = add_error(ld: ld, file: shown, d: diag(code: "E0608", msg: "dependency `{d.name}` is {describe(d)} here " +
+              "but {describe(prev.dep)} in {there}", span: Span { line: d.line, col: 1, end_line: d.line, end_col: 1 },
+            hint: Some("a dependency name means one package in the whole program: make the manifests agree")))
+        }
+      },
+    }
+  }
+  return Pair { first: ld, second: ManState.Good(m: man) }
+}
+
+/// How a `use` resolves its first name in the package at `pkg`.
+enum DepUse {
+  NotDep,
+  Unusable,
+  Root(dir: Str),
+}
+
+fn dependency(ld0: Ld, pkg: Option[Str], name: Str, file: Str, span: Span) -> Pair[Ld, DepUse] uses fs {
+  var ld = ld0
+  let root = match pkg {
+    Some(r) => r,
+    None => {
+      return Pair { first: ld, second: DepUse.NotDep }
+    },
+  }
+  let r = manifest(ld0: ld, root: root)
+  ld = r.first
+  let man = match r.second {
+    ManState.Good(m) => m,
+    ManState.Broken => {
+      return Pair { first: ld, second: DepUse.Unusable }
+    },
+    ManState.NoManifest => {
+      return Pair { first: ld, second: DepUse.NotDep }
+    },
+  }
+  let dep = match man.deps.filter(fn(d) => d.name == name).get(0) {
+    Some(d) => d,
+    None => {
+      return Pair { first: ld, second: DepUse.NotDep }
+    },
+  }
+  let droot = match ld.packages.get(name) {
+    Some(reg) => reg.root,
+    None => dep_root(project: ld.project.unwrap_or(root), owner: root, d: dep),
+  }
+  if not file_exists(droot + "/klar.toml") {
+    let where = display_of(ld, droot + "/klar.toml")
+    match dep.git {
+      Some(_) => {
+        ld = add_error(ld: ld, file: file, d: diag(code: "E0609", msg: "dependency `{name}` is not fetched (no `{where}`)",
+          span: span, hint: Some("run `klar fetch` in the project directory")))
+      },
+      None => {
+        let owner_toml = display_of(ld, root + "/klar.toml")
+        ld = add_error(ld: ld, file: file, d: diag(code: "E0609", msg: "dependency `{name}` is not a package: `{where}` " +
+            "does not exist", span: span, hint: Some("a package is a directory with a klar.toml; check `path` of " +
+              "`{name}` in {owner_toml}")))
+      },
+    }
+    return Pair { first: ld, second: DepUse.Unusable }
+  }
+  ld = manifest(ld0: ld, root: droot).first    // (its dependencies are registered, and conflicts reported, on first use)
+  return Pair { first: ld, second: DepUse.Root(dir: droot) }
+}
+
+/// A module of a dependency is named after it (`geo`, `geo.shapes`); the project's modules as written.
+fn module_name(ld: Ld, path: Str, pkg: Option[Str], written: Str) -> Str {
+  let root = pkg.unwrap_or("")
+  return match ld.dep_names.get(root) {
+    Some(dep) => {
+      let rel = relpath(path, root)
+      let stem = rel.slice(0, rel.len() - 5).replace("/", ".")
+      return match stem == "lib" {
+        true => dep,
+        false => dep + "." + stem,
+      }
+    },
+    None => written,
+  }
 }
 
 /// Loads (and checks) the module at `path`, after the modules it imports.
-pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Importer]) -> Loaded uses fs {
+pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Importer], pkg: Option[Str]) -> Loaded uses fs {
   var ld = ld0
   if ld.by_path.has(path) and not ld.stack.contains(path) {
     return Loaded { ld: ld, path: Some(path) }
@@ -236,20 +414,55 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
       Decl.Use(span, dpath, items, item_spans) => {
         let dep_name = dpath.join(".")
         let first = dpath.get_or(0, "")
-        let dep_path = match first == "std" {
+        var dep_path = match first == "std" {
           true => join(std_dir(ld), dpath.drop(1)) + ".klar",
           false => match first == "rt" and is_sys {
             true => join(rt_dir(ld), dpath.drop(1)) + ".klar",
             false => join(here, dpath) + ".klar",
           },
         }
-        if not file_exists(dep_path) {
+        var dep_pkg = pkg
+        var skip = false
+        if first != "std" and not (first == "rt" and is_sys) {
+          let r = dependency(ld0: ld, pkg: pkg, name: first, file: display, span: span)
+          ld = r.first
+          match r.second {
+            DepUse.Unusable => {
+              skip = not file_exists(dep_path)
+            },
+            DepUse.NotDep => {},
+            DepUse.Root(droot) => {
+              if file_exists(dep_path) {
+                ld = add_error(ld: ld, file: display, d: diag(code: "E0607", msg: "`{dep_name}` is both the dependency " +
+                    "`{first}` and the file `{display_of(ld, dep_path)}`", span: span,
+                  hint: Some("rename the file or the dependency in klar.toml")))
+                skip = true
+              } else {
+                dep_pkg = Some(droot)
+                let rest = match dpath.len() > 1 {
+                  true => dpath.drop(1),
+                  false => ["lib"],
+                }
+                dep_path = join(droot, rest) + ".klar"
+                if not file_exists(dep_path) {
+                  ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "module `{dep_name}` not found " +
+                      "(looked for `{display_of(ld, dep_path)}`)", span: span, hint: Some("the package `{first}` has no " +
+                        "such file: `use {first}.\{...\}` loads its lib.klar, `use {first}.name.\{...\}` its name.klar")))
+                  skip = true
+                }
+              }
+            },
+          }
+        }
+        if skip {
+          // (reported above)
+        } else if not file_exists(dep_path) {
           ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "module `{dep_name}` not found (looked for " +
               "`{display_of(ld, dep_path)}`)", span: span, hint: Some("create the file `{display_of(ld, dep_path)}` " +
                 "(modules are files next to the importing file)")))
         } else {
-          let r = load(ld0: ld, path: dep_path, name: dep_name, display: display_of(ld, dep_path),
-            importer: Some(Importer { file: display, span: span }))
+          let r = load(ld0: ld, path: dep_path, name: module_name(ld: ld, path: dep_path, pkg: dep_pkg, written: dep_name),
+            display: display_of(ld, dep_path), importer: Some(Importer { file: display, span: span }), pkg: dep_pkg)
           ld = r.ld
           match r.path.map(fn(p) => r.ld.by_path.get(p)) {
             Some(Some(dep)) => {
@@ -312,7 +525,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
   let ck = check_module(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: display, mod_name: name, sys: is_sys,
     imports: imports))
   let m = Module { name: name, path: path, display: display, failed: false, is_sys: is_sys, checker: Some(ck),
-    exports: exports(ck), import_from: import_from }
+    exports: exports(ck), import_from: import_from, pkg: pkg }
   var diags = ck.diags
   if not is_sys and not diags.any(fn(x) => x.severity == "error") {
     diags = diags.concat(analyze(ck))
@@ -325,16 +538,17 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
 pub fn load_program(path: Str, lib: Str) -> Ld uses fs {
   let root = dirname(path)
   var ld = Ld { root: root, lib: lib, b: load_builtins(), uni: empty_universe(), by_path: Map {}, stack: [], diags: [],
-    prelude: None, order: [], sources: Map {}, runtime: None }
+    prelude: None, order: [], sources: Map {}, runtime: None, project: find_root(root), manifests: Map {}, packages: Map {},
+    dep_names: Map {} }
   let prelude_path = lib + "/prelude.klar"
-  ld = load(ld0: ld, path: prelude_path, name: "prelude", display: "prelude.klar", importer: None).ld
+  ld = load(ld0: ld, path: prelude_path, name: "prelude", display: "prelude.klar", importer: None, pkg: None).ld
   ld = ld with { prelude: Some(prelude_path) }
   let file = basename(path)
   let name = match file.ends_with(".klar") {
     true => file.slice(0, file.len() - 5),
     false => file,
   }
-  return load(ld0: ld, path: path, name: name, display: file, importer: None).ld
+  return load(ld0: ld, path: path, name: name, display: file, importer: None, pkg: ld.project).ld
 }
 
 /// Loads all runtime files (system Klar) as ONE module `klar_rt`, so they can call each other freely.
@@ -375,7 +589,7 @@ pub fn load_runtime(ld0: Ld) -> Ld uses fs {
     }
   }
   let base = Module { name: "klar_rt", path: rt_dir(ld) + "/<all>", display: "rt", failed: true, is_sys: true, checker: None,
-    exports: Map {}, import_from: Map {} }
+    exports: Map {}, import_from: Map {}, pkg: None }
   let head = match first {
     Some(p) => p,
     None => {

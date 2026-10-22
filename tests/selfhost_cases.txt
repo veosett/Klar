@@ -3027,3 +3027,327 @@ fn main() uses io {
   print(abs_val(-3))
   print(count([1]))
 }
+=== packages: path and git dependencies, modules named after their package
+use geo.{Point, describe, unit}
+use geo.shapes.{Circle}
+use util.{twice}
+use fmtx.{fmt}
+
+fn main() uses io {
+  let p = Point { x: 1.0, y: 2.0 }
+  print(describe(Circle { r: 2.0 }))
+  print(describe(unit()))
+  print(fmt(twice(p.x)))
+}
+--- klar.toml
+# the project
+[package]
+name = "app"
+version = "0.1.0"
+authors = ["a", "b",]
+
+[dependencies]
+geo = { path = "vendor/geo" }
+fmtx = { git = "https://example.com/fmtx.git", tag = "v1" }  # fetched
+--- util.klar
+pub fn twice(x: Float) -> Float {
+  return x * 2.0
+}
+--- vendor/geo/klar.toml
+[package]
+name = "geo"
+
+[dependencies]
+fmtx = { git = "https://example.com/fmtx.git", tag = "v1" }
+--- vendor/geo/lib.klar
+use shapes.{Circle, area}
+use fmtx.{fmt}
+
+pub type Point { x: Float, y: Float }
+
+pub fn describe(c: Circle) -> Str {
+  return fmt(area(c))
+}
+
+pub fn unit() -> Circle {
+  return Circle { r: 1.0 }
+}
+
+fn helper() -> Int {
+  return 1
+}
+--- vendor/geo/shapes.klar
+pub type Circle { r: Float }
+
+pub fn area(c: Circle) -> Float {
+  return 3.0 * c.r * c.r
+}
+--- .klar/deps/fmtx/klar.toml
+[package]
+name = "fmtx"
+--- .klar/deps/fmtx/lib.klar
+pub fn fmt(x: Float) -> Str {
+  return "<{x}>"
+}
+=== packages: conflicts, missing packages, ambiguous names, missing files
+use geo.{Point}
+use geo.missing.{x}
+use gone.{y}
+use nowhere.{z}
+use util.{twice}
+use other.{w}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "app"
+
+[dependencies]
+geo = { path = "vendor/geo" }
+gone = { git = "https://example.com/gone.git", branch = "main" }
+nowhere = { path = "no/such/dir" }
+util = { path = "vendor/util" }
+other = { path = "vendor/other" }
+--- util.klar
+pub fn twice(x: Float) -> Float {
+  return x * 2.0
+}
+--- vendor/util/klar.toml
+[package]
+name = "util"
+--- vendor/util/lib.klar
+pub fn twice(x: Float) -> Float {
+  return x
+}
+--- vendor/geo/klar.toml
+[package]
+name = "geo"
+
+[dependencies]
+gone = { git = "https://example.com/gone.git", tag = "v2" }
+nowhere = { path = "../../no/such/dir" }
+--- vendor/geo/lib.klar
+pub type Point { x: Float }
+--- vendor/other/klar.toml
+[package]
+name = "other"
+version = 3
+
+[dependencies]
+geo = { path = "../geo", tag = "v1" }
+--- vendor/other/lib.klar
+pub fn w() -> Int {
+  return 1
+}
+=== packages: a broken manifest
+use geo.{Point}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "app"
+[dependencies]
+geo = { path = "vendor/geo" } x
+=== packages: manifest error 0
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+x = 1
+=== packages: manifest error 1
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = 3
+=== packages: manifest error 2
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = { path = "a", git = "b" }
+=== packages: manifest error 3
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = "1"
+=== packages: manifest error 4
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[weird]
+=== packages: manifest error 5
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+std = { path = "a" }
+=== packages: manifest error 6
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = { git = "u", tag = "a", rev = "b" }
+=== packages: manifest error 7
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = { git = "" }
+=== packages: manifest error 8
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = { git = "u", what = "b" }
+=== packages: manifest error 9
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+foo = "x"
+=== packages: manifest error 10
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "a"
+[package]
+=== packages: manifest error 11
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "a"
+name = "b"
+=== packages: manifest error 12
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "a\q"
+=== packages: manifest error 13
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "unterminated
+=== packages: manifest error 14
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = { path = "a", path = "b" }
+=== packages: manifest error 15
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[dependencies]
+g = { path = "a" 
+=== packages: manifest error 16
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+authors = [1]
+=== packages: manifest error 17
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+version = -
+=== packages: manifest error 18
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[a b]
+=== packages: manifest error 19
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+name = "x"
+[dependencies]
+g = {}
+=== packages: manifest error 20
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+authors = ["a" "b"]
+=== packages: manifest error 21
+use g.{x}
+
+fn main() uses io {
+  print(1)
+}
+--- klar.toml
+[package]
+version = 12x

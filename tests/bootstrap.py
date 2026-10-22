@@ -5,7 +5,8 @@
     stage 3  klarc2 build compiler/klarc.klar        (Klar compiled by Klar)    -> klarc3
 
 All three must be the same bytes, the Windows build of klarc made by klarc2 must equal the one made by `klar build`,
-and klarc3 must build and run working programs, run test blocks and report errors like `klar check`. Linux x86-64 only (it runs the binaries).
+and klarc3 must build and run working programs (also a project with a dependency), run test blocks and report
+errors like `klar check`. Linux x86-64 only (it runs the binaries).
 
     python tests/bootstrap.py
 """
@@ -90,6 +91,21 @@ def main():
         if got.returncode != 0 or "4 passed, 0 failed" not in got.stdout:
             bad += 1
             print(f"DIFF klarc3 test examples/bank.klar: exit {got.returncode}\n{got.stdout[-500:]}")
+        # a project with a dependency (klar.toml)
+        proj = os.path.join(d, "proj")
+        for rel, text in (("app/klar.toml", '[package]\nname = "app"\n\n[dependencies]\ngeo = { path = "../geo" }\n'),
+                          ("app/main.klar", "use geo.{area}\nuse geo.shapes.{Sq}\n\nfn main() uses io {\n"
+                                            "  print(area(Sq { side: 3 }))\n}\n"),
+                          ("geo/klar.toml", '[package]\nname = "geo"\n'),
+                          ("geo/lib.klar", "use shapes.{Sq}\n\npub fn area(s: Sq) -> Int {\n  return s.side * s.side\n}\n"),
+                          ("geo/shapes.klar", "pub type Sq { side: Int }\n")):
+            os.makedirs(os.path.dirname(os.path.join(proj, rel)), exist_ok=True)
+            with open(os.path.join(proj, rel), "w", encoding="utf-8") as f:
+                f.write(text)
+        got = run([stage[2], "run", os.path.join(proj, "app", "main.klar"), "--lib", LIB])
+        if (got.stdout, got.returncode) != ("9\n", 0):
+            bad += 1
+            print(f"DIFF klarc3 run of a project with a path dependency: {got.stdout[:200]!r} {got.stderr[:200]!r}")
         # and reports errors
         proc = run([stage[2], "check", os.path.join("examples", "mistakes.klar"), "--lib", LIB])
         if proc.returncode != 1 or "error[E" not in proc.stdout:

@@ -176,12 +176,12 @@ def cmd_coverage(args):
 def cmd_new(args):
     from .runtools import new_project
     try:
-        files = new_project(args.path)
+        files = new_project(args.path, lib=args.lib)
     except FileExistsError as ex:
         print(f"error: {ex}", file=sys.stderr)
         return 1
     print(f"created {args.path}/: {', '.join(files)}")
-    print(f"next: cd {args.path} && klar dev main.klar")
+    print(f"next: cd {args.path} && klar dev {'lib' if args.lib else 'main'}.klar")
     return 0
 
 
@@ -256,11 +256,14 @@ def register(sub):
     p.add_argument("--open", action="store_true", help="open the page in the browser")
     p.add_argument("--json", action="store_true", help="print the underlying data instead")
     p.set_defaults(fn=cmd_view)
-    p = sub.add_parser("new", help="create a project skeleton (main.klar with tests, AGENTS.md, README)")
+    p = sub.add_parser("new", help="create a project skeleton (klar.toml, main.klar with tests, AGENTS.md, README)")
     p.add_argument("path")
+    p.add_argument("--lib", action="store_true", help="a library package (lib.klar) instead of a program")
     p.set_defaults(fn=cmd_new)
     from .patch import register as register_patch
     register_patch(sub)
+    from .pkg import register as register_pkg
+    register_pkg(sub)
     from .lsp import register as register_lsp
     register_lsp(sub)
     from .repl import register as register_repl

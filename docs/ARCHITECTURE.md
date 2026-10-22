@@ -60,7 +60,8 @@ flowchart TB
 | `nodes.py` | Узлы AST, стабильные `id`, экспорт в JSON (`klar ast`) |
 | `types.py` | Типы, переменные типов, унификация с откатом |
 | `checker.py` | Семантический анализ; режим `sys` для рантайма (тип `Word`, интринсики) |
-| `loader.py` | Модули, prelude, std, сборка рантайма `rt/*.klar` в один модуль `klar_rt` |
+| `loader.py` | Модули, prelude, std, зависимости из `klar.toml`, сборка рантайма `rt/*.klar` в один модуль `klar_rt` |
+| `packages.py` | `klar.toml`: подмножество TOML, проверка манифеста, где лежит зависимость (`tools/pkg.py`: `add`/`fetch`/`update`/`deps`, `klar.lock`) |
 | `builtins.py` | Стандартная библиотека для интерпретатора: сигнатуры **на Klar** + реализации |
 | `interpreter.py` | Эталонное исполнение, контракты, стек вызовов, тест-раннер, property-тесты, профайлер |
 | `codegen.py` | Бэкенд Klar → Python (запасной путь, если native не умеет конструкцию) |

@@ -5,6 +5,16 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 
 ## [Unreleased]
 
+### Added
+- Packages: a project is a directory with `klar.toml` (`[package]`, `[dependencies]` with `name = { path = "..." }` or
+  `name = { git = "...", tag|rev|branch = "..." }`). The first part of a `use` may name a dependency:
+  `use geo.{Point}` loads `<geo>/lib.klar`, `use geo.shapes.{Circle}` its `shapes.klar`; a dependency's modules are
+  named after it, so they never clash with the project's. `klar add`, `klar remove`, `klar fetch` (git dependencies
+  into `.klar/deps/`, commits pinned in `klar.lock`), `klar update`, `klar deps`; `klar new` writes `klar.toml`,
+  `klar new --lib` a library package. New errors: E0607 (a name is both a dependency and a file), E0608 (one name,
+  different sources), E0609 (dependency not fetched / not a package), E0610 (invalid klar.toml). Both compilers
+  resolve dependencies the same way: `compiler/manifest.klar` reads the manifests for `klarc`.
+
 ## [0.7.0] — 2026-10-22
 
 Safer types and safer edits: generic impls, newtypes with invariants, contracts checked at compile time, and a patch

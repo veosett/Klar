@@ -400,6 +400,43 @@ A module's public interface is exactly its `pub` lines (`klar outline` shows the
 private name is error E0606 and `klar fix` adds the `pub`. A private function nothing calls (tests count) is
 warning W0406: dead code.
 
+### Packages
+
+A project is a directory with a `klar.toml` (`klar new` writes one). It lists the dependencies:
+
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+geometry = { path = "../geometry" }                                   # a directory with its own klar.toml
+json5 = { git = "https://github.com/someone/json5.git", tag = "v1.2.0" }   # or rev = "...", branch = "main"
+```
+
+```mermaid
+flowchart LR
+    main["main.klar<br/>use geometry.{Point}<br/>use geometry.shapes.{Circle}"] --> lib["geometry/lib.klar"]
+    main --> sh["geometry/shapes.klar"]
+    lib --> j["json5/lib.klar<br/>(.klar/deps/json5)"]
+```
+
+The first part of a `use` is the dependency's name: `use geometry.{Point}` loads the package's `lib.klar`,
+`use geometry.shapes.{...}` its `shapes.klar`. A package's modules are named after it (`geometry`,
+`geometry.shapes`), so they never clash with yours. A dependency name means one package in the whole program: two
+`klar.toml` files giving it different sources is E0608.
+
+| I want to | command |
+|---|---|
+| add a dependency | `klar add json5 --git URL --tag v1.2.0` or `klar add geometry --path ../geometry` |
+| get the dependencies after `git clone` | `klar fetch` (checks out the commits in `klar.lock`) |
+| move to newer commits | `klar update [name]` |
+| see the tree | `klar deps` (`--json` for an agent) |
+| drop one | `klar remove name` |
+
+Git dependencies live in `.klar/deps/` (git-ignored), their exact commits in `klar.lock` (commit it). There is no
+central registry: a package is a git repository with `klar.toml` and `lib.klar` (`klar new name --lib`).
+
 ## 13. How an AI works with Klar
 
 ```mermaid
