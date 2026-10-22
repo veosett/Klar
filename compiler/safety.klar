@@ -3,7 +3,9 @@
 //
 //   E0701  Int division / remainder by a value that is not proven non-zero (Float only when certainly 0.0)
 //   E0702  unconditional recursion
-//   E0703  a call whose constant arguments violate the callee's `requires`
+//   E0703  a call whose arguments certainly violate the callee's `requires` (constants, or a simple contract that
+//          the signs known at the call contradict)
+//   E0706  a `return` whose value certainly violates a simple `ensures`
 //   E0704  a constant argument outside a built-in's domain
 //   E0705  a list index that is out of bounds on every call
 //   E0215  sorting / min / max of values that have no order
@@ -53,6 +55,8 @@ type Sf {
   loopvars: Map[Str, Int],
   var_init: Map[Str, Int],
   memo: Map[Str, Int],
+  /// > 0 inside a lambda (its `return`s leave the lambda, not the function)
+  in_lambda: Int,
 }
 
 /// A result with the updated state.
@@ -967,10 +971,18 @@ fn stmt(sf: Sf, st: Stmt, facts: Facts) -> SR[Flow] {
       let after = invalidate(facts, [name]).set(name, Fact { sign: r.v, vars: [name] })
       return flow(s: r.s, facts: after, exits: false)
     },
-    Stmt.Return(_, value) => {
+    Stmt.Return(sp, value) => {
       match value {
         Some(v) => {
           s = expr(sf: s, e: v, facts: facts)
+          match s.decl {
+            Some(d) => {
+              if not d.post.is_empty() and s.in_lambda == 0 {
+                s = check_ensures(sf: s, d: d, span: sp, value: v, facts: facts)
+              }
+            },
+            None => {},
+          }
         },
         None => {},
       }
@@ -1154,22 +1166,24 @@ fn expr(sf: Sf, e: Expr, facts: Facts) -> Sf {
     Expr.Lambda(_, _, _, body) => {
       let own = s.vars.keys()
       let lf = facts.filter(fn(_, f) => not f.vars.any(fn(v) => own.contains(v)))
-      return match body {
+      s = s with { in_lambda: s.in_lambda + 1 }
+      s = match body {
         Body.BlockBody(b) => walk(sf: s, stmts: b.stmts, facts: lf).s,
         Body.ExprBody(x) => expr(sf: s, e: x, facts: lf),
       }
+      return s with { in_lambda: s.in_lambda - 1 }
     },
     Expr.Call(_, callee, args) => {
       s = exprs(sf: s, es: args.map(fn(a) => a.value), facts: facts)
       s = expr(sf: s, e: callee, facts: facts)
-      s = check_contract(s, e)
+      s = check_contract(sf: s, e: e, facts: facts)
       return check_builtin_call(s, e)
     },
     Expr.MethodCall(_, obj, _, _, args) => {
       s = expr(sf: s, e: obj, facts: facts)
       s = exprs(sf: s, es: args.map(fn(a) => a.value), facts: facts)
       s = check_builtin(sf: s, e: e, facts: facts)
-      return check_contract(s, e)
+      return check_contract(sf: s, e: e, facts: facts)
     },
     _ => {},
   }
@@ -1457,7 +1471,7 @@ fn call_args(e: Expr) -> List[Arg] {
   }
 }
 
-fn check_contract(sf: Sf, e: Expr) -> Sf {
+fn check_contract(sf: Sf, e: Expr, facts: Facts) -> Sf {
   let found = match callee_of(sf, e) {
     Some(c) => c,
     None => {
@@ -1506,7 +1520,230 @@ fn check_contract(sf: Sf, e: Expr) -> Sf {
         span: expr_span(e), hint: "pass arguments that satisfy the precondition")
     }
   }
-  return sf
+  // simple contracts against the signs known here (`if n <= 0 \{ f(n) \}` with `requires n > 0`)
+  var s = sf
+  let names = env.keys()
+  for r in callee.pre {
+    for need in required_signs(c: r, names: names, truth: true) {
+      let is_len = need.first.ends_with(".len()")
+      let pname = match is_len {
+        true => need.first.slice(0, need.first.len() - 6),
+        false => need.first,
+      }
+      match env.get(pname) {
+        Some(arg) => {
+          let have = match is_len {
+            true => SR { s: s, v: len_sign(sf: s, e: arg, facts: facts) },
+            false => sign_of(sf: s, e: arg, facts: facts, override: None, computing: []),
+          }
+          s = have.s
+          if have.v != 0 and have.v.bit_and(need.second) == 0 {
+            let shown_name = match callee.owner_kind {
+              Some(_) => callee.name.split(".").last().unwrap_or(callee.name),
+              None => callee.name,
+            }
+            let text = match arg {
+              Expr.ListLit(_, items) => match items.is_empty() {
+                true => "[]",
+                false => "[...]",
+              },
+              _ => source_text(arg),
+            }
+            let state = match is_len {
+              true => match have.v == ZERO {
+                true => "is empty",
+                false => "is not empty",
+              },
+              false => "is " + sign_word(have.v),
+            }
+            return add_error(sf: s, code: "E0703", msg: "this call always violates `requires {source_text(r)}` of " +
+                "`{shown_name}`", span: expr_span(e), hint: "here `{text}` {state}: check it before the call")
+          }
+        },
+        None => {},
+      }
+    }
+  }
+  return s
+}
+
+/// A `return` whose value certainly violates a simple `ensures` of the function (E0706).
+fn check_ensures(sf: Sf, d: FnDecl, span: Span, value: Expr, facts: Facts) -> Sf {
+  var s = sf
+  for en in d.post {
+    for need in required_signs(c: en, names: ["result"], truth: true) {
+      let is_len = need.first == "result.len()"
+      let have = match is_len {
+        true => SR { s: s, v: len_sign(sf: s, e: value, facts: facts) },
+        false => sign_of(sf: s, e: value, facts: facts, override: None, computing: []),
+      }
+      s = have.s
+      if have.v != 0 and have.v.bit_and(need.second) == 0 {
+        let state = match is_len {
+          true => match have.v == ZERO {
+            true => "empty",
+            false => "not empty",
+          },
+          false => sign_word(have.v),
+        }
+        return add_error(sf: s, code: "E0706", msg: "this `return` always violates `ensures {source_text(en)}` of " +
+            "`{d.name}`", span: span, hint: "here the result is {state}")
+      }
+    }
+  }
+  return s
+}
+
+/// The sign of `e.len()`: known from conditions (`if xs.is_empty()`), or a list literal's length.
+fn len_sign(sf: Sf, e: Expr, facts: Facts) -> Int {
+  match e {
+    Expr.ListLit(_, items) => {
+      return sign_of_int(items.len())
+    },
+    _ => {},
+  }
+  return match keyof(sf, e) {
+    Some(k) => facts.get(k + ".len()").map(fn(f) => f.sign).unwrap_or(NONNEG),
+    None => NONNEG,
+  }
+}
+
+fn sign_word(s: Int) -> Str {
+  return match s {
+    4 => "positive",
+    1 => "negative",
+    2 => "0",
+    6 => ">= 0",
+    3 => "<= 0",
+    5 => "not 0",
+    _ => "any number",
+  }
+}
+
+/// The sign of x when `x op y` holds and y has the sign set `sy` (None: nothing follows).
+fn sign_from(op: Str, sy: Int) -> Option[Int] {
+  if op == "==" {
+    return Some(sy)
+  }
+  if op == "!=" and sy == ZERO {
+    return Some(NONZERO)
+  }
+  if op == ">" and subset(sy, NONNEG) {
+    return Some(POS)
+  }
+  if op == ">=" and subset(sy, POS) {
+    return Some(POS)
+  }
+  if op == ">=" and subset(sy, NONNEG) {
+    return Some(NONNEG)
+  }
+  if op == "<" and subset(sy, NONPOS) {
+    return Some(NEG)
+  }
+  if op == "<=" and subset(sy, NEG) {
+    return Some(NEG)
+  }
+  if op == "<=" and subset(sy, NONPOS) {
+    return Some(NONPOS)
+  }
+  return None
+}
+
+/// The sign of a number literal (`3`, `-0.5`).
+fn literal_sign(e: Expr) -> Option[Int] {
+  return match e {
+    Expr.IntLit(_, v) => Some(sign_of_int(v)),
+    Expr.FloatLit(_, v) => Some(sign_of_float(v)),
+    Expr.Unary(_, "-", Expr.IntLit(_, v)) => Some(flip(sign_of_int(v))),
+    Expr.Unary(_, "-", Expr.FloatLit(_, v)) => Some(flip(sign_of_float(v))),
+    _ => None,
+  }
+}
+
+/// `n` or `xs.len()` for a name in `names` (a parameter, or `result`).
+fn contract_subject(e: Expr, names: List[Str]) -> Option[Str] {
+  return match e {
+    Expr.Name(_, n) => match names.contains(n) {
+      true => Some(n),
+      false => None,
+    },
+    Expr.MethodCall(_, Expr.Name(_, n), "len", _, args) => match args.is_empty() and names.contains(n) {
+      true => Some(n + ".len()"),
+      false => None,
+    },
+    _ => None,
+  }
+}
+
+/// What `x op y` demands of x, a contract subject, when y is a number literal.
+fn side_need(x: Expr, op: Str, y: Expr, names: List[Str]) -> Option[Pair[Str, Int]] {
+  return match contract_subject(x, names) {
+    Some(k) => match literal_sign(y) {
+      Some(sy) => sign_from(op, sy).map(fn(s) => Pair { first: k, second: s }),
+      None => None,
+    },
+    None => None,
+  }
+}
+
+/// Adds a demand to the list, intersecting it with an earlier one on the same subject.
+fn merge_need(needs: List[Pair[Str, Int]], key: Str, sign: Int) -> List[Pair[Str, Int]] {
+  return match needs.map(fn(n) => n.first).index_of(key) {
+    Some(i) => {
+      let before = needs.get_or(i, Pair { first: key, second: ANY_SIGN }).second
+      return needs.set(i, Pair { first: key, second: before.bit_and(sign) })
+    },
+    None => needs.push(Pair { first: key, second: sign }),
+  }
+}
+
+/// What a simple contract demands of the signs of `names` (in order): from comparisons with number literals
+/// (`n > 0`, `0 <= n`, `x != 0.0`), `xs.is_empty()`, `not` and `and`; other conditions demand nothing.
+fn required_signs(c: Expr, names: List[Str], truth: Bool) -> List[Pair[Str, Int]] {
+  var out: List[Pair[Str, Int]] = []
+  match c {
+    Expr.Binary(_, "and", l, r) => {
+      if truth {
+        for part in [l, r] {
+          for need in required_signs(c: part, names: names, truth: true) {
+            out = merge_need(needs: out, key: need.first, sign: need.second)
+          }
+        }
+      }
+      return out
+    },
+    Expr.Unary(_, "not", x) => {
+      return required_signs(c: x, names: names, truth: not truth)
+    },
+    Expr.MethodCall(_, Expr.Name(_, n), "is_empty", _, args) => {
+      if args.is_empty() and names.contains(n) {
+        let s = match truth {
+          true => ZERO,
+          false => POS,
+        }
+        return [Pair { first: n + ".len()", second: s }]
+      }
+      return out
+    },
+    Expr.Binary(_, op, l, r) => {
+      if ["<", ">", "<=", ">=", "==", "!="].contains(op) {
+        let o = match truth {
+          true => op,
+          false => negate_op(op),
+        }
+        for need in [side_need(x: l, op: o, y: r, names: names), side_need(x: r, op: swap_op(o), y: l, names: names)] {
+          match need {
+            Some(n) => {
+              out = merge_need(needs: out, key: n.first, sign: n.second)
+            },
+            None => {},
+          }
+        }
+      }
+    },
+    _ => {},
+  }
+  return out
 }
 
 // ---- unconditional recursion --------------------------------------------------------------------------------
@@ -1605,7 +1842,8 @@ fn check_recursion(sf: Sf, d: FnDecl) -> Sf {
 // ---- driver -------------------------------------------------------------------------------------------------
 
 fn begin(sf: Sf, decl: Option[FnDecl], params: List[Str]) -> Sf {
-  return sf with { decl: decl, params: params, vars: Map {}, lets: Map {}, loopvars: Map {}, var_init: Map {}, memo: Map {} }
+  return sf with { decl: decl, params: params, vars: Map {}, lets: Map {}, loopvars: Map {}, var_init: Map {}, memo: Map {},
+    in_lambda: 0 }
 }
 
 /// The `var`s and `let`s of a body (flow-insensitive summaries).
@@ -1678,6 +1916,7 @@ pub fn analyze(ck: Ck) -> List[Diag] {
     loopvars: Map {},
     var_init: Map {},
     memo: Map {},
+    in_lambda: 0,
   }
   for d in ck.decls {
     match d {

@@ -170,7 +170,9 @@ it type-checks anywhere, warns (W0404) and fails at runtime (R0012) — use it t
   `assert b != 0`, `if xs.is_empty() { return ... }` before dividing by `xs.len()`, `ensures result > 0` on the
   function that produced `b`, or a `var` that starts positive and only grows (`var d = 3 ... d = d + 2`).
 - A function that calls itself on every path is an error (E0702) — write the base case first.
-- Calls with constant arguments are checked against `requires` (E0703) and built-in domains (E0704).
+- Calls with constant arguments are checked against `requires` (E0703) and built-in domains (E0704); simple contracts
+  (`n > 0`, `x != 0.0`, `not xs.is_empty()`) also against the signs the conditions prove (`if n <= 0 { f(n) }` → E0703),
+  and `return`s against simple `ensures` (`ensures result >= 0` + `return -1` → E0706).
 - `sort`/`min`/`max` need Int/Float/Str elements (E0215); for records use `sort_by(fn(p) => p.field)`.
 - No null, no exceptions, no indexing, no overflow, no shared mutation — those failures cannot be written.
 

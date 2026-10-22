@@ -2956,3 +2956,74 @@ fn main() uses io {
   print("{c.value} {h.value(1)} {t.value} {Celsius(-300.0)}")
   let n: Int = Code(3)
 }
+=== static contracts: signs known at calls and returns
+fn isqrt(n: Int) -> Int
+  requires n >= 0
+{
+  return n
+}
+
+fn inv(x: Float) -> Float
+  requires x != 0.0
+{
+  return 1.0 / x
+}
+
+fn head(xs: List[Int]) -> Int
+  requires not xs.is_empty()
+{
+  return xs.get_or(0, 0)
+}
+
+fn pos(n: Int) -> Int
+  requires n > 0 and n < 1000
+{
+  return n
+}
+
+fn abs_val(n: Int) -> Int
+  ensures result >= 0
+{
+  if n < 0 {
+    return -n
+  }
+  if n == 0 {
+    return -1
+  }
+  return n
+}
+
+fn count(xs: List[Int]) -> List[Int]
+  ensures not result.is_empty()
+{
+  if xs.is_empty() {
+    return xs
+  }
+  let f = fn(y: Int) -> Int {
+    return -1
+  }
+  return xs.map(f)
+}
+
+fn run(n: Int) uses io {
+  if n < 0 {
+    print(isqrt(n))
+  }
+  let z = 0.0
+  print(inv(z))
+  print(head([]))
+  let xs: List[Int] = []
+  if xs.is_empty() {
+    print(head(xs))
+  }
+  var d = 3
+  d = d + 1
+  print(pos(d))
+  print(pos(-d))
+}
+
+fn main() uses io {
+  run(5)
+  print(abs_val(-3))
+  print(count([1]))
+}

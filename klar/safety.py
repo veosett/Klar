@@ -7,7 +7,9 @@ run-time failures:
   E0701  Int division / remainder by a value that is not proven non-zero
          (Float division only when the divisor is certainly 0.0)
   E0702  unconditional recursion (every path calls the function again -> stack overflow)
-  E0703  a call whose constant arguments violate the callee's `requires`
+  E0703  a call whose arguments certainly violate the callee's `requires`: constant arguments, or a simple contract
+         (`n > 0`, `x != 0.0`, `not xs.is_empty()`, ...) that the signs known at the call contradict
+  E0706  a `return` whose value certainly violates a simple `ensures` (`ensures result >= 0` and `return -1`)
   E0704  a constant argument outside a built-in's domain (negative `pow` exponent, `sqrt(-1.0)`, ...)
   E0705  a list index that is out of bounds on every call (`xs.get(xs.len())`, negative index)
   E0215  sorting / min / max of values that have no order
@@ -39,6 +41,78 @@ ORDERED = ("Int", "Float", "Str")
 
 def sign_of_number(v):
     return S_POS if v > 0 else S_NEG if v < 0 else S_ZERO
+
+
+SIGN_WORDS = {S_POS: "positive", S_NEG: "negative", S_ZERO: "0", NONNEG: ">= 0", NONPOS: "<= 0", NONZERO: "not 0",
+              ANY: "any number"}
+
+
+def sign_from(op, sy):
+    """The sign of x when `x op y` holds and y has the sign set `sy` (None: nothing follows)."""
+    if op == "==":
+        return sy
+    if op == "!=" and sy == S_ZERO:
+        return NONZERO
+    if op == ">" and sy <= NONNEG:
+        return S_POS
+    if op == ">=" and sy <= S_POS:
+        return S_POS
+    if op == ">=" and sy <= NONNEG:
+        return NONNEG
+    if op == "<" and sy <= NONPOS:
+        return S_NEG
+    if op == "<=" and sy <= S_NEG:
+        return S_NEG
+    if op == "<=" and sy <= NONPOS:
+        return NONPOS
+    return None
+
+
+def literal_number(e):
+    if isinstance(e, (N.IntLit, N.FloatLit)) and not isinstance(e.value, bool):
+        return e.value
+    if isinstance(e, N.Unary) and e.op == "-" and isinstance(e.operand, (N.IntLit, N.FloatLit)):
+        return -e.operand.value
+    return None
+
+
+def contract_subject(e, names):
+    """`n` or `xs.len()` for a name in `names` (a parameter, or `result`), else None."""
+    if isinstance(e, N.Name) and e.name in names:
+        return e.name
+    if isinstance(e, N.MethodCall) and e.method == "len" and not e.args and isinstance(e.obj, N.Name) and \
+            e.obj.name in names:
+        return e.obj.name + ".len()"
+    return None
+
+
+def required_signs(c, names, truth=True):
+    """What a simple contract demands of the signs of `names`: {`n` / `xs.len()`: sign set}, from comparisons with
+    number literals (`n > 0`, `0 <= n`, `x != 0.0`), `xs.is_empty()`, `not` and `and`; other conditions demand
+    nothing."""
+    out = {}
+    if isinstance(c, N.Binary) and c.op == "and":
+        if truth:
+            for part in (c.left, c.right):
+                for k, s in required_signs(part, names, True).items():
+                    out[k] = out.get(k, ANY) & s
+        return out
+    if isinstance(c, N.Unary) and c.op == "not":
+        return required_signs(c.operand, names, not truth)
+    if isinstance(c, N.MethodCall) and c.method == "is_empty" and not c.args and isinstance(c.obj, N.Name) and \
+            c.obj.name in names:
+        out[c.obj.name + ".len()"] = S_ZERO if truth else S_POS
+        return out
+    if isinstance(c, N.Binary) and c.op in SWAP:
+        op = c.op if truth else NEGATE[c.op]
+        for x, o, y in ((c.left, op, c.right), (c.right, SWAP[op], c.left)):
+            k = contract_subject(x, names)
+            n = literal_number(y)
+            if k is not None and n is not None:
+                s = sign_from(o, sign_of_number(n))
+                if s is not None:
+                    out[k] = out.get(k, ANY) & s
+    return out
 
 
 def s_add(a, b):
@@ -135,6 +209,7 @@ class Safety:
         self.var_init = {}      # var name -> sign of its initial value (with the facts at the declaration)
         self.memo = {}
         self.computing = set()
+        self.in_lambda = 0
 
     def function(self, d):
         self.begin(d, [p.name for p in d.params])
@@ -335,6 +410,8 @@ class Safety:
         if isinstance(s, N.Return):
             if s.value is not None:
                 self.expr(s.value, facts)
+                if self.decl is not None and self.decl.ensures and not self.in_lambda:
+                    self.check_ensures(s, facts)
             return facts, True
         if isinstance(s, (N.Break, N.Continue)):
             return facts, True
@@ -428,16 +505,18 @@ class Safety:
             return
         if isinstance(e, N.Lambda):
             lf = {k: v for k, v in facts.items() if not (v[1] & set(self.vars))}
+            self.in_lambda += 1           # (its `return`s leave the lambda, not the function)
             if isinstance(e.body, N.Block):
                 self.walk(e.body.stmts, lf)
             else:
                 self.expr(e.body, lf)
+            self.in_lambda -= 1
             return
         if isinstance(e, N.Call):
             for a in e.args:
                 self.expr(a.value, facts)
             self.expr(e.callee, facts)
-            self.check_contract(e)
+            self.check_contract(e, facts)
             self.check_builtin_call(e)
             return
         if isinstance(e, N.MethodCall):
@@ -445,7 +524,7 @@ class Safety:
             for a in e.args:
                 self.expr(a.value, facts)
             self.check_builtin(e, facts)
-            self.check_contract(e)
+            self.check_contract(e, facts)
             return
         for child in children(e):
             self.expr(child, facts)
@@ -580,7 +659,7 @@ class Safety:
                                hint="the call would always fail at run time (R0009)")
                     return
 
-    def check_contract(self, e):
+    def check_contract(self, e, facts):
         callee, positional = self.callee_of(e)
         if callee is None or not callee.requires:
             return
@@ -608,6 +687,39 @@ class Safety:
                            e.span, hint="pass arguments that satisfy the precondition",
                            notes=[f"values: {shown}"] if shown else None)
                 return
+        # simple contracts against the signs known here (`if n <= 0 { f(n) }` with `requires n > 0`)
+        for r in callee.requires:
+            for k, need in required_signs(r, set(env)).items():
+                name, is_len = (k[:-6], True) if k.endswith(".len()") else (k, False)
+                arg = env[name]
+                have = self.len_sign(arg, facts) if is_len else self.sign_of(arg, facts)
+                if have and not (have & need):
+                    shown_name = callee.name.split(".")[-1] if callee.owner_kind else callee.name
+                    text = ("[]" if not arg.items else "[...]") if isinstance(arg, N.ListLit) else source_text(arg)
+                    state = ("is empty" if have == S_ZERO else "is not empty") if is_len else f"is {SIGN_WORDS[have]}"
+                    self.error("E0703", f"this call always violates `requires {source_text(r)}` of `{shown_name}`",
+                               e.span, hint=f"here `{text}` {state}: check it before the call")
+                    return
+
+    def len_sign(self, e, facts):
+        """The sign of `e.len()`: known from conditions (`if xs.is_empty()`), or a list literal's length."""
+        if isinstance(e, N.ListLit):
+            return sign_of_number(len(e.items))
+        k = keyof(e)
+        if k is not None and k + ".len()" in facts:
+            return facts[k + ".len()"][0]
+        return NONNEG
+
+    def check_ensures(self, s, facts):
+        """A `return` whose value certainly violates a simple `ensures` of the function (E0706)."""
+        for en in self.decl.ensures:
+            for k, need in required_signs(en, {"result"}).items():
+                have = self.len_sign(s.value, facts) if k == "result.len()" else self.sign_of(s.value, facts)
+                if have and not (have & need):
+                    state = ("empty" if have == S_ZERO else "not empty") if k == "result.len()" else SIGN_WORDS[have]
+                    self.error("E0706", f"this `return` always violates `ensures {source_text(en)}` of "
+                                        f"`{self.decl.name}`", s.span, hint=f"here the result is {state}")
+                    return
 
     # ---- unconditional recursion -----------------------------------------------------------------
     def check_recursion(self, d):

@@ -214,13 +214,18 @@ CODES = {
               "Every path through the function calls itself before it can return, so it would recurse until "
               "the stack overflows. Add a base case that returns without the recursive call."),
     "E0703": ("precondition violated at compile time",
-              "The call passes constant arguments for which a `requires` clause of the callee is false."),
+              "The call passes constant arguments for which a `requires` clause of the callee is false, or a simple "
+              "`requires` (`n > 0`, `x != 0.0`, `not xs.is_empty()`) contradicts what the conditions before the call "
+              "prove about the argument (`if n <= 0 { f(n) }`)."),
     "E0704": ("invalid constant argument to built-in",
               "The argument is outside the built-in's domain (negative `Int.pow` exponent, `sqrt` of a negative "
               "number, `ln` of a non-positive number, `chunks(0)`, ...), so the call could only fail."),
     "E0705": ("index always out of bounds",
               "Indexes go from 0 to `len() - 1`: `xs.get(xs.len())` and negative indexes never find an element. "
               "Use `xs.last()` for the last element."),
+    "E0706": ("postcondition violated at compile time",
+              "A `return` gives a value that certainly breaks a simple `ensures` of its function (`ensures result >= 0` "
+              "and `return -1`, or `ensures not result.is_empty()` and returning an empty list)."),
     # runtime
     "R0001": ("division by zero", "Only possible for Float division by a value computed at run time "
               "(Int division by zero is rejected at compile time: E0701). Check the divisor before dividing."),

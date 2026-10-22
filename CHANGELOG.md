@@ -22,6 +22,11 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   (`type Percent = new Int` / `requires value >= 0 and value <= 100`): checked at run time (R0002) and at compile time
   for known arguments (E0703). Record literals and `with` on a newtype are rejected (E0217). Generic newtypes
   (`type Id[T] = new Int`), impls and `pub` work; `use m.{Meters}` imports the type and its constructor.
+- Static checking of simple contracts: a `requires` that compares a parameter (or its `len()`) with a number literal,
+  `is_empty()`, `not` and `and` is checked against the signs the safety analysis knows at each call — `if n <= 0 {
+  root(n) }` with `requires n >= 0`, `first([])` with `requires not xs.is_empty()` are E0703 — and the same kind of
+  `ensures` against every `return` (E0706: `ensures result >= 0` and `return -1`). Errors only when the violation is
+  certain; newtype invariants are checked the same way.
 
 ## [0.6.0] — 2026-10-22
 

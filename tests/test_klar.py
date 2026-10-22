@@ -469,6 +469,22 @@ class CompileTimeSafety(unittest.TestCase):
         self.assertEqual(errors(src), ["E0703"])
         self.assertEqual(errors(src.replace("half(3)", "half(4)")), [])
 
+    def test_contracts_checked_with_known_signs(self):
+        lib = ("fn root(n: Int) -> Int\n  requires n >= 0\n{\n  return n\n}\n\n"
+               "fn first(xs: List[Int]) -> Int\n  requires not xs.is_empty()\n{\n  return xs.get_or(0, 0)\n}\n\n"
+               "pub fn size(n: Int) -> Int\n  ensures result > 0\n{\n  if n > 0 {\n    return n\n  }\n  return BODY\n}\n\n")
+
+        def errs(call, body="1"):
+            return errors(lib.replace("BODY", body) + "pub fn g(n: Int, xs: List[Int]) -> Int {\n" + call + "\n}\n")
+        self.assertEqual(errs("  if n < 0 {\n    return root(n)\n  }\n  return root(n)"), ["E0703"])
+        self.assertEqual(errs("  if xs.is_empty() {\n    return first(xs)\n  }\n  return first(xs)"), ["E0703"])
+        self.assertEqual(errs("  return first([])"), ["E0703"])
+        self.assertEqual(errs("  return root(n) + first(xs) + root(n * n) + first([n])"), [])
+        self.assertEqual(errs("  return 0", body="0"), ["E0706"])
+        self.assertEqual(errs("  return 0", body="-n"), [])           # n <= 0 here: -n >= 0, not proven > 0
+        d = [x for x in diags(lib.replace("BODY", "0")) if x.code == "E0706"][0]
+        self.assertEqual(d.hint, "here the result is 0")
+
     def test_builtin_domain(self):
         self.assertEqual(errors("fn main() uses io { print(2.pow(-1)) }"), ["E0704"])
         self.assertEqual(errors("fn main() uses io { print((-4.0).sqrt()) }"), ["E0704"])

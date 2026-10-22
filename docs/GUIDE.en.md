@@ -367,7 +367,8 @@ Also rejected before running:
 | shadowing a variable | E0102 |
 | calling an effectful function without `uses` | E0401 |
 | recursion without a base case | E0702 |
-| constant arguments that violate `requires` | E0703 |
+| a call that certainly violates `requires` (constants, or `if n < 0 { root(n) }`) | E0703 |
+| a `return` that certainly violates `ensures` (`ensures result > 0` and `return 0`) | E0706 |
 | `2.pow(-1)`, `(-1.0).sqrt()`, `xs.chunks(0)` | E0704 |
 | `xs.get(xs.len())` — always out of bounds | E0705 |
 | sorting values that have no order | E0215 |
