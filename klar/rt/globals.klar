@@ -632,6 +632,36 @@ fn b_make_dir(path: Word, rtd: Word) -> Word {
   return err_new(rtd, sb_finish(b))
 }
 
+// current_dir(): the working directory
+fn b_current_dir() -> Word {
+  let buf = alloc(4096)
+  let r = os_getcwd(buf, 4096)
+  var n: Word = 0
+  if r > 0 {
+    n = r
+    if os_platform() == 0 {
+      n = r - 1
+    }
+  }
+  let s = str_from(buf, n)
+  block_free(buf)
+  return s
+}
+
+// remove_file(path): deletes a file
+fn b_remove_file(path: Word, rtd: Word) -> Word {
+  let r = os_unlink(path + 32)
+  if r >= 0 {
+    return ok_new(rtd, 0)
+  }
+  let b = sb_new()
+  sb_add_cstr(b, "cannot remove '")
+  sb_add_str(b, path)
+  sb_add_cstr(b, "': ")
+  io_error_text(b, r)
+  return err_new(rtd, sb_finish(b))
+}
+
 // run_capture(args, dir, input): runs a program (searched in PATH) in `dir` ("" = here) with `input` as its stdin
 // and returns [exit code, stdout, stderr]; both streams are read together (poll), so neither can fill up and block
 // the child. The input goes into the pipe before the child starts (so at most one pipe buffer: 64 KB).

@@ -183,6 +183,8 @@ pub type Ck {
   /// the element type of each `for` loop (by the span of the loop)
   raw_elems: Map[Str, Type],
   elem_types: Map[Str, Type],
+  /// the input types of each property (by name), for the native generator
+  prop_types: Map[Str, List[Type]],
   /// the file of each declaration (a module made of several files: the runtime), and of the one being checked
   decl_files: List[Str],
   cur_file: Str,
@@ -538,6 +540,7 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       calls: Map {},
       raw_elems: Map {},
       elem_types: Map {},
+      prop_types: Map {},
       decl_files: [],
       cur_file: file,
     }
@@ -2068,9 +2071,11 @@ fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
   let ctx = Ctx { name: "property \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
     purpose: "test" }
   var c = push_scope(enter(ck: ck, ctx: top_ctx(), tparams: Map {}, bounds: Map {}))
+  var types: List[Type] = []
   for p in params {
     let r = resolve_opt(ck: c, te: p.ty, tps: Map {})
     c = r.c
+    types = types.push(r.v)
     if not generatable(c: c, t: r.v, seen: []) {
       c = error(c: c, code: "E0605", msg: "cannot generate random values of type `{sh(c, r.v)}` for property input " +
           "`{p.name}`", span: p.span, hint: Some("property inputs may be Int, Float, Bool, Str, Unit, List, Map, Option, " +
@@ -2078,7 +2083,7 @@ fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
     }
     c = declare(ck: c, name: p.name, t: r.v, mutable: false, span: p.span, kind: "param", kw: None)
   }
-  c = block(c with { ctx: ctx }, body)
+  c = block(c with { ctx: ctx, prop_types: c.prop_types.set(name, types) }, body)
   c = pop_scope(c)
   return c with { ctx: top_ctx() }
 }

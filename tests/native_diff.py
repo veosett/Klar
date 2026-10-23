@@ -43,6 +43,7 @@ def default_files():
     files.append(os.path.join(ROOT, "tests", "native", "generic_impls.klar"))
     files.append(os.path.join(ROOT, "tests", "native", "newtypes.klar"))
     files.append(os.path.join(ROOT, "tests", "native", "parallel.klar"))
+    files.append(os.path.join(ROOT, "tests", "native", "properties.klar"))
     bench = os.path.join(ROOT, "bench", "programs")
     files += [os.path.join(bench, b, b + ".klar") for b in sorted(os.listdir(bench))]
     return files
@@ -53,13 +54,13 @@ def interp_tests(path):
     it = Interpreter(loaded, out=io.StringIO(), err_stream=io.StringIO())
     out = []
     for t in it.tests:
-        if isinstance(t, N.PropertyDecl):
-            continue
         try:
             run_with_big_stack(lambda: it.run_test(t))
             out.append((t, None))
         except KlarRuntimeError as ex:
-            out.append((t, ex.code))
+            # a property's report must match the interpreter's exactly (the same inputs, the same shrinking)
+            text = ex.to_diag().format(loaded.sources.get(ex.span.file)) + "\n"
+            out.append((t, (ex.code, text) if isinstance(t, N.PropertyDecl) else ex.code))
     return out
 
 
@@ -96,9 +97,11 @@ def check_file(path, target, tmp):
         exe = os.path.join(tmp, "tests" + suffix)
         build(path, out=exe, target=target, loaded=load_path(path, with_runtime=True), tests=[t for t, _ in tests])
         for i, (t, code) in enumerate(tests):
-            p = run_exe(exe, [str(i)])
+            p = run_exe(exe, ["100", "0", str(i)])
             m = re.search(r"runtime error\[(\w+)\]", p.stderr)
             ncode = None if p.returncode == 0 else (m.group(1) if m else f"exit {p.returncode}")
+            if isinstance(code, tuple):
+                ncode = (ncode, p.stderr)
             if ncode != code:
                 problems.append(f"test {t.name!r}: interp={code} native={ncode}\n{p.stderr[-1500:]}")
     return problems, len(tests), has_main

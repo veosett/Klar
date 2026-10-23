@@ -34,6 +34,7 @@ const G_CHUNK: Word = 984
 const G_WORKER: Word = 992
 const G_ERRFD: Word = 1000
 const G_WFD: Word = 1008
+const G_PROP: Word = 1016
 
 const OUT_CAP: Word = 65536
 
@@ -479,7 +480,11 @@ fn sb_finish(b: Word) -> Word {
 fn flush_out() {
   let gp = g()
   let buf = static_addr("g_outbuf")
-  let n = peek(gp + G_OUTLEN)
+  var n = peek(gp + G_OUTLEN)
+  if peek(gp + G_PROP) != 0 {
+    // a property's own output is not shown (as in the interpreter)
+    n = 0
+  }
   var done: Word = 0
   while done < n {
     let w = os_write(1, buf + done, n - done)
@@ -574,6 +579,14 @@ fn detail_add(lst: Word, name: Word, value: Word) -> Word {
 }
 
 fn fail_with(code: Word, msg: Word, sp: Word, details: Word, hint: Word) -> Word {
+  if peek(g() + G_PROP) != 0 {
+    prop_failure(code, msg, sp, details, hint)
+  }
+  return report_error(code, msg, sp, details, hint, 0)
+}
+
+// prints a runtime error and exits (`stack`: the call-stack note as text, or 0 for the current stack)
+fn report_error(code: Word, msg: Word, sp: Word, details: Word, hint: Word, stack: Word) -> Word {
   worker_failing()
   flush_out()
   let b = sb_new()
@@ -603,7 +616,11 @@ fn fail_with(code: Word, msg: Word, sp: Word, details: Word, hint: Word) -> Word
       sb_add_byte(b, 10)
     }
   }
-  stack_note(b)
+  if stack == 0 {
+    stack_note(b)
+  } else {
+    sb_add_str(b, stack)
+  }
   if peek(hint + 16) > 0 {
     sb_add_cstr(b, "  hint: ")
     sb_add_str(b, hint)

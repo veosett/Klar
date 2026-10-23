@@ -74,6 +74,8 @@ SYS_SIGNATURES = [
     "fn os_chdir(path: Word) -> Word",
     "fn os_execve(path: Word, argv: Word, envp: Word) -> Word",
     "fn os_poll(fds: Word, n: Word) -> Word",
+    "fn os_unlink(path: Word) -> Word",
+    "fn os_getcwd(buf: Word, n: Word) -> Word",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

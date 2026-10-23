@@ -193,8 +193,10 @@ coverage of bank.klar: 83.3% of statements (10/12), 4 tests
 | `klarc new / outline / doc / refs / rename / spec / ast` | ✅ |
 | `klarc patch FILE PATCH [--dry-run] [--force] [--json]` | ✅ (с `--test` пока без запуска тестов) |
 | `klarc dev [--json] [--no-run] [--stdin TEXT]` | ✅ тот же отчёт; программа и тесты собираются в машинный код |
-| `klarc test [-k TEXT] [-q]` | ✅ тот же отчёт, что у `klar test` (ошибка, вывод теста); `property` пока пропускаются |
-| остальные (`dev`, пакеты, `lsp`, `view`, `eval`, `repl`, `coverage`, `profile`) | 🔜 |
+| `klarc test [-k TEXT] [-q] [--runs N] [--seed N]` | ✅ тот же отчёт, что у `klar test`, включая `property`: те же входные данные и то же сжатие контрпримера |
+| `klarc add / remove / fetch / update / deps` | ✅ (git запускается через `run_capture`) |
+| `klarc eval [STATEMENTS...] EXPR [--in FILE] [--json]` | ✅ (выражение собирается в машинный код как тест) |
+| остальные (`lsp`, `view`, `repl`, `coverage`, `profile`) | 🔜 |
 
 ## Редакторы
 

@@ -1322,6 +1322,9 @@ fn linux_layer(a0: A64, main_entry: Str) -> A64 {
   a = stub_end(syscall(a, 24))
   a = sys_stub(a0: a, name: "os_chdir", nr: 49, nargs: 1)
   a = sys_stub(a0: a, name: "os_execve", nr: 221, nargs: 3)
+  a = arg(a: mov_ri(a: stub_begin(a, "os_unlink"), rd: X0, imm: AT_FDCWD), reg: X1, i: 0)    // unlinkat(AT_FDCWD, path, 0)
+  a = stub_end(syscall(mov_ri(a: a, rd: X2, imm: 0), 35))
+  a = sys_stub(a0: a, name: "os_getcwd", nr: 17, nargs: 2)                                  // -> length with the NUL
   a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: X0, i: 0), reg: X1, i: 1)                         // ppoll
   for r in [X2, X3, X4] {
     a = mov_ri(a: a, rd: r, imm: 0)

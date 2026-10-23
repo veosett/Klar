@@ -1086,6 +1086,13 @@ class A64Emitter:
         self.stub_end()
         sys("os_chdir", 49, 1)
         sys("os_execve", 221, 3)
+        self.stub_begin("os_unlink")           # unlinkat(AT_FDCWD, path, 0)
+        a.mov_ri(X0, AT_FDCWD)
+        self.arg(X1, 0)
+        a.mov_ri(X2, 0)
+        self.syscall(35)
+        self.stub_end()
+        sys("os_getcwd", 17, 2)                # -> length with the final NUL
         self.stub_begin("os_poll")             # ppoll(fds, n, NULL, NULL, 0)
         self.arg(X0, 0)
         self.arg(X1, 1)

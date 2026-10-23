@@ -440,7 +440,7 @@ def python_kir(path, tests=False):
     from klar.native.regalloc import allocate
     blocks = None
     if tests:
-        blocks = [d for d in loaded.main.program.decls if isinstance(d, N.TestDecl)]
+        blocks = [d for d in loaded.main.program.decls if isinstance(d, (N.TestDecl, N.PropertyDecl))]
         if not blocks:
             return None
     try:
@@ -844,29 +844,120 @@ def check_patch(klarc, files):
 
 
 def check_dev(klarc):
-    """`klarc dev` == `klar dev` (text and --json) on the examples and native test programs without properties
-    (klarc does not run properties yet)."""
+    """`klarc dev` == `klar dev` (text and --json) and `klarc test` == `klar test` on the examples and native test
+    programs (properties included)."""
     import glob
     bad = runs = 0
     lib = os.path.join(ROOT, "klar")
     files = sorted(glob.glob(os.path.join(ROOT, "examples", "*.klar")) +
                    glob.glob(os.path.join(ROOT, "tests", "native", "*.klar")))
     for path in files:
-        with open(path, encoding="utf-8") as f:
-            if "\nproperty " in "\n" + f.read():
-                continue
-        for flags in (["--json"], []):
+        for job in (["dev", path, "--json"], ["dev", path], ["test", path], ["test", path, "--seed", "5", "-q"]):
             runs += 1
-            job = ["dev", path] + flags
             want = cli_output(job)
             proc = subprocess.run([klarc] + job + ["--lib", lib], capture_output=True, text=True, encoding="utf-8",
                                   stdin=subprocess.DEVNULL)
             if (proc.stdout, proc.returncode) != (want[0], want[2]):
                 bad += 1
                 if bad <= 10:
-                    print(f"DIFF dev {short(path)} {flags}: exit {want[2]}/{proc.returncode}\n"
+                    print(f"DIFF {job[0]} {short(path)} {job[2:]}: exit {want[2]}/{proc.returncode}\n"
                           f"  python: {want[0][:300]!r}\n  klar:   {proc.stdout[:300]!r} {proc.stderr[:200]!r}")
-    print(f"dev: {runs - bad}/{runs} outputs identical")
+    print(f"dev and test: {runs - bad}/{runs} outputs identical")
+    return bad
+
+
+PKG_STEPS = ["deps", "add geo --path ../geo", "deps", "deps --json", "add json5 --git REPO --tag v1", "fetch --json",
+             "update", "update json5 --json", "add json5 --git REPO", "remove geo", "remove nothere", "add Bad --path x",
+             "add x", "add y --path ../a --git z", "add y --path ../a --tag v1", "add y --git REPO --tag a --rev b",
+             "add ghost --path ../ghost --no-fetch", "fetch", "remove ghost --json", "deps"]
+
+
+def pkg_project(d):
+    """A project with a path dependency (which has its own) and a local git repository with a tag."""
+    for name, toml in (("app", '[package]\nname = "app"\nversion = "0.1.0"\n'),
+                       ("geo", '[package]\nname = "geo"\n\n[dependencies]\nmathx = { path = "../mathx" }\n'),
+                       ("mathx", '[package]\nname = "mathx"\n'), ("repo", '[package]\nname = "json5"\n')):
+        os.makedirs(os.path.join(d, name))
+        with open(os.path.join(d, name, "klar.toml"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(toml)
+    repo = os.path.join(d, "repo")
+    env = dict(os.environ, GIT_AUTHOR_DATE="2026-01-01T00:00:00", GIT_COMMITTER_DATE="2026-01-01T00:00:00")
+    for cmd in (["init", "-q"], ["add", "."], ["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "one"],
+                ["tag", "v1"]):
+        subprocess.run(["git"] + cmd, cwd=repo, check=True, env=env)
+    with open(os.path.join(repo, "lib.klar"), "w") as f:
+        f.write("// two\n")
+    for cmd in (["add", "."], ["-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "two"]):
+        subprocess.run(["git"] + cmd, cwd=repo, check=True, env=env)
+
+
+def project_state(app):
+    out = []
+    for name in ("klar.toml", "klar.lock"):
+        p = os.path.join(app, name)
+        if os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                out.append(f.read())
+    deps = os.path.join(app, ".klar", "deps")
+    out.append(sorted(os.listdir(deps)) if os.path.isdir(deps) else [])
+    return out
+
+
+def check_pkg(klarc, d):
+    """`klarc add/remove/fetch/update/deps` == the Python commands: the same output, klar.toml, klar.lock and fetched
+    packages after each step of a scenario with path and git dependencies."""
+    import shutil
+    if shutil.which("git") is None:
+        print("packages: skipped (no git)")
+        return 0
+    sides = {k: os.path.join(d, "pkg_" + k) for k in ("py", "k")}
+    for side in sides.values():
+        pkg_project(side)
+    bad = 0
+    for step in PKG_STEPS:
+        got = {}
+        for k, side in sides.items():
+            app = os.path.join(side, "app")
+            job = step.replace("REPO", os.path.join(side, "repo")).split()
+            if k == "py":
+                out, err, code = cli_output(job, cwd=app)
+            else:
+                proc = subprocess.run([klarc] + job, capture_output=True, text=True, encoding="utf-8", cwd=app)
+                out, err, code = proc.stdout, proc.stderr, proc.returncode
+            got[k] = [(out + err).replace(side, "ROOT"), code] + [str(x).replace(side, "ROOT") for x in project_state(app)]
+        if got["py"] != got["k"]:
+            bad += 1
+            print(f"DIFF packages `{step}`:\n  python: {got['py']!r:.400}\n  klar:   {got['k']!r:.400}")
+    print(f"packages: {len(PKG_STEPS) - bad}/{len(PKG_STEPS)} steps identical")
+    return bad
+
+
+EVAL_CASES = [["1 + 2"], ["let x = [1, 2]", "x.map(fn(v) => v * 2)"], ['"a,b".split(",")'], ['print("hi")', "42"],
+              ["nope(1)"], ['let x: Int = "s"', "x"], ["Some(3)"], ['Map {}.set("a", 1)'], ["[1, 2].get_or(5, 0) + 1.5"],
+              ["2.5 * 2.0"], ['"é".len()'], ["let xs = [3, 1, 2]", "xs.sort()"], ["[1].get_or(0, 0) / 0"],
+              ['let n = "x".to_int().ok_or("bad")', "n"], ['print("before")', "assert 1 == 2", "1"], ["sq(4)"]]
+
+
+def check_eval(klarc, d):
+    """`klarc eval` == `klar eval` (text and --json, alone and --in a file)."""
+    ctx = os.path.join(d, "ctx.klar")
+    with open(ctx, "w", encoding="utf-8") as f:
+        f.write("fn sq(n: Int) -> Int {\n  return n * n\n}\n\nfn main() uses io {\n  print(sq(3))\n}\n\n"
+                "test \"t\" {\n  assert sq(2) == 4\n}\n")
+    bad = runs = 0
+    for case in EVAL_CASES:
+        for extra in ([], ["--in", ctx]):
+            for flags in ([], ["--json"]):
+                runs += 1
+                job = ["eval"] + case + extra + flags
+                want = cli_output(job, cwd=d)
+                proc = subprocess.run([klarc] + job + ["--lib", os.path.join(ROOT, "klar")], capture_output=True,
+                                      text=True, encoding="utf-8", cwd=d)
+                if (proc.stdout, proc.stderr, proc.returncode) != want:
+                    bad += 1
+                    print(f"DIFF eval {case} {extra} {flags}:\n  python: {want!r:.300}\n"
+                          f"  klar:   {(proc.stdout, proc.stderr, proc.returncode)!r:.300}")
+    print(f"eval: {runs - bad}/{runs} outputs identical")
     return bad
 
 
@@ -884,6 +975,8 @@ def check_fix(cases):
         bad += check_new(klarc, d)
         bad += check_fmt_cli(klarc, d)
         bad += check_dev(klarc)
+        bad += check_eval(klarc, d)
+        bad += check_pkg(klarc, d)
         bad += check_patch(klarc, [p for p in klar_files() if os.sep + "rt" + os.sep not in p
                                    and os.sep + "compiler" + os.sep not in p][:80])
         bad += check_inspect(klarc, [p for p in cases + list(klar_files()) if not p.startswith(os.path.join(ROOT, "klar", "rt"))])

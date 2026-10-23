@@ -409,7 +409,14 @@ fn td(w0: Lw, t: Type) -> LR[Str] {
       let m = tparam_env(info.tparams, args)
       let variants = info.variants.entries().map(fn(v) => Variant { name: v.key, types: v.value.map(fn(f) => zonk(f.second,
         m)), names: v.value.map(fn(f) => f.first) })
-      return lr(enum_td(w0: w, name: name, enum_name: h, variants: variants, style: 0), name)
+      // which variants mention the enum in a field type (property inputs avoid them deep down, like the
+      // interpreter's generator, which tests `name in repr(field type)`)
+      let recursive = info.variants.values().map(fn(fs) => match fs.any(fn(f) => tshow(f.second).contains(h)) {
+        true => 1,
+        false => 0,
+      })
+      return lr(enum_td_flags(w0: w, name: name, enum_name: h, variants: variants, style: 0, recursive: Some(recursive)),
+        name)
     },
     None => {},
   }
@@ -419,34 +426,47 @@ fn td(w0: Lw, t: Type) -> LR[Str] {
 type Variant { name: Str, types: List[Type], names: List[Str] }
 
 fn enum_td(w0: Lw, name: Str, enum_name: Str, variants: List[Variant], style: Int) -> Lw {
-  var w = w0
-  var rows: List[W] = []
-  var i = 0
-  for v in variants {
-    var ftab: List[W] = []
-    for ft in v.types {
-      let x = td_word(w, ft)
-      w = x.w
-      ftab = ftab.push(x.v)
-    }
-    w = words(w: w, name: "{name}_v{i}f", ws: or_zero(ftab))
-    var ntab: List[W] = []
-    for f in v.names {
-      let x = str_word(w, f)
-      w = x.w
-      ntab = ntab.push(x.v)
-    }
-    w = words(w: w, name: "{name}_v{i}n", ws: or_zero(ntab))
-    let s = str_word(w, v.name)
-    w = s.w
-    rows = rows.concat([s.v, W.N(v: v.types.len()), W.A(sym: "{name}_v{i}f", add: 0), W.A(sym: "{name}_v{i}n", add: 0)])
-    i = i + 1
-  }
-  w = words(w: w, name: name + "_vars", ws: rows)
-  let s = str_word(w, enum_name)
-  return words(w: s.w, name: name, ws: [W.N(v: K_ENUM), s.v, W.N(v: variants.len()), W.A(sym: name + "_vars", add: 0),
-    W.N(v: style), W.N(v: 0)])
+  return enum_td_flags(w0: w0, name: name, enum_name: enum_name, variants: variants, style: style, recursive: None)
 }
+
+fn enum_td_flags(w0: Lw, name: Str, enum_name: Str, variants: List[Variant], style: Int,
+  recursive: Option[List[Int]]) -> Lw {
+    var w = w0
+    var rows: List[W] = []
+    var i = 0
+    for v in variants {
+      var ftab: List[W] = []
+      for ft in v.types {
+        let x = td_word(w, ft)
+        w = x.w
+        ftab = ftab.push(x.v)
+      }
+      w = words(w: w, name: "{name}_v{i}f", ws: or_zero(ftab))
+      var ntab: List[W] = []
+      for f in v.names {
+        let x = str_word(w, f)
+        w = x.w
+        ntab = ntab.push(x.v)
+      }
+      w = words(w: w, name: "{name}_v{i}n", ws: or_zero(ntab))
+      let s = str_word(w, v.name)
+      w = s.w
+      rows = rows.concat([s.v, W.N(v: v.types.len()), W.A(sym: "{name}_v{i}f", add: 0), W.A(sym: "{name}_v{i}n", add: 0)])
+      i = i + 1
+    }
+    w = words(w: w, name: name + "_vars", ws: rows)
+    var flags = W.N(v: 0)
+    match recursive {
+      Some(fl) => {
+        w = words(w: w, name: name + "_rec", ws: or_zero(fl.map(fn(x) => W.N(v: x))))
+        flags = W.A(sym: name + "_rec", add: 0)
+      },
+      None => {},
+    }
+    let s = str_word(w, enum_name)
+    return words(w: s.w, name: name, ws: [W.N(v: K_ENUM), s.v, W.N(v: variants.len()), W.A(sym: name + "_vars", add: 0),
+      W.N(v: style), flags])
+  }
 
 fn uid(w: Lw, prefix: Str) -> LR[Str] {
   let n = w.counter + 1
@@ -1353,7 +1373,7 @@ fn details(w0: Lw, names: List[Str]) -> LR[Int] {
       Some(loc) => {
         let v = read_local(w, loc)
         let t = addr_td(v.w, v.v.t)
-        let s = call_rt(w: t.w, name: "show_to_str", args: [v.v.reg, t.v])
+        let s = call_rt(w: t.w, name: "show_detail", args: [v.v.reg, t.v])
         let a = addr_str(s.w, n)
         let l = call_rt(w: a.w, name: "detail_add", args: [lst, a.v, s.v])
         w = l.w
@@ -1638,11 +1658,11 @@ fn assert_stmt(w0: Lw, span: Span, cond: Expr, message: Option[Expr]) -> Lw {
         w = place(emit(bad.w, [op("br"), r(ok.v), KV.S(s: good.v), KV.S(s: bad.v)]), bad.v)
         let l0 = call_rt(w: w, name: "list_new_str", args: [])
         let lt = addr_td(l0.w, lv.v.t)
-        let ls = call_rt(w: lt.w, name: "show_to_str", args: [lv.v.reg, lt.v])
+        let ls = call_rt(w: lt.w, name: "show_detail", args: [lv.v.reg, lt.v])
         let ln = addr_str(ls.w, "left")
         let l1 = call_rt(w: ln.w, name: "detail_add", args: [l0.v, ln.v, ls.v])
         let rt2 = addr_td(l1.w, rv.v.t)
-        let rs = call_rt(w: rt2.w, name: "show_to_str", args: [rv.v.reg, rt2.v])
+        let rs = call_rt(w: rt2.w, name: "show_detail", args: [rv.v.reg, rt2.v])
         let rn = addr_str(rs.w, "right")
         let l2 = call_rt(w: rn.w, name: "detail_add", args: [l1.v, rn.v, rs.v])
         w = assert_fail(w0: l2.w, span: span, cond: cond, message: message, det: l2.v)
@@ -2584,7 +2604,7 @@ fn x_try(w0: Lw, span: Span, x: Expr) -> LR[V] {
   w = place(emit(bad.w, [op("br"), r(c.v), KV.S(s: good.v), KV.S(s: bad.v)]), bad.v)
   if w.in_test {
     let td_a = addr_td(w, t)
-    let shown = call_rt(w: td_a.w, name: "show_to_str", args: [v.v.reg, td_a.v])
+    let shown = call_rt(w: td_a.w, name: "show_detail", args: [v.v.reg, td_a.v])
     let pre = addr_str(shown.w, "`{src_text(shown.w, expr_span(x))}?` produced ")
     let m1 = call_rt(w: pre.w, name: "Str_concat", args: [pre.v, shown.v])
     let post = addr_str(m1.w, " inside a test")
@@ -3184,6 +3204,86 @@ fn lower_test(w0: Lw, m: Module, name: Str, body: Block, index: Int) -> LR[Str] 
   return lr(finish_fn(w), fname)
 }
 
+/// A property: its body as a function of its inputs (named `property "..."` in call stacks), a trampoline that takes
+/// the inputs as an array, and the test entry, which hands both to the runtime's generator (prop_run).
+fn lower_property(w0: Lw, m: Module, name: Str, params: List[Param], body: Block, sp: Span, index: Int) -> LR[Str] {
+  let label_text = "property \"" + name + "\""
+  let body_name = "__prop{index}"
+  let n = params.len()
+  let f = KFn { name: body_name, klar_name: label_text, nparams: n, nregs: n, code: [], labels: 0 }
+  var w = begin_fn(w0 with { m: m, file: m.display, env: Map {}, is_rt: false }, f) with { in_test: true, ret_t: unit_t(),
+    decl: None, posts: [] }
+  w = push_scope(w)
+  let types = checker_of(m).prop_types.get(name).unwrap_or([])
+  var i = 0
+  for p in params {
+    w = declare(w: w, name: p.name, rg: i, t: types.get_or(i, unit_t()), owned: false)
+    i = i + 1
+  }
+  w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of(params.map(fn(p) => p.name),
+    Body.BlockBody(block: body)), no_move: [], b: body) }
+  let s = str_obj(w, label_text)
+  w = block_body(emit(s.w, [op("enter"), KV.S(s: s.v)]), body)
+  if not w.dead {
+    let u = unit_v(w)
+    w = do_return(u.w, u.v)
+  }
+  w = finish_fn(w)
+  // the trampoline: (closure, inputs) -> body(inputs[0], ...)
+  let tname_ = body_name + "__tramp"
+  w = begin_fn(w, KFn { name: tname_, klar_name: tname_, nparams: 2, nregs: 2, code: [], labels: 0 })
+  var regs: List[Int] = []
+  i = 0
+  while i < n {
+    let rg = reg(w)
+    w = emit_always(rg.w, [op("load"), r(rg.v), r(1), r(8 * i)])
+    regs = regs.push(rg.v)
+    i = i + 1
+  }
+  let res = reg(w)
+  w = emit_always(res.w, [op("call"), r(res.v), KV.S(s: body_name), KV.L(regs: regs)])
+  w = finish_fn(emit_always(w, [op("ret"), r(res.v)]))
+  let ctd = closure_td(w, [])
+  w = words(w: ctd.w, name: body_name + "_clo", ws: [W.N(v: -1), W.A(sym: ctd.v, add: 0), W.A(sym: tname_, add: 0)])
+  var tdws: List[W] = []
+  for t in types {
+    let x = td_word(w, t)
+    w = x.w
+    tdws = tdws.push(x.v)
+  }
+  w = words(w: w, name: body_name + "_tds", ws: or_zero(tdws))
+  var nws: List[W] = []
+  for p in params {
+    let x = str_word(w, p.name)
+    w = x.w
+    nws = nws.push(x.v)
+  }
+  w = words(w: w, name: body_name + "_names", ws: or_zero(nws))
+  // the test entry
+  let entry = "__test{index}"
+  w = begin_fn(w, KFn { name: entry, klar_name: entry, nparams: 0, nregs: 0, code: [], labels: 0 })
+  let a0 = reg(w)
+  w = emit_always(a0.w, [op("addr"), r(a0.v), KV.S(s: body_name + "_clo")])
+  let a1 = reg(w)
+  w = emit_always(a1.w, [op("addr"), r(a1.v), KV.S(s: body_name + "_tds")])
+  let a2 = reg(w)
+  w = emit_always(a2.w, [op("const"), r(a2.v), r(n)])
+  let pname = str_obj(w, name)
+  let psp = span_sym(pname.w, sp)
+  w = psp.w
+  let a3 = reg(w)
+  w = emit_always(a3.w, [op("addr"), r(a3.v), KV.S(s: body_name + "_names")])
+  let a4 = reg(w)
+  w = emit_always(a4.w, [op("addr"), r(a4.v), KV.S(s: pname.v)])
+  let a5 = reg(w)
+  w = emit_always(a5.w, [op("addr"), r(a5.v), KV.S(s: psp.v)])
+  let target = rt_fn(w, "prop_run")
+  let out = reg(target.w)
+  w = emit_always(out.w, [op("call"), r(out.v), KV.S(s: target.v), KV.L(regs: [a0.v, a1.v, a2.v, a3.v, a4.v, a5.v])])
+  w = finish_fn(emit_always(w, [op("ret"), r(out.v)]))
+  return lr(w, entry)
+}
+
 /// Lowers a whole program (loaded with its runtime) to KIR functions and the data image. With `tests`, the
 /// executable runs the main module's test block number argv[last] instead of `main`.
 pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
@@ -3296,6 +3396,9 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
       Decl.Test(_, _, _) => {
         test_blocks = test_blocks.push(d)
       },
+      Decl.Property(_, _, _, _) => {
+        test_blocks = test_blocks.push(d)
+      },
       _ => {},
     }
     k = k + 1
@@ -3317,6 +3420,16 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
           }
           test_spans = test_spans.push(sp)
           let t = lower_test(w0: w, m: main_mod, name: test_name, body: body, index: ti)
+          w = t.w
+          names = names.push(t.v)
+          ti = ti + 1
+        },
+        Decl.Property(sp, pname, params, body) => {
+          if ti == 0 {
+            main_span = sp
+          }
+          test_spans = test_spans.push(sp)
+          let t = lower_property(w0: w, m: main_mod, name: pname, params: params, body: body, sp: sp, index: ti)
           w = t.w
           names = names.push(t.v)
           ti = ti + 1

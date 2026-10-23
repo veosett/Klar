@@ -204,19 +204,25 @@ class Program:
             info = self.universe.enums[h]
             m = dict(zip(info.tparams, t.args))
             variants = [(v, [zonk(ft, m) for _, ft in fs], [f for f, _ in fs]) for v, fs in info.variants.items()]
-            self.enum_td(name, h, variants, style=0)
+            # which variants mention the enum in a field type (property inputs avoid them deep down, like the
+            # interpreter's generator, which tests `name in repr(field type)`)
+            recursive = [1 if any(h in show(ft) for _, ft in fs) else 0 for fs in info.variants.values()]
+            self.enum_td(name, h, variants, style=0, recursive=recursive)
         else:
             raise NativeUnsupported(f"no type descriptor for {key}")
         return name
 
-    def enum_td(self, name, enum_name, variants, style):
+    def enum_td(self, name, enum_name, variants, style, recursive=None):
         rows = []
         for i, (vname, ftypes, fnames) in enumerate(variants):
             ftab = self.words(f"{name}_v{i}f", [(self.td(ft), 0) for ft in ftypes] or [0])
             ntab = self.words(f"{name}_v{i}n", [(self.str_obj(f), 0) for f in fnames] or [0])
             rows += [(self.str_obj(vname), 0), len(ftypes), (ftab, 0), (ntab, 0)]
         vtab = self.words(name + "_vars", rows)
-        self.words(name, [K_ENUM, (self.str_obj(enum_name), 0), len(variants), (vtab, 0), style, 0])
+        flags = 0
+        if recursive is not None:
+            flags = (self.words(name + "_rec", recursive or [0]), 0)
+        self.words(name, [K_ENUM, (self.str_obj(enum_name), 0), len(variants), (vtab, 0), style, flags])
 
     def closure_td(self, cap_types):
         name = self.uid("tdc")
@@ -642,7 +648,7 @@ class FnLowering:
         for n in names:
             loc = self.lookup(n)
             v = self.read_local(n, loc)
-            s = self.call_rt("show_to_str", [v.reg, self.addr(self.p.td(v.t))])
+            s = self.call_rt("show_detail", [v.reg, self.addr(self.p.td(v.t))])
             lst = self.call_rt("detail_add", [lst, self.addr(self.p.str_obj(n)), s])
         return lst
 
@@ -860,9 +866,9 @@ class FnLowering:
             self.emit("br", ok, good, bad)
             self.place(bad)
             lst = self.call_rt("list_new_str", [])
-            ls = self.call_rt("show_to_str", [lv.reg, self.addr(self.p.td(lv.t))])
+            ls = self.call_rt("show_detail", [lv.reg, self.addr(self.p.td(lv.t))])
             lst = self.call_rt("detail_add", [lst, self.addr(self.p.str_obj("left")), ls])
-            rs = self.call_rt("show_to_str", [rv.reg, self.addr(self.p.td(rv.t))])
+            rs = self.call_rt("show_detail", [rv.reg, self.addr(self.p.td(rv.t))])
             lst = self.call_rt("detail_add", [lst, self.addr(self.p.str_obj("right")), rs])
             self.assert_fail(s, c, lst)
             self.place(good)
@@ -1361,7 +1367,7 @@ class FnLowering:
         self.emit("br", c, good, bad)
         self.place(bad)
         if getattr(self, "in_test", False):
-            shown = self.call_rt("show_to_str", [v.reg, self.addr(self.p.td(t))])
+            shown = self.call_rt("show_detail", [v.reg, self.addr(self.p.td(t))])
             pre = self.addr(self.p.str_obj(f"`{self.src_text(e.expr.span)}?` produced "))
             msg = self.call_rt("Str_concat", [pre, shown])
             msg = self.call_rt("Str_concat", [msg, self.addr(self.p.str_obj(" inside a test"))])
@@ -1703,6 +1709,59 @@ def lower_test(prog, module, t, index):
     return name
 
 
+def lower_property(prog, module, d, index):
+    """A property: its body as a function of its inputs (named `property "..."` in call stacks), a trampoline that
+    takes the inputs as an array, and the test entry, which hands both to the runtime's generator (prop_run)."""
+    label = f'property "{d.name}"'
+    body_name = f"__prop{index}"
+    fl = FnLowering(prog, module, {}, False)
+    fl.in_test = True
+    fl.fn = Fn(body_name, len(d.params), label)
+    prog.fns.append(fl.fn)
+    fl.ret_t = UNIT_T
+    fl.ensures = None
+    fl.decl = None
+    fl.push_scope()
+    types = [prune(t) for t in d.param_types]
+    for i, (p, t) in enumerate(zip(d.params, types)):
+        fl.declare(p.name, i, t, False)
+    fl.cand = Liveness(fl.locals_of([p.name for p in d.params], d.body)).run_block(d.body)
+    fl.emit("enter", prog.str_obj(label))
+    fl.block_body(d.body)
+    if not fl.dead:
+        fl.do_return(V(fl.const(0), UNIT_T, True))
+    tramp = Fn(body_name + "__tramp", 2)
+    prog.fns.append(tramp)
+    regs = []
+    for i in range(len(d.params)):
+        r = tramp.reg()
+        tramp.emit("load", r, 1, 8 * i)
+        regs.append(r)
+    res = tramp.reg()
+    tramp.emit("call", res, body_name, regs)
+    tramp.emit("ret", res)
+    clo = prog.words(body_name + "_clo", [-1, (prog.closure_td([]), 0), (tramp.name, 0)])
+    tds = prog.words(body_name + "_tds", [(prog.td(t), 0) for t in types] or [0])
+    names = prog.words(body_name + "_names", [(prog.str_obj(p.name), 0) for p in d.params] or [0])
+    entry = Fn(f"__test{index}", 0)
+    prog.fns.append(entry)
+    args = []
+    for sym in (clo, tds):
+        r = entry.reg()
+        entry.emit("addr", r, sym)
+        args.append(r)
+    args.append(entry.const(len(d.params)))
+    for sym in (names, prog.str_obj(d.name), prog.span_sym(d.span)):
+        r = entry.reg()
+        entry.emit("addr", r, sym)
+        args.append(r)
+    target, _ = prog.rt_fn("prop_run")
+    out = entry.reg()
+    entry.emit("call", out, target, args)
+    entry.emit("ret", out)
+    return entry.name
+
+
 SOFT_MATH = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
 
 
@@ -1723,7 +1782,8 @@ def lower_program(loaded, image, tests=None):
         um.emit("ret", r)
     else:
         main_decl = tests[0] if tests else main_mod.program
-        names = [lower_test(prog, main_mod, t, i) for i, t in enumerate(tests)]
+        names = [lower_property(prog, main_mod, t, i) if isinstance(t, N.PropertyDecl) else
+                 lower_test(prog, main_mod, t, i) for i, t in enumerate(tests)]
         sel = um.reg()
         um.emit("call", sel, "test_index_arg", [])
         for i, nm in enumerate(names):

@@ -21,6 +21,8 @@ pub fn global_sigs() -> List[Str] {
     "fn file_exists(path: Str) -> Bool uses fs",
     "fn list_dir(path: Str) -> Result[List[Str], Str] uses fs",
     "fn make_dir(path: Str) -> Result[Unit, Str] uses fs",
+    "fn current_dir() -> Str uses fs",
+    "fn remove_file(path: Str) -> Result[Unit, Str] uses fs",
     "fn is_dir(path: Str) -> Bool uses fs",
     "fn exit(code: Int) -> Never uses io",
     "fn run_command(args: List[Str]) -> Result[Int, Str] uses proc",
@@ -253,6 +255,8 @@ pub fn sys_sigs() -> List[Str] {
     "fn os_chdir(path: Word) -> Word",
     "fn os_execve(path: Word, argv: Word, envp: Word) -> Word",
     "fn os_poll(fds: Word, n: Word) -> Word",
+    "fn os_unlink(path: Word) -> Word",
+    "fn os_getcwd(buf: Word, n: Word) -> Word",
   ]
 }
 
@@ -450,6 +454,7 @@ pub fn rt_files() -> List[Str] {
     "map.klar",
     "misc.klar",
     "par.klar",
+    "prop.klar",
     "show.klar",
     "softmath.klar",
     "str.klar",

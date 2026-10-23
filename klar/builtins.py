@@ -154,6 +154,27 @@ def _make_dir(it, a, sp):
         return err(f"cannot create '{a[0]}': {ex.strerror}")
 
 
+@glob("fn current_dir() -> Str uses fs")
+def _current_dir(it, a, sp):
+    """The working directory (absolute)."""
+    import os
+    return os.getcwd()
+
+
+@glob("fn remove_file(path: Str) -> Result[Unit, Str] uses fs")
+def _remove_file(it, a, sp):
+    """Deletes a file."""
+    import os
+    try:
+        if os.path.isdir(a[0]):
+            return err(f"cannot remove '{a[0]}': Is a directory")
+        os.remove(a[0])
+        return ok(UNIT)
+    except OSError as ex:
+        reason = ex.strerror if ex.strerror in ("No such file or directory", "Permission denied") else "I/O error"
+        return err(f"cannot remove '{a[0]}': {reason}")
+
+
 @glob("fn is_dir(path: Str) -> Bool uses fs")
 def _is_dir(it, a, sp):
     import os

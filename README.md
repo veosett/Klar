@@ -207,7 +207,9 @@ python -m klar spec                             # the language reference for a p
 python -m klar explain E0701
 ```
 
-The compiler written in Klar (`compiler/`, self-hosted) builds without Python once it has been bootstrapped:
+The compiler written in Klar (`compiler/`, self-hosted) builds without Python: `./build.sh` (Linux) or `build.bat`
+(Windows) takes the seed `klarc` of the release (or `$KLARC`), lets it compile `compiler/klarc.klar`, and checks that the
+result compiles itself to the same bytes. With Python the first stage is the Python compiler:
 
 ```sh
 python -m klar build compiler/klarc.klar -o klarc   # stage 1: the Python compiler builds klarc
@@ -216,6 +218,8 @@ python -m klar build compiler/klarc.klar -o klarc   # stage 1: the Python compil
 ./klarc run examples/shapes.klar -- arg1 arg2       # build into a temporary file and run it
 ./klarc test examples/bank.klar                     # build the `test` blocks and run each one
 ./klarc fmt . --check                               # the formatter, written in Klar
+./klarc dev examples/bank.klar --json               # check, tests (properties too) and run, natively
+./klarc patch app.klar edits.json                   # the AI patch protocol; also add/fetch/deps, eval, fix, doc
 ```
 
 `pip install -e .` installs a `klar` command. On Windows `klar.bat run examples\hello.klar` works from the

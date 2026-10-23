@@ -14,7 +14,9 @@ use builtin_sigs.{klar_version}
 use commands.{doc_command, explain, fix_command, fmt_command, new_command, outline_command, refs_command}
 use commands.{ast_command, rename_command, spec_command}
 use patch.{patch_command}
-use dev.{dev_command, show_failure, test_items}
+use pkg.{pkg_command}
+use evaluate.{eval_command}
+use dev.{dev_command, host_target, show_failure, test_items}
 use report.{check_json, render_report, user_diags}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
@@ -25,13 +27,16 @@ use lower.{fnv1a, lower_program}
 const TARGETS: List[Str] = ["linux", "windows", "linux-arm64"]
 
 type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, quiet: Bool, filter: Str,
-  args: List[Str] }
+  runs: Int, seed: Int, args: List[Str] }
 
 fn usage() -> Never uses io {
   print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64] [--lib <dir>] [--time]")
   print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
-  print("       klarc test <file.klar> [-k <text>] [-q] [--lib <dir>]")
+  print("       klarc test <file.klar> [-k <text>] [-q] [--runs <n>] [--seed <n>] [--lib <dir>]")
   print("       klarc patch <file.klar> <patch.json | - | json> [--dry-run] [--force] [--json]")
+  print("       klarc add <name> (--path <dir> | --git <url> [--tag|--rev|--branch <x>]) [--no-fetch] [--json]")
+  print("       klarc remove <name> | fetch | update [names] | deps   [--dir <project>] [--json]")
+  print("       klarc eval [statements...] <expression> [--in <file.klar>] [--json]")
   print("       klarc dev <file.klar> [--json] [--no-run] [--stdin <text>] [--max-output <n>] [--max-warnings <n>]")
   print("       klarc check <file.klar> [--lib <dir>] [--json]")
   print("       klarc fmt [files or directories] [--check] [--json]")
@@ -55,9 +60,10 @@ fn lib_dir(args: List[Str]) -> Str uses io {
   }
 }
 
-fn parse_args(args: List[Str]) -> Options uses io {
-  var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "linux", lib: env_var("KLAR_LIB").unwrap_or(
-    "klar"), time: false, json: false, quiet: false, filter: "", args: [] }
+fn parse_args(args: List[Str]) -> Options uses io, proc {
+  var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "", lib: env_var("KLAR_LIB").unwrap_or(
+    "klar"), time: false, json: false, quiet: false, filter: "", runs: 100,
+    seed: 0, args: [] }
   var i = 1
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -86,12 +92,21 @@ fn parse_args(args: List[Str]) -> Options uses io {
     } else if a == "-k" or a == "--filter" {
       o = o with { filter: v }
       i = i + 2
+    } else if a == "--runs" {
+      o = o with { runs: v.to_int().unwrap_or(100) }
+      i = i + 2
+    } else if a == "--seed" {
+      o = o with { seed: v.to_int().unwrap_or(0) }
+      i = i + 2
     } else if o.file == "" and not a.starts_with("-") {
       o = o with { file: a }
       i = i + 1
     } else {
       return usage()
     }
+  }
+  if o.target == "" {
+    o = o with { target: host_target() }
   }
   if not ["build", "run", "test", "check"].contains(o.cmd) or o.file == "" or not TARGETS.contains(o.target) {
     return usage()
@@ -149,26 +164,6 @@ fn temp_exe(o: Options, what: Str) -> Str uses io {
 }
 
 /// The names of the `test` blocks of the main module, in order.
-fn test_names(ld: Ld, file: Str) -> List[Str] {
-  var out: List[Str] = []
-  let decls = match ld.by_path.get(file) {
-    Some(m) => match m.checker {
-      Some(c) => c.decls,
-      None => [],
-    },
-    None => [],
-  }
-  for d in decls {
-    match d {
-      Decl.Test(_, name, _) => {
-        out = out.push(name)
-      },
-      _ => {},
-    }
-  }
-  return out
-}
-
 fn write_exe(path: Str, image: Bytes) uses io, fs {
   match write_bytes(path, image) {
     Ok(_) => {},
@@ -225,6 +220,12 @@ fn main() uses io, fs, time, proc {
   if tool == "refs" {
     exit(refs_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
+  if ["add", "remove", "fetch", "update", "deps"].contains(tool) {
+    exit(pkg_command(tool: tool, args: argv.drop(1)))
+  }
+  if tool == "eval" {
+    exit(eval_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
   if tool == "dev" {
     exit(dev_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
@@ -275,28 +276,17 @@ fn main() uses io, fs, time, proc {
     show_report(text: render_report(ld, warnings), to_stderr: true)
   }
   let tests = o.cmd == "test"
-  let names = test_names(ld, o.file)
-  let items = test_items(ld, o.file).filter(fn(t) => t.name.contains(o.filter))
+  let all_tests = test_items(ld, o.file)
+  let items = all_tests.filter(fn(t) => t.name.contains(o.filter))
   if tests {
     let warnings = diags.filter(fn(d) => d.severity == "warning")
     if not o.quiet {
       show_report(text: render_report(ld, warnings), to_stderr: true)
     }
   }
-  if tests and (names.is_empty() or not items.any(fn(t) => not t.is_property)) {
-    var skipped = 0
-    for t in items {
-      print("  SKIP  {t.name} [property: klarc cannot run properties yet]")
-      skipped = skipped + 1
-    }
-    if items.is_empty() {
-      print("no tests found")
-    }
-    if skipped > 0 {
-      print("\n0 passed, 0 failed, {skipped} skipped")
-    } else {
-      print("\n0 passed, 0 failed")
-    }
+  if tests and items.is_empty() {
+    print("no tests found")
+    print("\n0 passed, 0 failed")
     return
   }
   let w = lower_program(ld: ld, main_path: o.file, tests: tests)
@@ -325,41 +315,37 @@ fn main() uses io, fs, time, proc {
     write_exe(exe, image)
     var passed = 0
     var failed = 0
-    var skipped = 0
     for t in items {
+      var label = ""
       if t.is_property {
-        print("  SKIP  {t.name} [property: klarc cannot run properties yet]")
-        skipped = skipped + 1
-      } else {
-        match run_capture(args: [exe, t.index.to_str()], dir: "", input: "") {
-          Ok(res) => {
-            if res.get_or(0, "") == "0" {
-              print("  PASS  {t.name}")
-              passed = passed + 1
-            } else {
-              print("  FAIL  {t.name}")
-              show_failure(out: res.get_or(1, ""), err: res.get_or(2, ""))
-              failed = failed + 1
-            }
-          },
-          Err(_) => {
-            // no captured output here (Windows): the test prints its own failure
-            if run_or_fail([exe, t.index.to_str()]) == 0 {
-              print("  PASS  {t.name}")
-              passed = passed + 1
-            } else {
-              print("  FAIL  {t.name}")
-              failed = failed + 1
-            }
-          },
-        }
+        label = " [property x{o.runs}]"
+      }
+      // the test executable takes `runs seed index` (properties use the first two)
+      let targs = [exe, o.runs.to_str(), o.seed.to_str(), t.index.to_str()]
+      match run_capture(args: targs, dir: "", input: "") {
+        Ok(res) => {
+          if res.get_or(0, "") == "0" {
+            print("  PASS  {t.name}{label}")
+            passed = passed + 1
+          } else {
+            print("  FAIL  {t.name}{label}")
+            show_failure(out: res.get_or(1, ""), err: res.get_or(2, ""))
+            failed = failed + 1
+          }
+        },
+        Err(_) => {
+          // no captured output here (Windows): the test prints its own failure
+          if run_or_fail(targs) == 0 {
+            print("  PASS  {t.name}{label}")
+            passed = passed + 1
+          } else {
+            print("  FAIL  {t.name}{label}")
+            failed = failed + 1
+          }
+        },
       }
     }
-    if skipped > 0 {
-      print("\n{passed} passed, {failed} failed, {skipped} skipped")
-    } else {
-      print("\n{passed} passed, {failed} failed")
-    }
+    print("\n{passed} passed, {failed} failed")
     if failed > 0 {
       exit(1)
     }

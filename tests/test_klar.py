@@ -425,6 +425,9 @@ fn main() uses io, fs {{
   print([is_dir("{d}"), is_dir("{d}/sub"), is_dir("{d}/b.txt"), is_dir("{d}/nope")])
   print(make_dir("{d}/x/y/z"))
   print([is_dir("{d}/x/y/z"), make_dir("{d}/b.txt").is_err()])
+  print([write_file("{d}/x/gone.txt", "x").is_ok(), remove_file("{d}/x/gone.txt").is_ok(), file_exists("{d}/x/gone.txt")])
+  print(remove_file("{d}/x/gone.txt"))
+  print(current_dir().len() > 1)
 }}"""
         with tempfile.TemporaryDirectory() as d:
             for name in ("b.txt", "a.klar", "é.txt"):
@@ -433,7 +436,8 @@ fn main() uses io, fs {{
             os.mkdir(os.path.join(d, "sub"))
             root = d.replace("\\", "/")
             want = (f'Ok(["a.klar", "b.txt", "sub", "é.txt"])\ntrue\n'
-                    f'Err("cannot list \'{root}/b.txt\': Not a directory")\n[true, true, false, false]\nOk(())\n[true, true]\n')
+                    f'Err("cannot list \'{root}/b.txt\': Not a directory")\n[true, true, false, false]\nOk(())\n[true, true]\n'
+                    f'[true, true, false]\nErr("cannot remove \'{root}/x/gone.txt\': No such file or directory")\ntrue\n')
             program = src.format(d=root)
             import shutil
             for compiled in (False, True):

@@ -51,13 +51,30 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - `klarc dev [--json] [--no-run] [--stdin TEXT]` (compiler/dev.klar): one AI-loop step without Python — check,
   native tests, native run, the same compact report as `klar dev` (runtime errors are read back from the text the
   runtime prints). Properties are reported as `skipped`.
+- `klarc add`, `remove`, `fetch`, `update`, `deps` (compiler/pkg.klar): the package commands without Python, with
+  the same output, `klar.toml` edits and `klar.lock`; `tests/selfhost.py` replays a scenario with path and git
+  dependencies on both. New built-ins `remove_file(path)` and `current_dir()` (effect `fs`; Linux unlink /
+  getcwd, Windows DeleteFileA / GetCurrentDirectoryA); klarc's tools no longer trust `$PWD` for absolute paths.
+- `klarc eval [STATEMENTS...] EXPR [--in FILE] [--json]` (compiler/evaluate.klar): the type from the Klar checker,
+  the value from a native run of the expression as a test block; the same output as `klar eval`.
+- `build.sh` / `build.bat`: build klarc without Python from a seed compiler (`seed/klarc-<target>`, `$KLARC`, or the
+  release download), with the self-reproduction check; `.github/workflows/release.yml` builds the seeds for Linux
+  x86-64, Linux arm64 and Windows, checks that they reproduce themselves and attaches them to a release.
 - `klarc test` reports like `klar test`: each failure with its runtime error and the test's output, `-k`/`--filter`,
-  `-q`, warnings first. Properties are listed as skipped (klarc does not generate inputs yet).
+  `-q`, `--runs`, `--seed`, warnings first.
+- Property tests in native code: test executables run `property` blocks too (`exe RUNS SEED INDEX`). The runtime
+  (`klar/rt/prop.klar`) reproduces the interpreter's generator exactly — CPython's `random.Random(f"{seed}:{name}")`
+  (SHA-512 seeding, Mersenne Twister, randbelow, uniform, `round(x, 3)`) — so the native report names the same
+  counterexample after the same number of runs; each run is a child process (fork), the failure comes back through a
+  pipe and the inputs are shrunk like in the interpreter. Both lowerings emit it identically (`tests/selfhost.py`),
+  and `tests/native_diff.py` compares the reports of `tests/native/properties.klar` character for character.
 
 ### Fixed
 - `klar ast` crashed on functions with trait bounds (a dict of spans was not converted to JSON).
 - Native test executables reported every test's call stack at the place of the first test.
 - `klarc run`/`build` showed the runtime's own warnings (the runtime reports as `rt`).
+- Native error reports showed strings in `note: values:` without quotes (`s = x`); they are quoted like in the
+  interpreter (`s = "x"`).
 
 ### Changed
 - `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm

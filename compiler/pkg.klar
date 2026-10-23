@@ -1,0 +1,659 @@
+// The package commands of `klarc` — `add`, `remove`, `fetch`, `update`, `deps` — with the output of klar/tools/pkg.py.
+// Path dependencies are used where they are; git dependencies are cloned into `<project>/.klar/deps/<name>` (git
+// runs through `run_capture`), and `klar.lock` pins the commit of each.
+use commands.{absolute}
+use jsonout.{J, compact}
+use manifest.{Dep, Manifest, TSection, TVal, describe, is_package_name, parse_manifest, parse_toml}
+
+/// `a/./b/../c` -> `a/c` (absolute paths stay absolute)
+fn norm(path: Str) -> Str {
+  var out: List[Str] = []
+  for part in path.split("/") {
+    if part == ".." {
+      if not out.is_empty() and out.last() != Some("") and out.last() != Some("..") {
+        out = out.take(out.len() - 1)
+      } else {
+        out = out.push(part)
+      }
+    } else if part != "." and not (part.is_empty() and not out.is_empty()) {
+      out = out.push(part)
+    }
+  }
+  let joined = out.join("/")
+  if joined.is_empty() {
+    return "/"
+  }
+  return joined
+}
+
+fn parent(path: Str) -> Str {
+  let parts = path.split("/")
+  if parts.len() <= 1 {
+    return "."
+  }
+  let d = parts.take(parts.len() - 1).join("/")
+  if d.is_empty() {
+    return "/"
+  }
+  return d
+}
+
+fn base_name(path: Str) -> Str {
+  return path.split("/").last().unwrap_or(path)
+}
+
+/// `path` relative to `base` (both absolute), like Python's `os.path.relpath`.
+fn rel(path: Str, base: Str) -> Str {
+  let p = path.split("/").filter(fn(x) => not x.is_empty())
+  let b = base.split("/").filter(fn(x) => not x.is_empty())
+  var k = 0
+  while k < p.len() and k < b.len() and p.get_or(k, "") == b.get_or(k, "") {
+    k = k + 1
+  }
+  var out: List[Str] = []
+  var i = k
+  while i < b.len() {
+    out = out.push("..")
+    i = i + 1
+  }
+  out = out.concat(p.drop(k))
+  if out.is_empty() {
+    return "."
+  }
+  return out.join("/")
+}
+
+fn abs_path(path: Str) -> Str uses fs {
+  return norm(absolute(path))
+}
+
+/// The nearest directory at or above `start` with a klar.toml.
+fn project_root(start: Str) -> Result[Str, Str] uses io, fs {
+  let first = abs_path(start)
+  var d = first
+  while true {
+    if file_exists(d + "/klar.toml") {
+      return Ok(d)
+    }
+    let up = parent(d)
+    if up == d or d == "/" {
+      return Err("no klar.toml in {first} or above: run `klar new` or create one with a [package] section")
+    }
+    d = up
+  }
+  return Err("")
+}
+
+fn load_manifest(root: Str) -> Result[Manifest, Str] uses fs {
+  let path = root + "/klar.toml"
+  let text = match read_file(path) {
+    Ok(t) => t,
+    Err(_) => {
+      return Err("cannot read {path}: No such file or directory")
+    },
+  }
+  return match parse_manifest(text, root) {
+    Ok(m) => Ok(m),
+    Err(e) => Err("{path}:{e.line}: {e.message}"),
+  }
+}
+
+fn dep_root(project: Str, owner: Str, d: Dep) -> Str {
+  return match d.path {
+    Some(p) => match p.starts_with("/") {
+      true => norm(p),
+      false => norm(owner + "/" + p),
+    },
+    None => project + "/.klar/deps/" + d.name,
+  }
+}
+
+// ---- the lock file ----------------------------------------------------------------------------------------------
+
+fn ref_text(d: Dep) -> Str {
+  return match d.ref {
+    Some(r) => d.ref_kind.unwrap_or("") + " " + r,
+    None => "default branch",
+  }
+}
+
+/// A locked git dependency.
+type Locked { name: Str, git: Str, ref: Str, rev: Str }
+
+fn tstr(sec: TSection, key: Str) -> Str {
+  for k in sec.keys {
+    if k.key == key {
+      return match k.value {
+        TVal.TStr(s) => s,
+        _ => "",
+      }
+    }
+  }
+  return ""
+}
+
+fn read_lock(root: Str) -> Result[List[Locked], Str] uses fs {
+  let path = root + "/klar.lock"
+  if not file_exists(path) or is_dir(path) {
+    return Ok([])
+  }
+  let text = read_file(path).unwrap_or("")
+  return match parse_toml(text) {
+    Ok(secs) => Ok(secs.filter(fn(s) => s.name != "").map(fn(s) => Locked { name: s.name, git: tstr(s, "git"),
+      ref: tstr(s, "ref"), rev: tstr(s, "rev") })),
+    Err(e) => Err("{path}:{e.line}: {e.message} (delete it and run `klar fetch`)"),
+  }
+}
+
+fn write_lock(root: Str, entries: List[Locked]) -> Result[Unit, Str] uses fs {
+  let path = root + "/klar.lock"
+  if entries.is_empty() {
+    if file_exists(path) {
+      return remove_file(path)
+    }
+    return Ok(())
+  }
+  var lines = ["# klar.lock — written by `klar fetch`: the exact commit of every git dependency. Commit this file;",
+    "# `klar fetch` checks out these commits, `klar update` moves them forward.", ""]
+  for e in entries.sort_by(fn(e) => e.name) {
+    lines = lines.concat(["[{e.name}]", "git = \"{e.git}\"", "ref = \"{e.ref}\"", "rev = \"{e.rev}\"", ""])
+  }
+  return write_file(path, lines.join("\n").trim_end() + "\n")
+}
+
+// ---- git --------------------------------------------------------------------------------------------------------
+
+fn git(args: List[Str], dir: Str) -> Result[Str, Str] uses proc {
+  let res = match run_capture(args: ["git"].concat(args), dir: dir, input: "") {
+    Ok(r) => r,
+    Err(_) => {
+      return Err("git is not installed (it is needed for git dependencies)")
+    },
+  }
+  let out = res.get_or(1, "").trim()
+  if res.get_or(0, "") != "0" {
+    var why = res.get_or(2, "").trim()
+    if why == "" {
+      why = out
+    }
+    return Err("git " + args.join(" ") + ": " + why)
+  }
+  return Ok(out)
+}
+
+/// Clones / updates a git dependency into `target` and checks out `rev` (or its tag / branch / rev); the commit.
+fn checkout(target: Str, d: Dep, rev: Option[Str]) -> Result[Str, Str] uses fs, proc {
+  let url = d.git.unwrap_or("")
+  if not is_dir(target + "/.git") {
+    make_dir(parent(target))?
+    let _ = git(["clone", "--quiet", url, target], "")?
+  } else {
+    if git(["remote", "get-url", "origin"], target)? != url {
+      let _ = git(["remote", "set-url", "origin", url], target)?
+    }
+    let _ = git(["fetch", "--quiet", "--tags", "--force", "origin"], target)?
+  }
+  let kind = d.ref_kind.unwrap_or("")
+  let r = d.ref.unwrap_or("")
+  var want = "origin/HEAD"
+  match rev {
+    Some(x) => {
+      want = x
+    },
+    None => {
+      if kind == "tag" {
+        want = "refs/tags/" + r
+      } else if kind == "branch" {
+        want = "origin/" + r
+      } else if kind == "rev" {
+        want = r
+      }
+    },
+  }
+  let _ = git(["checkout", "--quiet", "--detach", want], target)?
+  return git(["rev-parse", "HEAD"], target)
+}
+
+// ---- fetching ---------------------------------------------------------------------------------------------------
+
+/// What to update: nothing (keep the locked commits), everything, or some names.
+type Update { all: Bool, names: List[Str] }
+
+type Resolved { name: Str, root: Str, dep: Dep, owner: Str }
+
+type Fetched { packages: List[J], errors: List[Str], wrote_rev: Bool }
+
+fn fetch(root: Str, update: Update, verbose: Bool) -> Result[Fetched, Str] uses io, fs, proc {
+  let lock = read_lock(root)?
+  var resolved: List[Resolved] = []
+  var packages: List[J] = []
+  var errors: List[Str] = []
+  var new_lock: List[Locked] = []
+  var wrote_rev = false
+  let empty = Manifest { root: "", name: None, version: None, deps: [] }
+  var queue = [Pair { first: root, second: load_manifest(root)? }]
+  while not queue.is_empty() {
+    let head = queue.get_or(0, Pair { first: "", second: empty })
+    let owner = head.first
+    let man = head.second
+    queue = queue.drop(1)
+    for d in man.deps {
+      let droot = dep_root(project: root, owner: owner, d: d)
+      let prev = resolved.filter(fn(r) => r.name == d.name)
+      if not prev.is_empty() {
+        let p = prev.get_or(0, Resolved { name: "", root: "", dep: d, owner: "" })
+        if p.root != droot or p.dep.git != d.git or p.dep.ref != d.ref {
+          errors = errors.push("dependency `{d.name}` is {describe(d)} in " + rel(owner + "/klar.toml", root) +
+              " but {describe(p.dep)} in " + rel(p.owner + "/klar.toml", root))
+        }
+      } else {
+        resolved = resolved.push(Resolved { name: d.name, root: droot, dep: d, owner: owner })
+        var entry = [Pair { first: "name", second: J.JStr(d.name) }, Pair { first: "source", second: J.JStr(describe(
+          d)) }, Pair { first: "root", second: J.JStr(rel(droot, root)) }]
+        var ok = true
+        match d.git {
+          Some(url) => {
+            let locked = lock.filter(fn(l) => l.name == d.name)
+            let keep = not update.all and not update.names.contains(d.name) and not locked.is_empty() and
+              locked.get(0).map(fn(l) => l.git == url and l.ref == ref_text(d)).unwrap_or(false)
+            if verbose {
+              eprint("fetching {d.name} ({url}, {ref_text(d)})")
+            }
+            var rev: Option[Str] = None
+            if keep {
+              rev = locked.get(0).map(fn(l) => l.rev)
+            }
+            match checkout(target: droot, d: d, rev: rev) {
+              Ok(commit) => {
+                new_lock = new_lock.push(Locked { name: d.name, git: url, ref: ref_text(d), rev: commit })
+                entry = entry.push(Pair { first: "rev", second: J.JStr(commit) })
+                wrote_rev = true
+              },
+              Err(e) => {
+                errors = errors.push("`{d.name}`: {e}")
+                ok = false
+              },
+            }
+          },
+          None => {},
+        }
+        if ok {
+          if not file_exists(droot + "/klar.toml") {
+            errors = errors.push("`{d.name}` ({describe(d)}) is not a package: " + rel(droot, root) + " has no klar.toml")
+          } else {
+            match load_manifest(droot) {
+              Ok(m) => {
+                queue = queue.push(Pair { first: droot, second: m })
+              },
+              Err(e) => {
+                errors = errors.push(e)
+              },
+            }
+            packages = packages.push(J.JObj(entry))
+          }
+        }
+      }
+    }
+  }
+  if errors.is_empty() {
+    write_lock(root, new_lock)?
+  }
+  return Ok(Fetched { packages: packages, errors: errors, wrote_rev: wrote_rev })
+}
+
+// ---- editing klar.toml ------------------------------------------------------------------------------------------
+
+fn quote(s: Str) -> Str {
+  return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+}
+
+fn dep_line(d: Dep) -> Str {
+  match d.path {
+    Some(p) => {
+      return d.name + " = \{ path = " + quote(p) + " \}"
+    },
+    None => {},
+  }
+  var r = ""
+  match d.ref {
+    Some(x) => {
+      r = ", " + d.ref_kind.unwrap_or("") + " = " + quote(x)
+    },
+    None => {},
+  }
+  return d.name + " = \{ git = " + quote(d.git.unwrap_or("")) + r + " \}"
+}
+
+/// Whether a line is `name = ...` (the key may be quoted).
+fn is_key_line(line: Str, name: Str) -> Bool {
+  var s = line.trim_start()
+  if s.starts_with("\"") {
+    s = s.slice(1, s.len())
+  }
+  if not s.starts_with(name) {
+    return false
+  }
+  s = s.slice(name.len(), s.len())
+  if s.starts_with("\"") {
+    s = s.slice(1, s.len())
+  }
+  return s.trim_start().starts_with("=")
+}
+
+fn set_dependency(root: Str, d: Dep) -> Result[Unit, Str] uses fs {
+  let path = root + "/klar.toml"
+  var lines = read_file(path)?.split("\n")
+  var start = -1
+  var i = 0
+  for x in lines {
+    if start < 0 and x.trim() == "[dependencies]" {
+      start = i
+    }
+    i = i + 1
+  }
+  if start < 0 {
+    while not lines.is_empty() and lines.last().unwrap_or("").trim() == "" {
+      lines = lines.take(lines.len() - 1)
+    }
+    lines = lines.concat(["", "[dependencies]", dep_line(d), ""])
+  } else {
+    var end = lines.len()
+    var j = lines.len() - 1
+    while j > start {
+      if lines.get_or(j, "").trim().starts_with("[") {
+        end = j
+      }
+      j = j - 1
+    }
+    var at = -1
+    var last = start
+    var k = start + 1
+    while k < end {
+      if at < 0 and is_key_line(lines.get_or(k, ""), d.name) {
+        at = k
+      }
+      if lines.get_or(k, "").trim() != "" {
+        last = k
+      }
+      k = k + 1
+    }
+    if at >= 0 {
+      lines = lines.set(at, dep_line(d))
+    } else {
+      lines = lines.insert(last + 1, dep_line(d))
+    }
+  }
+  let text = lines.join("\n")
+  match parse_manifest(text, root) {
+    Ok(_) => {},
+    Err(e) => {
+      return Err("{path}:{e.line}: {e.message}")
+    },
+  }
+  return write_file(path, text)
+}
+
+fn remove_dependency(root: Str, name: Str) -> Result[Unit, Str] uses fs {
+  let path = root + "/klar.toml"
+  let lines = read_file(path)?.split("\n")
+  var section = ""
+  var out: List[Str] = []
+  var found = false
+  for x in lines {
+    if x.trim().starts_with("[") {
+      section = x.trim()
+    }
+    if section == "[dependencies]" and is_key_line(x, name) {
+      found = true
+    } else {
+      out = out.push(x)
+    }
+  }
+  if not found {
+    return Err("`{name}` is not a dependency in klar.toml")
+  }
+  return write_file(path, out.join("\n"))
+}
+
+// ---- the commands -----------------------------------------------------------------------------------------------
+
+fn report(f: Fetched, json: Bool, root: Str) -> Int uses io {
+  if json {
+    print(compact(J.JObj([Pair { first: "ok", second: J.JBool(f.errors.is_empty()) }, Pair { first: "project",
+      second: J.JStr(root) }, Pair { first: "packages", second: J.JArr(f.packages) }, Pair { first: "errors",
+        second: J.JArr(f.errors.map(fn(e) => J.JStr(e))) }])))
+  } else {
+    for p in f.packages {
+      let fs = match p {
+        J.JObj(x) => x,
+        _ => [],
+      }
+      var name = ""
+      var source = ""
+      var rev = ""
+      for x in fs {
+        match x.second {
+          J.JStr(s) => {
+            if x.first == "name" {
+              name = s
+            } else if x.first == "source" {
+              source = s
+            } else if x.first == "rev" {
+              rev = " @ " + s.slice(0, s.len().min(12))
+            }
+          },
+          _ => {},
+        }
+      }
+      print("  " + name.pad_right(16, " ") + " " + source + rev)
+    }
+    for e in f.errors {
+      eprint("error: " + e)
+    }
+    if f.errors.is_empty() {
+      let n = f.packages.len()
+      var line = "{n} dependencies ready"
+      if n == 1 {
+        line = "1 dependency ready"
+      }
+      if f.wrote_rev {
+        line = line + " (klar.lock written)"
+      }
+      print(line)
+    }
+  }
+  if f.errors.is_empty() {
+    return 0
+  }
+  return 1
+}
+
+fn failed_with(e: Str) -> Int uses io {
+  eprint("error: " + e)
+  return 1
+}
+
+fn opt(args: List[Str], name: Str) -> Option[Str] {
+  var i = 0
+  while i < args.len() {
+    if args.get_or(i, "") == name and i + 1 < args.len() {
+      return Some(args.get_or(i + 1, ""))
+    }
+    i = i + 1
+  }
+  return None
+}
+
+/// The positional arguments (not options or their values).
+fn positionals(args: List[Str]) -> List[Str] {
+  let with_value = ["--path", "--git", "--tag", "--rev", "--branch", "--dir", "--lib"]
+  var out: List[Str] = []
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if with_value.contains(a) {
+      i = i + 2
+    } else {
+      if not a.starts_with("--") {
+        out = out.push(a)
+      }
+      i = i + 1
+    }
+  }
+  return out
+}
+
+fn add(args: List[Str], root: Str, json: Bool) -> Result[Int, Str] uses io, fs, proc {
+  let name = positionals(args).get_or(0, "")
+  if not is_package_name(name) or ["std", "rt", "prelude"].contains(name) {
+    return Err("`{name}` is not a valid dependency name (snake_case, not std/rt/prelude)")
+  }
+  var kinds: List[Str] = []
+  var refs: List[Str] = []
+  for k in ["tag", "rev", "branch"] {
+    match opt(args, "--" + k) {
+      Some(v) => {
+        if v != "" {
+          kinds = kinds.push(k)
+          refs = refs.push(v)
+        }
+      },
+      None => {},
+    }
+  }
+  let path = opt(args, "--path")
+  let url = opt(args, "--git")
+  if (path == None) == (url == None) {
+    return Err("give the source: `--path ../dir` or `--git URL` (with --tag, --rev or --branch)")
+  }
+  if not refs.is_empty() and url == None {
+    return Err("--tag, --rev and --branch are for git dependencies")
+  }
+  if refs.len() > 1 {
+    return Err("give at most one of --tag, --rev and --branch")
+  }
+  let d = Dep { name: name, path: path, git: url, ref_kind: kinds.get(0), ref: refs.get(0), line: 0 }
+  set_dependency(root, d)?
+  print("added " + dep_line(d))
+  if args.contains("--no-fetch") {
+    return Ok(0)
+  }
+  return fetched(root: root, update: Update { all: false, names: [name] }, verbose: true, json: json)
+}
+
+fn deps_tree(project: Str, owner: Str, seen0: List[Str]) -> Pair[List[J], List[Str]] uses fs {
+  var seen = seen0
+  let man = match load_manifest(owner) {
+    Ok(m) => m,
+    Err(e) => {
+      return Pair { first: [J.JObj([Pair { first: "error", second: J.JStr(e) }])], second: seen }
+    },
+  }
+  var out: List[J] = []
+  for d in man.deps {
+    let droot = dep_root(project: project, owner: owner, d: d)
+    var node = [Pair { first: "name", second: J.JStr(d.name) }, Pair { first: "source", second: J.JStr(describe(d)) },
+      Pair { first: "root", second: J.JStr(rel(droot, project)) }]
+    if not file_exists(droot + "/klar.toml") {
+      node = node.push(Pair { first: "missing", second: J.JBool(true) })
+    } else if seen.contains(d.name) {
+      node = node.push(Pair { first: "repeated", second: J.JBool(true) })
+    } else {
+      seen = seen.push(d.name)
+      let sub = deps_tree(project: project, owner: droot, seen0: seen)
+      seen = sub.second
+      node = node.push(Pair { first: "deps", second: J.JArr(sub.first) })
+    }
+    out = out.push(J.JObj(node))
+  }
+  return Pair { first: out, second: seen }
+}
+
+fn field(fs: List[Pair[Str, J]], key: Str) -> J {
+  return fs.filter(fn(f) => f.first == key).get(0).map(fn(f) => f.second).unwrap_or(J.JNull)
+}
+
+fn text_of(j: J) -> Str {
+  return match j {
+    J.JStr(s) => s,
+    _ => "",
+  }
+}
+
+fn show_tree(nodes: List[J], indent: Str) uses io {
+  for n in nodes {
+    let fs = match n {
+      J.JObj(x) => x,
+      _ => [],
+    }
+    if field(fs, "error") != J.JNull {
+      print(indent + "error: " + text_of(field(fs, "error")))
+    } else {
+      var note = ""
+      if field(fs, "missing") == J.JBool(true) {
+        note = "  (not fetched: run `klar fetch`)"
+      } else if field(fs, "repeated") == J.JBool(true) {
+        note = "  (see above)"
+      }
+      print(indent + text_of(field(fs, "name")) + "  " + text_of(field(fs, "source")) + note)
+      match field(fs, "deps") {
+        J.JArr(sub) => show_tree(sub, indent + "  "),
+        _ => {},
+      }
+    }
+  }
+}
+
+fn deps(root: Str, json: Bool) -> Result[Int, Str] uses io, fs {
+  let nodes = deps_tree(project: root, owner: root, seen0: []).first
+  if json {
+    print(compact(J.JObj([Pair { first: "project", second: J.JStr(root) }, Pair { first: "deps", second: J.JArr(nodes)
+    }])))
+    return Ok(0)
+  }
+  let man = load_manifest(root)?
+  print((man.name.unwrap_or(base_name(root)) + " " + man.version.unwrap_or("")).trim_end())
+  show_tree(nodes, "  ")
+  return Ok(0)
+}
+
+/// `klarc add | remove | fetch | update | deps ...` (`tool` is the command).
+pub fn pkg_command(tool: Str, args: List[Str]) -> Int uses io, fs, proc {
+  let json = args.contains("--json")
+  let root = match project_root(opt(args, "--dir").unwrap_or(".")) {
+    Ok(r) => r,
+    Err(e) => {
+      return failed_with(e)
+    },
+  }
+  var done: Result[Int, Str] = Ok(0)
+  if tool == "add" {
+    done = add(args: args, root: root, json: json)
+  } else if tool == "remove" {
+    let name = positionals(args).get_or(0, "")
+    match remove_dependency(root, name) {
+      Ok(_) => {},
+      Err(e) => {
+        return failed_with(e)
+      },
+    }
+    print("removed `{name}` from klar.toml")
+    done = fetched(root: root, update: Update { all: false, names: [] }, verbose: false, json: json)
+  } else if tool == "fetch" {
+    done = fetched(root: root, update: Update { all: false, names: [] }, verbose: true, json: json)
+  } else if tool == "update" {
+    let names = positionals(args)
+    done = fetched(root: root, update: Update { all: names.is_empty(), names: names }, verbose: true, json: json)
+  } else {
+    done = deps(root, json)
+  }
+  return match done {
+    Ok(code) => code,
+    Err(e) => failed_with(e),
+  }
+}
+
+fn fetched(root: Str, update: Update, verbose: Bool, json: Bool) -> Result[Int, Str] uses io, fs, proc {
+  let f = fetch(root: root, update: update, verbose: verbose)?
+  return Ok(report(f: f, json: json, root: root))
+}

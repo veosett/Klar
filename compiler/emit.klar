@@ -26,12 +26,14 @@ const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
 pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open",
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
   "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir", "os_getdents", "os_find_first",
-  "os_find_next", "os_find_close", "os_mkdir", "os_dup2", "os_chdir", "os_execve", "os_poll"]
+  "os_find_next", "os_find_close", "os_mkdir", "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink",
+  "os_getcwd"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
   "GetCommandLineA", "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
-  "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose", "CreateDirectoryA"]
+  "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose", "CreateDirectoryA",
+  "DeleteFileA", "GetCurrentDirectoryA"]
 
 /// Instructions that know where floats live in XMM registers.
 const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun", "fpow"]
@@ -1583,6 +1585,8 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   a = sys_stub(a0: a, name: "os_dup2", nr: 33, nargs: 2)
   a = sys_stub(a0: a, name: "os_chdir", nr: 80, nargs: 1)
   a = sys_stub(a0: a, name: "os_execve", nr: 59, nargs: 3)
+  a = sys_stub(a0: a, name: "os_unlink", nr: 87, nargs: 1)
+  a = sys_stub(a0: a, name: "os_getcwd", nr: 79, nargs: 2)                                  // -> length with the NUL
   a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: RDI, i: 0), reg: RSI, i: 1)          // poll(fds, n, -1)
   a = stub_end(syscall(mov_ri(a: mov_ri(a: a, dst: RDX, imm: -1), dst: RAX, imm: 7)))
   for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
@@ -1740,6 +1744,12 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
   a = mov_ri(a: arg(a: win_begin(a: a, name: "os_mkdir", extra: 0), reg: RCX, i: 0), dst: RDX, imm: 0)
   a = mov_ri(a: win_call(a, "CreateDirectoryA"), dst: RCX, imm: 4294967295)
   a = win_end(alu_ri(a: alu_rr(a: a, op: "and", dst: RAX, src: RCX), op: "sub", dst: RAX, imm: 1))   // TRUE -> 0
+  a = win_call(arg(a: win_begin(a: a, name: "os_unlink", extra: 0), reg: RCX, i: 0), "DeleteFileA")    // -> 0 / -1
+  a = mov_ri(a: a, dst: RCX, imm: 4294967295)
+  a = win_end(alu_ri(a: alu_rr(a: a, op: "and", dst: RAX, src: RCX), op: "sub", dst: RAX, imm: 1))
+  a = arg(a: arg(a: win_begin(a: a, name: "os_getcwd", extra: 0), reg: RCX, i: 1), reg: RDX, i: 0)   // GetCurrentDirectoryA
+  a = mov_ri(a: win_call(a, "GetCurrentDirectoryA"), dst: RCX, imm: 4294967295)
+  a = win_end(alu_rr(a: a, op: "and", dst: RAX, src: RCX))
   a = test_index_stub(a, "windows")
   a = alu_ri(a: alu_ri(a: label(a, "_start"), op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
   a = win_call(mov_ri(a: a, dst: RCX, imm: 65001), "SetConsoleOutputCP")

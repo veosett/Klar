@@ -137,6 +137,13 @@ fn show_to_str(v: Word, td: Word) -> Word {
   return sb_finish(b)
 }
 
+// a value inside an error report (`name = value`): strings quoted, as in the interpreter
+fn show_detail(v: Word, td: Word) -> Word {
+  let b = sb_new()
+  show_into(b, v, td, false)
+  return sb_finish(b)
+}
+
 fn Str_eq(a: Word, b: Word) -> Bool {
   if a == b {
     return true

@@ -21,13 +21,13 @@ OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
             "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir",
             "os_getdents", "os_find_first", "os_find_next", "os_find_close", "os_mkdir",
-            "os_dup2", "os_chdir", "os_execve", "os_poll"]
+            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
                "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
                "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose",
-               "CreateDirectoryA"]
+               "CreateDirectoryA", "DeleteFileA", "GetCurrentDirectoryA"]
 
 
 def udiv_magic(d):
@@ -1191,6 +1191,8 @@ class Emitter:
         sys("os_dup2", 33, 2)
         sys("os_chdir", 80, 1)
         sys("os_execve", 59, 3)
+        sys("os_unlink", 87, 1)
+        sys("os_getcwd", 79, 2)                # -> length with the final NUL
         self.stub_begin("os_poll")             # poll(fds, n, -1)
         self.arg(RDI, 0)
         self.arg(RSI, 1)
@@ -1476,6 +1478,20 @@ class Emitter:
         a.mov_ri(RCX, 0xFFFFFFFF)
         a.alu_rr("and", RAX, RCX)
         a.alu_ri("sub", RAX, 1)        # TRUE (1) -> 0, FALSE (0) -> -1
+        win_end()
+        win_begin("os_unlink")                 # DeleteFileA(path) -> 0, or -1
+        self.arg(RCX, 0)
+        call("DeleteFileA")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)
+        a.alu_ri("sub", RAX, 1)
+        win_end()
+        win_begin("os_getcwd")                 # GetCurrentDirectoryA(n, buf) -> length without the NUL
+        self.arg(RCX, 1)
+        self.arg(RDX, 0)
+        call("GetCurrentDirectoryA")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)
         win_end()
         self.test_index_stub()
 

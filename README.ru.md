@@ -198,13 +198,17 @@ python -m klar spec                             # справка по языку
 python -m klar explain E0701
 ```
 
-Компилятор на Klar (`compiler/`) после сборки работает без Python:
+Компилятор на Klar (`compiler/`) собирается без Python: `./build.sh` (Linux) или `build.bat` (Windows) берёт
+seed-компилятор `klarc` из релиза (или `$KLARC`), собирает им `compiler/klarc.klar` и проверяет, что результат
+собирает сам себя в те же байты. С Python первой стадией служит Python-компилятор:
 
 ```sh
 python -m klar build compiler/klarc.klar -o klarc   # stage 1: Python-компилятор собирает klarc
 ./klarc build compiler/klarc.klar -o klarc2         # stage 2: klarc собирает сам себя (те же байты)
 ./klarc run examples/shapes.klar -- arg1 arg2       # собрать во временный файл и запустить
-./klarc test examples/bank.klar                     # собрать блоки `test` и запустить каждый
+./klarc test examples/bank.klar                     # тесты, doc-тесты и property — в машинном коде
+./klarc dev examples/bank.klar --json               # проверка, тесты и запуск — без Python
+./klarc patch app.klar edits.json                   # протокол правок для ИИ; также add/fetch/deps, eval, fix, doc
 ```
 
 `pip install -e .` установит команду `klar`. На Windows из корня репозитория работает `klar.bat run examples\hello.klar`,

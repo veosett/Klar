@@ -399,13 +399,13 @@ pub fn package_name(dir: Str) -> Str {
   return out
 }
 
-fn base_name(path: Str) -> Str uses io {
+fn base_name(path: Str) -> Str uses fs {
   var p = path.replace("\\", "/")
   while p.len() > 1 and p.ends_with("/") {
     p = p.slice(0, p.len() - 1)
   }
   if p == "." or p == "" {
-    p = env_var("PWD").unwrap_or(".")
+    p = current_dir().replace("\\", "/")
   }
   return p.split("/").last().unwrap_or(p)
 }
@@ -559,7 +559,7 @@ fn starts_upper(s: Str) -> Bool {
   return c >= "A" and c <= "Z" and c != ""
 }
 
-pub fn absolute(path: Str) -> Str uses io {
+pub fn absolute(path: Str) -> Str uses fs {
   if path.starts_with("/") or path.contains(":\\") or path.contains(":/") {
     return path
   }
@@ -567,11 +567,11 @@ pub fn absolute(path: Str) -> Str uses io {
   while p.starts_with("./") {
     p = p.slice(2, p.len())
   }
-  return env_var("PWD").unwrap_or(".") + "/" + p
+  return current_dir() + "/" + p
 }
 
 /// The new text of each file for renaming `old` to `new`, and the occurrences; or why the rename is unsafe.
-pub fn plan_rename(ld: Ld, old: Str, new: Str) -> Result[Pair[List[Pair[Str, Str]], List[NameOcc]], Str] uses io {
+pub fn plan_rename(ld: Ld, old: Str, new: Str) -> Result[Pair[List[Pair[Str, Str]], List[NameOcc]], Str] uses io, fs {
   if not is_name(new) {
     return Err("`{new}` is not a valid name")
   }

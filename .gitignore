@@ -15,3 +15,6 @@ node_modules/
 # bootstrap stages of the self-hosted compiler
 /klarc
 /klarc[0-9]
+
+# seed compilers for build.sh / build.bat
+/seed/

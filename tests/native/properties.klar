@@ -1,0 +1,126 @@
+type Point { x: Int, y: Float }
+
+enum Shape {
+  Circle(r: Float),
+  Rect(w: Int, h: Int),
+  Empty,
+}
+
+enum Tree {
+  Leaf,
+  Node(left: Tree, value: Int, right: Tree),
+}
+
+type Box[T] { item: T, tags: List[Str] }
+
+fn depth(t: Tree) -> Int {
+  return match t {
+    Tree.Leaf => 0,
+    Tree.Node(l, _, r) => 1 + depth(l).max(depth(r)),
+  }
+}
+
+fn total(t: Tree) -> Int {
+  return match t {
+    Tree.Leaf => 0,
+    Tree.Node(l, v, r) => total(l) + v + total(r),
+  }
+}
+
+property "ints small" (a: Int, b: Int) {
+  assert a + b < 50
+}
+
+property "big ints" (a: Int) {
+  assert a < 100000
+}
+
+property "floats" (x: Float) {
+  assert x < 20.5
+}
+
+property "float sum" (x: Float, y: Float) {
+  assert x + y < 30.0
+}
+
+property "strings" (s: Str) {
+  assert not s.contains("x")
+}
+
+property "string len" (s: Str, t: Str) {
+  assert s.len() + t.len() < 9
+}
+
+property "bools" (a: Bool, b: Bool) {
+  assert a or b
+}
+
+property "lists" (xs: List[Int]) {
+  assert xs.len() < 4
+}
+
+property "list sum" (xs: List[Int]) {
+  assert xs.fold(0, fn(acc, v) => acc + v) < 40
+}
+
+property "nested lists" (xss: List[List[Str]]) {
+  assert xss.len() < 3 or xss.get_or(0, []).len() < 2
+}
+
+property "maps" (m: Map[Str, Int]) {
+  assert m.len() < 3
+}
+
+property "options" (o: Option[Int]) {
+  assert o.unwrap_or(0) < 15
+}
+
+property "results" (r: Result[Int, Str]) {
+  assert r.is_ok()
+}
+
+property "records" (p: Point) {
+  assert p.x < 20 or p.y < 0.0
+}
+
+property "enums" (s: Shape) {
+  let ok = match s {
+    Shape.Circle(r) => r < 30.0,
+    Shape.Rect(w, h) => w * h < 100,
+    Shape.Empty => true,
+  }
+  assert ok
+}
+
+property "trees" (t: Tree) {
+  assert depth(t) < 3
+}
+
+property "tree total" (t: Tree) {
+  assert total(t) < 60
+}
+
+property "generic box" (b: Box[Int]) {
+  assert b.item < 30 or b.tags.len() > 2
+}
+
+property "bytes" (b: Bytes) {
+  assert b.len() < 5
+}
+
+property "passes" (a: Int, s: Str, xs: List[Bool]) {
+  assert a == a and s == s and xs.len() >= 0
+}
+
+property "unit and output" (_u: Unit, n: Int) {
+  print("noise")
+  assert n < 90
+}
+
+property "runtime error" (xs: List[Int]) {
+  let n = xs.len()
+  if n > 3 {
+    let ys = [1, 2]
+    assert ys.get_or(n, 0) == 1
+  }
+}

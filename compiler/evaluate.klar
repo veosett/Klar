@@ -1,0 +1,203 @@
+// `klarc eval`: evaluates an expression (after some statements), optionally in the context of a file, like
+// klar/tools/runtools.py — checked by the Klar checker (which also gives the type), then compiled as a test block and
+// run natively; the value comes back through `dbg`.
+use commands.{absolute}
+use dev.{host_target, native_image, parse_rt, save_exe, temp_path, test_items}
+use jsonout.{J, compact}
+use loader.{load_program_with, load_runtime}
+use report.{user_diags}
+use types.{show}
+
+const ENTRY: Str = "klar_eval_entry"
+const VALUE: Str = "klar_eval_value"
+
+type Eval { ok: Bool, fields: List[Pair[Str, J]] }
+
+fn err_eval(fields: List[Pair[Str, J]]) -> Eval {
+  return Eval { ok: false, fields: [Pair { first: "ok", second: J.JBool(false) }].concat(fields) }
+}
+
+/// The static type of the expression that starts at line:col (the longest one recorded there).
+fn type_at(types: Map[Str, Str], file: Str, line: Int, col: Int) -> Str {
+  let prefix = "{file}:{line}:{col}:"
+  var best = "?"
+  var best_end = -1
+  for e in types.entries() {
+    if e.key.starts_with(prefix) {
+      let rest = e.key.slice(prefix.len(), e.key.len()).split(":")
+      let end = rest.get_or(0, "0").to_int().unwrap_or(0) * 1000000 + rest.get_or(1, "0").to_int().unwrap_or(0)
+      if end > best_end {
+        best_end = end
+        best = e.value
+      }
+    }
+  }
+  return best
+}
+
+fn evaluate(parts: List[Str], context: Str, lib: Str) -> Eval uses io, fs, proc {
+  let stmts = parts.take(parts.len() - 1)
+  let expr = parts.last().unwrap_or("")
+  var base = ""
+  var path = current_dir() + "/eval.klar"
+  if context != "" {
+    base = read_file(context).unwrap_or("")
+    path = absolute(context)
+  }
+  let fname = path.replace("\\", "/").split("/").last().unwrap_or(path)
+  var header = ""
+  var trimmed = base
+  while trimmed.ends_with("\n") {
+    trimmed = trimmed.slice(0, trimmed.len() - 1)
+  }
+  if trimmed != "" {
+    header = trimmed + "\n\n"
+  }
+  let offset = header.count("\n") + 1
+  let body = stmts.map(fn(s) => "  " + s + "\n").join("")
+  let tail = "  let " + VALUE + " = " + expr + "\n  let _ = dbg(" + VALUE + ")\n\}\n"
+  let src = header + "fn " + ENTRY + "() uses io, time, rand, fs \{\n" + body + tail
+  let ld = load_program_with(path: path, lib: lib, overlay: Map {}.set(path, src))
+  let errors = ld.diags.filter(fn(d) => d.severity == "error" and d.file == fname)
+  if not errors.is_empty() {
+    let ds = errors.map(fn(d) => J.JObj([Pair { first: "code", second: J.JStr(d.code) }, Pair { first: "message",
+      second: J.JStr(d.message) }, Pair { first: "hint", second: d.hint.map(fn(h) => J.JStr(h)).unwrap_or(J.JNull) },
+      Pair { first: "line", second: J.JInt(match d.span.line > offset {
+        true => d.span.line - offset,
+        false => d.span.line,
+      }) }, Pair { first: "where", second: J.JStr(match d.span.line > offset {
+        true => "input",
+        false => fname,
+    }) }]))
+    return err_eval([Pair { first: "diagnostics", second: J.JArr(ds) }])
+  }
+  let value_line = offset + 1 + stmts.len()
+  let types = match ld.by_path.get(path) {
+    Some(m) => match m.checker {
+      Some(ck) => ck.types.map_values(fn(t) => show(Map {}, t)),
+      None => Map {},
+    },
+    None => Map {},
+  }
+  let typ = type_at(types: types, file: fname, line: value_line, col: 10 + VALUE.len())
+  // run it: the same statements as a test block
+  let test_src = header + "test \"" + ENTRY + "\" \{\n" + body + tail
+  let tl = load_runtime(load_program_with(path: path, lib: lib, overlay: Map {}.set(path, test_src)))
+  if tl.diags.any(fn(d) => d.severity == "error") {
+    return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
+      first: "message", second: J.JStr("klarc cannot run this expression") }]) }, Pair { first: "output",
+        second: J.JStr("") }])
+  }
+  let index = test_items(tl, path).filter(fn(t) => t.name == ENTRY).get(0).map(fn(t) => t.index).unwrap_or(0)
+  let exe = temp_path(path, "eval")
+  match save_exe(exe, native_image(ld: tl, main_path: path, target: host_target(), tests: true)) {
+    Ok(_) => {},
+    Err(e) => {
+      return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
+        first: "message", second: J.JStr(e) }]) }, Pair { first: "output", second: J.JStr("") }])
+    },
+  }
+  let res = match run_capture(args: [exe, "100", "0", index.to_str()], dir: "", input: "") {
+    Ok(r) => r,
+    Err(e) => {
+      return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
+        first: "message", second: J.JStr(e) }]) }, Pair { first: "output", second: J.JStr("") }])
+    },
+  }
+  let out = res.get_or(1, "")
+  match parse_rt(res.get_or(2, "")) {
+    Some(e) => {
+      return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr(e.code) }, Pair {
+        first: "message", second: J.JStr(e.msg) }]) }, Pair { first: "output", second: J.JStr(out) }])
+    },
+    None => {},
+  }
+  var value = J.JNull
+  let marker = "] " + VALUE + " = "
+  for line in res.get_or(2, "").split("\n") {
+    if line.starts_with("[dbg ") and line.contains(marker) {
+      value = J.JStr(line.split(marker).drop(1).join(marker))
+    }
+  }
+  return Eval { ok: true, fields: [Pair { first: "ok", second: J.JBool(true) }, Pair { first: "value", second: value },
+    Pair { first: "type", second: J.JStr(typ) }, Pair { first: "output", second: J.JStr(out) }] }
+}
+
+fn get(fields: List[Pair[Str, J]], key: Str) -> J {
+  return fields.filter(fn(f) => f.first == key).get(0).map(fn(f) => f.second).unwrap_or(J.JNull)
+}
+
+fn text(j: J) -> Str {
+  return match j {
+    J.JStr(s) => s,
+    J.JInt(i) => i.to_str(),
+    J.JNull => "None",
+    _ => "",
+  }
+}
+
+/// `klarc eval [STATEMENT...] EXPR [--in FILE] [--json]`
+pub fn eval_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
+  var parts: List[Str] = []
+  var context = ""
+  var json = false
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--in" {
+      context = args.get_or(i + 1, "")
+      i = i + 2
+    } else if a == "--lib" {
+      i = i + 2
+    } else if a == "--json" {
+      json = true
+      i = i + 1
+    } else {
+      parts = parts.push(a)
+      i = i + 1
+    }
+  }
+  if parts.is_empty() {
+    eprint("usage: klarc eval [statements...] <expression> [--in file.klar] [--json]")
+    return 2
+  }
+  let res = evaluate(parts: parts, context: context, lib: lib)
+  if json {
+    print(compact(J.JObj(res.fields)))
+    return match res.ok {
+      true => 0,
+      false => 1,
+    }
+  }
+  match get(res.fields, "output") {
+    J.JStr(o) => print_raw(o),
+    _ => {},
+  }
+  if res.ok {
+    print(text(get(res.fields, "value")) + " : " + text(get(res.fields, "type")))
+    return 0
+  }
+  match get(res.fields, "diagnostics") {
+    J.JArr(ds) => {
+      for d in ds {
+        let f = match d {
+          J.JObj(x) => x,
+          _ => [],
+        }
+        eprint("error[" + text(get(f, "code")) + "] (" + text(get(f, "where")) + " line " + text(get(f, "line")) + "): " +
+            text(get(f, "message")))
+        if get(f, "hint") != J.JNull and text(get(f, "hint")) != "" {
+          eprint("  hint: " + text(get(f, "hint")))
+        }
+      }
+    },
+    _ => {
+      let e = match get(res.fields, "error") {
+        J.JObj(x) => x,
+        _ => [],
+      }
+      eprint("runtime error[" + text(get(e, "code")) + "]: " + text(get(e, "message")))
+    },
+  }
+  return 1
+}

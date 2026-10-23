@@ -12,8 +12,8 @@ use loader.{Ld, load_program, load_runtime}
 use lower.{fnv1a, lower_program}
 use report.{user_diags}
 
-/// A test of the main file: its name, and whether it is a property (only `test` blocks run natively, doc tests
-/// included; `index` numbers them as the test executable does).
+/// A test of the main file (a `test` block, a doc test or a property): its name, whether it is a property, and its
+/// number in the test executable.
 pub type TestItem { name: Str, is_property: Bool, index: Int }
 
 pub fn test_items(ld: Ld, file: Str) -> List[TestItem] {
@@ -33,7 +33,8 @@ pub fn test_items(ld: Ld, file: Str) -> List[TestItem] {
         k = k + 1
       },
       Decl.Property(_, name, _, _) => {
-        out = out.push(TestItem { name: name, is_property: true, index: -1 })
+        out = out.push(TestItem { name: name, is_property: true, index: k })
+        k = k + 1
       },
       _ => {},
     }
@@ -54,6 +55,20 @@ fn has_main(ld: Ld, file: Str) -> Bool {
     Decl.Fn(f) => f.name == "main",
     _ => false,
   })
+}
+
+/// The target of this machine: Windows (by its temp directory), else Linux on the CPU `uname -m` names.
+pub fn host_target() -> Str uses io, proc {
+  if env_var("TEMP").unwrap_or("").contains("\\") {
+    return "windows"
+  }
+  return match run_capture(args: ["uname", "-m"], dir: "", input: "") {
+    Ok(r) => match ["aarch64", "arm64"].contains(r.get_or(1, "").trim()) {
+      true => "linux-arm64",
+      false => "linux",
+    },
+    Err(_) => "linux",
+  }
 }
 
 /// The executable of a checked program (`tests`: the one that runs test #argv[1]).
@@ -360,10 +375,10 @@ pub fn dev_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
   let items = test_items(ld, file)
   var passed = 0
   var failed: List[J] = []
-  var skipped: List[J] = []
-  if items.any(fn(t) => not t.is_property) {
+  let runs = int_flag(args: args, name: "--runs", default: 50)
+  if not items.is_empty() {
     let exe = temp_path(file, "dev-test")
-    match save_exe(exe, native_image(ld: ld, main_path: file, target: "linux", tests: true)) {
+    match save_exe(exe, native_image(ld: ld, main_path: file, target: host_target(), tests: true)) {
       Ok(_) => {},
       Err(e) => {
         eprint("klarc: {e}")
@@ -371,40 +386,30 @@ pub fn dev_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
       },
     }
     for t in items {
-      if not t.is_property {
-        match run_exe(exe: exe, args: [t.index.to_str()], input: "") {
-          Ok(res) => {
-            if res.get_or(0, "") == "0" {
-              passed = passed + 1
-            } else {
-              let e = parse_rt(res.get_or(2, "")).unwrap_or(RtError { code: "R0000", msg: "the test failed (exit " +
-                  "code " + res.get_or(0, "") + ")", at: shown, values: [], stack: [], hint: "" })
-              failed = failed.push(J.JObj([Pair { first: "name", second: J.JStr(t.name) }].concat(rt_fields(e))))
-            }
-          },
-          Err(e) => {
-            eprint("klarc: {e}")
-            return 1
-          },
-        }
+      match run_exe(exe: exe, args: [runs.to_str(), "0", t.index.to_str()], input: "") {
+        Ok(res) => {
+          if res.get_or(0, "") == "0" {
+            passed = passed + 1
+          } else {
+            let e = parse_rt(res.get_or(2, "")).unwrap_or(RtError { code: "R0000", msg: "the test failed (exit " +
+                "code " + res.get_or(0, "") + ")", at: shown, values: [], stack: [], hint: "" })
+            failed = failed.push(J.JObj([Pair { first: "name", second: J.JStr(t.name) }].concat(rt_fields(e))))
+          }
+        },
+        Err(e) => {
+          eprint("klarc: {e}")
+          return 1
+        },
       }
     }
   }
-  for t in items {
-    if t.is_property {
-      skipped = skipped.push(J.JStr(t.name))
-    }
-  }
-  var tests = [Pair { first: "passed", second: J.JInt(passed) }, Pair { first: "failed", second: J.JArr(failed) }]
-  if not skipped.is_empty() {
-    tests = tests.push(Pair { first: "skipped", second: J.JArr(skipped) })
-  }
+  let tests = [Pair { first: "passed", second: J.JInt(passed) }, Pair { first: "failed", second: J.JArr(failed) }]
   report = report.push(Pair { first: "tests", second: J.JObj(tests) })
   // the program
   var run_failed = false
   if has_main(ld, file) and not args.contains("--no-run") {
     let exe = temp_path(file, "dev-run")
-    match save_exe(exe, native_image(ld: ld, main_path: file, target: "linux", tests: false)) {
+    match save_exe(exe, native_image(ld: ld, main_path: file, target: host_target(), tests: false)) {
       Ok(_) => {},
       Err(e) => {
         eprint("klarc: {e}")
