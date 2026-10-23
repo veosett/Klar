@@ -43,8 +43,33 @@ def method(owner, sig):
     return deco
 
 
-def rt_error(code, msg, span):
-    return KlarRuntimeError(code, msg, span)
+def rt_error(code, msg, span, hint=None):
+    return KlarRuntimeError(code, msg, span, hint=hint)
+
+
+# ---- the rights of `--allow` (klar/sandbox.py): `it.sandbox` is None without it --------------------------------
+def need(it, what, right, sp):
+    sb = getattr(it, "sandbox", None)
+    if sb is not None:
+        sb.need(what, right, sp)
+
+
+def need_fs(it, what, path, sp):
+    sb = getattr(it, "sandbox", None)
+    if sb is not None:
+        sb.need_fs(what, path, sp)
+
+
+def need_any_fs(it, what, sp):
+    sb = getattr(it, "sandbox", None)
+    if sb is not None:
+        sb.need_any_fs(what, sp)
+
+
+def need_proc(it, what, args, sp):
+    sb = getattr(it, "sandbox", None)
+    if sb is not None:
+        sb.need_proc(what, list(args), sp)
 
 
 # ---------------------------------------------------------------------------
@@ -100,18 +125,43 @@ def _range(it, a, sp):
 
 @glob("fn now_ms() -> Int uses time")
 def _now(it, a, sp):
+    need(it, "now_ms", "time", sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        return f.clock // 1000000
     return int(time.time() * 1000)
 
 
 @glob("fn now_ns() -> Int uses time")
 def _now_ns(it, a, sp):
+    need(it, "now_ns", "time", sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        return f.clock
     return time.perf_counter_ns()
+
+
+@glob("fn set_clock(ms: Int) uses time")
+def _set_clock(it, a, sp):
+    """Sets the fake clock of a test: `now_ms()` is `ms` afterwards (and `now_ns()` the same in nanoseconds)."""
+    need(it, "set_clock", "time", sp)
+    f = getattr(it, "fake", None)
+    if f is None:
+        raise rt_error("R0009", "set_clock: only tests have a clock that can be set", sp)
+    if a[0] < 0 or a[0] > 9_000_000_000_000:
+        raise rt_error("R0009", f"set_clock: {a[0]} is not a time in milliseconds from 0 to 9000000000000", sp)
+    f.clock = a[0] * 1000000
+    return UNIT
 
 
 @glob("fn random_int(min: Int, max: Int) -> Int uses rand")
 def _rand(it, a, sp):
+    need(it, "random_int", "rand", sp)
     if a[0] > a[1]:
         raise rt_error("R0009", f"random_int: min ({a[0]}) > max ({a[1]})", sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        return f.random_int(a[0], a[1])
     return random.randint(a[0], a[1])
 
 
@@ -131,6 +181,11 @@ def _todo(it, a, sp):
 
 @glob("fn read_file(path: Str) -> Result[Str, Str] uses fs")
 def _read_file(it, a, sp):
+    need_fs(it, "read_file", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.read_file(a[0])
+        return ok(UNIT if v is None else v) if good else err(v)
     try:
         with open(a[0], encoding="utf-8") as f:
             return ok(f.read())
@@ -142,6 +197,11 @@ def _read_file(it, a, sp):
 
 @glob("fn write_file(path: Str, content: Str) -> Result[Unit, Str] uses fs")
 def _write_file(it, a, sp):
+    need_fs(it, "write_file", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.write_file(a[0], a[1])
+        return ok(UNIT if v is None else v) if good else err(v)
     try:
         with open(a[0], "w", encoding="utf-8") as f:
             f.write(a[1])
@@ -152,12 +212,21 @@ def _write_file(it, a, sp):
 
 @glob("fn file_exists(path: Str) -> Bool uses fs")
 def _file_exists(it, a, sp):
+    need_fs(it, "file_exists", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        return f.file_exists(a[0])
     import os
     return os.path.isfile(a[0])
 
 
 @glob("fn list_dir(path: Str) -> Result[List[Str], Str] uses fs")
 def _list_dir(it, a, sp):
+    need_fs(it, "list_dir", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.list_dir(a[0])
+        return ok(UNIT if v is None else v) if good else err(v)
     import os
     try:
         return ok(tuple(sorted(os.listdir(a[0]))))
@@ -167,6 +236,11 @@ def _list_dir(it, a, sp):
 
 @glob("fn make_dir(path: Str) -> Result[Unit, Str] uses fs")
 def _make_dir(it, a, sp):
+    need_fs(it, "make_dir", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.make_dir(a[0])
+        return ok(UNIT if v is None else v) if good else err(v)
     import os
     try:
         os.makedirs(a[0], exist_ok=True)
@@ -178,6 +252,10 @@ def _make_dir(it, a, sp):
 @glob("fn current_dir() -> Str uses fs")
 def _current_dir(it, a, sp):
     """The working directory (absolute)."""
+    need_any_fs(it, "current_dir", sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        return "/"
     import os
     return os.getcwd()
 
@@ -185,6 +263,11 @@ def _current_dir(it, a, sp):
 @glob("fn remove_file(path: Str) -> Result[Unit, Str] uses fs")
 def _remove_file(it, a, sp):
     """Deletes a file."""
+    need_fs(it, "remove_file", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.remove_file(a[0])
+        return ok(UNIT if v is None else v) if good else err(v)
     import os
     try:
         if os.path.isdir(a[0]):
@@ -198,6 +281,10 @@ def _remove_file(it, a, sp):
 
 @glob("fn is_dir(path: Str) -> Bool uses fs")
 def _is_dir(it, a, sp):
+    need_fs(it, "is_dir", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        return f.is_dir(a[0])
     import os
     return os.path.isdir(a[0])
 
@@ -210,6 +297,7 @@ def _exit(it, a, sp):
 @glob("fn run_command(args: List[Str]) -> Result[Int, Str] uses proc")
 def _run_command(it, a, sp):
     """Runs a program (searched in PATH) with inherited stdin/stdout/stderr; Ok(exit code)."""
+    need_proc(it, "run_command", a[0], sp)
     import os
     import subprocess
     import sys
@@ -233,6 +321,7 @@ def _run_command(it, a, sp):
 def _run_capture(it, a, sp):
     """Runs a program (searched in PATH) in `dir` ("": here) with `input` as its stdin (at most 64 KB) and its output
     captured: Ok([exit code, stdout, stderr])."""
+    need_proc(it, "run_capture", a[0], sp)
     import os
     import shutil
     import subprocess
@@ -254,6 +343,11 @@ def _run_capture(it, a, sp):
 @glob("fn set_executable(path: Str) -> Result[Unit, Str] uses fs")
 def _set_executable(it, a, sp):
     """Marks a file as executable (chmod 755); nothing to do on Windows."""
+    need_fs(it, "set_executable", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.set_executable(a[0])
+        return ok(UNIT if v is None else v) if good else err(v)
     import os
     if os.name == "nt":
         return ok(UNIT)
@@ -546,6 +640,11 @@ def _bytes_of(it, a, sp): return bytes(_byte(b, "bytes_of", sp) for b in a[0])
 
 @glob("fn read_bytes(path: Str) -> Result[Bytes, Str] uses fs")
 def _read_bytes(it, a, sp):
+    need_fs(it, "read_bytes", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.read_bytes(a[0])
+        return ok(UNIT if v is None else v) if good else err(v)
     try:
         with open(a[0], "rb") as f:
             return ok(f.read())
@@ -555,6 +654,11 @@ def _read_bytes(it, a, sp):
 
 @glob("fn write_bytes(path: Str, data: Bytes) -> Result[Unit, Str] uses fs")
 def _write_bytes(it, a, sp):
+    need_fs(it, "write_bytes", a[0], sp)
+    f = getattr(it, "fake", None)
+    if f is not None:
+        good, v = f.write_bytes(a[0], a[1])
+        return ok(UNIT if v is None else v) if good else err(v)
     try:
         with open(a[0], "wb") as f:
             f.write(a[1])

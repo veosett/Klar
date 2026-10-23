@@ -355,7 +355,7 @@ fn w_decl(st0: RS, d: Decl) -> RS {
     Decl.Alias(_, _, _, target, _, _) => w_type(st, target),
     Decl.Const(_, _, _, ty, value, _, _) => w_type(w_expr(st, value), ty),
     Decl.Use(_, _, _, _) => st,
-    Decl.Property(_, _, params, body) => w_params(w_block(st, body), params),
+    Decl.Property(_, _, params, body, _) => w_params(w_block(st, body), params),
     Decl.EnumD(_, _, _, variants, _, _) => {
       for v in variants.reverse() {
         if v.name == st.name {
@@ -365,7 +365,7 @@ fn w_decl(st0: RS, d: Decl) -> RS {
       }
       return st
     },
-    Decl.Test(_, _, body) => w_block(st, body),
+    Decl.Test(_, _, body, _) => w_block(st, body),
     Decl.Trait(_, _, _, methods, _, _, _) => {
       for m in methods.reverse() {
         st = w_fn(st, m)
@@ -588,9 +588,9 @@ pub fn sig_text(lines: List[Str], d: Decl, newtype: Bool) -> Str {
       return "enum {name}{tparams_text(tps)} \{ " + vs + " \}"
     },
     Decl.Fn(f) => fn_sig_text(lines, f),
-    Decl.Test(span, _, body) => strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: 0,
+    Decl.Test(span, _, body, _) => strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: 0,
       last: body.span.line, last_col: body.span.col))),
-    Decl.Property(span, _, _, body) => strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: 0,
+    Decl.Property(span, _, _, body, _) => strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: 0,
       last: body.span.line, last_col: body.span.col))),
     _ => {
       let sp = decl_span(d)
@@ -607,9 +607,9 @@ pub fn decl_span(d: Decl) -> Span {
     Decl.Alias(s, _, _, _, _, _) => s,
     Decl.Const(s, _, _, _, _, _, _) => s,
     Decl.Use(s, _, _, _) => s,
-    Decl.Property(s, _, _, _) => s,
+    Decl.Property(s, _, _, _, _) => s,
     Decl.EnumD(s, _, _, _, _, _) => s,
-    Decl.Test(s, _, _) => s,
+    Decl.Test(s, _, _, _) => s,
     Decl.Trait(s, _, _, _, _, _, _) => s,
     Decl.Impl(s, _, _, _, _, _, _, _, _) => s,
   }
@@ -620,7 +620,7 @@ pub fn doc_examples(decls: List[Decl], lines: List[Str], name: Str) -> List[Str]
   var out: List[Str] = []
   for d in decls {
     match d {
-      Decl.Test(span, tname, _) => {
+      Decl.Test(span, tname, _, _) => {
         if tname == "doc: " + name {
           var ln = span.line
           while ln <= span.end_line {
@@ -664,9 +664,9 @@ fn decl_kind(d: Decl) -> Str {
     Decl.Alias(_, _, _, _, _, _) => "alias",
     Decl.Const(_, _, _, _, _, _, _) => "const",
     Decl.Use(_, _, _, _) => "use",
-    Decl.Property(_, _, _, _) => "property",
+    Decl.Property(_, _, _, _, _) => "property",
     Decl.EnumD(_, _, _, _, _, _) => "enum",
-    Decl.Test(_, _, _) => "test",
+    Decl.Test(_, _, _, _) => "test",
     Decl.Trait(_, _, _, _, _, _, _) => "trait",
     Decl.Impl(_, _, _, _, _, _, _, _, _) => "impl",
   }
@@ -679,9 +679,9 @@ pub fn decl_name(d: Decl) -> Str {
     Decl.Alias(_, n, _, _, _, _) => n,
     Decl.Const(_, n, _, _, _, _, _) => n,
     Decl.Use(_, path, _, _) => path.join("."),
-    Decl.Property(_, n, _, _) => n,
+    Decl.Property(_, n, _, _, _) => n,
     Decl.EnumD(_, n, _, _, _, _) => n,
-    Decl.Test(_, n, _) => n,
+    Decl.Test(_, n, _, _) => n,
     Decl.Trait(_, n, _, _, _, _, _) => n,
     Decl.Impl(_, t, _, _, _, _, _, _, _) => t,
   }
@@ -803,8 +803,8 @@ fn module_outline(m: UMod) -> OMod {
           }
           item = item with { name: "{trait_name} for {tname}", signature: sig, methods: ms }
         },
-        Decl.Test(_, _, _) => {},
-        Decl.Property(_, _, _, _) => {},
+        Decl.Test(_, _, _, _) => {},
+        Decl.Property(_, _, _, _, _) => {},
         Decl.Use(_, _, names, _) => {
           item = item with { items: names }
         },

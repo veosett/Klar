@@ -1,0 +1,334 @@
+// Klar runtime: the fakes behind the effects of tests (`test "t" uses fs, time, rand`), as in klar/fakes.py: an
+// empty file system in memory, a clock that starts at 0 (moved by `set_clock`) and a fixed sequence of random
+// numbers. A test executable runs one test per process and calls `fake_begin` before it; a property runs each input
+// in a child process, so every run starts from the same fakes.
+//
+// The file system is a linked list of entries [next, path, content]: `path` is absolute and normalized (no `.`, `..`
+// or double `/`), `content` is the text of a file or 0 for a directory.
+
+const G_FAKE: Word = 1048
+const G_FAKE_FS: Word = 1056
+const G_CLOCK: Word = 1064
+
+// the first state of the random numbers of a test (0x9E3779B97F4A7C15)
+const FAKE_SEED: Word = -7046029254386353131
+
+fn fake_begin() {
+  let gp = g()
+  poke(gp + G_FAKE, 1)
+  poke(gp + G_FAKE_FS, fake_entry(0, str_from(bits("/") + 32, 1), 0))
+  poke(gp + G_CLOCK, 0)
+  poke(gp + G_RAND, FAKE_SEED)
+}
+
+fn fake_on() -> Bool {
+  return peek(g() + G_FAKE) != 0
+}
+
+fn fake_entry(next: Word, path: Word, content: Word) -> Word {
+  let e = alloc(24)
+  poke(e, next)
+  poke(e + 8, path)
+  poke(e + 16, content)
+  return e
+}
+
+// the absolute form of a path: relative paths start at `/`, `.` and `..` resolved
+fn fake_norm(path: Word) -> Word {
+  let n = peek(path + 16)
+  let p = path + 32
+  let b = sb_new()
+  var i: Word = 0
+  while i <= n {
+    var j = i
+    while j < n and peek8(p + j) != 47 {
+      j = j + 1
+    }
+    let len = j - i
+    if len == 0 or (len == 1 and peek8(p + i) == 46) {
+      // an empty segment or `.`
+    } else if len == 2 and peek8(p + i) == 46 and peek8(p + i + 1) == 46 {
+      var k = sb_len(b) - 1
+      while k > 0 and peek8(peek(b + 32) + k) != 47 {
+        k = k - 1
+      }
+      if k < 0 {
+        k = 0
+      }
+      poke(b + 16, k)
+    } else {
+      sb_add_byte(b, 47)
+      sb_add_bytes(b, p + i, len)
+    }
+    i = j + 1
+  }
+  if sb_len(b) == 0 {
+    sb_add_byte(b, 47)
+  }
+  return sb_finish(b)
+}
+
+fn fake_find(n: Word) -> Word {
+  var e = peek(g() + G_FAKE_FS)
+  while e != 0 {
+    if Str_eq(peek(e + 8), n) {
+      return e
+    }
+    e = peek(e)
+  }
+  return 0
+}
+
+fn fake_is_file(n: Word) -> Bool {
+  let e = fake_find(n)
+  return e != 0 and peek(e + 16) != 0
+}
+
+fn fake_is_dir_n(n: Word) -> Bool {
+  let e = fake_find(n)
+  return e != 0 and peek(e + 16) == 0
+}
+
+// the directory of an absolute path (`/` for `/x`)
+fn fake_parent(n: Word) -> Word {
+  var k = peek(n + 16) - 1
+  while k > 0 and peek8(n + 32 + k) != 47 {
+    k = k - 1
+  }
+  if k <= 0 {
+    return str_from(bits("/") + 32, 1)
+  }
+  return str_from(n + 32, k)
+}
+
+// whether a file stands where a directory of path n would be
+fn fake_blocked(n: Word) -> Bool {
+  rc_inc(n)
+  var cur = n
+  var found = false
+  while not found and peek(cur + 16) > 1 {
+    if fake_is_file(cur) {
+      found = true
+    } else {
+      let up = fake_parent(cur)
+      rc_dec(cur)
+      cur = up
+    }
+  }
+  rc_dec(cur)
+  return found
+}
+
+fn fake_err(rtd: Word, verb: Str, path: Word, reason: Str) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "cannot ")
+  sb_add_cstr(b, verb)
+  sb_add_cstr(b, " '")
+  sb_add_str(b, path)
+  sb_add_cstr(b, "': ")
+  sb_add_cstr(b, reason)
+  return err_new(rtd, sb_finish(b))
+}
+
+fn fake_read_file(path: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  let e = fake_find(n)
+  rc_dec(n)
+  if e == 0 {
+    return fake_err(rtd, "read", path, "No such file or directory")
+  }
+  let c = peek(e + 16)
+  if c == 0 {
+    return fake_err(rtd, "read", path, "Is a directory")
+  }
+  if not valid_utf8(c) {
+    return fake_err(rtd, "read", path, "not valid UTF-8 text")
+  }
+  rc_inc(c)
+  return ok_new(rtd, c)
+}
+
+fn fake_read_bytes(path: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  let e = fake_find(n)
+  rc_dec(n)
+  if e == 0 {
+    return fake_err(rtd, "read", path, "No such file or directory")
+  }
+  let c = peek(e + 16)
+  if c == 0 {
+    return fake_err(rtd, "read", path, "Is a directory")
+  }
+  let len = peek(c + 16)
+  let out = bytes_with_cap(len)
+  copy_bytes(peek(out + 32), c + 32, len)
+  poke(out + 16, len)
+  return ok_new(rtd, out)
+}
+
+fn fake_write_bytes(path: Word, data: Word, rtd: Word) -> Word {
+  let s = str_from(peek(data + 32), peek(data + 16))
+  let r = fake_write_file(path, s, rtd)
+  rc_dec(s)
+  return r
+}
+
+fn fake_write_file(path: Word, content: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  let e = fake_find(n)
+  if e != 0 and peek(e + 16) == 0 {
+    rc_dec(n)
+    return fake_err(rtd, "write", path, "Is a directory")
+  }
+  let up = fake_parent(n)
+  let up_ok = fake_is_dir_n(up)
+  let blocked = fake_blocked(up)
+  rc_dec(up)
+  if not up_ok {
+    rc_dec(n)
+    if blocked {
+      return fake_err(rtd, "write", path, "Not a directory")
+    }
+    return fake_err(rtd, "write", path, "No such file or directory")
+  }
+  rc_inc(content)
+  if e != 0 {
+    rc_dec(n)
+    rc_dec(peek(e + 16))
+    poke(e + 16, content)
+  } else {
+    let gp = g()
+    poke(gp + G_FAKE_FS, fake_entry(peek(gp + G_FAKE_FS), n, content))
+  }
+  return ok_new(rtd, 0)
+}
+
+fn fake_file_exists(path: Word) -> Bool {
+  let n = fake_norm(path)
+  let r = fake_is_file(n)
+  rc_dec(n)
+  return r
+}
+
+fn fake_is_dir(path: Word) -> Bool {
+  let n = fake_norm(path)
+  let r = fake_is_dir_n(n)
+  rc_dec(n)
+  return r
+}
+
+fn fake_list_dir(path: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  if not fake_is_dir_n(n) {
+    let not_dir = fake_is_file(n) or fake_blocked(n)
+    rc_dec(n)
+    if not_dir {
+      return fake_err(rtd, "list", path, "Not a directory")
+    }
+    return fake_err(rtd, "list", path, "No such file or directory")
+  }
+  // the entries directly below n: their path starts with n + "/" (n itself is "/" for the root)
+  var plen = peek(n + 16) + 1
+  if plen == 2 {
+    plen = 1
+  }
+  var names = list_new_str()
+  var e = peek(g() + G_FAKE_FS)
+  while e != 0 {
+    let k = peek(e + 8)
+    let klen = peek(k + 16)
+    if klen > plen and bytes_eq(k + 32, n + 32, plen - 1) and peek8(k + 32 + plen - 1) == 47 {
+      var slash = false
+      var i = plen
+      while i < klen {
+        if peek8(k + 32 + i) == 47 {
+          slash = true
+        }
+        i = i + 1
+      }
+      if not slash {
+        names = list_push_owned_raw(names, str_from(k + 32 + plen, klen - plen))
+      }
+    }
+    e = peek(e)
+  }
+  rc_dec(n)
+  let sorted = List_sort(names, 0)
+  rc_dec(names)
+  return ok_new(rtd, sorted)
+}
+
+fn fake_make_dir(path: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  if fake_is_file(n) {
+    rc_dec(n)
+    return fake_err(rtd, "create", path, "File exists")
+  }
+  if fake_blocked(n) {
+    rc_dec(n)
+    return fake_err(rtd, "create", path, "Not a directory")
+  }
+  var cur = n
+  while fake_find(cur) == 0 {
+    let gp = g()
+    rc_inc(cur)
+    poke(gp + G_FAKE_FS, fake_entry(peek(gp + G_FAKE_FS), cur, 0))
+    let up = fake_parent(cur)
+    rc_dec(cur)
+    cur = up
+  }
+  rc_dec(cur)
+  return ok_new(rtd, 0)
+}
+
+fn fake_remove_file(path: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  let e = fake_find(n)
+  rc_dec(n)
+  if e != 0 and peek(e + 16) == 0 {
+    return fake_err(rtd, "remove", path, "Is a directory")
+  }
+  if e == 0 {
+    return fake_err(rtd, "remove", path, "No such file or directory")
+  }
+  // unlink the entry
+  let gp = g()
+  if peek(gp + G_FAKE_FS) == e {
+    poke(gp + G_FAKE_FS, peek(e))
+  } else {
+    var prev = peek(gp + G_FAKE_FS)
+    while peek(prev) != e {
+      prev = peek(prev)
+    }
+    poke(prev, peek(e))
+  }
+  rc_dec(peek(e + 8))
+  rc_dec(peek(e + 16))
+  block_free(e)
+  return ok_new(rtd, 0)
+}
+
+fn fake_set_executable(path: Word, rtd: Word) -> Word {
+  let n = fake_norm(path)
+  let e = fake_find(n)
+  rc_dec(n)
+  if e == 0 {
+    return fake_err(rtd, "change", path, "No such file or directory")
+  }
+  return ok_new(rtd, 0)
+}
+
+fn b_set_clock(ms: Int, sp: Word) {
+  sb_need("set_clock", SB_TIME, "time", sp)
+  if not fake_on() {
+    fail_msg("R0009", "set_clock: only tests have a clock that can be set", sp)
+  }
+  if ms < 0 or ms > 9000000000000 {
+    let b = sb_new()
+    sb_add_cstr(b, "set_clock: ")
+    int_show(b, bits(ms))
+    sb_add_cstr(b, " is not a time in milliseconds from 0 to 9000000000000")
+    fail_simple("R0009", sb_finish(b), sp)
+  }
+  poke(g() + G_CLOCK, untag(ms) * 1000000)
+}

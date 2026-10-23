@@ -34,11 +34,19 @@ fn b_range(lo: Int, hi: Int, rtd: Word) -> Word {
   return list_from_range(rtd, untag(lo), untag(hi))
 }
 
-fn b_now_ns() -> Int {
+fn b_now_ns(sp: Word) -> Int {
+  sb_need("now_ns", SB_TIME, "time", sp)
+  if fake_on() {
+    return tag(peek(g() + G_CLOCK))
+  }
   return tag(os_time_ns())
 }
 
-fn b_now_ms() -> Int {
+fn b_now_ms(sp: Word) -> Int {
+  sb_need("now_ms", SB_TIME, "time", sp)
+  if fake_on() {
+    return tag(peek(g() + G_CLOCK) / 1000000)
+  }
   return tag(os_wall_ns() / 1000000)
 }
 
@@ -58,6 +66,7 @@ fn b_todo(what: Word, sp: Word) -> Word {
 }
 
 fn b_random_int(lo: Int, hi: Int, sp: Word) -> Int {
+  sb_need("random_int", SB_RAND, "rand", sp)
   if lo > hi {
     let b = sb_new()
     sb_add_cstr(b, "random_int: min (")
@@ -230,7 +239,11 @@ fn io_error_text(b: Word, code: Word) {
   }
 }
 
-fn b_read_file(path: Word, rtd: Word) -> Word {
+fn b_read_file(path: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("read_file", path, sp)
+  if fake_on() {
+    return fake_read_file(path, rtd)
+  }
   let fd = os_open(path + 32, 0)
   if fd < 0 {
     let b = sb_new()
@@ -294,7 +307,11 @@ fn valid_utf8(s: Word) -> Bool {
   return true
 }
 
-fn b_write_file(path: Word, content: Word, rtd: Word) -> Word {
+fn b_write_file(path: Word, content: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("write_file", path, sp)
+  if fake_on() {
+    return fake_write_file(path, content, rtd)
+  }
   let fd = os_open(path + 32, 1)
   if fd < 0 {
     let b = sb_new()
@@ -318,7 +335,11 @@ fn b_write_file(path: Word, content: Word, rtd: Word) -> Word {
   return ok_new(rtd, 0)
 }
 
-fn b_file_exists(path: Word) -> Bool {
+fn b_file_exists(path: Word, sp: Word) -> Bool {
+  sb_need_fs("file_exists", path, sp)
+  if fake_on() {
+    return fake_file_exists(path)
+  }
   return os_file_exists(path + 32)
 }
 
@@ -567,7 +588,8 @@ fn add_win_arg(b: Word, s: Word) {
   sb_add_byte(b, 34)
 }
 
-fn b_run_command(args: Word, rtd: Word) -> Word {
+fn b_run_command(args: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_proc("run_command", args, sp)
   let n = peek(args + 16)
   if n == 0 {
     return err_new(rtd, bits("run_command: no program given"))
@@ -611,7 +633,11 @@ fn b_run_command(args: Word, rtd: Word) -> Word {
   return ok_new(rtd, bits(tag(r)))
 }
 
-fn b_set_executable(path: Word, rtd: Word) -> Word {
+fn b_set_executable(path: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("set_executable", path, sp)
+  if fake_on() {
+    return fake_set_executable(path, rtd)
+  }
   if os_platform() == 1 {
     return ok_new(rtd, 0)
   }
@@ -630,7 +656,11 @@ fn b_set_executable(path: Word, rtd: Word) -> Word {
 // ---------------------------------------------------------------------------
 // directories
 // ---------------------------------------------------------------------------
-fn b_is_dir(path: Word) -> Bool {
+fn b_is_dir(path: Word, sp: Word) -> Bool {
+  sb_need_fs("is_dir", path, sp)
+  if fake_on() {
+    return fake_is_dir(path)
+  }
   return os_is_dir(path + 32)
 }
 
@@ -652,7 +682,11 @@ fn add_entry(names: Word, p: Word) -> Word {
   return list_push_owned_raw(names, str_from(p, n))
 }
 
-fn b_list_dir(path: Word, rtd: Word) -> Word {
+fn b_list_dir(path: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("list_dir", path, sp)
+  if fake_on() {
+    return fake_list_dir(path, rtd)
+  }
   var names = list_new_str()
   if os_platform() == 1 {
     let b = sb_new()
@@ -714,7 +748,11 @@ fn b_list_dir(path: Word, rtd: Word) -> Word {
 }
 
 // make_dir(path): creates the directory and the missing ones above it (like Python's os.makedirs(exist_ok=True))
-fn b_make_dir(path: Word, rtd: Word) -> Word {
+fn b_make_dir(path: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("make_dir", path, sp)
+  if fake_on() {
+    return fake_make_dir(path, rtd)
+  }
   let n = peek(path + 16)
   let buf = alloc(n + 1)
   copy_bytes(buf, path + 32, n)
@@ -749,7 +787,16 @@ fn b_make_dir(path: Word, rtd: Word) -> Word {
 }
 
 // current_dir(): the working directory
-fn b_current_dir() -> Word {
+fn b_current_dir(sp: Word) -> Word {
+  sb_need_any_fs("current_dir", sp)
+  if fake_on() {
+    return str_from(bits("/") + 32, 1)
+  }
+  return raw_cwd()
+}
+
+// the working directory (absolute)
+fn raw_cwd() -> Word {
   let buf = alloc(4096)
   let r = os_getcwd(buf, 4096)
   var n: Word = 0
@@ -765,7 +812,11 @@ fn b_current_dir() -> Word {
 }
 
 // remove_file(path): deletes a file
-fn b_remove_file(path: Word, rtd: Word) -> Word {
+fn b_remove_file(path: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("remove_file", path, sp)
+  if fake_on() {
+    return fake_remove_file(path, rtd)
+  }
   let r = os_unlink(path + 32)
   if r >= 0 {
     return ok_new(rtd, 0)
@@ -873,7 +924,8 @@ fn run_capture_win(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
 // run_capture(args, dir, input): runs a program (searched in PATH) in `dir` ("" = here) with `input` as its stdin
 // and returns [exit code, stdout, stderr]; both streams are read together (poll), so neither can fill up and block
 // the child. The input goes into the pipe before the child starts (so at most one pipe buffer: 64 KB).
-fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
+fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_proc("run_capture", args, sp)
   let n = peek(args + 16)
   if n == 0 {
     return err_new(rtd, bits("run_capture: no program given"))

@@ -1765,7 +1765,22 @@ def lower_property(prog, module, d, index):
 SOFT_MATH = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
 
 
-def lower_program(loaded, image, tests=None):
+def sandbox_data(prog, allow):
+    """`g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc,
+    time, rand, net, #dirs, dirs, #programs, programs]."""
+    if allow is None:
+        prog.words("g_allow", [0])
+        return
+    dirs = [r[3:] for r in allow if r.startswith("fs:")]
+    progs = [r[5:] for r in allow if r.startswith("proc:")]
+    dsym = prog.words("g_allow_dirs", [(prog.str_obj(d), 0) for d in dirs] or [0])
+    psym = prog.words("g_allow_progs", [(prog.str_obj(p), 0) for p in progs] or [0])
+    shown = prog.str_obj(", ".join(allow) if allow else "nothing")
+    flags = [1 if r in allow else 0 for r in ("fs", "proc", "time", "rand", "net")]
+    prog.words("g_allow", [1, (shown, 0)] + flags + [len(dirs), (dsym, 0), len(progs), (psym, 0)])
+
+
+def lower_program(loaded, image, tests=None, allow=None):
     """Lower the whole program; returns (Program, runtime-helper map for the emitter).
 
     tests: None -> run main(); a list of TestDecl -> the executable runs test #argv[1].
@@ -1786,6 +1801,8 @@ def lower_program(loaded, image, tests=None):
                  lower_test(prog, main_mod, t, i) for i, t in enumerate(tests)]
         sel = um.reg()
         um.emit("call", sel, "test_index_arg", [])
+        fake, _ = prog.rt_fn("fake_begin")        # tests run on fake files, clock and random numbers
+        um.emit("call", um.reg(), fake, [])
         for i, nm in enumerate(names):
             c, k, yes, no = um.reg(), um.reg(), um.label("t"), um.label("n")
             um.emit("const", k, i)
@@ -1848,6 +1865,7 @@ def lower_program(loaded, image, tests=None):
     else:
         prog.words("main_kind", [0])
         main_span = tests[0].span if tests else prog.loaded.main.program.span
+    sandbox_data(prog, allow)
     image.data_syms["main_span"] = image.data_syms[prog.span_sym(main_span)]
     image.add_bss("g_rt", 8 * 4096)
     image.add_bss("g_outbuf", 65536)

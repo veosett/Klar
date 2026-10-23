@@ -3405,6 +3405,64 @@ pub fn lower_program_cov(ld: Ld, main_path: Str, tests: Bool, coverage: Bool) ->
 
 /// `lower_program` with coverage marks and/or profiling calls (klar/rt/cov.klar, klar/rt/profile.klar).
 pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool) -> Lw {
+  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: coverage, profile: profile, allow: None)
+}
+
+/// `lower_program` of a program that runs with the rights of `--allow` (klar/rt/sandbox.klar).
+pub fn lower_program_allow(ld: Ld, main_path: Str, tests: Bool, allow: Option[List[Str]]) -> Lw {
+  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: false, profile: false, allow: allow)
+}
+
+/// `g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc, time,
+/// rand, net, #dirs, dirs, #programs, programs] (as `sandbox_data` in klar/native/lower.py).
+fn sandbox_data(w0: Lw, allow: Option[List[Str]]) -> Lw {
+  let rights = match allow {
+    Some(given) => given,
+    None => {
+      return words(w: w0, name: "g_allow", ws: [W.N(v: 0)])
+    },
+  }
+  var w = w0
+  let dirs = rights.filter(fn(x) => x.starts_with("fs:")).map(fn(x) => x.slice(3, x.len()))
+  let progs = rights.filter(fn(x) => x.starts_with("proc:")).map(fn(x) => x.slice(5, x.len()))
+  var dws: List[W] = []
+  for d in dirs {
+    let s = str_word(w, d)
+    w = s.w
+    dws = dws.push(s.v)
+  }
+  if dws.is_empty() {
+    dws = [W.N(v: 0)]
+  }
+  w = words(w: w, name: "g_allow_dirs", ws: dws)
+  var pws: List[W] = []
+  for pr in progs {
+    let s = str_word(w, pr)
+    w = s.w
+    pws = pws.push(s.v)
+  }
+  if pws.is_empty() {
+    pws = [W.N(v: 0)]
+  }
+  w = words(w: w, name: "g_allow_progs", ws: pws)
+  let shown = str_word(w, match rights.is_empty() {
+    true => "nothing",
+    false => rights.join(", "),
+  })
+  w = shown.w
+  var ws = [W.N(v: 1), shown.v]
+  for right in ["fs", "proc", "time", "rand", "net"] {
+    ws = ws.push(W.N(v: match rights.contains(right) {
+      true => 1,
+      false => 0,
+    }))
+  }
+  ws = ws.concat([W.N(v: dirs.len()), W.A(sym: "g_allow_dirs", add: 0), W.N(v: progs.len()), W.A(sym: "g_allow_progs",
+    add: 0)])
+  return words(w: w, name: "g_allow", ws: ws)
+}
+
+fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool, allow: Option[List[Str]]) -> Lw {
   let rt_mod = match ld.runtime {
     Some(m) => m,
     None => fail("native: the runtime is not loaded"),
@@ -3522,10 +3580,10 @@ pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, p
           main_idx = k
         }
       },
-      Decl.Test(_, _, _) => {
+      Decl.Test(_, _, _, _) => {
         test_blocks = test_blocks.push(d)
       },
-      Decl.Property(_, _, _, _) => {
+      Decl.Property(_, _, _, _, _) => {
         test_blocks = test_blocks.push(d)
       },
       _ => {},
@@ -3543,7 +3601,7 @@ pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, p
     var ti = 0
     for d in test_blocks {
       match d {
-        Decl.Test(sp, test_name, body) => {
+        Decl.Test(sp, test_name, body, _) => {
           if ti == 0 {
             main_span = sp
           }
@@ -3553,7 +3611,7 @@ pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, p
           names = names.push(t.v)
           ti = ti + 1
         },
-        Decl.Property(sp, pname, params, body) => {
+        Decl.Property(sp, pname, params, body, _) => {
           if ti == 0 {
             main_span = sp
           }
@@ -3573,6 +3631,10 @@ pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, p
       in_test: false }
     let sel = reg(w)
     w = emit_always(sel.w, [op("call"), r(sel.v), KV.S(s: "test_index_arg"), KV.L(regs: [])])
+    // tests run on fake files, clock and random numbers
+    let fake = rt_fn(w, "fake_begin")
+    let fr = reg(fake.w)
+    w = emit_always(fr.w, [op("call"), r(fr.v), KV.S(s: fake.v), KV.L(regs: [])])
     ti = 0
     for nm in names {
       let c = reg(w)
@@ -3676,7 +3738,7 @@ pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, p
   if not tests and tname(zonk(sig_of(main_mod, md).ret, Map {})) == "Result" {
     kind = 1
   }
-  w = words(w: w, name: "main_kind", ws: [W.N(v: kind)])
+  w = sandbox_data(words(w: w, name: "main_kind", ws: [W.N(v: kind)]), allow)
   let ms = span_sym(w, main_span)
   w = alias_sym(w: ms.w, name: "main_span", sym: ms.v)
   var img = add_bss(img: add_bss(img: add_bss(img: w.img, name: "g_rt", size: 8 * 4096), name: "g_outbuf", size: 65536),

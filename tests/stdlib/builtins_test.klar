@@ -1,6 +1,6 @@
 // Tests for every built-in function and method.
 // tests/test_klar.py fails if a built-in is added without being exercised here
-// (effectful globals like read_file/now_ms are tested from Python).
+// (effectful globals like read_file/now_ms are tested from Python and in tests/native/fakes.klar).
 
 type Item {
   name: Str
@@ -345,4 +345,10 @@ test "Bytes" {
 property "Bytes survive a list round trip" (b: Bytes) {
   assert bytes_of(b.to_list()) == b
   assert b.concat(b).len() == 2 * b.len()
+}
+
+test "set_clock moves the fake clock of a test" uses time {
+  assert now_ms() == 0
+  set_clock(42)
+  assert now_ms() == 42
 }

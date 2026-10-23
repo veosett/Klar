@@ -11,7 +11,8 @@
 // same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
 use ast.{Decl}
 use builtin_sigs.{klar_version}
-use commands.{doc_command, explain, fix_command, fmt_command, new_command, outline_command, refs_command}
+use commands.{context_command, doc_command, explain, fix_command, fmt_command, new_command, outline_command}
+use commands.{refs_command}
 use commands.{ast_command, rename_command, spec_command}
 use patch.{patch_command}
 use pkg.{pkg_command}
@@ -28,16 +29,39 @@ use emit.{emit_program}
 use emit_a64.{emit_a64}
 use link.{write_elf, write_macho, write_pe}
 use loader.{Ld, Module, load_program, load_runtime}
-use lower.{fnv1a, lower_program}
+use lower.{fnv1a, lower_program, lower_program_allow}
 
 const TARGETS: List[Str] = ["linux", "windows", "linux-arm64", "macos"]
 
 type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, quiet: Bool, filter: Str,
-  runs: Int, seed: Int, args: List[Str] }
+  runs: Int, seed: Int, args: List[Str], allow: Option[Str] }
+
+/// The rights of an `--allow` value (klar/sandbox.py), or the problem with an unknown one.
+fn parse_allow(spec: Str) -> Result[List[Str], Str] {
+  var out: List[Str] = []
+  for raw in spec.split(",") {
+    let r = raw.trim()
+    if r != "" {
+      let kind = r.split(":").get_or(0, "")
+      let has_colon = r.contains(":")
+      let arg = match r.index_of(":") {
+        Some(k) => r.slice(k + 1, r.len()),
+        None => "",
+      }
+      let known = ["io", "time", "rand", "net", "fs", "proc"].contains(kind)
+      if not known or (arg != "" and kind != "fs" and kind != "proc") or (has_colon and arg == "") {
+        return Err("unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME)")
+      }
+      out = out.push(r)
+    }
+  }
+  return Ok(out)
+}
 
 fn usage() -> Never uses io {
-  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64|macos] [--lib <dir>] [--time]")
-  print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
+  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64|macos] [--allow <rights>] [--lib <dir>]")
+  print("                   [--time]")
+  print("       klarc run <file.klar> [--allow <rights>] [--lib <dir>] [-- <program arguments>]")
   print("       klarc test <file.klar> [-k <text>] [-q] [--runs <n>] [--seed <n>] [--lib <dir>]")
   print("       klarc patch <file.klar> <patch.json | - | json> [--dry-run] [--force] [--json]")
   print("       klarc add <name> (--path <dir> | --git <url> [--tag|--rev|--branch <x>]) [--no-fetch] [--json]")
@@ -75,7 +99,7 @@ fn lib_dir(args: List[Str]) -> Str uses io {
 fn parse_args(args: List[Str]) -> Options uses io, proc {
   var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "", lib: env_var("KLAR_LIB").unwrap_or(
     "klar"), time: false, json: false, quiet: false, filter: "", runs: 100,
-    seed: 0, args: [] }
+    seed: 0, args: [], allow: None }
   var i = 1
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -109,6 +133,9 @@ fn parse_args(args: List[Str]) -> Options uses io, proc {
       i = i + 2
     } else if a == "--seed" {
       o = o with { seed: v.to_int().unwrap_or(0) }
+      i = i + 2
+    } else if a == "--allow" {
+      o = o with { allow: Some(v) }
       i = i + 2
     } else if o.file == "" and not a.starts_with("-") {
       o = o with { file: a }
@@ -232,6 +259,9 @@ fn main() uses io, fs, time, proc {
   if tool == "refs" {
     exit(refs_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
+  if tool == "context" {
+    exit(context_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
   if ["add", "remove", "fetch", "update", "deps"].contains(tool) {
     exit(pkg_command(tool: tool, args: argv.drop(1)))
   }
@@ -272,6 +302,16 @@ fn main() uses io, fs, time, proc {
     exit(fix_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
   let o = parse_args(argv)
+  let rights = match o.allow {
+    Some(spec) => match parse_allow(spec) {
+      Ok(r) => Some(r),
+      Err(e) => {
+        eprint("error: " + e)
+        return exit(2)
+      },
+    },
+    None => None,
+  }
   let t0 = now_ms()
   if not file_exists(o.file) {
     print("klarc: cannot read {o.file}")
@@ -319,7 +359,7 @@ fn main() uses io, fs, time, proc {
     print("\n0 passed, 0 failed")
     return
   }
-  let w = lower_program(ld: ld, main_path: o.file, tests: tests)
+  let w = lower_program_allow(ld: ld, main_path: o.file, tests: tests, allow: rights)
   let t2 = lap(o: o, phase: "lower", start: t1)
   var x = emit_program(w, "linux")
   if o.target == "linux-arm64" {

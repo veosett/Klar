@@ -157,7 +157,8 @@ This project is written in **Klar**. Get the full language reference (≈2k toke
 2. `klar dev main.klar --json` — check + all tests + run in one step; follow the `next` field.
 3. `klar fix main.klar` applies safe fixes; `klar fmt .` normalizes the layout.
 4. Look things up instead of guessing: `klar doc split` (built-ins, std, this project), `klar outline main.klar`,
-   `klar refs name`, `klar eval '"a,b".split(",")'`, `klar explain E0701`.
+   `klar refs name`, `klar context main.klar name` (one function with its types, tests and callers),
+   `klar eval '"a,b".split(",")'`, `klar explain E0701`.
 5. Before finishing: `klar coverage main.klar` (untested statements), `klar build main.klar` (native executable).
 6. Packages: dependencies are in `klar.toml`; `klar add name --git URL --tag v1` / `--path ../dir`, then
    `use name.{{item}}`; `klar fetch` after cloning, `klar deps` shows the tree.

@@ -100,7 +100,8 @@ def run_native(args, loaded):
     if host_target() is None:
         return None
     try:
-        exe = cached_build(args.file, loaded)
+        sb = getattr(args, "sandbox", None)
+        exe = cached_build(args.file, loaded, allow=sb.rights if sb else None)
     except NativeUnsupported as why:
         if args.verbose:
             print(f"note: native backend cannot compile this program yet ({why}); using the Python backend",
@@ -135,12 +136,16 @@ def run_native(args, loaded):
 def cmd_build(args):
     from .native.build import build, host_target
     from .native.lower import NativeUnsupported
+    sandbox = sandbox_of(args)
+    if sandbox is False:
+        return 2
     loaded = load_path(args.file, with_runtime=True)
     if loaded.has_errors():
         return fail_check(args, loaded)
     target = args.target or host_target() or "linux"
     try:
-        out, _ = build(args.file, out=args.output, target=target, loaded=loaded)
+        out, _ = build(args.file, out=args.output, target=target, loaded=loaded,
+                       allow=sandbox.rights if sandbox else None)
     except NativeUnsupported as why:
         print(f"error: the native backend cannot compile this program yet: {why}", file=sys.stderr)
         return 1
@@ -150,7 +155,23 @@ def cmd_build(args):
     return 0
 
 
+def sandbox_of(args):
+    """The rights of `--allow` (None without it); prints the problem and returns False for an unknown right."""
+    from .sandbox import RightsError, Sandbox
+    if getattr(args, "allow", None) is None:
+        return None
+    try:
+        return Sandbox(args.allow)
+    except RightsError as ex:
+        print(f"error: {ex}", file=sys.stderr)
+        return False
+
+
 def cmd_run(args):
+    sandbox = sandbox_of(args)
+    if sandbox is False:
+        return 2
+    args.sandbox = sandbox
     loaded, code = prepare_run(args)
     if code is not None:
         return code
@@ -174,11 +195,13 @@ def cmd_run(args):
     out = io.StringIO() if args.json else sys.stdout
     errs = io.StringIO() if args.json else sys.stderr
     interp = Interpreter(loaded, out=out, err_stream=errs, cli_args=args.args)
+    interp.sandbox = sandbox
     runner = interp
     backend = "interpreter"
     if not args.interp:
         try:
             runner = CompiledProgram(loaded, out=out, err_stream=errs, cli_args=args.args)
+            runner.ctx.sandbox = sandbox
             backend = "compiled"
         except Unsupported as why:
             if args.verbose:
@@ -562,6 +585,8 @@ def main(argv=None):
     p.add_argument("--py", action="store_true", help="use the Klar -> Python backend instead of native code")
     p.add_argument("-v", "--verbose", action="store_true", help="report which backend runs the program")
     p.add_argument("--emit-python", action="store_true", help="print the generated Python code and exit")
+    p.add_argument("--allow", metavar="RIGHTS", help="run with only these rights, e.g. fs:./data,proc:git,time "
+                                                     "(io is always allowed; anything else is R0016)")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("build", help="compile to a standalone native executable (Linux ELF, Windows PE, macOS Mach-O)")
     p.add_argument("file")
@@ -570,6 +595,8 @@ def main(argv=None):
                    help="default: this machine (macos: x86-64, experimental)")
     p.add_argument("--json", action="store_true")
     p.add_argument("-q", "--quiet", action="store_true", help="print nothing on success")
+    p.add_argument("--allow", metavar="RIGHTS", help="build the rights into the executable, e.g. fs:./data,time "
+                                                     "(io is always allowed; anything else is R0016)")
     p.set_defaults(fn=cmd_build)
     p = sub.add_parser("check", help="type-check without running")
     p.add_argument("file")

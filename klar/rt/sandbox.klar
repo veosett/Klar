@@ -1,0 +1,166 @@
+// Klar runtime: the rights of `--allow` (klar/sandbox.py, with the same checks and messages). `klar build --allow`
+// puts them into the executable as `g_allow`: [0] without rights, else [1, shown, fs, proc, time, rand, net, #dirs,
+// dirs, #programs, programs] (`shown`: the rights as the message names them; dirs and programs: arrays of strings).
+
+const SB_SHOWN: Word = 8
+const SB_FS: Word = 16
+const SB_PROC: Word = 24
+const SB_TIME: Word = 32
+const SB_RAND: Word = 40
+const SB_NET: Word = 48
+const SB_NDIRS: Word = 56
+const SB_DIRS: Word = 64
+const SB_NPROGS: Word = 72
+const SB_PROGS: Word = 80
+
+fn allow_area() -> Word {
+  return static_addr("g_allow")
+}
+
+fn sb_on() -> Bool {
+  return peek(allow_area()) != 0
+}
+
+fn sb_deny(what: Str, right: Str, arg: Word, sp: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "`")
+  sb_add_cstr(b, what)
+  sb_add_cstr(b, "` needs `--allow ")
+  sb_add_cstr(b, right)
+  sb_add_cstr(b, "`")
+  if arg != 0 {
+    sb_add_cstr(b, " for '")
+    sb_add_str(b, arg)
+    sb_add_cstr(b, "'")
+  }
+  sb_add_cstr(b, " (allowed: ")
+  sb_add_str(b, peek(allow_area() + SB_SHOWN))
+  sb_add_cstr(b, ")")
+  let h = sb_new()
+  if peek8(bits(right) + 32) == 102 {
+    sb_add_cstr(h, "add the right to `--allow`: `fs` for every file or `fs:DIR` for one directory")
+  } else if peek8(bits(right) + 32) == 112 {
+    sb_add_cstr(h, "add the right to `--allow`: `proc` for every program or `proc:NAME` for one")
+  } else {
+    sb_add_cstr(h, "add `")
+    sb_add_cstr(h, right)
+    sb_add_cstr(h, "` to `--allow`")
+  }
+  var at = sp
+  if at == 0 {
+    at = current_span()
+  }
+  return fail_with(bits("R0016"), sb_finish(b), at, 0, sb_finish(h))
+}
+
+// a right without an argument (`time`, `rand`, `net`): `at` is its place in g_allow
+fn sb_need(what: Str, at: Word, right: Str, sp: Word) {
+  if sb_on() and peek(allow_area() + at) == 0 {
+    sb_deny(what, right, 0, sp)
+  }
+}
+
+// the absolute form of a path as its parts joined by `/` (no leading `/`): `\` is a separator too, relative paths
+// start at the working directory, `.` and `..` are resolved
+fn sb_norm(path: Word) -> Word {
+  let b = sb_new()
+  let n = peek(path + 16)
+  let first = peek8(path + 32)
+  let absolute = n > 0 and (first == 47 or first == 92) or (n >= 2 and peek8(path + 33) == 58)
+  if not absolute {
+    let cwd = raw_cwd()
+    sb_add_segments(b, cwd)
+    rc_dec(cwd)
+  }
+  sb_add_segments(b, path)
+  return sb_finish(b)
+}
+
+fn sb_add_segments(b: Word, s: Word) {
+  let n = peek(s + 16)
+  let p = s + 32
+  var i: Word = 0
+  while i <= n {
+    var j = i
+    while j < n and peek8(p + j) != 47 and peek8(p + j) != 92 {
+      j = j + 1
+    }
+    let len = j - i
+    if len == 0 or (len == 1 and peek8(p + i) == 46) {
+      // an empty part or `.`
+    } else if len == 2 and peek8(p + i) == 46 and peek8(p + i + 1) == 46 {
+      var k = sb_len(b) - 1
+      while k > 0 and peek8(peek(b + 32) + k) != 47 {
+        k = k - 1
+      }
+      if k < 0 {
+        k = 0
+      }
+      poke(b + 16, k)
+    } else {
+      if sb_len(b) > 0 {
+        sb_add_byte(b, 47)
+      }
+      sb_add_bytes(b, p + i, len)
+    }
+    i = j + 1
+  }
+}
+
+// whether path (normalized) lies in dir (normalized): equal, or dir followed by `/`; the root (empty) holds all
+fn sb_inside(path: Word, dir: Word) -> Bool {
+  let dn = peek(dir + 16)
+  let pn = peek(path + 16)
+  if dn == 0 {
+    return true
+  }
+  if pn < dn or not bytes_eq(path + 32, dir + 32, dn) {
+    return false
+  }
+  return pn == dn or peek8(path + 32 + dn) == 47
+}
+
+fn sb_need_fs(what: Str, path: Word, sp: Word) {
+  if not sb_on() or peek(allow_area() + SB_FS) != 0 {
+    return
+  }
+  let p = sb_norm(path)
+  let dirs = peek(allow_area() + SB_DIRS)
+  var ok = false
+  var i: Word = 0
+  while not ok and i < peek(allow_area() + SB_NDIRS) {
+    let d = sb_norm(peek(dirs + i * 8))
+    ok = sb_inside(p, d)
+    rc_dec(d)
+    i = i + 1
+  }
+  rc_dec(p)
+  if not ok {
+    sb_deny(what, "fs", path, sp)
+  }
+}
+
+fn sb_need_any_fs(what: Str, sp: Word) {
+  if sb_on() and peek(allow_area() + SB_FS) == 0 and peek(allow_area() + SB_NDIRS) == 0 {
+    sb_deny(what, "fs", 0, sp)
+  }
+}
+
+fn sb_need_proc(what: Str, args: Word, sp: Word) {
+  if not sb_on() or peek(allow_area() + SB_PROC) != 0 {
+    return
+  }
+  var prog = bits("")
+  if peek(args + 16) > 0 {
+    prog = peek(peek(args + 32))
+  }
+  let progs = peek(allow_area() + SB_PROGS)
+  var i: Word = 0
+  while i < peek(allow_area() + SB_NPROGS) {
+    if Str_eq(peek(progs + i * 8), prog) {
+      return
+    }
+    i = i + 1
+  }
+  sb_deny(what, "proc", prog, sp)
+}

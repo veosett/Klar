@@ -635,6 +635,51 @@ class FunctionEffects(unittest.TestCase):
                          ["E0401"])
 
 
+class FakeEffects(unittest.TestCase):
+    """`test "t" uses fs, time, rand`: tests run on an empty file system in memory, a clock at 0 and fixed random
+    numbers (tests/native/fakes.klar checks native code against the same)."""
+
+    def klar_test(self, src):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
+            code, out, err = cli("test", path)
+            return code, out + err, os.listdir(d)
+
+    def test_tests_declare_the_faked_effects(self):
+        self.assertEqual(errors('test "t" uses fs, time, rand {\n assert now_ms() == 0\n}'), [])
+        self.assertEqual(errors('test "t" {\n assert now_ms() == 0\n}'), ["E0401"])
+        self.assertEqual(errors('test "t" uses proc {\n}'), ["E0401"])
+        self.assertEqual(errors('test "t" uses fs {\n let _ = run_command(["ls"])\n}'), ["E0401"])
+        self.assertEqual(errors('test "t" uses fsx {\n}'), ["E0403"])
+        self.assertEqual(errors('property "p" (x: Int) uses rand {\n assert random_int(x, x) == x\n}'), [])
+        d = [x for x in diags('test "t" {\n assert now_ms() == 0\n}') if x.code == "E0401"][0]
+        self.assertIn("write `uses time` after the test name", d.hint)
+        self.assertEqual(d.fix["text"], " uses time")
+
+    def test_files_are_in_memory_and_fresh_for_every_test(self):
+        code, out, files = self.klar_test(
+            'test "a" uses fs {\n assert write_file("notes.txt", "hi") == Ok(())\n'
+            ' assert read_file("/notes.txt") == Ok("hi")\n}\n'
+            'test "b" uses fs {\n assert list_dir("/") == Ok([])\n assert current_dir() == "/"\n}\n')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(files, ["t.klar"])          # nothing was written to the real disk
+        self.assertFalse(os.path.exists(os.path.join(os.getcwd(), "notes.txt")))
+
+    def test_clock_and_random_numbers(self):
+        code, out, _ = self.klar_test(
+            'test "clock" uses time {\n assert now_ms() == 0\n set_clock(250)\n assert now_ms() == 250\n'
+            ' assert now_ns() == 250000000\n}\n'
+            'test "dice" uses rand {\n assert range(0, 5).map(fn(_i) => random_int(1, 6)) == [6, 1, 1, 5, 6]\n}\n')
+        self.assertEqual(code, 0, out)
+
+    def test_set_clock_outside_tests_is_a_runtime_error(self):
+        with self.assertRaises(KlarRuntimeError) as cm:
+            run("fn main() uses io, time {\n set_clock(5)\n}")
+        self.assertEqual(cm.exception.code, "R0009")
+
+
 class CompileTimeSafety(unittest.TestCase):
     """Failures that Klar rejects before the program runs (E07xx)."""
 
@@ -1803,6 +1848,152 @@ class LlmBenchmark(unittest.TestCase):
             self.assertEqual((r["ok"], r["stage"]), (False, "compile"), lang)
         self.assertIn("E0204", bench.evaluate(rle, "klar", broken["klar"])["feedback"])
         self.assertEqual(bench.extract_code("text\n```klar\nfn f() {}\n```\nmore"), "fn f() {}\n")
+
+
+class Sandbox(unittest.TestCase):
+    """`klar run --allow RIGHTS`: effects become rights at run time (R0016 outside them) — the same answers in the
+    interpreter, the Python backend and native code for every target that can run here."""
+    SRC = """fn main() uses io, fs, time, rand, proc {
+  let step = cli_args().get_or(0, "")
+  if step == "read" {
+    print(read_file("data/a.txt"))
+  } else if step == "outside" {
+    print(read_file("other.txt"))
+  } else if step == "up" {
+    print(read_file("data/../other.txt"))
+  } else if step == "write" {
+    print(write_file("data/b.txt", "x"))
+  } else if step == "list" {
+    print(list_dir("data"))
+  } else if step == "cwd" {
+    print(current_dir().len() > 0)
+  } else if step == "time" {
+    print(now_ms() >= 0)
+  } else if step == "rand" {
+    print(random_int(4, 4))
+  } else if step == "proc" {
+    print(run_command(["klar-not-a-program", "x"]).is_err())
+  } else if step == "capture" {
+    print(run_capture(["klar-not-a-program"], "", "").is_err())
+  } else if step == "bytes" {
+    print(read_bytes("data/a.txt").map(fn(b) => b.len()))
+  }
+}
+"""
+    CASES = [("read", "fs:data"), ("read", "fs:./data/"), ("read", "fs"), ("read", "time"), ("read", ""),
+             ("outside", "fs:data"), ("up", "fs:data"), ("write", "fs:data"), ("list", "fs:data"),
+             ("cwd", "fs:data"), ("cwd", "time"), ("time", "time"), ("time", "fs"), ("rand", "rand"),
+             ("rand", "time"), ("proc", "fs"), ("proc", "proc"), ("proc", "proc:klar-not-a-program"),
+             ("proc", "proc:git"), ("capture", "proc:git"), ("capture", "proc"), ("bytes", "fs:data"),
+             ("bytes", "proc")]
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.dir, "data"))
+        for name, text in (("data/a.txt", "hi"), ("other.txt", "secret")):
+            with open(os.path.join(self.dir, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        self.path = os.path.join(self.dir, "p.klar")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(self.SRC)
+        self.old = os.getcwd()
+        os.chdir(self.dir)
+
+    def tearDown(self):
+        os.chdir(self.old)
+        import shutil
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def answer(self, backend, step, allow):
+        code, out, err = cli("run", backend, "-q", "--allow", allow, self.path, step)
+        return code, out, re.sub(r"\n  note: call stack.*", "", err)
+
+    def test_rights_in_the_python_backends(self):
+        for step, allow in self.CASES:
+            with self.subTest(step=step, allow=allow):
+                want = self.answer("--interp", step, allow)
+                self.assertEqual(self.answer("--py", step, allow), want)
+                denied = want[0] != 0
+                self.assertEqual("R0016" in want[2], denied, want)
+        self.assertIn("Ok(\"hi\")", self.answer("--interp", "read", "fs:data")[1])
+        self.assertIn("`read_file` needs `--allow fs` for 'other.txt' (allowed: fs:data)",
+                      self.answer("--interp", "outside", "fs:data")[2])
+        self.assertIn("`read_file` needs `--allow fs` for 'data/../other.txt'", self.answer("--interp", "up", "fs:data")[2])
+        self.assertIn("`run_command` needs `--allow proc` for 'klar-not-a-program' (allowed: proc:git)",
+                      self.answer("--interp", "proc", "proc:git")[2])
+        self.assertIn("(allowed: nothing)", self.answer("--interp", "read", "")[2])
+        code, _, err = cli("run", "--allow", "fs,disk", self.path)
+        self.assertEqual(code, 2)
+        self.assertIn("unknown right `disk`", err)
+
+    def test_rights_in_native_code(self):
+        from klar.native.build import build, host_target
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        from native_diff import run_exe
+        targets = [t for t in ("linux", "windows", "linux-arm64", "macos")
+                   if (t == "linux" and host_target() == "linux") or
+                   (t == "windows" and os.path.exists("/usr/lib/wine/wine64")) or
+                   (t == "linux-arm64" and shutil_which("qemu-aarch64-static")) or
+                   (t == "macos" and host_target() == "linux")]
+        if not targets:
+            self.skipTest("no native target runs here")
+        rights = sorted({a for _, a in self.CASES})
+        for target in targets:
+            suffix = {"windows": ".exe", "linux-arm64": ".a64", "macos": ".macho"}.get(target, "")
+            for allow in rights:
+                exe = os.path.join(self.dir, f"p{rights.index(allow)}{suffix}")
+                from klar.sandbox import parse_allow
+                build(self.path, out=exe, target=target, allow=parse_allow(allow))
+                for step, a in self.CASES:
+                    if a != allow:
+                        continue
+                    with self.subTest(target=target, step=step, allow=allow):
+                        p = run_exe(exe, [step])
+                        want = self.answer("--interp", step, allow)
+                        err = re.sub(r"\n  note: call stack.*", "", p.stderr.replace("\r\n", "\n"))
+                        self.assertEqual((p.returncode != 0, p.stdout.replace("\r\n", "\n"), err),
+                                         (want[0] != 0, want[1], want[2]))
+
+
+def shutil_which(name):
+    import shutil
+    return shutil.which(name)
+
+
+class Context(unittest.TestCase):
+    """`klar context FILE NAME`: one declaration with what is needed to change it (klarc gives the same output)."""
+    SRC = ("type Note {\n  title: Str\n}\n\nfn slug(s: Str) -> Str {\n  return s.lower()\n}\n\n"
+           "/// The file name of a note.\n/// >>> assert file_name(Note { title: \"A\" }) == \"a.txt\"\n"
+           "fn file_name(n: Note) -> Str {\n  return \"{slug(n.title)}.txt\"\n}\n\n"
+           "fn main() uses io {\n  print(file_name(Note { title: \"X\" }))\n}\n\n"
+           "test \"names\" {\n  assert file_name(Note { title: \"B\" }) == \"b.txt\"\n}\n")
+
+    def ctx(self, *args):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "notes.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.SRC)
+            return cli("context", path, *args)
+
+    def test_text(self):
+        code, out, _ = self.ctx("file_name")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("fn file_name — notes.klar:11\n/// The file name of a note."))
+        self.assertIn("uses:\n  type Note { title: Str }   // notes.klar:1\n  fn slug(s: Str) -> Str   // notes.klar:5", out)
+        self.assertIn('tests:\n  // notes.klar:19\n  test "names" {', out)
+        self.assertIn("callers:\n  main — notes.klar:16: print(file_name(Note { title: \"X\" }))", out)
+        self.assertRegex(out, r"~\d+ tokens\n$")
+
+    def test_json_budget_and_unknown_names(self):
+        code, out, _ = self.ctx("file_name", "--json", "--max-tokens", "60")
+        c = json.loads(out)
+        self.assertEqual((c["ok"], c["kind"], c["line"]), (True, "fn", 11))
+        self.assertGreater(sum(c["omitted"].values()), 0)
+        code, out, _ = self.ctx("Note", "--json")
+        self.assertEqual([x["name"] for x in json.loads(out)["callers"]], ["file_name", "main"])
+        code, out, err = self.ctx("missing")
+        self.assertEqual(code, 1)
+        self.assertIn("no function, type or constant `missing`", err)
 
 
 class Mcp(unittest.TestCase):

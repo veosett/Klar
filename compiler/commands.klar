@@ -6,6 +6,7 @@ use ast.{Decl, Span, TypeExpr}
 use astjson.{ast_text}
 use builtin_sigs.{agents_template, diag_codes, global_sigs, lib_template, main_template, method_sigs}
 use checker.{Diag, FixEdit}
+use context.{DEFAULT_TOKENS, context, context_json, context_text}
 use inspect.{NameOcc, UMod, doc_json, doc_lookup, doc_text, name_occurrences, outline, outline_json, outline_text}
 use inspect.{main_module, user_modules}
 use jsonout.{J, compact, json_list, pretty}
@@ -534,6 +535,57 @@ pub fn refs_command(args: List[Str], lib: Str) -> Int uses io, fs {
             shown)
       }
       return 0
+    },
+  }
+}
+
+/// `klarc context FILE NAME [--max-tokens N] [--json]`.
+pub fn context_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  var pos: List[Str] = []
+  var max_tokens = DEFAULT_TOKENS
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--lib" {
+      i = i + 2
+    } else if a == "--max-tokens" {
+      max_tokens = args.get_or(i + 1, "").to_int().unwrap_or(DEFAULT_TOKENS)
+      i = i + 2
+    } else {
+      if not a.starts_with("--") {
+        pos = pos.push(a)
+      }
+      i = i + 1
+    }
+  }
+  let file = pos.get_or(0, "")
+  let name = pos.get_or(1, "")
+  return match loaded_main(file, lib) {
+    None => {
+      eprint("cannot parse the file; run `klar check` first")
+      return 1
+    },
+    Some(ld) => {
+      match context(mods: user_modules(ld), name: name, max_tokens: max_tokens) {
+        Some(c) => {
+          if args.contains("--json") {
+            print(context_json(c))
+          } else {
+            print(context_text(c, true))
+          }
+          return 0
+        },
+        None => {
+          let msg = "no function, type or constant `{name}` in the program"
+          if args.contains("--json") {
+            print(compact(J.JObj([Pair { first: "ok", second: J.JBool(false) }, Pair { first: "error",
+              second: J.JStr(msg) }])))
+          } else {
+            eprint("error: " + msg)
+          }
+          return 1
+        },
+      }
     },
   }
 }

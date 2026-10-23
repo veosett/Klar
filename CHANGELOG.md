@@ -38,6 +38,20 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   whose type is pure (the E0406 rule about function values from outside its lambda is gone). A function that returns
   an effectful function writes the return type in parentheses: `-> (fn(Str) -> Unit uses io)`. Example:
   `examples/effects.klar`.
+- **Rights at run time**: `klar run --allow fs:./data,proc:git,time` / `klar build --allow ...` (and `klarc run/build
+  --allow`) run a program with only these rights in every backend — files outside the allowed directories, other
+  programs, the clock and random numbers are runtime error R0016 with the missing right; `io` is always allowed.
+  Native executables carry the rights. Tested for every right in the interpreter, the Python backend and native
+  code (Linux, Windows, ARM64, macOS).
+- `klar context FILE NAME [--max-tokens N] [--json]` (also `klarc context` and the MCP tool `klar_context`): the
+  smallest context to change one function, type or constant — its source with the documentation, the signatures of
+  the declarations it uses, its tests and its callers, within a token budget (default 2000; what does not fit is
+  counted as "not shown").
+- **Fakes for the effects of tests**: `test "save" uses fs, time, rand { ... }` (and `property "p" (x: Int) uses fs`)
+  runs on an empty file system in memory rooted at `/`, a clock that starts at 0 (new built-in `set_clock(ms)`) and
+  a fixed sequence of random numbers — the same in the interpreter and in native code, fresh for every test and
+  every run of a property. Calling an effect a test does not declare is E0401 with a fix that adds `uses ...`;
+  `proc` and `net` stay forbidden in tests. Tested in `tests/native/fakes.klar`.
 - `docs/ROADMAP.md`: the plan after 1.0 (phases, acceptance criteria, status).
 - `bench/ai/llm_bench.py`: an LLM-in-the-loop benchmark — 24 tasks with hidden tests generated for Klar
   (`klar test`), Python and TypeScript (`tsc --strict`); the model gets the statement (for Klar also `klar spec`),

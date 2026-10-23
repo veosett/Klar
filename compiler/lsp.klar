@@ -489,7 +489,7 @@ fn walk_decl(d: Decl) -> List[LspNode] {
     Decl.Alias(sp, name, _, target, _, _) => w_type([LspNode.NTypeDecl(span: sp, name: name)], target),
     Decl.Const(_, name, name_span, ty, value, _, _) => w_expr(w_type([LspNode.NConst(name: name, name_span: name_span)], ty),
       value),
-    Decl.Property(_, _, params, body) => w_block(w_params([], params), body),
+    Decl.Property(_, _, params, body, _) => w_block(w_params([], params), body),
     Decl.EnumD(sp, name, _, variants, _, _) => {
       var out = [LspNode.NTypeDecl(span: sp, name: name)]
       for v in variants {
@@ -497,7 +497,7 @@ fn walk_decl(d: Decl) -> List[LspNode] {
       }
       return out
     },
-    Decl.Test(_, _, body) => w_block([], body),
+    Decl.Test(_, _, body, _) => w_block([], body),
     Decl.Trait(_, name, name_span, methods, _, _, _) => {
       var out = [LspNode.NTrait(name: name, name_span: name_span)]
       for m in methods {
@@ -517,9 +517,9 @@ fn decl_span_of(d: Decl) -> Span {
     Decl.Alias(s, _, _, _, _, _) => s,
     Decl.Const(s, _, _, _, _, _, _) => s,
     Decl.Use(s, _, _, _) => s,
-    Decl.Property(s, _, _, _) => s,
+    Decl.Property(s, _, _, _, _) => s,
     Decl.EnumD(s, _, _, _, _, _) => s,
-    Decl.Test(s, _, _) => s,
+    Decl.Test(s, _, _, _) => s,
     Decl.Trait(s, _, _, _, _, _, _) => s,
     Decl.Impl(s, _, _, _, _, _, _, _, _) => s,
   }
@@ -1595,9 +1595,9 @@ fn decl_kind(d: Decl) -> Str {
     Decl.Alias(_, _, _, _, _, _) => "alias",
     Decl.Const(_, _, _, _, _, _, _) => "const",
     Decl.Use(_, _, _, _) => "use",
-    Decl.Property(_, _, _, _) => "property",
+    Decl.Property(_, _, _, _, _) => "property",
     Decl.EnumD(_, _, _, _, _, _) => "enum",
-    Decl.Test(_, _, _) => "test",
+    Decl.Test(_, _, _, _) => "test",
     Decl.Trait(_, _, _, _, _, _, _) => "trait",
     Decl.Impl(_, _, _, _, _, _, _, _, _) => "impl",
   }
@@ -1635,11 +1635,11 @@ fn on_document_symbol(s0: LspServer, params: Json) -> Pair[LspServer, J] uses io
     var name = named_decl_name(d)
     var methods: List[FnDecl] = []
     match d {
-      Decl.Test(_, n, _) => {
+      Decl.Test(_, n, _, _) => {
         skip = n.starts_with("doc: ")
         name = n
       },
-      Decl.Property(_, n, _, _) => {
+      Decl.Property(_, n, _, _, _) => {
         name = n
       },
       Decl.Fn(f) => {

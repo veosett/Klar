@@ -14,6 +14,7 @@ pub fn global_sigs() -> List[Str] {
     "fn range(start: Int, end: Int) -> List[Int]",
     "fn now_ms() -> Int uses time",
     "fn now_ns() -> Int uses time",
+    "fn set_clock(ms: Int) uses time",
     "fn random_int(min: Int, max: Int) -> Int uses rand",
     "fn dbg[T](value: T) -> T uses io",
     "fn todo(what: Str) -> Never",
@@ -384,7 +385,7 @@ pub fn diag_codes() -> List[List[Str]] {
     ["E0301", "non-exhaustive match", "Cover every variant or add a catch-all `_ => ...` arm."],
     ["E0302", "invalid pattern", "The pattern does not fit the matched type, or the variant does not exist."],
     ["W0303", "unreachable match arm", "An earlier catch-all arm already matches everything."],
-    ["E0401", "missing effect", "Functions must declare effects they use: `fn f() uses io \{ ... \}`, also those of the function values they call (`f: fn(Int) -> Unit uses io`). Contracts are pure; tests may only use `io`."],
+    ["E0401", "missing effect", "Functions must declare effects they use: `fn f() uses io \{ ... \}`, also those of the function values they call (`f: fn(Int) -> Unit uses io`). Contracts are pure; tests use `io` and the fakes they declare (`test \"t\" uses fs, time, rand`)."],
     ["E0402", "unhandled Result", "A `Result` may carry an error and must be handled with `?`, `match`, or discarded explicitly with `let _ = ...`."],
     ["E0403", "unknown effect", "Known effects: io, time, rand, fs, net, proc."],
     ["E0406", "par_map needs a pure function", "`xs.par_map(f)` runs `f` in worker processes: `f` must be a lambda without effects or a function whose type has no `uses`, and its results must not contain functions."],
@@ -426,6 +427,7 @@ pub fn diag_codes() -> List[List[Str]] {
     ["R0012", "reached todo()", "The program executed a `todo(...)` placeholder."],
     ["R0013", "exit() in a test", "A test called `exit(code)`, which would end the whole test run. Tests should check return values instead."],
     ["R0015", "out of memory", "A value (a string, a list, a number) would need more memory than a computer has — usually a count that is far too large, such as `\"x\".repeat(1_000_000_000_000_000)`. Check the size before building the value."],
+    ["R0016", "effect not allowed", "The program runs with `--allow` rights (`klar run --allow fs:./data,proc:git`) and called something outside them: a file outside the allowed directories, another program, the clock or random numbers. Add the right, or change the program."],
     ["R0014", "par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was killed, e.g. by the system running out of memory)."],
   ]
 }
@@ -440,7 +442,7 @@ pub fn lib_template() -> Str {
 }
 
 pub fn agents_template() -> Str {
-  return "# Working on \{name\} (instructions for AI assistants)\n\nThis project is written in **Klar**. Get the full language reference (≈2k tokens) with `klar spec`.\n\n## Loop\n1. Edit `.klar` files; keep tests next to the code (`test`, doc-tests `/// >>>`, `property`).\n2. `klar dev main.klar --json` — check + all tests + run in one step; follow the `next` field.\n3. `klar fix main.klar` applies safe fixes; `klar fmt .` normalizes the layout.\n4. Look things up instead of guessing: `klar doc split` (built-ins, std, this project), `klar outline main.klar`,\n   `klar refs name`, `klar eval '\"a,b\".split(\",\")'`, `klar explain E0701`.\n5. Before finishing: `klar coverage main.klar` (untested statements), `klar build main.klar` (native executable).\n6. Packages: dependencies are in `klar.toml`; `klar add name --git URL --tag v1` / `--path ../dir`, then\n   `use name.\{\{item\}\}`; `klar fetch` after cloning, `klar deps` shows the tree.\n\n## Rules that the compiler enforces\nNo null/exceptions/indexing; handle `Option`/`Result`; values are immutable (`xs = xs.push(x)`);\nno shadowing; named arguments for 3+ parameters; `uses io` etc. for effects; Int division needs a\nprovably non-zero divisor.\n"
+  return "# Working on \{name\} (instructions for AI assistants)\n\nThis project is written in **Klar**. Get the full language reference (≈2k tokens) with `klar spec`.\n\n## Loop\n1. Edit `.klar` files; keep tests next to the code (`test`, doc-tests `/// >>>`, `property`).\n2. `klar dev main.klar --json` — check + all tests + run in one step; follow the `next` field.\n3. `klar fix main.klar` applies safe fixes; `klar fmt .` normalizes the layout.\n4. Look things up instead of guessing: `klar doc split` (built-ins, std, this project), `klar outline main.klar`,\n   `klar refs name`, `klar context main.klar name` (one function with its types, tests and callers),\n   `klar eval '\"a,b\".split(\",\")'`, `klar explain E0701`.\n5. Before finishing: `klar coverage main.klar` (untested statements), `klar build main.klar` (native executable).\n6. Packages: dependencies are in `klar.toml`; `klar add name --git URL --tag v1` / `--path ../dir`, then\n   `use name.\{\{item\}\}`; `klar fetch` after cloning, `klar deps` shows the tree.\n\n## Rules that the compiler enforces\nNo null/exceptions/indexing; handle `Option`/`Result`; values are immutable (`xs = xs.push(x)`);\nno shadowing; named arguments for 3+ parameters; `uses io` etc. for effects; Int division needs a\nprovably non-zero divisor.\n"
 }
 
 /// The version of Klar.
@@ -454,6 +456,7 @@ pub fn rt_files() -> List[Str] {
     "bytes.klar",
     "core.klar",
     "cov.klar",
+    "fake.klar",
     "float.klar",
     "globals.klar",
     "int.klar",
@@ -463,6 +466,7 @@ pub fn rt_files() -> List[Str] {
     "par.klar",
     "profile.klar",
     "prop.klar",
+    "sandbox.klar",
     "show.klar",
     "softmath.klar",
     "str.klar",

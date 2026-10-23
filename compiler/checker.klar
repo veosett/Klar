@@ -5,7 +5,7 @@
 // Klar values are immutable, so the checker state (`Ck`: diagnostics, scopes, the type substitution, the
 // universe of declared types, ...) is passed to every function and returned updated with the result (`Res`).
 use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span}
-use ast.{Stmt, StrPiece, TypeExpr, expr_span, pattern_span}
+use ast.{Stmt, StrPiece, TestUses, TypeExpr, expr_span, no_uses, pattern_span}
 use builtin_sigs.{foreign_methods, foreign_notes, global_sigs, method_sigs, sys_sigs}
 use parser.{parse_signature}
 use similar.{closest}
@@ -263,6 +263,12 @@ fn settle_types(c: Ck) -> Ck {
 
 /// A result together with the updated checker state.
 pub type Res[T] { c: Ck, v: T }
+
+/// The effects a test may declare: they run on fakes (an empty file system in memory, a clock at 0, fixed random
+/// numbers).
+const TEST_EFFECTS: List[Str] = ["io", "fs", "time", "rand"]
+
+const TEST_HINT: Str = "pass the result of the program or network call as a parameter, so the code under test stays testable"
 
 const KNOWN_EFFECTS: List[Str] = ["io", "time", "rand", "fs", "net", "proc"]
 const PRIMS: List[Str] = ["Int", "Float", "Bool", "Str", "Bytes", "Unit", "Never"]
@@ -1161,13 +1167,13 @@ fn collect(ck: Ck) -> Ck {
           c = c with { consts: c.consts.set(name, None), own_consts: c.own_consts.push(idx) }
         }
       },
-      Decl.Test(span, name, _) => {
+      Decl.Test(span, name, _, _) => {
         if test_names.contains(name) {
           c = error(c: c, code: "E0101", msg: "duplicate test name \"{name}\"", span: span, hint: None)
         }
         test_names = test_names.push(name)
       },
-      Decl.Property(span, name, _, _) => {
+      Decl.Property(span, name, _, _, _) => {
         if test_names.contains(name) {
           c = error(c: c, code: "E0101", msg: "duplicate test name \"{name}\"", span: span, hint: None)
         }
@@ -1180,7 +1186,7 @@ fn collect(ck: Ck) -> Ck {
   // resolve the type declarations (all names are registered now, so recursion works)
   for k in own_types {
     c = resolve_type_decl(c, c.decls.get_or(k, Decl.Test(span: no_span(), name: "", body: Block { span: no_span(),
-      stmts: [] })))
+      stmts: [] }, eff: no_uses())))
   }
   for k in c.own_consts {
     match c.decls.get(k) {
@@ -2110,18 +2116,36 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
   return c with { ctx: top_ctx() }
 }
 
-fn check_test(ck: Ck, name: Str, body: Block) -> Ck {
-  let ctx = Ctx { name: "test \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
+/// The effects a test or property may use: `io`, and the fakes it declares (`uses fs, time, rand`).
+fn test_effects(ck: Ck, eff: TestUses) -> Res[List[Str]] {
+  var c = ck
+  var effects = ["io"]
+  let span = eff.span.unwrap_or(no_span())
+  for e in eff.effects {
+    if not KNOWN_EFFECTS.contains(e) {
+      c = error(c: c, code: "E0403", msg: "unknown effect `{e}`", span: span,
+        hint: or_hint(did_you_mean(e, KNOWN_EFFECTS), "known effects: io, time, rand, fs, net, proc"))
+    } else if not TEST_EFFECTS.contains(e) {
+      c = error(c: c, code: "E0401", msg: "tests cannot use `{e}`: only files, the clock and random numbers have fakes",
+        span: span, hint: Some(TEST_HINT))
+    } else if not effects.contains(e) {
+      effects = effects.push(e)
+    }
+  }
+  return Res { c: c, v: effects }
+}
+
+fn check_test(ck: Ck, name: Str, body: Block, eff: TestUses) -> Ck {
+  let te = test_effects(ck, eff)
+  let ctx = Ctx { name: "test \"{name}\"", ret: con("Unit"), effects: te.v, is_test: true, loop: 0, sig_end: eff.sig_end,
     purpose: "test", used: [], fn_type: None }
-  var c = push_scope(enter(ck: ck, ctx: ctx, tparams: Map {}, bounds: Map {}))
+  var c = push_scope(enter(ck: te.c, ctx: ctx, tparams: Map {}, bounds: Map {}))
   c = block(c, body)
   c = pop_scope(c)
   return c with { ctx: top_ctx() }
 }
 
-fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
-  let ctx = Ctx { name: "property \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
-    purpose: "test", used: [], fn_type: None }
+fn check_property(ck: Ck, name: Str, params: List[Param], body: Block, eff: TestUses) -> Ck {
   var c = push_scope(enter(ck: ck, ctx: top_ctx(), tparams: Map {}, bounds: Map {}))
   var types: List[Type] = []
   for p in params {
@@ -2135,6 +2159,10 @@ fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
     }
     c = declare(ck: c, name: p.name, t: r.v, mutable: false, span: p.span, kind: "param", kw: None)
   }
+  let te = test_effects(c, eff)
+  c = te.c
+  let ctx = Ctx { name: "property \"{name}\"", ret: con("Unit"), effects: te.v, is_test: true, loop: 0,
+    sig_end: eff.sig_end, purpose: "test", used: [], fn_type: None }
   c = block(c with { ctx: ctx, prop_types: c.prop_types.set(name, types) }, body)
   c = pop_scope(c)
   return c with { ctx: top_ctx() }
@@ -3184,8 +3212,26 @@ fn need_effects(ck: Ck, what: Str, effects: List[Str], span: Span) -> Ck {
       hint: Some("add `uses {commas(union(eff_names(c0.s, ft), missing).unique().sort())}` to the function type"))
   }
   if purpose == "test" or c0.ctx.is_test {
-    return error(c: c0, code: "E0401", msg: "tests may only use `io`, but {what} uses `{effs}`", span: span,
-      hint: Some("pass the time/random/file value as a parameter so the code under test stays deterministic"))
+    let real = minus(missing, TEST_EFFECTS)
+    if not real.is_empty() {
+      return error(c: c0, code: "E0401", msg: "tests cannot use `{commas(real)}`, but {what} uses it", span: span,
+        hint: Some(TEST_HINT))
+    }
+    let declared = minus(c0.ctx.effects, ["io"])
+    let allowed = union(declared, missing).unique().sort().join(", ")
+    var tfix: Option[DiagFix] = None
+    match c0.ctx.sig_end {
+      Some(se) => {
+        if declared.is_empty() {
+          tfix = fix_at(span: Span { line: se.end_line, col: se.end_col, end_line: se.end_line, end_col: se.end_col },
+            text: " uses " + allowed, safe: true)
+        }
+      },
+      None => {},
+    }
+    return error_fix(c: c0, code: "E0401", msg: "calling {what} requires effect `{effs}`, but `{c0.ctx.name}` does not " +
+        "declare it", span: span, hint: Some("write `uses {allowed}` after the test name: tests run on an empty file " +
+          "system in memory, a clock that starts at 0 and fixed random numbers"), fix: tfix)
   }
   let allowed = union(c0.ctx.effects, missing).unique().sort()
   var fix: Option[DiagFix] = None
@@ -4751,8 +4797,8 @@ fn decl_names(d: Decl) -> List[Str] {
       None => [],
     }),
     Decl.Const(_, _, _, _, v, _, _) => walk_names(v),
-    Decl.Test(_, _, b) => walk_names_block(b),
-    Decl.Property(_, _, _, b) => walk_names_block(b),
+    Decl.Test(_, _, b, _) => walk_names_block(b),
+    Decl.Property(_, _, _, b, _) => walk_names_block(b),
     _ => [],
   }
 }
@@ -4857,11 +4903,11 @@ pub fn check_module(ck: Ck) -> Ck {
       Decl.Fn(f) => {
         c = check_pending(check_fn(ck: c, f: f, idx: idx))
       },
-      Decl.Test(_, name, body) => {
-        c = check_pending(check_test(ck: c, name: name, body: body))
+      Decl.Test(_, name, body, eff) => {
+        c = check_pending(check_test(ck: c, name: name, body: body, eff: eff))
       },
-      Decl.Property(_, name, params, body) => {
-        c = check_pending(check_property(ck: c, name: name, params: params, body: body))
+      Decl.Property(_, name, params, body, eff) => {
+        c = check_pending(check_property(ck: c, name: name, params: params, body: body, eff: eff))
       },
       _ => {},
     }

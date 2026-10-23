@@ -1977,10 +1977,10 @@ pub fn analyze(ck: Ck) -> List[Diag] {
       Decl.Fn(f) => {
         s = check_recursion(function(s, f), f)
       },
-      Decl.Test(_, _, body) => {
+      Decl.Test(_, _, body, _) => {
         s = walk(sf: begin(sf: s, decl: None, params: []), stmts: body.stmts, facts: Map {}).s
       },
-      Decl.Property(_, _, params, body) => {
+      Decl.Property(_, _, params, body, _) => {
         s = walk(sf: begin(sf: s, decl: None, params: params.map(fn(p) => p.name)), stmts: body.stmts, facts: Map {}).s
       },
       _ => {},

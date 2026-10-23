@@ -136,6 +136,9 @@ class PropertyDecl(Node):
     name: str
     params: List["Param"]
     body: Any
+    effects: List[str] = field(default_factory=list)     # `property "p" (x: Int) uses fs { ... }`: fakes
+    effects_span: Optional[Span] = None
+    sig_end: Optional[Span] = None                         # where `uses ...` can be inserted
 
 
 @dataclass(eq=False)
@@ -157,6 +160,9 @@ class EnumDecl(Node):
 class TestDecl(Node):
     name: str
     body: Any
+    effects: List[str] = field(default_factory=list)     # `test "t" uses fs, time { ... }`: run on fakes
+    effects_span: Optional[Span] = None
+    sig_end: Optional[Span] = None                         # where `uses ...` can be inserted
 
 
 @dataclass(eq=False)

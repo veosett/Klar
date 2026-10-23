@@ -106,10 +106,10 @@ fn decl_targets(p: Program) -> Map[Str, Span] {
       Decl.Trait(s, n, _, _, _, _, _) => {
         out = out.set(n, s)
       },
-      Decl.Test(s, n, _) => {
+      Decl.Test(s, n, _, _) => {
         out = out.set("test:" + n, s)
       },
-      Decl.Property(s, n, _, _) => {
+      Decl.Property(s, n, _, _, _) => {
         out = out.set("property:" + n, s)
       },
       Decl.Impl(s, tr, _, target, _, _, _, _, _) => {

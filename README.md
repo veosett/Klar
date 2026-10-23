@@ -98,6 +98,7 @@ Built for an AI author **and** a human reviewer ([docs/TOOLS.md](docs/TOOLS.md))
 | `klar eval '<expr>'` | value and type, no file needed | `klar coverage f.klar` | statements the tests never run |
 | `klar fix` / `klar fmt` | safe fixes, canonical layout | `klar lsp` + `editors/vscode` | errors as you type, hover, go to definition, rename, completion |
 | `klar refs` / `klar rename` / `klar patch` | exact (no shadowing in Klar); patches by name, verified | `klar new app` | project skeleton with tests and `AGENTS.md` |
+| `klar context file name` | one function with the signatures it uses, its tests and callers, within a token budget | `klar mcp` | all of these as MCP tools for agents |
 
 `klar view` turns any Klar program into a page a human can read — the big picture first, details on demand:
 

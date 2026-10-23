@@ -712,7 +712,7 @@ pub fn collect(ld: Ld, trace: J) -> J {
           consts = consts.push(obj([kv("name", js(name)), kv("value", js(seg(lines, expr_span(value)))), kv("line",
             J.JInt(sp.line))]))
         },
-        Decl.Test(sp, name, body) => {
+        Decl.Test(sp, name, body, _) => {
           if own {
             var kind = "test"
             if name.starts_with("doc: ") {
@@ -722,7 +722,7 @@ pub fn collect(ld: Ld, trace: J) -> J {
               user_fns: user_fns, targets: targets, f: facts) })
           }
         },
-        Decl.Property(sp, name, _, body) => {
+        Decl.Property(sp, name, _, body, _) => {
           if own {
             tests = tests.push(VTest { name: name, kind: "property", line: sp.line, calls: calls_in(evs: v_block([],
               body), user_fns: user_fns, targets: targets, f: facts) })

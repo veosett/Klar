@@ -12,14 +12,18 @@ exactly; the compiler rejects everything else with a coded error (`klar explain 
    `klar fmt file.klar` normalizes the layout.
    Look things up instead of guessing: `klar doc split` / `klar doc List.sort` (signature + tested examples),
    `klar eval '"a,b".split(",")'` (value : type), `klar outline file.klar` (API of a file),
-   `klar refs file.klar name`, `klar rename file.klar old new`, `klar coverage file.klar` (untested statements).
+   `klar refs file.klar name`, `klar rename file.klar old new`, `klar coverage file.klar` (untested statements),
+   `klar context file.klar name [--max-tokens 2000]` (one function/type/constant: its source and docs, the
+   signatures it uses, its tests and callers — enough to change it without reading files).
    Edit by name, not by rewriting files: `klar patch file.klar '{"edits": [{"replace": "fname", "with": "fn ..."}]}' --test --json`
    (also `Type.method`, `test:name`, `insert`+`after`/`before`, `delete`, `find`+`replace`+`in`, `rename`+`to`,
    `id` from `klar ast`); it writes only if there are no new errors and the tests pass.
    Packages: `klar add name --git URL --tag v1` (or `--path ../dir`) edits klar.toml and fetches; `klar fetch` after a
    clone; `klar deps --json` shows the tree.
 4. Failures show values, both sides of `assert`, the Klar call stack, minimal property counterexamples.
-5. `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
+5. `klar run --allow fs:./data,proc:git,time file.klar` runs with only these rights (`io` always; R0016 outside;
+   `fs`/`proc` alone allow everything of that kind); `klar build --allow ...` builds them into the executable.
+   `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
    `.exe`/ELF (`--target windows|linux|linux-arm64`, experimental `macos`); `klar profile file.klar` shows where time goes.
 
 ## Lexical
@@ -162,7 +166,9 @@ A function without `uses` is pure. Calling something with an effect requires dec
 `exit(code)` (type `Never`, flushes output) → `io`; `run_command(["prog", "arg"])` → `Result[Int, Str]` (exit code;
 inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `run_capture(args, dir, input)` → `Result[List[Str], Str]`
 (`[exit code, stdout, stderr]`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
-pure. Tests may use only `io`.
+pure. Tests may use `io` and declare fakes: `test "save" uses fs, time, rand { ... }` (also `property "p"
+(x: Int) uses fs { ... }`) runs on an empty in-memory file system rooted at `/`, a clock at 0 (`set_clock(ms)` moves
+it) and fixed random numbers, fresh for every test; `proc`/`net` are not allowed in tests.
 Function types carry effects: `fn(Int) -> Unit uses io` may print when called; `fn(Int) -> Int` is pure, so
 passing a function with `uses` there is E0202 (add `uses` to the parameter type). Calling a function value needs
 its effects. A lambda may use the effects of the function type it is passed as, else those of the enclosing

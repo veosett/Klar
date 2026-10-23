@@ -8,6 +8,7 @@ import time
 from . import nodes as N
 from .builtins import GLOBALS, METHODS, param_names
 from .errors import KlarRuntimeError
+from .fakes import Fake
 from .types import TCon, prune, subst
 from .values import (UNIT, Builtin, Closure, KMap, NONE, Record, Variant, err, ok, show, some, type_head)
 
@@ -129,6 +130,7 @@ class Interpreter:
         self.builtins_env.vars["None"] = NONE
         self.stack = []
         self.mode = []
+        self.fake = None         # the fakes of the running test (klar/fakes.py)
         self.initialized = False
         self._dispatch = {}
         self.main_env = None
@@ -535,6 +537,7 @@ class Interpreter:
             return self.run_property(t, runs, seed)
         self.stack = [(f'test "{t.name}"', t.span)]
         self.mode = ["test"]
+        self.fake = Fake()
         try:
             self.exec_block(t.body, self.main_env)
         except ReturnSignal:
@@ -542,12 +545,14 @@ class Interpreter:
         finally:
             self.stack = []
             self.mode = []
+            self.fake = None
         return None
 
     # ---- property-based testing --------------------------------------------------
     def try_property(self, d, args):
         self.stack = [(f'property "{d.name}"', d.span)]
         self.mode = ["test"]
+        self.fake = Fake()        # every run starts from fresh fakes
         env = Env(self.main_env, {p.name: v for p, v in zip(d.params, args)})
         try:
             self.exec_block(d.body, env)
@@ -558,6 +563,7 @@ class Interpreter:
         finally:
             self.stack = []
             self.mode = []
+            self.fake = None
         return None
 
     def run_property(self, d, runs, seed):

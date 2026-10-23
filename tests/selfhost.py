@@ -557,8 +557,13 @@ def check_emit(interp):
             except (NativeUnsupported, SystemExit):
                 pass
         files = [p for p in files if p in want]
-        out = run_driver("dump_exe.klar", [os.path.join(ROOT, "klar"), d] + files, interp)
-        got = dict(line.split("\t") for line in out.splitlines())
+        got = {}
+        for i in range(0, len(files), 8):     # in parts: one process for all files needs more memory than CI has
+            os.makedirs(os.path.join(d, f"k{i}"))
+            out = run_driver("dump_exe.klar", [os.path.join(ROOT, "klar"), os.path.join(d, f"k{i}")] + files[i:i + 8],
+                             interp)
+            got.update({k: os.path.join(f"k{i}", v) if v != "error" else v
+                        for k, v in (line.split("\t") for line in out.splitlines())})
         for path in files:
             for _, ext in TARGETS:
                 with open(os.path.join(d, f"py{want[path]}.{ext}"), "rb") as f:
@@ -750,8 +755,8 @@ def cli_output(argv, cwd=None):
 
 
 def check_inspect(klarc, files):
-    """`klarc outline` and `klarc refs` == `klar outline` / `klar refs` (text and --json) on every file, for the
-    names declared and used in it."""
+    """`klarc outline`, `klarc refs` and `klarc context` == the Python commands (text and --json) on every file, for
+    the names declared and used in it."""
     import klar.tools.commands as commands
     from klar.loader import load_path
     bad = runs = 0
@@ -765,6 +770,9 @@ def check_inspect(klarc, files):
         big = len(loaded.sources.get(loaded.main.display, "").split("\n")) > 1500 if loaded.main else False
         for name in names_of(path)[:4 if big else 12]:
             jobs += [["refs", path, name], ["refs", path, name, "--json"]]
+        for name in names_of(path)[:2 if big else 6]:
+            jobs += [["context", path, name], ["context", path, name, "--json", "--max-tokens", "150"]]
+        jobs += [["context", path, "no_such_name"], ["context", path, "no_such_name", "--json"]]
         for job in jobs:
             runs += 1
             want = cli_output(job)
@@ -937,6 +945,32 @@ EVAL_CASES = [["1 + 2"], ["let x = [1, 2]", "x.map(fn(v) => v * 2)"], ['"a,b".sp
               ["nope(1)"], ['let x: Int = "s"', "x"], ["Some(3)"], ['Map {}.set("a", 1)'], ["[1, 2].get_or(5, 0) + 1.5"],
               ["2.5 * 2.0"], ['"é".len()'], ["let xs = [3, 1, 2]", "xs.sort()"], ["[1].get_or(0, 0) / 0"],
               ['let n = "x".to_int().ok_or("bad")', "n"], ['print("before")', "assert 1 == 2", "1"], ["sq(4)"]]
+
+
+def check_sandbox(klarc, d):
+    """`klarc run --allow` == `klar run --allow`: the same output, R0016 messages and exit codes for every right."""
+    sys.path.insert(0, os.path.join(ROOT, "tests"))
+    from test_klar import Sandbox
+    work = os.path.join(d, "sandbox")
+    os.makedirs(os.path.join(work, "data"), exist_ok=True)
+    for name, text in (("data/a.txt", "hi"), ("other.txt", "secret"), ("p.klar", Sandbox.SRC)):
+        with open(os.path.join(work, name), "w", encoding="utf-8") as f:
+            f.write(text)
+    bad = runs = 0
+    lib = os.path.join(ROOT, "klar")
+    for step, allow in Sandbox.CASES + [("read", "fs,disk")]:
+        runs += 1
+        want = subprocess.run([sys.executable, "-m", "klar", "run", "-q", "--allow", allow, "p.klar", step],
+                              capture_output=True, text=True, cwd=work, env=dict(os.environ, PYTHONPATH=ROOT))
+        got = subprocess.run([klarc, "run", "p.klar", "--allow", allow, "--lib", lib, "--", step], capture_output=True,
+                             text=True, cwd=work)
+        if (want.stdout, want.stderr, want.returncode) != (got.stdout, got.stderr, got.returncode):
+            bad += 1
+            if bad <= 5:
+                print(f"DIFF run --allow {allow!r} {step}:\n  python: {want.stdout!r} {want.stderr[:300]!r} "
+                      f"{want.returncode}\n  klar:   {got.stdout!r} {got.stderr[:300]!r} {got.returncode}")
+    print(f"sandbox: {runs - bad}/{runs} runs identical")
+    return bad
 
 
 def check_eval(klarc, d):
@@ -1221,6 +1255,7 @@ def check_fix(cases):
         bad += check_mcp(klarc)
         bad += check_view(klarc, d)
         bad += check_eval(klarc, d)
+        bad += check_sandbox(klarc, d)
         bad += check_pkg(klarc, d)
         bad += check_patch(klarc, [p for p in klar_files() if os.sep + "rt" + os.sep not in p
                                    and os.sep + "compiler" + os.sep not in p][:80])

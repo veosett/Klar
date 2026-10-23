@@ -105,6 +105,27 @@ def cmd_refs(args):
     return 0
 
 
+def cmd_context(args):
+    from .context import context, context_text
+    loaded = load_path(args.file)
+    if loaded.program is None:
+        print("cannot parse the file; run `klar check` first", file=sys.stderr)
+        return 1
+    c = context(loaded, args.name, args.max_tokens)
+    if c is None:
+        msg = f"no function, type or constant `{args.name}` in the program"
+        if args.json:
+            emit({"ok": False, "error": msg})
+        else:
+            print(f"error: {msg}", file=sys.stderr)
+        return 1
+    if args.json:
+        emit(dict({"ok": True}, **c))
+    else:
+        print(context_text(c))
+    return 0
+
+
 def cmd_rename(args):
     from .inspect import rename
     loaded = load_path(args.file)
@@ -229,6 +250,13 @@ def register(sub):
     p.add_argument("name")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_refs)
+    p = sub.add_parser("context", help="what a model needs to change one function, type or constant: its source, the "
+                                       "signatures it uses, its tests and callers, within a token budget")
+    p.add_argument("file")
+    p.add_argument("name")
+    p.add_argument("--max-tokens", type=int, default=2000, help="the budget (about 4 characters per token)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_context)
     p = sub.add_parser("rename", help="rename a function, type, variable, field or variant everywhere")
     p.add_argument("file")
     p.add_argument("old")

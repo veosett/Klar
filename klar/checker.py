@@ -14,6 +14,9 @@ from .types import (ANY, BOOL, FLOAT, INT, NEVER, STR, UNIT, Eff, TCon, TFn, TPa
                     head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify)
 
 KNOWN_EFFECTS = {"io", "time", "rand", "fs", "net", "proc"}
+# the effects a test may declare: they run on fakes (an empty file system in memory, a clock at 0, fixed random numbers)
+TEST_EFFECTS = {"io", "fs", "time", "rand"}
+TEST_HINT = "pass the result of the program or network call as a parameter, so the code under test stays testable"
 PRIMS = {"Int", "Float", "Bool", "Str", "Bytes", "Unit", "Never"}
 GENERIC_ARITY = {"List": 1, "Map": 2, "Option": 1, "Result": 2}
 PASCAL = re.compile(r"^[A-Z][A-Za-z0-9]*$")
@@ -883,10 +886,26 @@ class Checker:
         self.bounds = {}
         self.scopes = []
         self.push()
-        self.ctx = Ctx(f'test "{d.name}"', UNIT, {"io"}, is_test=True, purpose="test")
+        self.ctx = Ctx(f'test "{d.name}"', UNIT, self.test_effects(d), is_test=True, purpose="test",
+                       sig_end=getattr(d, "sig_end", None))
         self.block(d.body)
         self.pop()
         self.ctx = None
+
+    def test_effects(self, d):
+        """The effects a test or property may use: `io`, and the fakes it declares (`uses fs, time, rand`)."""
+        effects = {"io"}
+        for e in getattr(d, "effects", []):
+            if e not in KNOWN_EFFECTS:
+                h, fx = self.did_you_mean(e, KNOWN_EFFECTS, d.effects_span)
+                self.error("E0403", f"unknown effect `{e}`", d.effects_span,
+                           hint=h or "known effects: io, time, rand, fs, net, proc")
+            elif e not in TEST_EFFECTS:
+                self.error("E0401", f"tests cannot use `{e}`: only files, the clock and random numbers have fakes",
+                           d.effects_span, hint=TEST_HINT)
+            else:
+                effects.add(e)
+        return effects
 
     def check_property(self, d: N.PropertyDecl):
         self.tparams = {}
@@ -902,7 +921,8 @@ class Checker:
                                         "Result and records/enums built from them (not newtypes with `requires`)")
             d.param_types.append(t)
             self.declare(p.name, t, False, p.span, "param")
-        self.ctx = Ctx(f'property "{d.name}"', UNIT, {"io"}, is_test=True, purpose="test")
+        self.ctx = Ctx(f'property "{d.name}"', UNIT, self.test_effects(d), is_test=True, purpose="test",
+                       sig_end=d.sig_end)
         self.block(d.body)
         self.pop()
         self.ctx = None
@@ -1353,8 +1373,21 @@ class Checker:
                                 f"`{show(self.ctx.fn_type)}` does not declare it", span,
                        hint=f"add `uses {', '.join(sorted(eff_names(self.ctx.fn_type) | missing))}` to the function type")
         elif purpose == "test" or self.ctx.is_test:
-            self.error("E0401", f"tests may only use `io`, but {what} uses `{effs}`", span,
-                       hint="pass the time/random/file value as a parameter so the code under test stays deterministic")
+            real = sorted(missing - TEST_EFFECTS)
+            if real:
+                self.error("E0401", f"tests cannot use `{', '.join(real)}`, but {what} uses it", span, hint=TEST_HINT)
+            else:
+                fix = None
+                declared = self.ctx.effects - {"io"}
+                allowed = ", ".join(sorted(declared | missing))
+                if self.ctx.sig_end is not None and not declared:
+                    se = self.ctx.sig_end
+                    fix = {"span": Span(se.file, se.end_line, se.end_col, se.end_line, se.end_col),
+                           "text": " uses " + allowed}
+                self.error("E0401", f"calling {what} requires effect `{effs}`, but `{self.ctx.name}` does not declare "
+                                    f"it", span,
+                           hint=f"write `uses {allowed}` after the test name: tests run on an empty file system in "
+                                f"memory, a clock that starts at 0 and fixed random numbers", fix=fix)
         else:
             fix = None
             allowed = sorted(self.ctx.effects | missing)

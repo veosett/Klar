@@ -1,0 +1,333 @@
+// `klarc context FILE NAME`: the smallest context a model needs to change one function, type or constant — its
+// source with the documentation, the signatures of what it uses, its tests and its callers — within a token budget.
+// The counterpart of klar/tools/context.py, with the same output. Names are found by the words of the source (Klar
+// has no shadowing, so a word that names a function, type or constant of the program is that declaration).
+use ast.{Decl}
+use inspect.{UMod, decl_name, decl_span, sig_text}
+use jsonout.{J, compact}
+use lexer.{StrPart, TokKind, Token, tokenize}
+
+pub const DEFAULT_TOKENS: Int = 2000
+
+/// A word of the source that may name a declaration, and its line.
+type CtxWord { line: Int, text: Str }
+
+/// A top-level declaration: what it is called, how it is shown and which lines it covers (`first`: the first line
+/// of its documentation).
+type CtxItem { d: Decl, file: Str, kind: Str, name: Str, word: Str, first: Int, line: Int, last: Int, signature: Str }
+
+pub type UseE { name: Str, kind: Str, signature: Str, file: Str, line: Int }
+
+pub type TestE { name: Str, kind: Str, file: Str, line: Int, source: Str }
+
+pub type CallerE { name: Str, kind: Str, signature: Str, file: Str, line: Int, code: Str }
+
+/// The context of a name: its source and the parts that fit the budget (`omitted_*`: how many did not).
+pub type Context {
+  name: Str,
+  kind: Str,
+  file: Str,
+  line: Int,
+  source: Str,
+  used: List[UseE],
+  tests: List[TestE],
+  callers: List[CallerE],
+  omitted_uses: Int,
+  omitted_tests: Int,
+  omitted_callers: Int,
+  tokens: Int,
+}
+
+/// A rough token count of text (about 4 characters per token).
+fn tokens_of(text: Str) -> Int {
+  return (text.len() + 3) / 4
+}
+
+fn is_op_tok(t: Option[Token], v: Str) -> Bool {
+  return match t {
+    Some(x) => x.kind == TokKind.Op and x.text == v,
+    None => false,
+  }
+}
+
+/// The identifiers of the tokens that may name a declaration: not a field after `.` (but a method call `x.f()`
+/// is), including the code inside `{...}` of strings (`line` >= 0: the line of all of them).
+fn scan(toks: List[Token], line: Int) -> List[CtxWord] {
+  var out: List[CtxWord] = []
+  var i = 0
+  for t in toks {
+    if t.kind == TokKind.Ident {
+      let after_dot = i > 0 and is_op_tok(toks.get(i - 1), ".")
+      if not after_dot or is_op_tok(toks.get(i + 1), "(") {
+        let ln = match line >= 0 {
+          true => line,
+          false => t.line,
+        }
+        out = out.push(CtxWord { line: ln, text: t.text })
+      }
+    } else if t.kind == TokKind.StrLit {
+      for part in t.parts {
+        match part {
+          StrPart.Expr(code, pl, _) => {
+            match tokenize(code) {
+              Ok(inner) => {
+                out = out.concat(scan(inner, pl))
+              },
+              Err(_) => {},
+            }
+          },
+          StrPart.Text(_) => {},
+        }
+      }
+    }
+    i = i + 1
+  }
+  return out
+}
+
+fn words(src: Str) -> List[CtxWord] {
+  return match tokenize(src) {
+    Ok(toks) => scan(toks, -1),
+    Err(_) => [],
+  }
+}
+
+fn kind_of(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(_) => "fn",
+    Decl.TypeD(_, _, _, _, _, _) => "type",
+    Decl.EnumD(_, _, _, _, _, _) => "enum",
+    Decl.Alias(_, _, _, _, _, _) => "alias",
+    Decl.Trait(_, _, _, _, _, _, _) => "trait",
+    Decl.Const(_, _, _, _, _, _, _) => "const",
+    Decl.Test(_, _, _, _) => "test",
+    Decl.Property(_, _, _, _, _) => "property",
+    _ => "",
+  }
+}
+
+/// The first line of the `///` documentation right above a declaration (its own line without one).
+fn doc_start(lines: List[Str], line: Int) -> Int {
+  var first = line
+  while first > 1 and lines.get_or(first - 2, "").trim().starts_with("///") {
+    first = first - 1
+  }
+  return first
+}
+
+fn is_method(d: Decl) -> Bool {
+  return match d {
+    Decl.Fn(f) => f.owner_kind != None,
+    _ => false,
+  }
+}
+
+fn skipped(d: Decl) -> Bool {
+  return match d {
+    Decl.Fn(f) => f.constructs != None,
+    Decl.Test(_, n, _, _) => n.starts_with("doc: "),
+    _ => kind_of(d) == "",
+  }
+}
+
+fn item_of(d: Decl, file: Str, lines: List[Str]) -> CtxItem {
+  let k = kind_of(d)
+  let sp = decl_span(d)
+  let name = decl_name(d)
+  let word = match d {
+    Decl.Fn(f) => match f.owner_kind {
+      Some(_) => f.method_name.unwrap_or(name),
+      None => name,
+    },
+    _ => name,
+  }
+  let signature = match k == "test" or k == "property" {
+    true => k + " \"" + name + "\"",
+    false => sig_text(lines: lines, d: d, newtype: false),
+  }
+  return CtxItem { d: d, file: file, kind: k, name: name, word: word, first: doc_start(lines, sp.line), line: sp.line,
+    last: sp.end_line, signature: signature }
+}
+
+fn item_source(it: CtxItem, lines: List[Str]) -> Str {
+  return lines.drop(it.first - 1).take(it.last - it.first + 1).join("\n")
+}
+
+/// The context of `name`, or None when the program declares no such function, type or constant.
+pub fn context(mods: List[UMod], name: Str, max_tokens: Int) -> Option[Context] {
+  var all: List[Pair[UMod, List[CtxItem]]] = []
+  for m in mods {
+    var its: List[CtxItem] = []
+    for d in m.decls {
+      if not skipped(d) {
+        its = its.push(item_of(d: d, file: m.display, lines: m.lines))
+      }
+    }
+    all = all.push(Pair { first: m, second: its })
+  }
+  var found: Option[Pair[CtxItem, List[Str]]] = None
+  for mi in all {
+    for it in mi.second {
+      if found == None and it.name == name and it.kind != "test" and it.kind != "property" {
+        found = Some(Pair { first: it, second: mi.first.lines })
+      }
+    }
+  }
+  let tp = match found {
+    Some(f) => f,
+    None => {
+      return None
+    },
+  }
+  let target = tp.first
+  var defs: Map[Str, CtxItem] = Map {}
+  for mi in all {
+    for it in mi.second {
+      if it.kind != "test" and it.kind != "property" and not is_method(it.d) and not defs.has(it.name) {
+        defs = defs.set(it.name, it)
+      }
+    }
+  }
+  var cache: Map[Str, List[CtxWord]] = Map {}
+  for mi in all {
+    cache = cache.set(mi.first.display, words(mi.first.lines.join("\n")))
+  }
+  let own = cache.get(target.file).unwrap_or([]).filter(fn(w) => w.line >= target.first and w.line <= target.last)
+    .map(fn(w) => w.text).unique().sort()
+  var uses_items: List[CtxItem] = []
+  for w in own {
+    match defs.get(w) {
+      Some(it) => {
+        if not (it.file == target.file and it.line == target.line and it.name == target.name) {
+          uses_items = uses_items.push(it)
+        }
+      },
+      None => {},
+    }
+  }
+  var c = Context { name: target.name, kind: target.kind, file: target.file, line: target.line,
+    source: item_source(target, tp.second), used: [], tests: [], callers: [], omitted_uses: 0, omitted_tests: 0,
+    omitted_callers: 0, tokens: 0 }
+  let budget = max_tokens * 4
+  var used = head_text(c).len() + c.source.len() + 1
+  for it in uses_items {
+    let e = UseE { name: it.name, kind: it.kind, signature: it.signature, file: it.file, line: it.line }
+    let t = use_text(e)
+    if used + t.len() + 1 > budget {
+      c = c with { omitted_uses: c.omitted_uses + 1 }
+    } else {
+      c = c with { used: c.used.push(e) }
+      used = used + t.len() + 1
+    }
+  }
+  var callers: List[CallerE] = []
+  for mi in all {
+    let ws = cache.get(mi.first.display).unwrap_or([])
+    for it in mi.second {
+      let same = it.file == target.file and it.line == target.line and it.name == target.name
+      if not same {
+        let lo = it.line
+        let hi = it.last
+        let hits = ws.filter(fn(w) => w.text == target.word and w.line >= lo and w.line <= hi)
+        match hits.first() {
+          Some(h) => {
+            if it.kind == "test" or it.kind == "property" {
+              let e = TestE { name: decl_name(it.d), kind: it.kind, file: it.file, line: it.line,
+                source: item_source(it, mi.first.lines) }
+              let t = test_text(e)
+              if used + t.len() + 1 > budget {
+                c = c with { omitted_tests: c.omitted_tests + 1 }
+              } else {
+                c = c with { tests: c.tests.push(e) }
+                used = used + t.len() + 1
+              }
+            } else {
+              callers = callers.push(CallerE { name: it.name, kind: it.kind, signature: it.signature, file: it.file,
+                line: h.line, code: mi.first.lines.get_or(h.line - 1, "").trim() })
+            }
+          },
+          None => {},
+        }
+      }
+    }
+  }
+  for e in callers {
+    let t = caller_text(e)
+    if used + t.len() + 1 > budget {
+      c = c with { omitted_callers: c.omitted_callers + 1 }
+    } else {
+      c = c with { callers: c.callers.push(e) }
+      used = used + t.len() + 1
+    }
+  }
+  return Some(c with { tokens: tokens_of(context_text(c, false)) })
+}
+
+fn head_text(c: Context) -> Str {
+  return "{c.kind} {c.name} — {c.file}:{c.line}"
+}
+
+fn use_text(e: UseE) -> Str {
+  return "  {e.signature}   // {e.file}:{e.line}"
+}
+
+fn test_text(e: TestE) -> Str {
+  return "  // {e.file}:{e.line}\n" + e.source.split("\n").map(fn(x) => "  " + x).join("\n")
+}
+
+fn caller_text(e: CallerE) -> Str {
+  return "  {e.name} — {e.file}:{e.line}: {e.code}"
+}
+
+pub fn context_text(c: Context, with_count: Bool) -> Str {
+  var out = [head_text(c), c.source]
+  if not c.used.is_empty() {
+    out = out.push("").push("uses:").concat(c.used.map(use_text))
+  }
+  if not c.tests.is_empty() {
+    out = out.push("").push("tests:").concat(c.tests.map(test_text))
+  }
+  if not c.callers.is_empty() {
+    out = out.push("").push("callers:").concat(c.callers.map(caller_text))
+  }
+  var parts: List[Str] = []
+  if c.omitted_uses > 0 {
+    parts = parts.push("{c.omitted_uses} uses")
+  }
+  if c.omitted_tests > 0 {
+    parts = parts.push("{c.omitted_tests} tests")
+  }
+  if c.omitted_callers > 0 {
+    parts = parts.push("{c.omitted_callers} callers")
+  }
+  if not parts.is_empty() {
+    out = out.push("").push("not shown: " + parts.join(", ") + " (raise --max-tokens)")
+  }
+  if with_count {
+    out = out.push("").push("~{c.tokens} tokens")
+  }
+  return out.join("\n")
+}
+
+fn str_pair(k: Str, v: Str) -> Pair[Str, J] {
+  return Pair { first: k, second: J.JStr(v) }
+}
+
+fn int_pair(k: Str, v: Int) -> Pair[Str, J] {
+  return Pair { first: k, second: J.JInt(v) }
+}
+
+pub fn context_json(c: Context) -> Str {
+  let used = c.used.map(fn(e) => J.JObj([str_pair("name", e.name), str_pair("kind", e.kind),
+    str_pair("signature", e.signature), str_pair("file", e.file), int_pair("line", e.line)]))
+  let tests = c.tests.map(fn(e) => J.JObj([str_pair("name", e.name), str_pair("kind", e.kind), str_pair("file", e.file),
+    int_pair("line", e.line), str_pair("source", e.source)]))
+  let callers = c.callers.map(fn(e) => J.JObj([str_pair("name", e.name), str_pair("kind", e.kind),
+    str_pair("signature", e.signature), str_pair("file", e.file), int_pair("line", e.line), str_pair("code", e.code)]))
+  let omitted = J.JObj([int_pair("uses", c.omitted_uses), int_pair("tests", c.omitted_tests),
+    int_pair("callers", c.omitted_callers)])
+  return compact(J.JObj([Pair { first: "ok", second: J.JBool(true) }, str_pair("name", c.name), str_pair("kind", c.kind),
+    str_pair("file", c.file), int_pair("line", c.line), str_pair("source", c.source), Pair { first: "uses",
+      second: J.JArr(used) }, Pair { first: "tests", second: J.JArr(tests) }, Pair { first: "callers",
+        second: J.JArr(callers) }, Pair { first: "omitted", second: omitted }, int_pair("tokens", c.tokens)]))
+}

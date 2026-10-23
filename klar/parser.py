@@ -273,9 +273,26 @@ class Parser:
         self.expect_op("(", " with the generated inputs", hint='write `property "name" (x: Int, xs: List[Int]) { ... }`')
         params = self.parse_params(require_types=True)
         self.expect_op(")")
+        sig_end = self.prev().span
+        effects, eff_span = self.parse_uses()
+        if eff_span is not None:
+            sig_end = self.prev().span
         self.skip_nl()
         body = self.parse_block()
-        return N.PropertyDecl(span=self.span_from(start), name=name, params=params, body=body)
+        return N.PropertyDecl(span=self.span_from(start), name=name, params=params, body=body, effects=effects,
+                              effects_span=eff_span, sig_end=sig_end)
+
+    def parse_uses(self):
+        """`uses io, fs` after a signature (or a test name): (effects, span), ([], None) without it."""
+        if not self.at_kw("uses"):
+            return [], None
+        eff_start = self.advance().span
+        effects = []
+        while True:
+            effects.append(self.expect_ident("effect name (io, time, rand, fs, net, proc)").value)
+            if not self.accept_op(","):
+                break
+        return effects, self.span_from(eff_start)
 
     # ---- declarations -------------------------------------------------------
     def parse_fn(self, doc=None, with_body=True, method_of=None) -> N.FnDecl:
@@ -293,16 +310,9 @@ class Parser:
             ret = self.parse_type(decl_ret=True)
         elif self.at_op(":"):
             self.fail("return types are written with `->`", hint="write `fn f(x: Int) -> Int`")
-        effects = []
-        eff_span = None
         sig_end = self.prev().span
-        if self.at_kw("uses"):
-            eff_start = self.advance().span
-            while True:
-                effects.append(self.expect_ident("effect name (io, time, rand, fs, net, proc)").value)
-                if not self.accept_op(","):
-                    break
-            eff_span = self.span_from(eff_start)
+        effects, eff_span = self.parse_uses()
+        if eff_span is not None:
             sig_end = self.prev().span
         requires, ensures = [], []
         while True:
@@ -580,9 +590,14 @@ class Parser:
         if not self.at("STR"):
             self.fail("expected a test name string", hint='write `test "adds numbers" { ... }`')
         name = self.advance().value
+        sig_end = self.prev().span
+        effects, eff_span = self.parse_uses()
+        if eff_span is not None:
+            sig_end = self.prev().span
         self.skip_nl()
         body = self.parse_block()
-        return N.TestDecl(span=self.span_from(start), name=name, body=body)
+        return N.TestDecl(span=self.span_from(start), name=name, body=body, effects=effects, effects_span=eff_span,
+                          sig_end=sig_end)
 
     # ---- statements ---------------------------------------------------------
     def parse_block(self) -> N.Block:

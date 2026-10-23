@@ -35,11 +35,11 @@ RT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 NATIVE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def cache_key(loaded, target):
-    """Hash of everything the executable depends on: user modules, runtime and compiler sources."""
+def cache_key(loaded, target, allow=None):
+    """Hash of everything the executable depends on: user modules, runtime and compiler sources, the rights."""
     from .. import __version__
     h = hashlib.sha256()
-    h.update(f"{__version__}|{target}".encode())
+    h.update(f"{__version__}|{target}|{allow}".encode())
     for name in sorted(loaded.sources):
         h.update(name.encode())
         h.update(loaded.sources[name].encode())
@@ -51,21 +51,23 @@ def cache_key(loaded, target):
     return h.hexdigest()[:24]
 
 
-def cached_build(path, loaded_user, target=None):
-    """Build into ~/.klar-cache unless an identical executable is already there."""
+def cached_build(path, loaded_user, target=None, allow=None):
+    """Build into ~/.klar-cache unless an identical executable is already there (`allow`: the rights of
+    `--allow`, a list, or None)."""
     target = target or host_target()
-    key = cache_key(loaded_user, target)
+    key = cache_key(loaded_user, target, allow)
     os.makedirs(CACHE_DIR, exist_ok=True)
     exe = os.path.join(CACHE_DIR, key + (".exe" if target == "windows" else ""))
     if not os.path.exists(exe):
         tmp = exe + ".tmp"
-        build(path, out=tmp, target=target)
+        build(path, out=tmp, target=target, allow=allow)
         os.replace(tmp, exe)
     return exe
 
 
-def build(path, out=None, target=None, loaded=None, tests=None):
-    """Returns (output_path, loaded). Raises NativeUnsupported for programs the backend cannot compile yet."""
+def build(path, out=None, target=None, loaded=None, tests=None, allow=None):
+    """Returns (output_path, loaded). Raises NativeUnsupported for programs the backend cannot compile yet.
+    allow: the rights of `--allow` (a list, see klar/sandbox.py) built into the executable, or None."""
     target = target or host_target()
     loaded = loaded or load_path(path, with_runtime=True)
     if loaded.has_errors():
@@ -73,7 +75,7 @@ def build(path, out=None, target=None, loaded=None, tests=None):
         raise SystemExit("\n".join(d.format(loaded.sources.get(d.span.file)) for d in errs))
     img = Image()
     arm = target == "linux-arm64"
-    prog, rt = lower_program(loaded, img, tests)
+    prog, rt = lower_program(loaded, img, tests, allow)
     em = (A64Emitter if arm else Emitter)(img, target, rt)
     em.os_layer()
     inline_calls(prog.fns)

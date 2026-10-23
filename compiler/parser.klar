@@ -5,7 +5,8 @@
 // The parser state is immutable: every rule takes the position of its first token and returns the node with
 // the position after it (`Got`), or the first syntax error.
 use ast.{Arg, Block, Body, Decl, Else, Expr, FieldDecl, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Param}
-use ast.{Pattern, Program, Span, Stmt, StrPiece, TypeExpr, VariantDecl, body_span, expr_span, merge, pattern_span}
+use ast.{Pattern, Program, Span, Stmt, StrPiece, TestUses, TypeExpr, VariantDecl, body_span, expr_span, merge, pattern_span}
+use ast.{no_uses}
 use lexer.{LexError, StrPart, TokKind, Token, tokenize_at}
 
 /// A syntax error, positioned like the Python parser's (the token where it was found).
@@ -1239,9 +1240,31 @@ fn parse_test(p: Ps, i: Int) -> Result[Got[Decl], ParseError] {
     return bad_h(t: tk(p, j), message: "expected a test name string",
       hint: "write `test \"adds numbers\" \{ ... \}`")
   }
-  let body = parse_block(p, skip_nl(p, next(p, j)))?
+  let u = parse_test_uses(p: p, i: next(p, j), sig_end: span_of(tk(p, j)))?
+  let body = parse_block(p, skip_nl(p, u.pos))?
   return Ok(Got { value: Decl.Test(span: span_from(p: p, start: start, i: body.pos), name: tk(p, j).text,
-    body: body.value), pos: body.pos })
+    body: body.value, eff: u.value), pos: body.pos })
+}
+
+/// `uses fs, time` after the name of a test (or the inputs of a property).
+fn parse_test_uses(p: Ps, i: Int, sig_end: Span) -> Result[Got[TestUses], ParseError] {
+  if not is_kw(tk(p, i), "uses") {
+    return Ok(Got { value: TestUses { effects: [], span: None, sig_end: Some(sig_end) }, pos: i })
+  }
+  let eff_start = span_of(tk(p, i))
+  var j = next(p, i)
+  var effects: List[Str] = []
+  while true {
+    let e = expect_ident(p: p, i: j, what: "effect name (io, time, rand, fs, net, proc)")?
+    effects = effects.push(e.value.text)
+    j = e.pos
+    if not is_op(tk(p, j), ",") {
+      break
+    }
+    j = next(p, j)
+  }
+  return Ok(Got { value: TestUses { effects: effects, span: Some(span_from(p: p, start: eff_start, i: j)),
+    sig_end: Some(span_of(tk(p, j - 1))) }, pos: j })
 }
 
 fn parse_property(p: Ps, i: Int) -> Result[Got[Decl], ParseError] {
@@ -1255,9 +1278,10 @@ fn parse_property(p: Ps, i: Int) -> Result[Got[Decl], ParseError] {
     hint: "write `property \"name\" (x: Int, xs: List[Int]) \{ ... \}`")?
   let params = parse_params(p: p, i: k, require_types: true, is_method: false)?
   k = expect_op(p: p, i: params.pos, v: ")", ctx: "")?
-  let body = parse_block(p, skip_nl(p, k))?
+  let u = parse_test_uses(p: p, i: k, sig_end: span_of(tk(p, k - 1)))?
+  let body = parse_block(p, skip_nl(p, u.pos))?
   return Ok(Got { value: Decl.Property(span: span_from(p: p, start: start, i: body.pos), name: tk(p, j).text,
-    params: params.value, body: body.value), pos: body.pos })
+    params: params.value, body: body.value, eff: u.value), pos: body.pos })
 }
 
 fn parse_const(p: Ps, i: Int, doc: Option[Str]) -> Result[Got[Decl], ParseError] {
@@ -1362,7 +1386,7 @@ fn doctest(docs: List[Token], name: Str) -> Result[Option[Decl], ParseError] {
   return match first {
     Some(a) => {
       let span = merge(a, last.unwrap_or(a))
-      return Ok(Some(Decl.Test(span: span, name: "doc: " + name, body: Block { span: span, stmts: stmts })))
+      return Ok(Some(Decl.Test(span: span, name: "doc: " + name, body: Block { span: span, stmts: stmts }, eff: no_uses())))
     },
     None => Ok(None),
   }
@@ -1508,8 +1532,8 @@ fn decl_name(d: Decl) -> Str {
     Decl.Alias(_, n, _, _, _, _) => n,
     Decl.Const(_, n, _, _, _, _, _) => n,
     Decl.EnumD(_, n, _, _, _, _) => n,
-    Decl.Test(_, n, _) => n,
-    Decl.Property(_, n, _, _) => n,
+    Decl.Test(_, n, _, _) => n,
+    Decl.Property(_, n, _, _, _) => n,
     Decl.Trait(_, n, _, _, _, _, _) => n,
     _ => "?",
   }
@@ -1610,10 +1634,10 @@ pub fn parse_program(src: Str) -> Result[Program, ParseError] {
         }
         var items = group.value
         if public {
-          items = items.set(0, make_public(items.get_or(0, Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] }))))
+          items = items.set(0, make_public(items.get_or(0, Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] }, eff: no_uses()))))
         }
         decls = decls.concat(items)
-        match doctest(docs, decl_name(items.get_or(0, Decl.Test(span: start, name: "?", body: Block { span: start, stmts: [] }))))? {
+        match doctest(docs, decl_name(items.get_or(0, Decl.Test(span: start, name: "?", body: Block { span: start, stmts: [] }, eff: no_uses()))))? {
           Some(t) => {
             decls = decls.push(t)
           },
@@ -1622,7 +1646,7 @@ pub fn parse_program(src: Str) -> Result[Program, ParseError] {
         j = expect_line_end(p, group.pos)?
         continue
       }
-      var d = Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] })
+      var d = Decl.Test(span: start, name: "", body: Block { span: start, stmts: [] }, eff: no_uses())
       var ctor: Option[FnDecl] = None
       if is_kw(tk(p, j), "fn") {
         let f = parse_fn(p: p, i: j, doc: doc, with_body: true, is_method: false)?

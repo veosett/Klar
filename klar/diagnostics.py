@@ -178,7 +178,8 @@ CODES = {
     "W0303": ("unreachable match arm", "An earlier catch-all arm already matches everything."),
     # effects / values
     "E0401": ("missing effect", "Functions must declare effects they use: `fn f() uses io { ... }`, also those of the "
-              "function values they call (`f: fn(Int) -> Unit uses io`). Contracts are pure; tests may only use `io`."),
+              "function values they call (`f: fn(Int) -> Unit uses io`). Contracts are pure; tests use `io` and "
+              "the fakes they declare (`test \"t\" uses fs, time, rand`)."),
     "E0402": ("unhandled Result", "A `Result` may carry an error and must be handled with `?`, `match`, or discarded explicitly with `let _ = ...`."),
     "E0403": ("unknown effect", "Known effects: io, time, rand, fs, net, proc."),
     "E0406": ("par_map needs a pure function", "`xs.par_map(f)` runs `f` in worker processes: `f` must be a lambda "
@@ -263,6 +264,9 @@ CODES = {
     "R0015": ("out of memory", "A value (a string, a list, a number) would need more memory than a computer has — "
                                "usually a count that is far too large, such as `\"x\".repeat(1_000_000_000_000_000)`. "
                                "Check the size before building the value."),
+    "R0016": ("effect not allowed", "The program runs with `--allow` rights (`klar run --allow fs:./data,proc:git`) and "
+                                    "called something outside them: a file outside the allowed directories, another "
+                                    "program, the clock or random numbers. Add the right, or change the program."),
     "R0014": ("par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was "
                                      "killed, e.g. by the system running out of memory)."),
 }

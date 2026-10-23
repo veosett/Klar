@@ -28,11 +28,11 @@ pub fn test_items(ld: Ld, file: Str) -> List[TestItem] {
   }
   for d in decls {
     match d {
-      Decl.Test(_, name, _) => {
+      Decl.Test(_, name, _, _) => {
         out = out.push(TestItem { name: name, is_property: false, index: k })
         k = k + 1
       },
-      Decl.Property(_, name, _, _) => {
+      Decl.Property(_, name, _, _, _) => {
         out = out.push(TestItem { name: name, is_property: true, index: k })
         k = k + 1
       },

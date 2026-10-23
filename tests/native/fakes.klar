@@ -1,0 +1,87 @@
+// Tests with effects run on fakes (klar/fakes.py, klar/rt/fake.klar): an empty file system in memory, a clock at 0
+// and fixed random numbers. tests/native_diff.py checks that native code gives the same results.
+
+fn save(name: Str, text: Str) -> Result[Unit, Str] uses fs {
+  make_dir("data/{name}")?
+  return write_file("data/{name}/text.txt", text)
+}
+
+fn stamp() -> Str uses time {
+  return "t={now_ms()}"
+}
+
+fn dice(n: Int) -> List[Int] uses rand {
+  var out: List[Int] = []
+  for _i in range(0, n) {
+    out = out.push(random_int(1, 6))
+  }
+  return out
+}
+
+test "files live in memory" uses fs {
+  assert not file_exists("data/a/text.txt")
+  assert save("a", "hello") == Ok(())
+  assert read_file("/data/a/text.txt") == Ok("hello")
+  assert read_file("data/../data/./a//text.txt") == Ok("hello")
+  assert write_file("data/a/text.txt", "again") == Ok(())
+  assert read_file("data/a/text.txt") == Ok("again")
+  assert list_dir(".") == Ok(["data"])
+  assert list_dir("/data") == Ok(["a"])
+  assert list_dir("data/a") == Ok(["text.txt"])
+  assert file_exists("data/a/text.txt") and not file_exists("data/a")
+  assert is_dir("data/a") and not is_dir("data/a/text.txt")
+  assert current_dir() == "/"
+  assert set_executable("data/a/text.txt") == Ok(())
+  assert remove_file("data/a/text.txt") == Ok(())
+  assert list_dir("data/a") == Ok([])
+}
+
+test "fake file errors" uses fs {
+  assert read_file("nope") == Err("cannot read 'nope': No such file or directory")
+  assert make_dir("d") == Ok(())
+  assert read_file("d") == Err("cannot read 'd': Is a directory")
+  assert write_file("d", "x") == Err("cannot write 'd': Is a directory")
+  assert write_file("x/y", "") == Err("cannot write 'x/y': No such file or directory")
+  assert write_file("f", "") == Ok(())
+  assert write_file("f/y", "") == Err("cannot write 'f/y': Not a directory")
+  assert list_dir("f") == Err("cannot list 'f': Not a directory")
+  assert list_dir("g") == Err("cannot list 'g': No such file or directory")
+  assert make_dir("f") == Err("cannot create 'f': File exists")
+  assert make_dir("f/z") == Err("cannot create 'f/z': Not a directory")
+  assert remove_file("d") == Err("cannot remove 'd': Is a directory")
+  assert remove_file("g") == Err("cannot remove 'g': No such file or directory")
+  assert set_executable("g") == Err("cannot change 'g': No such file or directory")
+  assert list_dir("/") == Ok(["d", "f"])
+}
+
+test "bytes in the fake file system" uses fs {
+  assert write_bytes("b.bin", bytes_of([104, 105, 255])) == Ok(())
+  assert read_bytes("b.bin").map(fn(b) => b.len()) == Ok(3)
+  assert read_file("b.bin") == Err("cannot read 'b.bin': not valid UTF-8 text")
+  assert write_file("t.txt", "hé") == Ok(())
+  assert read_bytes("t.txt").map(fn(b) => b.len()) == Ok(3)
+  assert read_bytes("none") == Err("cannot read 'none': No such file or directory")
+}
+
+test "every test starts with an empty file system" uses fs {
+  assert list_dir("/") == Ok([])
+}
+
+test "the clock starts at 0 and is set" uses time {
+  assert now_ms() == 0
+  assert now_ns() == 0
+  set_clock(1500)
+  assert stamp() == "t=1500"
+  assert now_ns() == 1500000000
+}
+
+test "random numbers are the same in every run" uses rand {
+  assert dice(5) == [6, 1, 1, 5, 6]
+  assert random_int(0, 1000000) == 189927
+}
+
+property "fakes are fresh in every run" (name: Str) uses fs {
+  assert list_dir("/") == Ok([])
+  assert write_file("/x", name) == Ok(())
+  assert read_file("x") == Ok(name)
+}

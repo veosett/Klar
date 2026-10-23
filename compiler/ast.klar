@@ -126,15 +126,23 @@ pub type FnDecl {
   constructs: Option[Str],
 }
 
+/// The effects a test or property declares (`test "t" uses fs, time`: they run on fakes), the span of the list and
+/// where `uses ...` can be inserted.
+pub type TestUses { effects: List[Str], span: Option[Span], sig_end: Option[Span] }
+
+pub fn no_uses() -> TestUses {
+  return TestUses { effects: [], span: None, sig_end: None }
+}
+
 pub enum Decl {
   Fn(decl: FnDecl),
   TypeD(span: Span, name: Str, type_params: List[Str], fields: List[FieldDecl], doc: Option[Str], public: Bool),
   Alias(span: Span, name: Str, type_params: List[Str], target: TypeExpr, doc: Option[Str], public: Bool),
   Const(span: Span, name: Str, name_span: Span, ty: TypeExpr, value: Expr, doc: Option[Str], public: Bool),
   Use(span: Span, path: List[Str], items: List[Str], item_spans: List[Span]),
-  Property(span: Span, name: Str, params: List[Param], body: Block),
+  Property(span: Span, name: Str, params: List[Param], body: Block, eff: TestUses),
   EnumD(span: Span, name: Str, type_params: List[Str], variants: List[VariantDecl], doc: Option[Str], public: Bool),
-  Test(span: Span, name: Str, body: Block),
+  Test(span: Span, name: Str, body: Block, eff: TestUses),
   Trait(span: Span, name: Str, name_span: Span, methods: List[FnDecl], defaults: List[Str], doc: Option[Str],
     public: Bool),
   Impl(span: Span, trait_name: Str, trait_span: Span, target: TypeExpr, methods: List[Str], method_spans: List[Span],

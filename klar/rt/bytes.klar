@@ -353,7 +353,11 @@ fn bytes_equal(a: Word, b: Word) -> Bool {
   return bytes_eq(peek(a + 32), peek(b + 32), n)
 }
 
-fn b_read_bytes(path: Word, rtd: Word) -> Word {
+fn b_read_bytes(path: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("read_bytes", path, sp)
+  if fake_on() {
+    return fake_read_bytes(path, rtd)
+  }
   let fd = os_open(path + 32, 0)
   if fd < 0 {
     let b = sb_new()
@@ -379,7 +383,11 @@ fn b_read_bytes(path: Word, rtd: Word) -> Word {
   return ok_new(rtd, out)
 }
 
-fn b_write_bytes(path: Word, data: Word, rtd: Word) -> Word {
+fn b_write_bytes(path: Word, data: Word, rtd: Word, sp: Word) -> Word {
+  sb_need_fs("write_bytes", path, sp)
+  if fake_on() {
+    return fake_write_bytes(path, data, rtd)
+  }
   let fd = os_open(path + 32, 1)
   if fd < 0 {
     let b = sb_new()

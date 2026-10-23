@@ -1,5 +1,5 @@
 """`klar mcp`: a Model Context Protocol server (stdio, one JSON-RPC message per line) that gives AI agents the Klar
-tools directly: check, test, dev, eval, doc, outline, refs, patch, fix, fmt, explain, spec.
+tools directly: check, test, dev, eval, doc, outline, refs, context, patch, fix, fmt, explain, spec.
 
 Each tool runs the `klar` command of the same name and returns its output (the `--json` form where there is one) as
 text; `isError` is true when the command exits with a non-zero status. `klarc mcp` (compiler/mcp.klar) answers every
@@ -58,6 +58,13 @@ TOOLS = [
     ("klar_refs", "Every definition and use of a name in a Klar file and its modules (JSON).",
      {"file": FILE, "name": _s("the name")}, ["file", "name"],
      lambda a: ["refs", a["file"], a["name"], "--json"]),
+    ("klar_context", "Everything needed to change one function, type or constant without reading files: its source "
+                     "and documentation, the signatures it uses, its tests and callers, within a token budget (JSON).",
+     {"file": FILE, "name": _s("the function, type or constant (a method: Type.method)"),
+      "max_tokens": {"type": "integer", "description": "the budget in tokens (default 2000)"}}, ["file", "name"],
+     lambda a: ["context", a["file"], a["name"], "--json"]
+     + (["--max-tokens", str(a["max_tokens"])] if isinstance(a.get("max_tokens"), int)
+        and not isinstance(a.get("max_tokens"), bool) else [])),
     ("klar_patch", "Edit a Klar file by name with the AI patch protocol, e.g. "
                    "{\"edits\": [{\"replace\": \"fname\", \"with\": \"fn ...\"}]}; written only when it adds no "
                    "errors (JSON report).",

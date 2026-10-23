@@ -963,6 +963,9 @@ fn try_prop_here(clo: Word, args: Word) -> Word {
   let nest = peek(gp + G_NEST)
   poke(gp + G_PROP, 1)
   poke(gp + G_PROPJB, jb)
+  if fake_on() {
+    fake_begin()        // every run starts from fresh fakes (with fork, each child starts from the parent's)
+  }
   if os_setjmp(jb) == 0 {
     call1(clo, args)
   }

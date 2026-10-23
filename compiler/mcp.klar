@@ -45,12 +45,17 @@ fn tools() -> List[McpTool] {
                 required: ["query"] }, McpTool { name: "klar_outline", desc: "The API of a Klar file and its modules: " +
                     "declarations with signatures and lines (JSON).", props: [file_prop()], required: ["file"] }, McpTool {
                     name: "klar_refs", desc: "Every definition and use of a name in a Klar file and its modules (JSON).",
-                    props: [file_prop(), s_prop("name", "the name")], required: ["file", "name"] }, McpTool { name: "klar_patch",
-                      desc: "Edit a Klar file by name with the AI patch protocol, e.g. \{\"edits\": [\{\"replace\": \"fname\", " +
-                        "\"with\": \"fn ...\"\}]\}; written only when it adds no errors (JSON report).", props: [file_prop(),
-                        s_prop("patch", "the patch as JSON text"), b_prop("dry_run", "only report, do not write")], required: ["file",
-                          "patch"] }, McpTool { name: "klar_fix", desc: "Apply the safe machine fixes of the diagnostics to a Klar file " +
-                              "(JSON report).", props: [file_prop(), b_prop("dry_run", "only report, do not write")], required: ["file"] },
+                    props: [file_prop(), s_prop("name", "the name")], required: ["file", "name"] }, McpTool { name: "klar_context",
+                      desc: "Everything needed to change one function, type or constant without reading files: its source " +
+                        "and documentation, the signatures it uses, its tests and callers, within a token budget (JSON).",
+                      props: [file_prop(), s_prop("name", "the function, type or constant (a method: Type.method)"),
+                        kv("max_tokens", J.JObj([kv("type", J.JStr("integer")), kv("description",
+                          J.JStr("the budget in tokens (default 2000)"))]))], required: ["file", "name"] }, McpTool { name: "klar_patch",
+                            desc: "Edit a Klar file by name with the AI patch protocol, e.g. \{\"edits\": [\{\"replace\": \"fname\", " +
+                              "\"with\": \"fn ...\"\}]\}; written only when it adds no errors (JSON report).", props: [file_prop(),
+                              s_prop("patch", "the patch as JSON text"), b_prop("dry_run", "only report, do not write")], required: ["file",
+                                "patch"] }, McpTool { name: "klar_fix", desc: "Apply the safe machine fixes of the diagnostics to a Klar file " +
+                                    "(JSON report).", props: [file_prop(), b_prop("dry_run", "only report, do not write")], required: ["file"] },
     McpTool { name: "klar_fmt", desc: "Format a Klar file in place in the canonical layout (JSON report).",
       props: [file_prop()], required: ["file"] }, McpTool { name: "klar_explain", desc: "Explain a diagnostic code " +
           "(E0201, R0002, W0401, ...) with an example and the fix.", props: [s_prop("code", "the code")],
@@ -144,6 +149,13 @@ fn command(name: Str, a: Json) -> List[Str] {
   }
   if name == "klar_refs" {
     return ["refs", file, arg(a, "name"), "--json"]
+  }
+  if name == "klar_context" {
+    let budget = match get(a, "max_tokens") {
+      Json.Int(n) => ["--max-tokens", n.to_str()],
+      _ => [],
+    }
+    return ["context", file, arg(a, "name"), "--json"].concat(budget)
   }
   var dry: List[Str] = []
   if flag(a: a, key: "dry_run", value: true) {

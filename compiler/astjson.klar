@@ -40,6 +40,13 @@ fn type_json(t: TypeExpr) -> Json {
   }
 }
 
+fn opt_span(s: Option[Span]) -> Json {
+  return match s {
+    Some(sp) => span_json(sp),
+    None => Json.Null,
+  }
+}
+
 fn opt_type(t: Option[TypeExpr]) -> Json {
   return match t {
     Some(v) => type_json(v),
@@ -246,15 +253,18 @@ fn decl_json(d: Decl) -> Json {
     Decl.Use(s, path, items, spans) => node(kind: "UseDecl", span: s, fields: [field(name: "path", value: json_strings(path)),
       field(name: "items", value: json_strings(items)), field(name: "item_spans",
         value: Json.Arr(items: spans.map(span_json)))]),
-    Decl.Property(s, name, ps, body) => node(kind: "PropertyDecl", span: s, fields: [field(name: "name", value: text(name)),
-      field(name: "params", value: Json.Arr(items: ps.map(param_json))), field(name: "body", value: block_json(body))]),
+    Decl.Property(s, name, ps, body, eff) => node(kind: "PropertyDecl", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "params", value: Json.Arr(items: ps.map(param_json))), field(name: "body", value: block_json(body)),
+      field(name: "effects", value: json_strings(eff.effects)), field(name: "effects_span", value: opt_span(eff.span)),
+      field(name: "sig_end", value: opt_span(eff.sig_end))]),
     Decl.EnumD(s, name, tps, vs, doc, public) => node(kind: "EnumDecl", span: s, fields: [field(name: "name", value: text(name)),
       field(name: "type_params", value: json_strings(tps)), field(name: "variants",
         value: Json.Arr(items: vs.map(fn(v) => node(kind: "VariantDecl", span: v.span, fields: [field(name: "name",
           value: text(v.name)), field(name: "fields", value: field_decls(v.fields))])))), field(name: "doc",
             value: opt_text(doc)), field(name: "public", value: Json.Bool(value: public))]),
-    Decl.Test(s, name, body) => node(kind: "TestDecl", span: s, fields: [field(name: "name", value: text(name)),
-      field(name: "body", value: block_json(body))]),
+    Decl.Test(s, name, body, eff) => node(kind: "TestDecl", span: s, fields: [field(name: "name", value: text(name)),
+      field(name: "body", value: block_json(body)), field(name: "effects", value: json_strings(eff.effects)),
+      field(name: "effects_span", value: opt_span(eff.span)), field(name: "sig_end", value: opt_span(eff.sig_end))]),
     Decl.Trait(s, name, ns, ms, defaults, doc, public) => node(kind: "TraitDecl", span: s, fields: [field(name: "name",
       value: text(name)), field(name: "name_span", value: span_json(ns)), field(name: "methods", value: Json.Arr(items: ms.map(fn_json))), field(name: "defaults",
         value: json_strings(defaults)), field(name: "doc", value: opt_text(doc)), field(name: "public",

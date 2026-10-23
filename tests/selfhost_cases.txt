@@ -3598,3 +3598,35 @@ fn main() uses io {
 === nesting limit in types (E0003)
 fn f(x: List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[Int]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]) {
 }
+=== test fakes
+fn save(t: Str) -> Result[Unit, Str] uses fs {
+  return write_file("a.txt", t)
+}
+
+test "declared" uses fs, time, rand {
+  assert save("x") == Ok(())
+  set_clock(5)
+  assert now_ms() == 5
+  assert random_int(1, 2) >= 1
+}
+
+test "undeclared" {
+  assert save("x") == Ok(())
+}
+
+test "partly declared" uses time {
+  assert random_int(1, 2) >= 1
+}
+
+test "real effects" uses proc, net, fsx {
+  let _ = run_command(["ls"])
+}
+
+property "p" (x: Int) uses rand {
+  assert random_int(x, x) == x
+  assert now_ms() >= 0
+}
+
+property "q" (x: Int) {
+  assert save("{x}") == Ok(())
+}

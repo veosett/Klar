@@ -15,8 +15,9 @@ A program that passes `klar check` cannot, in any backend:
   allocator (`"x".repeat(huge)`, `range(0, huge)`) are R0015, values nested deeper than 100 000 levels are R0006
   when printed, compared or hashed, recursion deeper than 10 000 calls is R0006 — never a crash.
 * **do effects it does not declare.** Reading files needs `uses fs`, running programs `uses proc`, the network
-  `uses net`, and so on (E0401). Tests, doc-tests and properties may use only `io` — so `klar test` cannot touch
-  files or run programs. Constants and contracts are pure. Function types carry effects (`fn(Int) -> Unit uses io`), so a
+  `uses net`, and so on (E0401). Tests, doc-tests and properties may use `io` and the fakes `fs`, `time` and
+  `rand` (a file system in memory, a clock at 0, fixed random numbers) — so `klar test` cannot touch real files or
+  run programs. Constants and contracts are pure. Function types carry effects (`fn(Int) -> Unit uses io`), so a
   function without `uses` is pure even when it calls function values, and `par_map` gets only pure functions.
 * **race.** The only parallelism is `par_map` with a pure function in worker processes.
 
@@ -27,11 +28,16 @@ A program that passes `klar check` cannot, in any backend:
 | `check`, `fmt`, `outline`, `doc`, `refs`, `ast`, `spec`, `explain`, `deps`, `view` (without `--run`), `lsp` | no | — |
 | `test`, `coverage`, `patch` with `"test": true` | the tests | `io` only (the checker enforces it) |
 | `run`, `dev`, `eval`, `profile`, `view --run`, `repl`, `coverage --main` | yes | the effects its code declares |
+| `run --allow RIGHTS`, `build --allow RIGHTS` | yes | only the rights given (runtime error R0016 outside them) |
 | `fetch`, `add`, `update` | runs `git` | clones the URLs of `klar.toml` |
 
 Treat `run`, `dev`, `eval` and `profile` on an untrusted project like running any other program from it. The
 effects a program declares are visible in its signatures (`klar outline`), so a reviewer (or an agent) can see what
-it may do before running it. A runtime sandbox that enforces the declared effects is planned (`docs/ROADMAP.md`).
+it may do before running it. `klar run --allow fs:./data,proc:git` (and `klar build --allow`, `klarc run/build
+--allow`) enforces rights at run time in every backend: files outside the allowed directories, other programs, the
+clock and random numbers are refused (R0016); `io` stays allowed. Directories are compared as written after resolving
+`.` and `..` — symbolic links inside an allowed directory are not followed, so do not give rights to directories an
+untrusted program could fill with links.
 
 ## Tools and untrusted projects
 
