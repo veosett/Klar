@@ -1,0 +1,8 @@
+pub fn group_anagrams(words: List[Str]) -> List[List[Str]] {
+  var groups: Map[Str, List[Str]] = Map {}
+  for w in words {
+    let key = w.chars().sort().join("")
+    groups = groups.set(key, groups.get(key).unwrap_or([]).push(w))
+  }
+  return groups.values().map(fn(g) => g.sort()).sort_by(fn(g) => g.get_or(0, ""))
+}

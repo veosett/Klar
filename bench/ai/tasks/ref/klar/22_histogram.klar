@@ -1,0 +1,3 @@
+pub fn histogram(counts: Map[Str, Int]) -> List[Str] {
+  return counts.keys().sort().map(fn(k) => k + ": " + "*".repeat(counts.get(k).unwrap_or(0)))
+}

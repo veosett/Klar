@@ -1,0 +1,15 @@
+pub fn rle(s: Str) -> Str {
+  let cs = s.chars()
+  var out = ""
+  var i = 0
+  while i < cs.len() {
+    let c = cs.get_or(i, "")
+    var j = i
+    while j < cs.len() and cs.get_or(j, "") == c {
+      j = j + 1
+    }
+    out = out + c + (j - i).to_str()
+    i = j
+  }
+  return out
+}

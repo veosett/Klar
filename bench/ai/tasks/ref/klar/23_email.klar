@@ -1,0 +1,10 @@
+pub fn is_valid_email(s: Str) -> Bool {
+  let parts = s.split("@")
+  if s.contains(" ") or parts.len() != 2 {
+    return false
+  }
+  let local = parts.get_or(0, "")
+  let domain = parts.get_or(1, "")
+  return local != "" and domain.contains(".") and not domain.starts_with(".") and not domain.ends_with(".") and
+    not domain.contains("..")
+}

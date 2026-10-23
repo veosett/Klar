@@ -1,0 +1,4 @@
+pub fn transpose(m: List[List[Int]]) -> List[List[Int]] {
+  let width = m.get(0).map(fn(r) => r.len()).unwrap_or(0)
+  return range(0, width).map(fn(j) => m.map(fn(row) => row.get_or(j, 0)))
+}

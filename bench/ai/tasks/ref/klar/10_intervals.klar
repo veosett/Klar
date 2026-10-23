@@ -1,0 +1,20 @@
+pub fn merge_intervals(xs: List[List[Int]]) -> List[List[Int]] {
+  var out: List[List[Int]] = []
+  for iv in xs.sort_by(fn(x) => x.get_or(1, 0)).sort_by(fn(x) => x.get_or(0, 0)) {
+    let a = iv.get_or(0, 0)
+    let b = iv.get_or(1, 0)
+    match out.last() {
+      Some(last) => {
+        if a <= last.get_or(1, 0) {
+          out = out.take(out.len() - 1).push([last.get_or(0, 0), last.get_or(1, 0).max(b)])
+        } else {
+          out = out.push([a, b])
+        }
+      },
+      None => {
+        out = out.push([a, b])
+      },
+    }
+  }
+  return out
+}

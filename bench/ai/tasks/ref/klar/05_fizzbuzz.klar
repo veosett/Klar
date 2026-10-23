@@ -1,0 +1,15 @@
+pub fn fizzbuzz(n: Int) -> List[Str] {
+  var out: List[Str] = []
+  for i in range(1, n + 1) {
+    if i % 15 == 0 {
+      out = out.push("FizzBuzz")
+    } else if i % 3 == 0 {
+      out = out.push("Fizz")
+    } else if i % 5 == 0 {
+      out = out.push("Buzz")
+    } else {
+      out = out.push(i.to_str())
+    }
+  }
+  return out
+}

@@ -1,0 +1,30 @@
+fn is_land(grid: List[Str], r: Int, c: Int) -> Bool {
+  return grid.get_or(r, "").chars().get_or(c, ".") == "#"
+}
+
+pub fn count_islands(grid: List[Str]) -> Int {
+  var seen: Map[Str, Bool] = Map {}
+  var count = 0
+  for r in range(0, grid.len()) {
+    for c in range(0, grid.get_or(r, "").len()) {
+      if is_land(grid: grid, r: r, c: c) and not seen.has("{r},{c}") {
+        count = count + 1
+        seen = seen.set("{r},{c}", true)
+        var stack = [[r, c]]
+        while not stack.is_empty() {
+          let top = stack.last().unwrap_or([0, 0])
+          stack = stack.take(stack.len() - 1)
+          for d in [[1, 0], [-1, 0], [0, 1], [0, -1]] {
+            let ny = top.get_or(0, 0) + d.get_or(0, 0)
+            let nx = top.get_or(1, 0) + d.get_or(1, 0)
+            if is_land(grid: grid, r: ny, c: nx) and ny >= 0 and nx >= 0 and not seen.has("{ny},{nx}") {
+              seen = seen.set("{ny},{nx}", true)
+              stack = stack.push([ny, nx])
+            }
+          }
+        }
+      }
+    }
+  }
+  return count
+}

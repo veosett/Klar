@@ -1,0 +1,15 @@
+pub fn camel_to_snake(s: Str) -> Str {
+  var out = ""
+  for e in s.chars().enumerate() {
+    let code = e.value.codes().get_or(0, 0)
+    if code >= 65 and code <= 90 {
+      if e.index > 0 {
+        out = out + "_"
+      }
+      out = out + e.value.lower()
+    } else {
+      out = out + e.value
+    }
+  }
+  return out
+}

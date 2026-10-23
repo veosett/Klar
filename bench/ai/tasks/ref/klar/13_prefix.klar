@@ -1,0 +1,9 @@
+pub fn common_prefix(words: List[Str]) -> Str {
+  var p = words.get_or(0, "")
+  for w in words.drop(1) {
+    while not w.starts_with(p) {
+      p = p.slice(0, p.len() - 1)
+    }
+  }
+  return p
+}

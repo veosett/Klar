@@ -1,0 +1,34 @@
+pub fn parse_csv_line(line: Str) -> Result[List[Str], Str] {
+  let cs = line.chars()
+  var fields: List[Str] = []
+  var cur = ""
+  var quoted = false
+  var i = 0
+  while i < cs.len() {
+    let c = cs.get_or(i, "")
+    if quoted {
+      if c == "\"" {
+        if cs.get_or(i + 1, "") == "\"" {
+          cur = cur + "\""
+          i = i + 1
+        } else {
+          quoted = false
+        }
+      } else {
+        cur = cur + c
+      }
+    } else if c == "\"" {
+      quoted = true
+    } else if c == "," {
+      fields = fields.push(cur)
+      cur = ""
+    } else {
+      cur = cur + c
+    }
+    i = i + 1
+  }
+  if quoted {
+    return Err("unterminated quote")
+  }
+  return Ok(fields.push(cur))
+}

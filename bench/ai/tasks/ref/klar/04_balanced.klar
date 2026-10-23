@@ -1,0 +1,19 @@
+pub fn is_balanced(s: Str) -> Bool {
+  var stack: List[Str] = []
+  for c in s.chars() {
+    if c == "(" or c == "[" or c == "\{" {
+      stack = stack.push(c)
+    } else if c == ")" or c == "]" or c == "\}" {
+      let want = match c {
+        ")" => "(",
+        "]" => "[",
+        _ => "\{",
+      }
+      if stack.last() != Some(want) {
+        return false
+      }
+      stack = stack.take(stack.len() - 1)
+    }
+  }
+  return stack.is_empty()
+}

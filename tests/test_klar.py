@@ -1706,6 +1706,44 @@ class RuntimeLimits(unittest.TestCase):
         self.assertEqual(errors(src), [])
 
 
+class LlmBenchmark(unittest.TestCase):
+    """bench/ai/llm_bench.py: the reference solutions pass every hidden test, and wrong answers are scored as such."""
+
+    def bench(self):
+        sys.path.insert(0, os.path.join(ROOT, "bench", "ai"))
+        import llm_bench
+        with open(llm_bench.TASKS, encoding="utf-8") as f:
+            return llm_bench, json.load(f)
+
+    def test_references_pass(self):
+        import shutil
+        bench, tasks = self.bench()
+        langs = ["klar", "python"] + (["typescript"] if shutil.which("tsc") and shutil.which("node") else [])
+        for task in tasks:
+            for lang in langs:
+                if lang == "typescript" and task["id"] > "05":
+                    continue                    # (tsc is slow: a few tasks are enough here)
+                code = bench.extract_code(bench.reference(task, lang)[0])
+                result = bench.evaluate(task, lang, code)
+                self.assertTrue(result["ok"], f"{task['id']} {lang}: {result['feedback']}")
+
+    def test_failures_are_classified(self):
+        bench, tasks = self.bench()
+        rle = next(t for t in tasks if t["id"] == "03_rle")
+        wrong = {"klar": "pub fn rle(s: Str) -> Str {\n  return s\n}\n",
+                 "python": "def rle(s: str) -> str:\n    return s\n"}
+        broken = {"klar": "pub fn rle(s: Str) -> Str {\n  return s.length()\n}\n",
+                  "python": "def rle(s: str) -> str\n    return s\n"}
+        for lang in ("klar", "python"):
+            r = bench.evaluate(rle, lang, wrong[lang])
+            self.assertEqual((r["ok"], r["stage"]), (False, "test"), lang)
+            self.assertIn("a3b1c2", r["feedback"])
+            r = bench.evaluate(rle, lang, broken[lang])
+            self.assertEqual((r["ok"], r["stage"]), (False, "compile"), lang)
+        self.assertIn("E0204", bench.evaluate(rle, "klar", broken["klar"])["feedback"])
+        self.assertEqual(bench.extract_code("text\n```klar\nfn f() {}\n```\nmore"), "fn f() {}\n")
+
+
 class Mcp(unittest.TestCase):
     """`klar mcp`: the Model Context Protocol server (klarc mcp gives the same answers: tests/selfhost.py)."""
 

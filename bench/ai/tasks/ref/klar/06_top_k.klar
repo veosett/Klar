@@ -1,0 +1,8 @@
+pub fn top_k(words: List[Str], k: Int) -> List[Str] {
+  var counts: Map[Str, Int] = Map {}
+  for w in words {
+    counts = counts.set(w, counts.get(w).unwrap_or(0) + 1)
+  }
+  let final = counts
+  return final.keys().sort().sort_by(fn(w) => 0 - final.get(w).unwrap_or(0)).take(k)
+}

@@ -5,6 +5,7 @@ build/
 *.exe
 *.map
 bench/ai/results/*.tmp
+bench/ai/results/reference/
 .ruff_cache/
 
 # editor extension

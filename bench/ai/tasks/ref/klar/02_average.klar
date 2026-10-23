@@ -1,0 +1,6 @@
+pub fn average(xs: List[Int]) -> Option[Float] {
+  if xs.is_empty() {
+    return None
+  }
+  return Some(xs.sum().to_float() / xs.len().to_float())
+}

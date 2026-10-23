@@ -1,0 +1,11 @@
+pub fn divide_all(xs: List[Int], ys: List[Int]) -> Result[List[Int], Str] {
+  var out: List[Int] = []
+  for e in xs.enumerate() {
+    let y = ys.get_or(e.index, 0)
+    if y == 0 {
+      return Err("division by zero at index " + e.index.to_str())
+    }
+    out = out.push(e.value / y)
+  }
+  return Ok(out)
+}

@@ -1,0 +1,10 @@
+pub fn word_freq(text: Str) -> Map[Str, Int] {
+  var out: Map[Str, Int] = Map {}
+  for raw in text.split(" ") {
+    if raw != "" {
+      let w = raw.lower()
+      out = out.set(w, out.get(w).unwrap_or(0) + 1)
+    }
+  }
+  return out
+}

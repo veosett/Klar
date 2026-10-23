@@ -1,0 +1,21 @@
+pub fn run_ops(ops: List[Str]) -> Result[Int, Str] {
+  var balance = 0
+  for e in ops.enumerate() {
+    let at = (e.index + 1).to_str()
+    let parts = e.value.split(" ")
+    let kind = parts.get_or(0, "")
+    let amount = parts.get_or(1, "")
+    if parts.len() != 2 or (kind != "deposit" and kind != "withdraw") or not amount.is_numeric() {
+      return Err("bad op at op " + at)
+    }
+    let n = amount.to_int().unwrap_or(0)
+    if kind == "deposit" {
+      balance = balance + n
+    } else if balance - n < 0 {
+      return Err("insufficient funds at op " + at)
+    } else {
+      balance = balance - n
+    }
+  }
+  return Ok(balance)
+}

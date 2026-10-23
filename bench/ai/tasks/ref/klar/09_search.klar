@@ -1,0 +1,17 @@
+pub fn find_index(sorted: List[Int], target: Int) -> Option[Int] {
+  var lo = 0
+  var hi = sorted.len() - 1
+  while lo <= hi {
+    let mid = (lo + hi) / 2
+    let v = sorted.get_or(mid, 0)
+    if v == target {
+      return Some(mid)
+    }
+    if v < target {
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
+  }
+  return None
+}

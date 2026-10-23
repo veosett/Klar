@@ -30,6 +30,12 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
 
 ### Added
 - `docs/ROADMAP.md`: the plan after 1.0 (phases, acceptance criteria, status).
+- `bench/ai/llm_bench.py`: an LLM-in-the-loop benchmark — 24 tasks with hidden tests generated for Klar
+  (`klar test`), Python and TypeScript (`tsc --strict`); the model gets the statement (for Klar also `klar spec`),
+  sees compiler messages and failing cases and retries. It reports tasks solved on the first try and in total,
+  attempts, tokens and how many failures the compiler caught before running. Anthropic and OpenAI-compatible APIs,
+  `--provider reference` (the reference solutions in `bench/ai/tasks/ref/`) and `--provider replay` (re-score saved
+  answers).
 - `klar mcp` / `klarc mcp`: a Model Context Protocol server (stdio, newline-delimited JSON-RPC) that gives AI agents
   the Klar tools directly — `klar_check`, `klar_dev`, `klar_test`, `klar_eval`, `klar_doc`, `klar_outline`,
   `klar_refs`, `klar_patch`, `klar_fix`, `klar_fmt`, `klar_explain`, `klar_spec`. Each runs the command of the same

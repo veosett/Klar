@@ -1,0 +1,19 @@
+pub fn to_roman(n: Int) -> Result[Str, Str] {
+  if n < 1 or n > 3999 {
+    return Err("out of range")
+  }
+  let table = [Pair { first: 1000, second: "M" }, Pair { first: 900, second: "CM" }, Pair { first: 500, second: "D" },
+    Pair { first: 400, second: "CD" }, Pair { first: 100, second: "C" }, Pair { first: 90, second: "XC" },
+    Pair { first: 50, second: "L" }, Pair { first: 40, second: "XL" }, Pair { first: 10, second: "X" },
+    Pair { first: 9, second: "IX" }, Pair { first: 5, second: "V" }, Pair { first: 4, second: "IV" },
+    Pair { first: 1, second: "I" }]
+  var rest = n
+  var out = ""
+  for p in table {
+    while rest >= p.first {
+      out = out + p.second
+      rest = rest - p.first
+    }
+  }
+  return Ok(out)
+}

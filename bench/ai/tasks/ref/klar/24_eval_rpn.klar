@@ -1,0 +1,38 @@
+pub fn eval_rpn(expr: Str) -> Result[Int, Str] {
+  var stack: List[Int] = []
+  for tok in expr.split(" ").filter(fn(t) => t != "") {
+    if tok == "+" or tok == "-" or tok == "*" or tok == "/" {
+      if stack.len() < 2 {
+        return Err("stack underflow")
+      }
+      let b = stack.get_or(stack.len() - 1, 0)
+      let a = stack.get_or(stack.len() - 2, 0)
+      stack = stack.take(stack.len() - 2)
+      if tok == "+" {
+        stack = stack.push(a + b)
+      } else if tok == "-" {
+        stack = stack.push(a - b)
+      } else if tok == "*" {
+        stack = stack.push(a * b)
+      } else {
+        if b == 0 {
+          return Err("division by zero")
+        }
+        stack = stack.push(a / b)
+      }
+    } else {
+      match tok.to_int() {
+        Some(v) => {
+          stack = stack.push(v)
+        },
+        None => {
+          return Err("bad token " + tok)
+        },
+      }
+    }
+  }
+  if stack.len() != 1 {
+    return Err("bad expression")
+  }
+  return Ok(stack.get_or(0, 0))
+}
