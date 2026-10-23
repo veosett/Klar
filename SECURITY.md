@@ -16,9 +16,8 @@ A program that passes `klar check` cannot, in any backend:
   when printed, compared or hashed, recursion deeper than 10 000 calls is R0006 — never a crash.
 * **do effects it does not declare.** Reading files needs `uses fs`, running programs `uses proc`, the network
   `uses net`, and so on (E0401). Tests, doc-tests and properties may use only `io` — so `klar test` cannot touch
-  files or run programs. Constants and contracts are pure. A function value carries no effects in its type; its
-  effects were checked where it was written (see `docs/SPEC.md`, section 4), and inside `par_map` function values
-  from outside the lambda are rejected (E0406).
+  files or run programs. Constants and contracts are pure. Function types carry effects (`fn(Int) -> Unit uses io`), so a
+  function without `uses` is pure even when it calls function values, and `par_map` gets only pure functions.
 * **race.** The only parallelism is `par_map` with a pure function in worker processes.
 
 ## Which commands run code
@@ -46,5 +45,5 @@ it may do before running it. A runtime sandbox that enforces the declared effect
   predictable name.
 * **`klar view`** escapes all program text and output in the HTML page.
 * **The language servers** (`klar lsp`, `klarc lsp`) skip malformed messages instead of stopping.
-* **Deeply nested source** (thousands of brackets) is a diagnostic in `klar` (E0003) and a clean runtime error in
+* **Deeply nested source** (expressions or types nested more than 200 levels) is a diagnostic (E0003) in `klar` and
   `klarc`, not a crash of the tool.

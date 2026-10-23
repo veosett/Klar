@@ -34,8 +34,9 @@ fn type_json(t: TypeExpr) -> Json {
   return match t {
     TypeExpr.Named(s, name, args) => node(kind: "TypeName", span: s, fields: [field(name: "name", value: text(name)),
       field(name: "args", value: Json.Arr(items: args.map(type_json)))]),
-    TypeExpr.FnType(s, ps, ret) => node(kind: "FnTypeExpr", span: s, fields: [field(name: "params",
-      value: Json.Arr(items: ps.map(type_json))), field(name: "ret", value: type_json(ret))]),
+    TypeExpr.FnType(s, ps, ret, effs) => node(kind: "FnTypeExpr", span: s, fields: [field(name: "params",
+      value: Json.Arr(items: ps.map(type_json))), field(name: "ret", value: type_json(ret)), field(name: "effects",
+        value: Json.Arr(items: effs.map(text)))]),
   }
 }
 

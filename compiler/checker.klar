@@ -10,7 +10,7 @@ use builtin_sigs.{foreign_methods, foreign_notes, global_sigs, method_sigs, sys_
 use parser.{parse_signature}
 use similar.{closest}
 use types.{Subst, Type, args_of, con, head, is_unit, list_of, map_of, option_of, prune, resolved, result_of, show, subst}
-use types.{unify}
+use types.{eff_fixed, eff_flex, eff_is_flex, eff_is_poly, eff_list, eff_names, eff_root, poly_eff, pure_eff, unify}
 
 /// A diagnostic: an error or a warning at a position of a file.
 /// One change of a machine-applicable fix.
@@ -135,7 +135,19 @@ type Var { ty: Type, mutable: Bool, span: Span, used: Bool, kind: Str, kw_span: 
 
 type Scope { id: Int, vars: Map[Str, Var] }
 
-type Ctx { name: Str, ret: Type, effects: List[Str], is_test: Bool, loop: Int, sig_end: Option[Span], purpose: Str }
+/// `used`: the effects the body uses (a lambda's type gets them); `fn_type`: for purpose "fntype", the written
+/// function type a lambda must fit.
+type Ctx {
+  name: Str,
+  ret: Type,
+  effects: List[Str],
+  is_test: Bool,
+  loop: Int,
+  sig_end: Option[Span],
+  purpose: Str,
+  used: List[Str],
+  fn_type: Option[Type],
+}
 
 /// A call of a generic function with bounds, checked when the enclosing body is done.
 type Pending { sig: Sig, mapping: Map[Str, Type], span: Span, ctx_bounds: Map[Str, List[Str]] }
@@ -171,8 +183,6 @@ pub type Ck {
   lambda_bounds: List[Int],
   /// the lambda passed to `par_map` that is being checked (it may not use effects)
   pure_lambda: Option[Span],
-  /// inside that lambda: the index of its parameters' scope (-1 outside)
-  par_depth: Int,
   reported: Map[Str, Bool],
   resolving: List[Str],
   /// declaration index of an `impl` -> its key in `uni.impls` (impls that were registered)
@@ -393,7 +403,7 @@ fn is_var(t: Type) -> Bool {
 
 fn is_fn_type(t: Type) -> Bool {
   return match t {
-    Type.Fun(_, _) => true,
+    Type.Fun(_, _, _) => true,
     _ => false,
   }
 }
@@ -413,7 +423,12 @@ fn ticked(xs: List[Str]) -> Str {
 
 fn builtin_type(te: TypeExpr, tps: Map[Str, Type]) -> Type {
   return match te {
-    TypeExpr.FnType(_, ps, ret) => Type.Fun(params: ps.map(fn(p) => builtin_type(p, tps)), ret: builtin_type(ret, tps)),
+    // a function parameter of a built-in is polymorphic in its effects: `xs.map(f)` does what `f` does
+    TypeExpr.FnType(_, ps, ret, effs) => Type.Fun(params: ps.map(fn(p) => builtin_type(p, tps)), ret: builtin_type(ret, tps),
+      eff: match effs.is_empty() {
+        true => poly_eff(),
+        false => eff_fixed(effs),
+    }),
     TypeExpr.Named(_, name, args) => match tps.get(name) {
       Some(t) => t,
       None => match name == "Never" {
@@ -495,7 +510,7 @@ fn builtin_methods_of(c: Ck, h: Option[Str]) -> Map[Str, Sig] {
 // ---- state ----------------------------------------------------------------------------------------------
 
 fn top_ctx() -> Ctx {
-  return Ctx { name: "", ret: Type.Any, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "fn" }
+  return Ctx { name: "", ret: Type.Any, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "fn", used: [], fn_type: None }
 }
 
 /// A checker for one module; `imports` are the names it may use from other modules (and the prelude).
@@ -554,7 +569,6 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       next_scope: 0,
       lambda_bounds: [],
       pure_lambda: None,
-      par_depth: -1,
       reported: Map {},
       resolving: [],
       impl_keys: Map {},
@@ -769,7 +783,7 @@ fn callable(c: Ck, name: Str) -> Option[Sig] {
 fn te_span(te: TypeExpr) -> Span {
   return match te {
     TypeExpr.Named(s, _, _) => s,
-    TypeExpr.FnType(s, _, _) => s,
+    TypeExpr.FnType(s, _, _, _) => s,
   }
 }
 
@@ -850,10 +864,16 @@ fn pad_any(args: List[Type], n: Int) -> List[Type] {
 fn resolve(ck: Ck, te: TypeExpr, tps: Map[Str, Type]) -> Res[Type] {
   var c = ck
   let named = match te {
-    TypeExpr.FnType(_, ps, ret) => {
+    TypeExpr.FnType(fs, ps, ret, effs) => {
+      for e in effs {
+        if not KNOWN_EFFECTS.contains(e) {
+          c = error(c: c, code: "E0403", msg: "unknown effect `{e}`", span: fs,
+            hint: or_hint(did_you_mean(e, KNOWN_EFFECTS), "known effects: io, time, rand, fs, net, proc"))
+        }
+      }
       let a = resolve_all(ck: c, tes: ps, tps: tps)
       let r = resolve(ck: a.c, te: ret, tps: tps)
-      return Res { c: r.c, v: Type.Fun(params: a.v, ret: r.v) }
+      return Res { c: r.c, v: Type.Fun(params: a.v, ret: r.v, eff: eff_fixed(effs.filter(fn(e) => KNOWN_EFFECTS.contains(e)))) }
     },
     TypeExpr.Named(sp, name, args) => Pair { first: sp, second: Pair { first: name, second: args } },
   }
@@ -1946,25 +1966,6 @@ fn captured_var(ck: Ck, name: Str, span: Span, assigning: Bool) -> Ck {
   return c
 }
 
-/// Inside the lambda given to `par_map`: a function value that comes from outside it (captured, or a parameter) may
-/// do effects that the checker cannot see, so it may not be used there.
-fn par_fn_value(ck: Ck, name: Str, span: Span, t: Type) -> Ck {
-  var i = ck.scopes.len() - 1
-  while i >= 0 {
-    let sc = ck.scopes.get_or(i, Scope { id: -1, vars: Map {} })
-    if sc.vars.has(name) {
-      if i <= ck.par_depth and holds_fn(c: ck, t: t, seen: []) {
-        return error(c: ck, code: "E0406", msg: "`par_map` runs this lambda in worker processes, so it must be pure, " +
-            "but `{name}` holds a function from outside it, whose effects are unknown", span: span,
-          hint: Some("call functions by name (declared without `uses`) or write the lambda inside"))
-      }
-      return ck
-    }
-    i = i - 1
-  }
-  return ck
-}
-
 fn declare(ck: Ck, name: Str, t: Type, mutable: Bool, span: Span, kind: Str, kw: Option[Span]) -> Ck {
   var c = ck
   if name == "_" {
@@ -2029,7 +2030,8 @@ fn check_const(ck: Ck, idx: Int, name: Str, value: Expr) -> Ck {
       }
     }
   }
-  let ctx = Ctx { name: "const {name}", ret: t, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "const" }
+  let ctx = Ctx { name: "const {name}", ret: t, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "const",
+    used: [], fn_type: None }
   var c = enter(ck: ck, ctx: ctx, tparams: Map {}, bounds: Map {}) with { scopes: [Scope { id: ck.next_scope, vars: Map {} }],
     next_scope: ck.next_scope + 1, const_allowed: Some(allowed) }
   c = expr(ck: c, e: value, exp: Some(t)).c
@@ -2057,7 +2059,8 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
     },
     None => {},
   }
-  let contract = Ctx { name: f.name, ret: sig.ret, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "contract" }
+  let contract = Ctx { name: f.name, ret: sig.ret, effects: [], is_test: false, loop: 0, sig_end: None, purpose: "contract",
+    used: [], fn_type: None }
   var c = push_scope(enter(ck: ck, ctx: contract, tparams: tps, bounds: sig.bounds))
   var k = 0
   for p in sig.params {
@@ -2091,7 +2094,7 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
     false => sig.effects,
   }
   c = c with { ctx: Ctx { name: f.name, ret: sig.ret, effects: effects, is_test: false, loop: 0, sig_end: Some(f.sig_end),
-    purpose: "fn" } }
+    purpose: "fn", used: [], fn_type: None } }
   match f.body {
     Some(body) => {
       c = block(c, body)
@@ -2109,7 +2112,7 @@ fn check_fn(ck: Ck, f: FnDecl, idx: Int) -> Ck {
 
 fn check_test(ck: Ck, name: Str, body: Block) -> Ck {
   let ctx = Ctx { name: "test \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
-    purpose: "test" }
+    purpose: "test", used: [], fn_type: None }
   var c = push_scope(enter(ck: ck, ctx: ctx, tparams: Map {}, bounds: Map {}))
   c = block(c, body)
   c = pop_scope(c)
@@ -2118,7 +2121,7 @@ fn check_test(ck: Ck, name: Str, body: Block) -> Ck {
 
 fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
   let ctx = Ctx { name: "property \"{name}\"", ret: con("Unit"), effects: ["io"], is_test: true, loop: 0, sig_end: None,
-    purpose: "test" }
+    purpose: "test", used: [], fn_type: None }
   var c = push_scope(enter(ck: ck, ctx: top_ctx(), tparams: Map {}, bounds: Map {}))
   var types: List[Type] = []
   for p in params {
@@ -2237,6 +2240,9 @@ fn stmt(ck: Ck, st: Stmt) -> Ck {
         t = Type.Any
       }
       c = c with { raw_binds: c.raw_binds.set(key_of(c, name_span), t) }
+      if mutable {
+        c = freeze(c, t)
+      }
       let kind = match mutable {
         true => "var",
         false => "let",
@@ -2606,7 +2612,44 @@ fn mismatch(ck: Ck, expected: Type, found: Type, span: Span) -> Ck {
       hint = Some("read the wrapped value: `.value`")
     }
   }
+  if is_fn_type(ex) and is_fn_type(fo) {
+    let have = eff_names(c.s, ex)
+    let more = minus(eff_names(c.s, fo), have)
+    if not more.is_empty() {
+      hint = Some("this function uses `{commas(more)}`, which `{sh(c, ex)}` does not allow: add " +
+          "`uses {commas(union(have, more).sort())}` to the function type")
+    }
+  }
   return error(c: c, code: "E0202", msg: "expected `{sh(c, ex)}`, found `{sh(c, fo)}`", span: span, hint: hint)
+}
+
+/// The effects of the function types in a `var` are fixed at its declaration: a later assignment cannot widen
+/// them for uses already checked.
+fn freeze(c: Ck, t: Type) -> Ck {
+  return match pr(c, t) {
+    Type.Fun(ps, ret, eff) => {
+      var cur = c
+      let root = eff_root(c.s, eff)
+      if eff_is_flex(c.s, root) {
+        cur = cur with { s: cur.s.set(var_id(match root {
+          Type.Con(_, args) => args.get_or(0, Type.Any),
+          _ => Type.Any,
+        }), eff_fixed(eff_list(c.s, root))) }
+      }
+      for p in ps {
+        cur = freeze(cur, p)
+      }
+      return freeze(cur, ret)
+    },
+    Type.Con(_, args) => {
+      var cur = c
+      for a in args {
+        cur = freeze(cur, a)
+      }
+      return cur
+    },
+    _ => c,
+  }
 }
 
 fn expr_kind(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
@@ -2711,12 +2754,52 @@ fn variants_list(c: Ck, enum_name: Str) -> List[Str] {
   return c.uni.enums.get(enum_name).map(fn(i) => i.variants.keys()).unwrap_or([])
 }
 
+/// A function used as a value: calling the value does its effects.
 fn instantiate(ck: Ck, sig: Sig, span: Span) -> Res[Type] {
-  var c = check_effects(ck: ck, sig: sig, span: span)
-  let m = fresh_map(c, sig.tparams)
+  let m = fresh_map(ck, sig.tparams)
   let done = record_call(c: note_bounds(c: m.c, sig: sig, mapping: m.v, span: span), span: span, sig: sig, inst: m.v)
-  return ok(done, Type.Fun(params: sig.params.map(fn(p) => sub(c: done, t: p.second, m: m.v)), ret: sub(c: done, t: sig.ret,
-    m: m.v)))
+  let ps = fresh_effs_all(ck: done, ts: sig.params.map(fn(p) => sub(c: done, t: p.second, m: m.v)))
+  let r = fresh_effs(ck: ps.c, t: sub(c: done, t: sig.ret, m: m.v))
+  let f = fresh_var(r.c)
+  return ok(f.c, Type.Fun(params: ps.v, ret: r.v, eff: eff_flex(id: var_id(f.v), names: sig.effects)))
+}
+
+fn var_id(t: Type) -> Int {
+  return match t {
+    Type.Var(id) => id,
+    _ => -1,
+  }
+}
+
+/// Replaces the polymorphic effects of a built-in's function types by fresh flexible ones (Python's `subst`).
+fn fresh_effs(ck: Ck, t: Type) -> Res[Type] {
+  return match t {
+    Type.Fun(ps, ret, eff) => {
+      let a = fresh_effs_all(ck: ck, ts: ps)
+      let r = fresh_effs(ck: a.c, t: ret)
+      if eff_is_poly(eff) {
+        let f = fresh_var(r.c)
+        return ok(f.c, Type.Fun(params: a.v, ret: r.v, eff: eff_flex(id: var_id(f.v), names: [])))
+      }
+      return ok(r.c, Type.Fun(params: a.v, ret: r.v, eff: eff))
+    },
+    Type.Con(name, args) => {
+      let a = fresh_effs_all(ck: ck, ts: args)
+      return ok(a.c, Type.Con(name: name, args: a.v))
+    },
+    other => ok(ck, other),
+  }
+}
+
+fn fresh_effs_all(ck: Ck, ts: List[Type]) -> Res[List[Type]] {
+  var c = ck
+  var out: List[Type] = []
+  for t in ts {
+    let r = fresh_effs(ck: c, t: t)
+    c = r.c
+    out = out.push(r.v)
+  }
+  return Res { c: c, v: out }
 }
 
 fn e_name(ck: Ck, span: Span, name: Str) -> Res[Type] {
@@ -2727,8 +2810,15 @@ fn e_name(ck: Ck, span: Span, name: Str) -> Res[Type] {
       if v.mutable {
         c = captured_var(ck: c, name: name, span: span, assigning: false)
       }
-      if c.par_depth >= 0 {
-        c = par_fn_value(ck: c, name: name, span: span, t: v.ty)
+      match pr(c, v.ty) {
+        Type.Fun(fps, fret, eff) => {
+          if not v.mutable {
+            // a function with fewer effects fits where more are allowed: each use may widen them
+            let f = fresh_var(c)
+            return ok(f.c, Type.Fun(params: fps, ret: fret, eff: eff_flex(id: var_id(f.v), names: eff_list(c.s, eff))))
+          }
+        },
+        _ => {},
       }
       return ok(c, v.ty)
     },
@@ -2986,23 +3076,20 @@ fn par_map_call(ck: Ck, bsig: Sig, rt: Type, args: List[Arg], span: Span, exp: O
     },
     _ => {},
   }
-  let r = call_sig(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: "par_map")
+  let r = call_sig_p(ck: c, sig: bsig, args: args, span: span, expected: exp, self_type: Some(rt), display: "par_map",
+    poly: false)
   c = r.c with { pure_lambda: None }
   match f {
     Some(fe) => {
       if not is_lambda {
-        match fn_ref_sig(c, fe) {
-          None => {
-            c = error(c: c, code: "E0406", msg: "`par_map` needs a lambda or the name of a function, so that it can " +
-                "be checked to be pure", span: expr_span(fe), hint: Some("write `xs.par_map(fn(x) => ...)`"))
-          },
-          Some(sig) => {
-            if not sig.effects.is_empty() {
-              let effs = sig.effects.sort().join(", ")
-              c = error(c: c, code: "E0406", msg: "`par_map` runs `{sig.name}` in worker processes, so it must be " +
-                  "pure, but `{sig.name}` uses `{effs}`", span: expr_span(fe), hint: Some(PAR_HINT))
-            }
-          },
+        let effs = eff_names(c.s, c.raw_types.get(key_of(c, expr_span(fe))).unwrap_or(Type.Any)).join(", ")
+        if effs != "" {
+          let what = match fe {
+            Expr.Name(_, n) => "`{n}`",
+            _ => "this function",
+          }
+          c = error(c: c, code: "E0406", msg: "`par_map` runs {what} in worker processes, so it must be " +
+              "pure, but {what} uses `{effs}`", span: expr_span(fe), hint: Some(PAR_HINT))
         }
       }
     },
@@ -3025,24 +3112,11 @@ fn par_map_call(ck: Ck, bsig: Sig, rt: Type, args: List[Arg], span: Span, exp: O
   return ok(c, r.v)
 }
 
-/// The signature of a function named by `e` (not a variable or constant).
-fn fn_ref_sig(c: Ck, e: Expr) -> Option[Sig] {
-  return match e {
-    Expr.Name(_, name) => {
-      if lookup(c, name) != None or name == "None" or c.consts.has(name) {
-        return None
-      }
-      return callable(c, name)
-    },
-    _ => None,
-  }
-}
-
 /// Whether values of type t may contain functions.
 fn holds_fn(c: Ck, t: Type, seen: List[Str]) -> Bool {
   let p = pr(c, t)
   let parts = match p {
-    Type.Fun(_, _) => {
+    Type.Fun(_, _, _) => {
       return true
     },
     Type.Con(name, targs) => Pair { first: name, second: targs },
@@ -3078,51 +3152,77 @@ fn holds_fn(c: Ck, t: Type, seen: List[Str]) -> Bool {
 }
 
 fn check_effects(ck: Ck, sig: Sig, span: Span) -> Ck {
-  let missing = minus(sig.effects, ck.ctx.effects)
+  return need_effects(ck: ck, what: "`{sig.name}`", effects: sig.effects, span: span)
+}
+
+/// Calling `what` (a quoted name, or a description) does `effects`: the current function must declare them.
+fn need_effects(ck: Ck, what: Str, effects: List[Str], span: Span) -> Ck {
+  // a missing effect is reported here, not again later
+  let ctx0 = ck.ctx
+  let c0 = ck with { ctx: ctx0 with { used: union(ctx0.used, effects.filter(fn(e) => ctx0.effects.contains(e))).unique().sort() } }
+  let missing = minus(effects, c0.ctx.effects).unique().sort()
   if missing.is_empty() {
-    return ck
+    return c0
   }
   let effs = missing.join(", ")
-  let purpose = ck.ctx.purpose
+  let purpose = c0.ctx.purpose
   if purpose == "contract" or purpose == "const" {
-    let what = match purpose == "contract" {
+    let kind = match purpose == "contract" {
       true => "contracts",
       false => "constants",
     }
-    return error(c: ck, code: "E0401", msg: "{what} must be pure, but `{sig.name}` uses `{effs}`", span: span, hint: None)
+    return error(c: c0, code: "E0401", msg: "{kind} must be pure, but {what} uses `{effs}`", span: span, hint: None)
   }
   if purpose == "parallel" {
-    return error(c: ck, code: "E0401", msg: "`par_map` runs this function in worker processes, so it must be pure, " +
-        "but `{sig.name}` uses `{effs}`", span: span, hint: Some(PAR_HINT))
+    return error(c: c0, code: "E0401", msg: "`par_map` runs this function in worker processes, so it must be pure, " +
+        "but {what} uses `{effs}`", span: span, hint: Some(PAR_HINT))
   }
-  if purpose == "test" or ck.ctx.is_test {
-    return error(c: ck, code: "E0401", msg: "tests may only use `io`, but `{sig.name}` uses `{effs}`", span: span,
+  if purpose == "fntype" {
+    let ft = c0.ctx.fn_type.unwrap_or(Type.Any)
+    return error(c: c0, code: "E0401", msg: "calling {what} requires effect `{effs}`, but the function type " +
+        "`{sh(c0, ft)}` does not declare it", span: span,
+      hint: Some("add `uses {commas(union(eff_names(c0.s, ft), missing).unique().sort())}` to the function type"))
+  }
+  if purpose == "test" or c0.ctx.is_test {
+    return error(c: c0, code: "E0401", msg: "tests may only use `io`, but {what} uses `{effs}`", span: span,
       hint: Some("pass the time/random/file value as a parameter so the code under test stays deterministic"))
   }
-  let allowed = union(ck.ctx.effects, missing).sort()
+  let allowed = union(c0.ctx.effects, missing).unique().sort()
   var fix: Option[DiagFix] = None
-  match ck.ctx.sig_end {
+  match c0.ctx.sig_end {
     Some(se) => {
-      if ck.ctx.effects.is_empty() {
+      if c0.ctx.effects.is_empty() {
         fix = fix_at(span: Span { line: se.end_line, col: se.end_col, end_line: se.end_line, end_col: se.end_col },
           text: " uses " + commas(allowed), safe: true)
       }
     },
     None => {},
   }
-  return error_fix(c: ck, code: "E0401", msg: "calling `{sig.name}` requires effect `{effs}`, but `{ck.ctx.name}` " +
-      "does not declare it", span: span, hint: Some("add `uses {commas(allowed)}` to the signature of `{ck.ctx.name}`"),
+  return error_fix(c: c0, code: "E0401", msg: "calling {what} requires effect `{effs}`, but `{c0.ctx.name}` " +
+      "does not declare it", span: span, hint: Some("add `uses {commas(allowed)}` to the signature of `{c0.ctx.name}`"),
     fix: fix)
 }
 
 /// A call of a function with a signature (`self_type`: the receiver of a method call).
 fn call_sig(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Type], self_type: Option[Type],
   display: Str) -> Res[Type] {
+    return call_sig_p(ck: ck, sig: sig, args: args, span: span, expected: expected, self_type: self_type, display: display,
+      poly: true)
+  }
+
+/// `poly`: check the effects of the functions passed to a built-in (`par_map` checks them itself).
+fn call_sig_p(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Type], self_type: Option[Type],
+  display: Str, poly: Bool) -> Res[Type] {
     var c = ck
     let fm = fresh_map(c, sig.tparams)
     let mapping = fm.v
     c = record_call(c: note_bounds(c: fm.c, sig: sig, mapping: mapping, span: span), span: span, sig: sig, inst: mapping)
-    var params = sig.params.map(fn(p) => Pair { first: p.first, second: subst(s: fm.c.s, t: p.second, mapping: mapping) })
+    var params: List[Pair[Str, Type]] = []
+    for p in sig.params {
+      let r = fresh_effs(ck: c, t: subst(s: fm.c.s, t: p.second, mapping: mapping))
+      c = r.c
+      params = params.push(Pair { first: p.first, second: r.v })
+    }
     let ret = sub(c: c, t: sig.ret, m: mapping)
     match self_type {
       Some(st) => {
@@ -3245,10 +3345,38 @@ fn call_sig(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Type
         None => {},
       }
     }
+    if poly {
+      c = poly_effects(ck: c, sig: sig, params: params, assigned: assigned, display: display)
+    }
     return ok(c, ret)
   }
 
-fn call_fn_type(ck: Ck, ft: Type, args: List[Arg], span: Span) -> Res[Type] {
+/// A built-in that takes a function (`map`, `filter`, ...) does what the function does.
+fn poly_effects(ck: Ck, sig: Sig, params: List[Pair[Str, Type]], assigned: Map[Str, Arg], display: Str) -> Ck {
+  var c = ck
+  for p in params {
+    let orig = sig.params.find(fn(o) => o.first == p.first).map(fn(o) => o.second).unwrap_or(Type.Any)
+    let is_poly = match orig {
+      Type.Fun(_, _, eff) => eff_is_poly(eff),
+      _ => false,
+    }
+    match assigned.get(p.first) {
+      Some(a) => {
+        if is_poly {
+          let what = match a.value {
+            Expr.Name(_, n) => "`{n}`",
+            _ => "the function passed to `{display}`",
+          }
+          c = need_effects(ck: c, what: what, effects: eff_names(c.s, p.second), span: expr_span(a.value))
+        }
+      },
+      None => {},
+    }
+  }
+  return c
+}
+
+fn call_fn_type(ck: Ck, ft: Type, args: List[Arg], span: Span, what: Str) -> Res[Type] {
   var c = ck
   let f = pr(c, ft)
   return match f {
@@ -3261,9 +3389,10 @@ fn call_fn_type(ck: Ck, ft: Type, args: List[Arg], span: Span) -> Res[Type] {
         ps = ps.push(pr(c, r.v))
       }
       let r = fresh_var(c)
-      return ok(uni_(ck: r.c, a: f, b: Type.Fun(params: ps, ret: r.v)), r.v)
+      // a function of unknown type is called as a pure one
+      return ok(uni_(ck: r.c, a: f, b: Type.Fun(params: ps, ret: r.v, eff: pure_eff())), r.v)
     },
-    Type.Fun(fps, fret) => {
+    Type.Fun(fps, fret, _) => {
       for a in args {
         if a.name != None {
           c = error(c: c, code: "E0209", msg: "named arguments cannot be used when calling a function value", span: a.span,
@@ -3283,7 +3412,7 @@ fn call_fn_type(ck: Ck, ft: Type, args: List[Arg], span: Span) -> Res[Type] {
         }
         i = i + 1
       }
-      return ok(c, fret)
+      return ok(need_effects(ck: c, what: what, effects: eff_names(c.s, f), span: span), fret)
     },
     _ => {
       c = error(c: c, code: "E0210", msg: "`{sh(c, f)}` is not a function and cannot be called", span: span, hint: None)
@@ -3334,10 +3463,7 @@ fn e_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
       match lookup(c, name) {
         Some(v) => {
           c = mark_used(c, name)
-          if c.par_depth >= 0 {
-            c = par_fn_value(ck: c, name: name, span: cspan, t: v.ty)
-          }
-          return call_fn_type(ck: c, ft: v.ty, args: args, span: span)
+          return call_fn_type(ck: c, ft: v.ty, args: args, span: span, what: "`{name}`")
         },
         None => {},
       }
@@ -3388,7 +3514,7 @@ fn e_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     _ => {},
   }
   let r = expr(ck: c, e: callee, exp: None)
-  return call_fn_type(ck: r.c, ft: r.v, args: args, span: span)
+  return call_fn_type(ck: r.c, ft: r.v, args: args, span: span, what: "this function")
 }
 
 /// A fresh instance `Name[?A, ?B]` of a generic declaration and its parameter mapping.
@@ -3521,7 +3647,7 @@ fn method_call(ck: Ck, rt: Type, e: Expr, exp: Option[Type]) -> Res[Type] {
               let ft = sub(c: c, t: fty, m: args_map(c: c, tparams: info.tparams, t: rt))
               if is_fn_type(pr(c, ft)) {
                 c = resolve_as(c: c, span: span, kind: "field_fn", of: "", name: m, sig: None)
-                return call_fn_type(ck: c, ft: ft, args: args, span: span)
+                return call_fn_type(ck: c, ft: ft, args: args, span: span, what: "`{m}`")
               }
             },
             None => {},
@@ -3966,9 +4092,10 @@ fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
   let ret_te = parts.second.first
   let body = parts.second.second
   var efn: Option[Pair[List[Type], Type]] = match exp.map(fn(t) => pr(ck, t)) {
-    Some(Type.Fun(ps, r)) => Some(Pair { first: ps, second: r }),
+    Some(Type.Fun(ps, r, _)) => Some(Pair { first: ps, second: r }),
     _ => None,
   }
+  let exp_fn = exp.map(fn(t) => pr(ck, t))
   match efn {
     Some(f) => {
       if f.first.len() != params.len() {
@@ -4029,14 +4156,23 @@ fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     false => "lambda",
   }
   var effects = outer.effects
-  let par_depth = c.par_depth
+  var fn_type: Option[Type] = None
+  let fixed = efn != None and match exp_fn {
+    Some(Type.Fun(_, _, eff)) => not eff_is_flex(c.s, eff),
+    _ => false,
+  }
   if c.pure_lambda == Some(span) {
     purpose = "parallel"
     effects = []
-    c = c with { pure_lambda: None, par_depth: c.scopes.len() }
+    c = c with { pure_lambda: None }
+  } else if fixed {
+    // the lambda must fit a written function type: it may do exactly the effects that type declares
+    purpose = "fntype"
+    effects = eff_names(c.s, exp_fn.unwrap_or(Type.Any))
+    fn_type = exp_fn
   }
   c = c with { ctx: Ctx { name: outer.name, ret: ret, effects: effects, is_test: false, loop: 0, sig_end: outer.sig_end,
-    purpose: purpose }, lambda_bounds: c.lambda_bounds.push(c.scopes.len()) }
+    purpose: purpose, used: [], fn_type: fn_type }, lambda_bounds: c.lambda_bounds.push(c.scopes.len()) }
   c = push_scope(c)
   i = 0
   for p in params {
@@ -4061,8 +4197,10 @@ fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     },
   }
   c = pop_scope(c)
-  c = c with { ctx: outer, lambda_bounds: c.lambda_bounds.take(c.lambda_bounds.len() - 1), par_depth: par_depth }
-  return ok(c, Type.Fun(params: ptypes, ret: ret))
+  let used = c.ctx.used
+  c = c with { ctx: outer, lambda_bounds: c.lambda_bounds.take(c.lambda_bounds.len() - 1) }
+  let f = fresh_var(c)
+  return ok(f.c, Type.Fun(params: ptypes, ret: ret, eff: eff_flex(id: var_id(f.v), names: used)))
 }
 
 // ---- match --------------------------------------------------------------------------------------------------

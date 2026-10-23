@@ -751,7 +751,7 @@ fn src_text(lines: List[Str], sp: Span) -> Str {
 fn texpr_span(t: TypeExpr) -> Span {
   return match t {
     TypeExpr.Named(s, _, _) => s,
-    TypeExpr.FnType(s, _, _) => s,
+    TypeExpr.FnType(s, _, _, _) => s,
   }
 }
 

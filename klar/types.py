@@ -16,12 +16,66 @@ class TCon(Type):
         return show(self)
 
 
-class TFn(Type):
-    __slots__ = ("params", "ret")
+class Eff:
+    """The effects of a function type. Fixed: exactly `names` (from a written type: `fn() -> Unit uses io`).
+    Flexible: at least `names`, decided by unification (a lambda: the effects its body uses; a named function: its
+    `uses`) — a function with fewer effects fits where more are allowed. Polymorphic (`poly`): a function parameter
+    of a built-in (`map`, `filter`, ...); every call gets a fresh flexible one and needs the effects it ends with."""
+    __slots__ = ("names", "fixed", "poly", "ref")
 
-    def __init__(self, params, ret):
+    def __init__(self, names=(), fixed=True, poly=False):
+        self.names = frozenset(names)
+        self.fixed = fixed
+        self.poly = poly
+        self.ref = None
+
+
+PURE = Eff()
+
+
+def flex(names=()):
+    return Eff(names, fixed=False)
+
+
+def eprune(e):
+    while e.ref is not None:
+        e = e.ref
+    return e
+
+
+def eff_names(t):
+    """The effects of calling a value of function type t (empty for anything else)."""
+    t = prune(t)
+    return eprune(t.eff).names if isinstance(t, TFn) else frozenset()
+
+
+def _unify_eff(a, b, trail):
+    a, b = eprune(a), eprune(b)
+    if a is b:
+        return True
+    if a.fixed and b.fixed:
+        return a.names == b.names
+    if a.fixed:
+        a, b = b, a
+    # a is flexible: it may grow up to b (a fixed b), or the smaller of two flexible ones takes the larger
+    if a.names <= b.names:
+        a.ref = b
+        trail.append(a)
+        return True
+    if not b.fixed and b.names <= a.names:
+        b.ref = a
+        trail.append(b)
+        return True
+    return False
+
+
+class TFn(Type):
+    __slots__ = ("params", "ret", "eff")
+
+    def __init__(self, params, ret, eff=None):
         self.params = list(params)
         self.ret = ret
+        self.eff = PURE if eff is None else eff
 
     def __repr__(self):
         return show(self)
@@ -124,7 +178,8 @@ def _unify(a, b, trail):
     if isinstance(a, TFn) and isinstance(b, TFn):
         if len(a.params) != len(b.params):
             return False
-        return all(_unify(x, y, trail) for x, y in zip(a.params, b.params)) and _unify(a.ret, b.ret, trail)
+        return (all(_unify(x, y, trail) for x, y in zip(a.params, b.params)) and _unify(a.ret, b.ret, trail)
+                and _unify_eff(a.eff, b.eff, trail))
     if isinstance(a, TParam) and isinstance(b, TParam):
         return a.name == b.name
     return False
@@ -149,7 +204,8 @@ def subst(t, mapping):
             return t
         return TCon(t.name, [subst(a, mapping) for a in t.args])
     if isinstance(t, TFn):
-        return TFn([subst(p, mapping) for p in t.params], subst(t.ret, mapping))
+        e = eprune(t.eff)
+        return TFn([subst(p, mapping) for p in t.params], subst(t.ret, mapping), flex() if e.poly else t.eff)
     return t
 
 
@@ -160,7 +216,13 @@ def show(t):
             return f"{t.name}[{', '.join(show(a) for a in t.args)}]"
         return t.name
     if isinstance(t, TFn):
-        return f"fn({', '.join(show(p) for p in t.params)}) -> {show(t.ret)}"
+        names = eprune(t.eff).names
+        ret = show(t.ret)
+        if not names:
+            return f"fn({', '.join(show(p) for p in t.params)}) -> {ret}"
+        if isinstance(prune(t.ret), TFn):
+            ret = f"({ret})"
+        return f"fn({', '.join(show(p) for p in t.params)}) -> {ret} uses {', '.join(sorted(names))}"
     if isinstance(t, TVar):
         return "_"
     if isinstance(t, TParam):

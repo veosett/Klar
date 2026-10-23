@@ -10,7 +10,7 @@ import re
 from . import nodes as N
 from .builtins import GLOBALS, METHODS, FOREIGN_METHODS, FOREIGN_NOTES, parsed
 from .diagnostics import Diagnostic, Span
-from .types import (ANY, BOOL, FLOAT, INT, NEVER, STR, UNIT, TCon, TFn, TParam, TVar,
+from .types import (ANY, BOOL, FLOAT, INT, NEVER, STR, UNIT, Eff, TCon, TFn, TParam, TVar, eff_names, eprune, flex,
                     head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify)
 
 KNOWN_EFFECTS = {"io", "time", "rand", "fs", "net", "proc"}
@@ -131,11 +131,31 @@ class Ctx:
         self.loop = 0
         self.sig_end = sig_end
         self.purpose = purpose  # fn | lambda | test | contract | const | parallel (the function of a par_map)
+        self.used = set()        # the effects the body uses (a lambda's type gets them)
+        self.fn_type = None      # purpose "fntype": the written function type a lambda must fit
+
+
+def freeze(t, seen=None):
+    """The effects of the function types in a `var` are fixed at its declaration: a later assignment cannot
+    widen them for uses already checked."""
+    t = prune(t)
+    if isinstance(t, TFn):
+        e = eprune(t.eff)
+        if not e.fixed:
+            e.ref = Eff(e.names)
+        for p in t.params:
+            freeze(p)
+        freeze(t.ret)
+    elif isinstance(t, TCon):
+        for a in t.args:
+            freeze(a)
 
 
 def _resolve_builtin_type(te, tps):
     if isinstance(te, N.FnTypeExpr):
-        return TFn([_resolve_builtin_type(p, tps) for p in te.params], _resolve_builtin_type(te.ret, tps))
+        # a function parameter of a built-in is polymorphic in its effects: `xs.map(f)` does what `f` does
+        return TFn([_resolve_builtin_type(p, tps) for p in te.params], _resolve_builtin_type(te.ret, tps),
+                   Eff(te.effects) if te.effects else Eff(poly=True))
     if te.name in tps:
         return tps[te.name]
     if te.name == "Never":
@@ -652,7 +672,13 @@ class Checker:
         if te is None:
             return ANY
         if isinstance(te, N.FnTypeExpr):
-            return TFn([self.resolve(p, tps) for p in te.params], self.resolve(te.ret, tps))
+            for e in te.effects:
+                if e not in KNOWN_EFFECTS:
+                    h, _ = self.did_you_mean(e, KNOWN_EFFECTS, te.span)
+                    self.error("E0403", f"unknown effect `{e}`", te.span,
+                               hint=h or "known effects: io, time, rand, fs, net, proc")
+            return TFn([self.resolve(p, tps) for p in te.params], self.resolve(te.ret, tps),
+                       Eff(e for e in te.effects if e in KNOWN_EFFECTS))
         name = te.name
         if name in tps:
             if te.args:
@@ -781,17 +807,6 @@ class Checker:
                         self.error("E0216", f"a lambda cannot capture `{name}`: it is a `var` and may change",
                                    span, hint=f"capture a snapshot: `let {name}_now = {name}` before the lambda, "
                                               f"and use `{name}_now` inside it")
-                return
-
-    def par_fn_value(self, name, span, v):
-        """Inside the lambda given to `par_map`: a function value that comes from outside it (captured, or a
-        parameter) may do effects that the checker cannot see, so it may not be used there."""
-        for i in range(len(self.scopes) - 1, -1, -1):
-            if name in self.scopes[i]:
-                if i <= self.par_depth and self.holds_fn(v.type, set()):
-                    self.error("E0406", f"`par_map` runs this lambda in worker processes, so it must be pure, but "
-                                        f"`{name}` holds a function from outside it, whose effects are unknown", span,
-                               hint="call functions by name (declared without `uses`) or write the lambda inside")
                 return
 
     def declare(self, name, t, mutable, span, kind, kw_span=None):
@@ -933,6 +948,8 @@ class Checker:
         if prune(t) is NEVER and s.name != "_":
             t = ANY
         s.kt = t
+        if s.mutable:
+            freeze(t)
         self.declare(s.name, t, s.mutable, s.name_span, "var" if s.mutable else "let", s.kw_span)
 
     def s_Assign(self, s: N.Assign):
@@ -1110,6 +1127,10 @@ class Checker:
             hint = f"wrap the value: `{he}(value)`"
         elif hf in self.records and self.records[hf].newtype and show(self.newtype_value(fo)) == show(ex):
             hint = "read the wrapped value: `.value`"
+        if isinstance(ex, TFn) and isinstance(fo, TFn) and eff_names(fo) - eff_names(ex):
+            more = ", ".join(sorted(eff_names(fo) - eff_names(ex)))
+            hint = (f"this function uses `{more}`, which `{show(ex)}` does not allow: add "
+                    f"`uses {', '.join(sorted(eff_names(ex) | eff_names(fo)))}` to the function type")
         msg = f"expected `{show(ex)}`, found `{show(fo)}`"
         if what:
             msg = f"{what}: {msg}"
@@ -1179,8 +1200,10 @@ class Checker:
             v.used = True
             if v.mutable:
                 self.captured_var(e.name, e.span)
-            if getattr(self, "par_depth", None) is not None:
-                self.par_fn_value(e.name, e.span, v)
+            t = prune(v.type)
+            if isinstance(t, TFn) and not v.mutable:
+                # a function with fewer effects fits where more are allowed: each use may widen them
+                return TFn(t.params, t.ret, flex(eprune(t.eff).names))
             return v.type
         if e.name == "None":
             return option_of(TVar())
@@ -1191,11 +1214,11 @@ class Checker:
             return self.consts[e.name] or ANY
         sig = self.fns.get(e.name) or self.globals.get(e.name)
         if sig is not None:
-            self.check_effects(sig, e.span)
             mapping = {t: TVar() for t in sig.tparams}
             e.sig, e.inst = sig, mapping
             self.note_bounds(sig, mapping, e.span)
-            return TFn([subst(t, mapping) for _, t in sig.params], subst(sig.ret, mapping))
+            # a function used as a value: calling the value does its effects
+            return TFn([subst(t, mapping) for _, t in sig.params], subst(sig.ret, mapping), flex(sig.effects))
         if e.name in self.records:
             self.error("E0201", f"`{e.name}` is a type, not a value", e.span, hint=self.record_hint(e.name))
             return ANY
@@ -1307,20 +1330,30 @@ class Checker:
 
     # ---- calls -----------------------------------------------------------------
     def check_effects(self, sig, span):
-        missing = sig.effects - self.ctx.effects
+        self.need_effects(f"`{sig.name}`", sig.effects, span)
+
+    def need_effects(self, what, effects, span):
+        """Calling `what` (a quoted name, or a description) does `effects`: the current function must declare
+        them."""
+        self.ctx.used |= set(effects) & self.ctx.effects   # a missing effect is reported here, not again later
+        missing = set(effects) - self.ctx.effects
         if not missing:
             return
         effs = ", ".join(sorted(missing))
         purpose = self.ctx.purpose
         if purpose in ("contract", "const"):
-            what = "contracts" if purpose == "contract" else "constants"
-            self.error("E0401", f"{what} must be pure, but `{sig.name}` uses `{effs}`", span)
+            kind = "contracts" if purpose == "contract" else "constants"
+            self.error("E0401", f"{kind} must be pure, but {what} uses `{effs}`", span)
         elif purpose == "parallel":
             self.error("E0401", f"`par_map` runs this function in worker processes, so it must be pure, but "
-                                f"`{sig.name}` uses `{effs}`", span,
+                                f"{what} uses `{effs}`", span,
                        hint="compute the values with `par_map`, then do the effects with the results")
+        elif purpose == "fntype":
+            self.error("E0401", f"calling {what} requires effect `{effs}`, but the function type "
+                                f"`{show(self.ctx.fn_type)}` does not declare it", span,
+                       hint=f"add `uses {', '.join(sorted(eff_names(self.ctx.fn_type) | missing))}` to the function type")
         elif purpose == "test" or self.ctx.is_test:
-            self.error("E0401", f"tests may only use `io`, but `{sig.name}` uses `{effs}`", span,
+            self.error("E0401", f"tests may only use `io`, but {what} uses `{effs}`", span,
                        hint="pass the time/random/file value as a parameter so the code under test stays deterministic")
         else:
             fix = None
@@ -1329,11 +1362,11 @@ class Checker:
                 se = self.ctx.sig_end
                 fix = {"span": Span(se.file, se.end_line, se.end_col, se.end_line, se.end_col),
                        "text": " uses " + ", ".join(allowed)}
-            self.error("E0401", f"calling `{sig.name}` requires effect `{effs}`, but `{self.ctx.name}` "
+            self.error("E0401", f"calling {what} requires effect `{effs}`, but `{self.ctx.name}` "
                                 f"does not declare it", span,
                        hint=f"add `uses {', '.join(allowed)}` to the signature of `{self.ctx.name}`", fix=fix)
 
-    def call_sig(self, sig, args, span, expected=None, self_type=None, display=None, node=None):
+    def call_sig(self, sig, args, span, expected=None, self_type=None, display=None, node=None, poly=True):
         display = display or sig.name
         mapping = {t: TVar(t) for t in sig.tparams}
         if node is not None:
@@ -1397,9 +1430,21 @@ class Checker:
         for n, t in params:
             if n in assigned:
                 self.expr(assigned[n].value, t)
+        if poly:
+            self.poly_effects(sig, params, assigned, display)
         return ret
 
-    def call_fn_type(self, ft, args, span):
+    def poly_effects(self, sig, params, assigned, display):
+        """A built-in that takes a function (`map`, `filter`, ...) does what the function does."""
+        orig = dict(sig.params)
+        for n, t in params:
+            o = prune(orig.get(n))
+            if n in assigned and isinstance(o, TFn) and o.eff.poly:
+                f = assigned[n].value
+                what = f"`{f.name}`" if isinstance(f, N.Name) else f"the function passed to `{display}`"
+                self.need_effects(what, eff_names(t), f.span)
+
+    def call_fn_type(self, ft, args, span, what="this function"):
         ft = prune(ft)
         if ft is ANY:
             for a in args:
@@ -1408,7 +1453,7 @@ class Checker:
         if isinstance(ft, TVar):
             ps = [prune(self.expr(a.value)) for a in args]
             r = TVar()
-            unify(ft, TFn(ps, r))
+            unify(ft, TFn(ps, r))   # a function of unknown type is called as a pure one
             return r
         if not isinstance(ft, TFn):
             self.error("E0210", f"`{show(ft)}` is not a function and cannot be called", span)
@@ -1424,14 +1469,13 @@ class Checker:
             self.expr(a.value, pt)
         for a in args[len(ft.params):]:
             self.expr(a.value)
+        self.need_effects(what, eff_names(ft), span)
         return ft.ret
 
     def e_Call(self, e, exp):
         c = e.callee
         if isinstance(c, N.Name):
             v = self.lookup(c.name)
-            if v is not None and getattr(self, "par_depth", None) is not None:
-                self.par_fn_value(c.name, c.span, v)
             if v is None:
                 sig = self.fns.get(c.name) or self.globals.get(c.name)
                 if sig is not None:
@@ -1478,7 +1522,7 @@ class Checker:
                     self.expr(a.value)
                 return ANY
             v.used = True
-            return self.call_fn_type(v.type, e.args, e.span)
+            return self.call_fn_type(v.type, e.args, e.span, what=f"`{c.name}`")
         ft = self.expr(c)
         return self.call_fn_type(ft, e.args, e.span)
 
@@ -1535,7 +1579,7 @@ class Checker:
             ft = subst(info.fields[m], self.args_map(info, rt))
             if isinstance(prune(ft), TFn):
                 e.resolved = ("field_fn",)
-                return self.call_fn_type(ft, e.args, e.span)
+                return self.call_fn_type(ft, e.args, e.span, what=f"`{m}`")
         if isinstance(rt, TVar):
             self.error("E0214", f"cannot infer the type of this value before calling `.{m}()`", e.obj.span,
                        hint="add a type annotation, e.g. `let xs: List[Int] = []`")
@@ -1609,21 +1653,18 @@ class Checker:
 
     def par_map_call(self, bsig, rt, e, exp):
         """`xs.par_map(f)` runs `f` in worker processes: it must be pure (a lambda checked without effects, or a
-        function declared without `uses`), and the values it returns must not contain functions."""
+        function value whose type has no `uses`), and the values it returns must not contain functions."""
         f = e.args[0].value if len(e.args) == 1 else None
         if isinstance(f, N.Lambda):
             self.pure_lambda = f
-        t = self.call_sig(bsig, e.args, e.span, expected=exp, self_type=rt, display="par_map", node=e)
+        t = self.call_sig(bsig, e.args, e.span, expected=exp, self_type=rt, display="par_map", node=e, poly=False)
         self.pure_lambda = None
         if f is not None and not isinstance(f, N.Lambda):
-            sig = getattr(f, "sig", None) if isinstance(f, N.Name) else None
-            if sig is None:
-                self.error("E0406", "`par_map` needs a lambda or the name of a function, so that it can be checked "
-                                    "to be pure", f.span, hint="write `xs.par_map(fn(x) => ...)`")
-            elif sig.effects:
-                effs = ", ".join(sorted(sig.effects))
-                self.error("E0406", f"`par_map` runs `{sig.name}` in worker processes, so it must be pure, but "
-                                    f"`{sig.name}` uses `{effs}`", f.span,
+            effs = ", ".join(sorted(eff_names(getattr(f, "kt", None) or ANY)))
+            if effs:
+                what = f"`{f.name}`" if isinstance(f, N.Name) else "this function"
+                self.error("E0406", f"`par_map` runs {what} in worker processes, so it must be pure, but "
+                                    f"{what} uses `{effs}`", f.span,
                            hint="compute the values with `par_map`, then do the effects with the results")
         r = prune(t)
         if isinstance(r, TCon) and r.args and self.holds_fn(r.args[0], set()):
@@ -1815,13 +1856,17 @@ class Checker:
         outer = self.ctx
         purpose = outer.purpose if outer.purpose in ("test", "contract", "const", "parallel") else "lambda"
         effects = outer.effects
-        par_depth = getattr(self, "par_depth", None)
+        fixed = efn is not None and eprune(efn.eff).fixed
         if getattr(self, "pure_lambda", None) is e:
             purpose, effects = "parallel", set()
             self.pure_lambda = None
-            self.par_depth = len(self.scopes)
+        elif fixed:
+            # the lambda must fit a written function type: it may do exactly the effects that type declares
+            purpose, effects = "fntype", set(eprune(efn.eff).names)
         e.ptypes, e.ret_t = ptypes, ret
         self.ctx = Ctx(outer.name, ret, effects, purpose=purpose, sig_end=outer.sig_end)
+        if fixed:
+            self.ctx.fn_type = efn
         self.ctx.is_test = False
         if not hasattr(self, "lambda_bounds"):
             self.lambda_bounds = []
@@ -1844,9 +1889,9 @@ class Checker:
             self.expr(e.body, ret)
         self.pop()
         self.lambda_bounds.pop()
+        used = self.ctx.used
         self.ctx = outer
-        self.par_depth = par_depth
-        return TFn(ptypes, ret)
+        return TFn(ptypes, ret, flex(used))
 
     # ---- match -----------------------------------------------------------------
     def e_Match(self, e, exp):

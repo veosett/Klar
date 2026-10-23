@@ -4,10 +4,14 @@
 
 /// A static type. `Var` is an inference variable (bound in a `Subst`), `Param` a rigid generic parameter
 /// inside a generic function, `Any` the error-recovery type that unifies with everything, `Never` the type of
-/// `fail(...)`.
+/// `fail(...)`. `eff` of a function type is one of (see `Eff` in klar/types.py):
+/// `Con("uses", [Con(e), ...])` — exactly these effects (a written type);
+/// `Con("uses?", [Var(id), Con(e), ...])` — at least these, decided by unification (`id` is bound to the effects
+/// it grows to);
+/// `Con("uses*", [])` — a function parameter of a built-in: every call gets a fresh `uses?`.
 pub enum Type {
   Con(name: Str, args: List[Type]),
-  Fun(params: List[Type], ret: Type),
+  Fun(params: List[Type], ret: Type, eff: Type),
   Var(id: Int),
   Param(name: Str),
   Any,
@@ -37,6 +41,132 @@ pub fn map_of(k: Type, v: Type) -> Type {
   return Type.Con(name: "Map", args: [k, v])
 }
 
+/// Exactly the effects `names` (sorted, without duplicates).
+pub fn eff_fixed(names: List[Str]) -> Type {
+  return Type.Con(name: "uses", args: names.unique().sort().map(fn(n) => con(n)))
+}
+
+/// At least the effects `names`; `id` is a fresh variable.
+pub fn eff_flex(id: Int, names: List[Str]) -> Type {
+  return Type.Con(name: "uses?", args: [Type.Var(id: id)].concat(names.unique().sort().map(fn(n) => con(n))))
+}
+
+pub fn pure_eff() -> Type {
+  return Type.Con(name: "uses", args: [])
+}
+
+pub fn poly_eff() -> Type {
+  return Type.Con(name: "uses*", args: [])
+}
+
+/// The effects `eff` stands for now (following the variables of flexible ones).
+pub fn eff_root(s: Subst, eff: Type) -> Type {
+  var cur = eff
+  while true {
+    let next = match cur {
+      Type.Con(kind, args) => match kind == "uses?" {
+        true => match args.get(0) {
+          Some(Type.Var(id)) => s.get(id),
+          _ => None,
+        },
+        false => None,
+      },
+      _ => None,
+    }
+    match next {
+      Some(v) => {
+        cur = v
+      },
+      None => {
+        return cur
+      },
+    }
+  }
+  return cur
+}
+
+fn eff_kind(eff: Type) -> Str {
+  return match eff {
+    Type.Con(kind, _) => kind,
+    _ => "uses",
+  }
+}
+
+/// The effect names of `eff` (sorted).
+pub fn eff_list(s: Subst, eff: Type) -> List[Str] {
+  let root = eff_root(s, eff)
+  return match root {
+    Type.Con(kind, args) => args.drop(match kind == "uses?" {
+      true => 1,
+      false => 0,
+    }).flat_map(fn(a) => match a {
+      Type.Con(n, _) => [n],
+      _ => [],
+    }),
+    _ => [],
+  }
+}
+
+/// The effects of calling a value of type `t` (none for anything that is not a function).
+pub fn eff_names(s: Subst, t: Type) -> List[Str] {
+  return match prune(s, t) {
+    Type.Fun(_, _, eff) => eff_list(s, eff),
+    _ => [],
+  }
+}
+
+/// Whether `eff` is flexible (and not decided yet).
+pub fn eff_is_flex(s: Subst, eff: Type) -> Bool {
+  return eff_kind(eff_root(s, eff)) == "uses?"
+}
+
+pub fn eff_is_poly(eff: Type) -> Bool {
+  return eff_kind(eff) == "uses*"
+}
+
+fn subset(a: List[Str], b: List[Str]) -> Bool {
+  return a.all(fn(x) => b.contains(x))
+}
+
+fn eff_var(eff: Type) -> Int {
+  return match eff {
+    Type.Con(_, args) => match args.get(0) {
+      Some(Type.Var(id)) => id,
+      _ => -1,
+    },
+    _ => -1,
+  }
+}
+
+fn unify_eff(s: Subst, a: Type, b: Type) -> Option[Subst] {
+  let x = eff_root(s, a)
+  let y = eff_root(s, b)
+  if x == y {
+    return Some(s)
+  }
+  let lx = eff_list(s, x)
+  let ly = eff_list(s, y)
+  let fx = eff_kind(x) == "uses?"
+  let fy = eff_kind(y) == "uses?"
+  if not fx and not fy {
+    return match lx == ly {
+      true => Some(s),
+      false => None,
+    }
+  }
+  if not fx {
+    return unify_eff(s: s, a: y, b: x)
+  }
+  // x is flexible: it may grow up to y, or the smaller of two flexible ones takes the larger
+  if subset(lx, ly) {
+    return Some(s.set(eff_var(x), y))
+  }
+  if fy and subset(ly, lx) {
+    return Some(s.set(eff_var(y), x))
+  }
+  return None
+}
+
 /// Follows the bindings of a type variable to its current value.
 pub fn prune(s: Subst, t: Type) -> Type {
   var cur = t
@@ -61,7 +191,7 @@ fn occurs(s: Subst, id: Int, t: Type) -> Bool {
   return match prune(s, t) {
     Type.Var(other) => other == id,
     Type.Con(_, args) => args.any(fn(a) => occurs(s: s, id: id, t: a)),
-    Type.Fun(ps, ret) => ps.any(fn(p) => occurs(s: s, id: id, t: p)) or occurs(s: s, id: id, t: ret),
+    Type.Fun(ps, ret, _) => ps.any(fn(p) => occurs(s: s, id: id, t: p)) or occurs(s: s, id: id, t: ret),
     _ => false,
   }
 }
@@ -124,9 +254,12 @@ fn unify_rigid(s: Subst, x: Type, y: Type) -> Option[Subst] {
       },
       _ => None,
     },
-    Type.Fun(p1, r1) => match y {
-      Type.Fun(p2, r2) => match p1.len() == p2.len() {
-        true => unify_all(s: s, xs: p1.push(r1), ys: p2.push(r2)),
+    Type.Fun(p1, r1, e1) => match y {
+      Type.Fun(p2, r2, e2) => match p1.len() == p2.len() {
+        true => match unify_all(s: s, xs: p1.push(r1), ys: p2.push(r2)) {
+          Some(s2) => unify_eff(s: s2, a: e1, b: e2),
+          None => None,
+        },
         false => None,
       },
       _ => None,
@@ -147,8 +280,8 @@ pub fn subst(s: Subst, t: Type, mapping: Map[Str, Type]) -> Type {
   return match prune(s, t) {
     Type.Param(name) => mapping.get(name).unwrap_or(Type.Param(name: name)),
     Type.Con(name, args) => Type.Con(name: name, args: args.map(fn(a) => subst(s: s, t: a, mapping: mapping))),
-    Type.Fun(ps, ret) => Type.Fun(params: ps.map(fn(p) => subst(s: s, t: p, mapping: mapping)),
-      ret: subst(s: s, t: ret, mapping: mapping)),
+    Type.Fun(ps, ret, eff) => Type.Fun(params: ps.map(fn(p) => subst(s: s, t: p, mapping: mapping)),
+      ret: subst(s: s, t: ret, mapping: mapping), eff: eff),
     other => other,
   }
 }
@@ -160,12 +293,25 @@ pub fn show(s: Subst, t: Type) -> Str {
       true => name,
       false => name + "[" + args.map(fn(a) => show(s, a)).join(", ") + "]",
     },
-    Type.Fun(ps, ret) => "fn(" + ps.map(fn(p) => show(s, p)).join(", ") + ") -> " + show(s, ret),
+    Type.Fun(ps, ret, eff) => show_fn(s: s, ps: ps, ret: ret, eff: eff),
     Type.Var(_) => "_",
     Type.Param(name) => name,
     Type.Any => "?",
     Type.Never => "Never",
   }
+}
+
+fn show_fn(s: Subst, ps: List[Type], ret: Type, eff: Type) -> Str {
+  let names = eff_list(s, eff)
+  let start = "fn(" + ps.map(fn(p) => show(s, p)).join(", ") + ") -> "
+  if names.is_empty() {
+    return start + show(s, ret)
+  }
+  let r = match prune(s, ret) {
+    Type.Fun(_, _, _) => "(" + show(s, ret) + ")",
+    _ => show(s, ret),
+  }
+  return start + r + " uses " + names.join(", ")
 }
 
 /// The name of a constructed type (`List` for `List[Int]`), after following variables.
@@ -196,7 +342,8 @@ pub fn args_of(s: Subst, t: Type) -> List[Type] {
 pub fn resolved(s: Subst, t: Type) -> Type {
   return match prune(s, t) {
     Type.Con(name, args) => Type.Con(name: name, args: args.map(fn(a) => resolved(s, a))),
-    Type.Fun(ps, ret) => Type.Fun(params: ps.map(fn(p) => resolved(s, p)), ret: resolved(s, ret)),
+    Type.Fun(ps, ret, eff) => Type.Fun(params: ps.map(fn(p) => resolved(s, p)), ret: resolved(s, ret),
+      eff: eff_fixed(eff_list(s, eff))),
     other => other,
   }
 }
@@ -208,7 +355,21 @@ test "unify binds variables and fails without side effects" {
   assert show(s2, a) == "Int"
   assert unify(s: s2, a: a, b: con("Str")) == None
   assert unify(s: s, a: Type.Var(id: 1), b: list_of(Type.Var(id: 1))) == None
-  assert show(s, Type.Fun(params: [a, con("Bool")], ret: Type.Var(id: 2))) == "fn(_, Bool) -> _"
+  assert show(s, Type.Fun(params: [a, con("Bool")], ret: Type.Var(id: 2), eff: pure_eff())) == "fn(_, Bool) -> _"
   let m = Map { "T": con("Int") }
   assert show(s, subst(s: s, t: map_of(Type.Param(name: "T"), Type.Param(name: "U")), mapping: m)) == "Map[Int, U]"
+}
+
+test "effects of function types" {
+  let s: Subst = Map {}
+  let pure = Type.Fun(params: [], ret: con("Unit"), eff: pure_eff())
+  let io = Type.Fun(params: [], ret: con("Unit"), eff: eff_fixed(["io"]))
+  let lam = Type.Fun(params: [], ret: con("Unit"), eff: eff_flex(id: 7, names: ["io"]))
+  assert show(s, io) == "fn() -> Unit uses io"
+  assert unify(s: s, a: pure, b: io) == None
+  assert unify(s: s, a: lam, b: pure) == None
+  let s2 = unify(s: s, a: lam, b: Type.Fun(params: [], ret: con("Unit"), eff: eff_fixed(["fs", "io"]))).unwrap_or(s)
+  assert eff_names(s2, lam) == ["fs", "io"]
+  let wide = Type.Fun(params: [], ret: io, eff: eff_fixed(["time"]))
+  assert show(s, wide) == "fn() -> (fn() -> Unit uses io) uses time"
 }

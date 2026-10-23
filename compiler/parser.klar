@@ -26,7 +26,11 @@ pub type ParseError {
 /// A parsed node and the position of the next token.
 type Got[T] { value: T, pos: Int }
 
-type Ps { toks: List[Token], no_struct: Bool }
+/// `depth`: how deeply the expression or type being parsed is nested (at most `MAX_NESTING`).
+type Ps { toks: List[Token], no_struct: Bool, depth: Int }
+
+/// The deepest nesting of expressions and types (E0003 beyond), as in klar/parser.py.
+const MAX_NESTING: Int = 200
 
 // ---- tokens --------------------------------------------------------------------------------------------
 
@@ -164,6 +168,23 @@ fn is_upper_start(s: Str) -> Bool {
 // ---- types ----------------------------------------------------------------------------------------------
 
 fn parse_type(p: Ps, i: Int) -> Result[Got[TypeExpr], ParseError] {
+  return parse_type_in(p: p, i: i, decl_ret: false)
+}
+
+/// The effects a function may declare (`uses io, fs`).
+const EFFECT_NAMES: List[Str] = ["io", "time", "rand", "fs", "net", "proc"]
+
+/// A type. `decl_ret`: the return type of a declaration, where `uses` after a function type belongs to the
+/// declaration (write `-> (fn() -> Unit uses io)` for a function that returns an effectful function).
+fn parse_type_in(p: Ps, i: Int, decl_ret: Bool) -> Result[Got[TypeExpr], ParseError] {
+  if p.depth >= MAX_NESTING {
+    return bad_h(t: tk(p, i), message: "the code is nested too deeply to parse",
+      hint: "split deeply nested expressions or types into named parts")
+  }
+  return parse_type_at(p: p with { depth: p.depth + 1 }, i: i, decl_ret: decl_ret)
+}
+
+fn parse_type_at(p: Ps, i: Int, decl_ret: Bool) -> Result[Got[TypeExpr], ParseError] {
   let start = span_of(tk(p, i))
   if is_kw(tk(p, i), "fn") {
     var j = expect_op(p: p, i: next(p, i), v: "(", ctx: " in function type")?
@@ -179,9 +200,32 @@ fn parse_type(p: Ps, i: Int) -> Result[Got[TypeExpr], ParseError] {
     }
     j = expect_op(p: p, i: j, v: ")", ctx: "")?
     j = expect_op_h(p: p, i: j, v: "->", ctx: " in function type", hint: "function types look like `fn(Int, Str) -> Bool`")?
-    let ret = parse_type(p, j)?
-    return Ok(Got { value: TypeExpr.FnType(span: span_from(p: p, start: start, i: ret.pos), params: ps, ret: ret.value),
-      pos: ret.pos })
+    let ret = parse_type_in(p: p, i: j, decl_ret: decl_ret)?
+    j = ret.pos
+    var effects: List[Str] = []
+    if not decl_ret and is_kw(tk(p, j), "uses") {
+      j = next(p, j)
+      while true {
+        let e = expect_ident(p: p, i: j, what: "effect name (io, time, rand, fs, net, proc)")?
+        effects = effects.push(e.value.text)
+        j = e.pos
+        // `f: fn() -> Unit uses io, fs: Str`: a comma continues the effects only before an effect name that does
+        // not start the next parameter or field
+        let after = tk(p, j + 1)
+        if not (is_op(tk(p, j), ",") and is_kind(after, TokKind.Ident) and EFFECT_NAMES.contains(after.text) and
+            not is_op(tk(p, j + 2), ":")) {
+            break
+          }
+        j = next(p, j)
+      }
+    }
+    return Ok(Got { value: TypeExpr.FnType(span: span_from(p: p, start: start, i: j), params: ps, ret: ret.value,
+      effects: effects), pos: j })
+  }
+  if is_op(tk(p, i), "(") and is_kw(tk(p, i + 1), "fn") {
+    let t = parse_type(p, next(p, i))?
+    let j = expect_op(p: p, i: t.pos, v: ")", ctx: " to close the parenthesized function type")?
+    return Ok(Got { value: t.value, pos: j })
   }
   if is_op(tk(p, i), "(") {
     return bad_h(t: tk(p, i), message: "tuples are not supported in Klar 0.1",
@@ -302,7 +346,15 @@ fn parse_params(p: Ps, i: Int, require_types: Bool, is_method: Bool) -> Result[G
 // ---- expressions ------------------------------------------------------------------------------------------
 
 fn parse_expr(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
-  return parse_or(p, i)
+  if p.depth >= MAX_NESTING {
+    return too_deep(p, i)
+  }
+  return parse_or(p with { depth: p.depth + 1 }, i)
+}
+
+fn too_deep(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  return bad_h(t: tk(p, i), message: "the code is nested too deeply to parse",
+    hint: "split deeply nested expressions or types into named parts")
 }
 
 /// An expression where `Name { ... }` is not a record literal (`if`, `while`, `for`, `match` subjects).
@@ -598,7 +650,7 @@ fn string_node(t: Token) -> Result[Expr, ParseError] {
             return Err(from_lex(e))
           },
         }
-        let q = Ps { toks: toks, no_struct: false }
+        let q = Ps { toks: toks, no_struct: false, depth: 0 }
         let e = parse_expr(q, 0)?
         let k = skip_nl(q, e.pos)
         if not is_kind(tk(q, k), TokKind.Eof) {
@@ -977,7 +1029,7 @@ fn parse_fn(p: Ps, i: Int, doc: Option[Str], with_body: Bool, is_method: Bool) -
   j = expect_op(p: p, i: params.pos, v: ")", ctx: " to close the parameter list")?
   var ret: Option[TypeExpr] = None
   if is_op(tk(p, j), "->") {
-    let t = parse_type(p, next(p, j))?
+    let t = parse_type_in(p: p, i: next(p, j), decl_ret: true)?
     ret = Some(t.value)
     j = t.pos
   } else if is_op(tk(p, j), ":") {
@@ -1103,7 +1155,7 @@ fn parse_type_decl(p: Ps, i: Int, doc: Option[Str]) -> TypeDeclResult {
 fn type_expr_span(te: TypeExpr) -> Span {
   return match te {
     TypeExpr.Named(s, _, _) => s,
-    TypeExpr.FnType(s, _, _) => s,
+    TypeExpr.FnType(s, _, _, _) => s,
   }
 }
 
@@ -1292,7 +1344,7 @@ fn doctest(docs: List[Token], name: Str) -> Result[Option[Decl], ParseError] {
             return Err(from_lex(e))
           },
         }
-        let q = Ps { toks: toks, no_struct: false }
+        let q = Ps { toks: toks, no_struct: false, depth: 0 }
         let s = parse_stmt(q, 0)?
         let k = skip_nl(q, s.pos)
         if not is_kind(tk(q, k), TokKind.Eof) {
@@ -1492,7 +1544,7 @@ pub fn parse_program(src: Str) -> Result[Program, ParseError] {
       return Err(from_lex(e))
     },
   }
-  let p = Ps { toks: toks, no_struct: false }
+  let p = Ps { toks: toks, no_struct: false, depth: 0 }
   let start = span_of(tk(p, 0))
   var j = 0
   var module_name: Option[Str] = None
@@ -1634,6 +1686,6 @@ pub fn parse_signature(src: Str) -> Result[FnDecl, ParseError] {
       return Err(from_lex(e))
     },
   }
-  let f = parse_fn(p: Ps { toks: toks, no_struct: false }, i: 0, doc: None, with_body: false, is_method: false)?
+  let f = parse_fn(p: Ps { toks: toks, no_struct: false, depth: 0 }, i: 0, doc: None, with_body: false, is_method: false)?
   return Ok(f.value)
 }

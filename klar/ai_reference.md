@@ -163,9 +163,13 @@ A function without `uses` is pure. Calling something with an effect requires dec
 inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `run_capture(args, dir, input)` → `Result[List[Str], Str]`
 (`[exit code, stdout, stderr]`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
 pure. Tests may use only `io`.
-Lambdas inherit the effects of the enclosing function.
+Function types carry effects: `fn(Int) -> Unit uses io` may print when called; `fn(Int) -> Int` is pure, so
+passing a function with `uses` there is E0202 (add `uses` to the parameter type). Calling a function value needs
+its effects. A lambda may use the effects of the function type it is passed as, else those of the enclosing
+function. `map`/`filter`/`fold`/... need the effects of the function given to them. Returning an effectful
+function: `fn make() -> (fn(Str) -> Unit uses io)`.
 Parallel: `xs.par_map(f)` = `xs.map(f)` computed on all CPU cores. `f` must be a lambda without effects or a
-function name without `uses` (E0401/E0406; not a variable of fn type); results must not contain functions. Do the
+function value whose type has no `uses` (E0401/E0406); results must not contain functions. Do the
 effects (print, files) afterwards with the returned list.
 
 ## Debugging helpers

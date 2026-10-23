@@ -3498,3 +3498,103 @@ fn main() uses io {
 fn main() uses io {
   print(٣)
 }
+=== fn-effects errors
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  return f(x)
+}
+
+fn noisy(x: Int) -> Int uses io {
+  print("{x}")
+  return x
+}
+
+pub fn p1() -> Int uses io {
+  return apply(noisy, 1)
+}
+
+pub fn p2() -> Int uses io {
+  return apply(fn(x) => noisy(x), 1)
+}
+
+pub fn p3() -> List[Int] {
+  return [1].map(noisy)
+}
+
+pub fn p4(f: fn(Int) -> Int uses io) -> List[Int] uses io {
+  return [1].par_map(f)
+}
+
+pub fn p5() {
+  let h = fn(x: Int) => noisy(x)
+}
+
+pub fn p6(f: fn(Int) -> Int uses iox) -> Int {
+  return 1
+}
+
+pub fn p7() uses io {
+  var g = fn(x: Int) => x
+  g = fn(x: Int) => noisy(x)
+}
+=== fn-effects ok
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  return f(x)
+}
+
+fn each(xs: List[Int], f: fn(Int) -> Unit uses io, fs) uses io, fs {
+  for x in xs {
+    f(x)
+  }
+}
+
+fn show(x: Int) uses io {
+  print(x)
+}
+
+fn make(p: Str) -> (fn(Str) -> Unit uses io) {
+  return fn(m) => print("{p}{m}")
+}
+
+fn main() uses io, fs {
+  each([1, 2], show)
+  each([3], fn(x) => print(x * 10))
+  let f = make(">")
+  f("hi")
+  let g = fn(x: Int) => x + 1
+  print(apply(g, 1))
+  print([1, 2].par_map(g))
+  print([1].map(fn(x) => apply(fn(y) => y * x, x)))
+}
+=== fn-effects par_map
+fn main() uses io {
+ let g = fn(n: Int) -> Int {
+ print(n)
+ return n
+ }
+ print([1].par_map(fn(x) => g(x)))
+ print([1].par_map(g))
+ print([1].par_map(fn(x) => [x].map(g).len()))
+}
+=== fn-effects types
+type Job {
+ run: fn() -> Unit uses io
+}
+fn go(j: Job) {
+ j.run()
+}
+fn pick(c: Bool, a: fn() -> Unit uses io, b: fn() -> Unit) -> fn() -> Unit {
+ return match c {
+  true => a,
+  false => b,
+ }
+}
+fn later() -> fn() -> fn() -> Unit uses io {
+ return fn() => fn() => print(1)
+}
+=== nesting limit (E0003)
+fn main() uses io {
+  print((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+}
+=== nesting limit in types (E0003)
+fn f(x: List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[List[Int]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]) {
+}

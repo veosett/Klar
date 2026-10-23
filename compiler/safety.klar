@@ -1299,7 +1299,7 @@ fn check_builtin(sf: Sf, e: Expr, facts: Facts) -> Sf {
         _ => None,
       },
       false => match args.get(0).map(fn(a) => type_of(sf, a)) {
-        Some(Some(Type.Fun(_, ret))) => Some(ret),
+        Some(Some(Type.Fun(_, ret, _))) => Some(ret),
         _ => None,
       },
     }

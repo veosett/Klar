@@ -164,7 +164,7 @@ fn zonk(t: Type, env: Map[Str, Type]) -> Type {
       None => fail("native: unbound type parameter {name}"),
     },
     Type.Con(name, args) => Type.Con(name: name, args: args.map(fn(a) => zonk(a, env))),
-    Type.Fun(ps, ret) => Type.Fun(params: ps.map(fn(p) => zonk(p, env)), ret: zonk(ret, env)),
+    Type.Fun(ps, ret, eff) => Type.Fun(params: ps.map(fn(p) => zonk(p, env)), ret: zonk(ret, env), eff: eff),
     _ => unit_t(),
   }
 }
@@ -194,7 +194,7 @@ fn rck(t: Type) -> Str {
       "Word" => "",
       _ => "obj",
     },
-    Type.Fun(_, _) => "obj",
+    Type.Fun(_, _, _) => "obj",
     _ => "",
   }
 }
@@ -357,7 +357,7 @@ fn td(w0: Lw, t: Type) -> LR[Str] {
     _ => -1,
   }
   match t {
-    Type.Fun(_, _) => {
+    Type.Fun(_, _, _) => {
       let f = str_word(w, "fn")
       return lr(words(w: f.w, name: name, ws: [W.N(v: K_FN), f.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)]), name)
     },
@@ -2029,14 +2029,14 @@ fn fn_value(w0: Lw, e: Expr, info: CallInfo) -> LR[V] {
   let key = "fnval#" + target.v
   if not w.static_objs.has(key) {
     let nps = match ft {
-      Type.Fun(ps, _) => ps.len(),
+      Type.Fun(ps, _, _) => ps.len(),
       _ => 0,
     }
     var tramp = KFn { name: target.v + "__tramp", klar_name: target.v + "__tramp", nparams: 1 + nps, nregs: 1 + nps, code: [],
       labels: 0 }
     var code: List[Ins] = []
     let fps = match ft {
-      Type.Fun(ps, _) => ps,
+      Type.Fun(ps, _, _) => ps,
       _ => [],
     }
     for i in w.owned.get("{sig.mod_name}#{sig.decl}").unwrap_or([]).sort() {
@@ -3044,11 +3044,11 @@ fn x_lambda(w0: Lw, e: Expr) -> LR[V] {
 fn lambda_fn(w0: Lw, name: Str, params: List[Param], body: Body, ft: Type, captured: Map[Str, Pair[Int, Type]]) -> Lw {
   let outer = w0
   let fps = match ft {
-    Type.Fun(ps, _) => ps,
+    Type.Fun(ps, _, _) => ps,
     _ => [],
   }
   let ret = match ft {
-    Type.Fun(_, rt) => rt,
+    Type.Fun(_, rt, _) => rt,
     _ => unit_t(),
   }
   var w = begin_fn(w0, KFn { name: name, klar_name: "<lambda>", nparams: 1 + params.len(), nregs: 1 + params.len(), code: [],

@@ -1,0 +1,50 @@
+// Effects in function types: a function value says what calling it may do.
+
+/// Applies a pure function: `f` cannot print, read files or run programs.
+fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+  return f(f(x))
+}
+
+/// Calls `report` for every item; the type of `report` allows `io`, so `each_report` needs `io` too.
+fn each_report(items: List[Int], report: fn(Int) -> Unit uses io) uses io {
+  for x in items {
+    report(x)
+  }
+}
+
+fn show_item(x: Int) uses io {
+  print("item {x}")
+}
+
+fn double(x: Int) -> Int {
+  return x * 2
+}
+
+/// Returns a function that prints: the effect belongs to the returned function, not to `make_logger`.
+fn make_logger(prefix: Str) -> (fn(Str) -> Unit uses io) {
+  return fn(msg) => print("{prefix}: {msg}")
+}
+
+fn main() uses io {
+  print("{twice(double, 3)}")
+  print("{twice(fn(x) => x + 1, 3)}")
+  each_report([1, 2], show_item)
+  each_report([3], fn(x) => print("lambda {x}"))
+  let log = make_logger("app")
+  log("started")
+  // built-ins like `map` do what the function passed to them does
+  let lens = ["a", "bb"].map(fn(s) => s.len())
+  print("{lens}")
+  print("{[1, 2, 3].par_map(double)}")
+}
+
+test "pure function values" {
+  assert twice(double, 1) == 4
+  assert twice(fn(x) => x - 1, 0) == -2
+}
+
+test "effectful function values in tests" {
+  let log = make_logger("test")
+  log("io is allowed in tests")
+  each_report([1], show_item)
+}

@@ -83,7 +83,7 @@ def cli(*argv):
 
 KLAR_TEST_FILES = [
     os.path.join(ROOT, "examples", f) for f in ("hello.klar", "bank.klar", "collections.klar", "shapes.klar",
-                                                  "features.klar")
+                                                  "features.klar", "effects.klar")
 ] + [os.path.join(ROOT, "klar", "std", f) for f in sorted(os.listdir(os.path.join(ROOT, "klar", "std")))
      if f.endswith(".klar")] + [os.path.join(ROOT, "tests", "stdlib", "builtins_test.klar")]
 
@@ -98,7 +98,7 @@ class KlarTestFiles(unittest.TestCase):
                 self.assertEqual(code, 0, out + err)
 
     def test_examples_run(self):
-        for name in ("hello", "bank", "collections", "shapes", "features"):
+        for name in ("hello", "bank", "collections", "shapes", "features", "effects"):
             with self.subTest(example=name):
                 code, out, err = cli("run", "-q", os.path.join(ROOT, "examples", f"{name}.klar"))
                 self.assertEqual(code, 0, out + err)
@@ -539,21 +539,23 @@ class Parallelism(unittest.TestCase):
                          ["E0401"])
         self.assertEqual(errors("fn p(i: Int) -> Int uses io {\n print(i)\n return i\n}\n"
                                 "fn main() uses io { print([1].par_map(p)) }"), ["E0406"])
-        self.assertEqual(errors("fn main() uses io {\n let f = fn(i: Int) => i\n print([1].par_map(f))\n}"),
+        # a function value is pure when its type says so
+        self.assertEqual(errors("fn main() uses io {\n let f = fn(i: Int) => i\n print([1].par_map(f))\n}"), [])
+        self.assertEqual(errors("fn run(f: fn(Int) -> Int uses io) -> List[Int] uses io {\n return [1].par_map(f)\n}"),
                          ["E0406"])
         self.assertEqual(errors("fn main() uses io { print([1].par_map(fn(i) => fn(k: Int) => k + i).len()) }"),
                          ["E0406"])
 
-    def test_par_map_rejects_function_values_from_outside(self):
-        """Effects hide in function values (their type carries none): inside par_map's lambda only functions written
-        there or named pure functions may be called."""
+    def test_par_map_sees_the_effects_of_function_values(self):
+        """The type of a function value carries its effects, so par_map's lambda may call any function value whose
+        type is pure — and none that does effects."""
         g = "fn main() uses io {\n let g = fn(n: Int) -> Int {\n print(n)\n return n\n }\n"
         apply = "fn apply(f: fn(Int) -> Int, x: Int) -> Int {\n return f(x)\n}\n"
-        self.assertEqual(errors(g + " print([1].par_map(fn(x) => g(x)))\n}"), ["E0406"])
-        self.assertEqual(errors(apply + g + " print([1].par_map(fn(x) => apply(g, x)))\n}"), ["E0406"])
+        self.assertEqual(errors(g + " print([1].par_map(fn(x) => g(x)))\n}"), ["E0401"])
+        self.assertEqual(errors(apply + g + " print([1].par_map(fn(x) => apply(g, x)))\n}"), ["E0202"])
+        self.assertEqual(errors(g + " print([1].par_map(g))\n}"), ["E0406"])
         self.assertEqual(errors("fn tw(x: Int) -> Int {\n return x * 2\n}\nfn main() uses io {\n"
-                                " print([tw].par_map(fn(f) => f(1)))\n}"), ["E0406"])
-        # functions written inside the lambda, named pure functions and captured plain values are fine
+                                " print([tw].par_map(fn(f) => f(1)))\n}"), [])
         self.assertEqual(errors(apply + "fn tw(x: Int) -> Int {\n return x * 2\n}\nfn main() uses io {\n let k = 3\n"
                                 " print([1].par_map(fn(x) => apply(tw, x) + apply(fn(y) => y + k, x)))\n}"), [])
 
@@ -576,6 +578,61 @@ class Parallelism(unittest.TestCase):
         self.assertEqual((got.stdout, got.stderr, got.returncode), (want.stdout, want.stderr, want.returncode))
         self.assertIn("bad 3", got.stderr)
         self.assertEqual(got.stdout, "[0, 1, 4]\n")
+
+
+class FunctionEffects(unittest.TestCase):
+    """Function types carry effects (`fn(Int) -> Unit uses io`): a function without `uses` is pure, also when it
+    calls function values."""
+    NOISY = "fn noisy(x: Int) -> Int uses io {\n print(x)\n return x\n}\n"
+    APPLY = "fn apply(f: fn(Int) -> Int, x: Int) -> Int {\n return f(x)\n}\n"
+
+    def test_calling_a_function_value_needs_its_effects(self):
+        self.assertEqual(errors("fn f(g: fn(Int) -> Unit uses io) {\n g(1)\n}"), ["E0401"])
+        self.assertEqual(errors("fn f(g: fn(Int) -> Unit uses io) uses io {\n g(1)\n}"), [])
+        self.assertEqual(errors("fn f(g: fn() -> Int uses time, rand) -> Int uses time {\n return g()\n}"),
+                         ["E0401"])
+
+    def test_effectful_functions_do_not_fit_pure_types(self):
+        self.assertEqual(errors(self.NOISY + self.APPLY + "fn main() uses io {\n print(apply(noisy, 1))\n}"),
+                         ["E0202"])
+        self.assertEqual(errors(self.NOISY + self.APPLY + "fn main() uses io {\n print(apply(fn(x) => noisy(x), 1))\n}"),
+                         ["E0401"])
+        self.assertEqual(errors(self.NOISY + "fn main() uses io {\n var g = fn(x: Int) => x\n g = noisy\n print(g(1))\n}"),
+                         ["E0202"])
+        d = [x for x in diags(self.NOISY + self.APPLY + "fn main() uses io {\n print(apply(noisy, 1))\n}")
+             if x.code == "E0202"][0]
+        self.assertIn("fn(Int) -> Int uses io", d.message)
+        self.assertIn("add `uses io` to the function type", d.hint)
+
+    def test_pure_and_smaller_effects_fit_larger_types(self):
+        src = ("fn each(xs: List[Int], f: fn(Int) -> Unit uses io, fs) uses io, fs {\n for x in xs {\n f(x)\n }\n}\n"
+               "fn show(x: Int) uses io {\n print(x)\n}\n"
+               "fn main() uses io, fs {\n each([1, 2], show)\n each([3], fn(x) => print(x * 10))\n"
+               " each([4], fn(_x) {\n })\n}")
+        self.assertEqual(run(src), "1\n2\n30\n")
+
+    def test_lambdas_take_the_effects_of_the_written_type(self):
+        src = ("fn make(p: Str) -> (fn(Str) -> Unit uses io) {\n return fn(m) => print(\"{p}{m}\")\n}\n"
+               "fn main() uses io {\n let f = make(\">\")\n f(\"hi\")\n}")
+        self.assertEqual(run(src), ">hi\n")
+        self.assertEqual(errors("fn make() -> fn() -> Unit {\n return fn() => print(1)\n}"), ["E0401"])
+
+    def test_builtins_do_what_their_function_does(self):
+        self.assertEqual(errors(self.NOISY + "fn f() -> List[Int] {\n return [1].map(noisy)\n}"), ["E0401"])
+        self.assertEqual(errors(self.NOISY + "fn f() -> List[Int] uses io {\n return [1].map(noisy)\n}"), [])
+        self.assertEqual(errors("fn f(g: fn(Int) -> Bool uses rand) -> List[Int] {\n return [1].filter(g)\n}"),
+                         ["E0401"])
+
+    def test_unknown_effect_in_a_function_type(self):
+        self.assertEqual(errors("fn f(g: fn() -> Unit uses iox) {\n}"), ["E0403"])
+
+    def test_function_type_syntax(self):
+        # a comma after the effects starts the next parameter when a `name:` follows
+        self.assertEqual(errors("fn f(g: fn() -> Unit uses io, fs: Int) uses io {\n g()\n print(fs)\n}"), [])
+        self.assertEqual(errors("type Job {\n run: fn() -> Unit uses io, fs\n}\n"
+                                "fn go(j: Job) uses io, fs {\n j.run()\n}"), [])
+        self.assertEqual(errors("type Job {\n run: fn() -> Unit uses io\n}\nfn go(j: Job) {\n j.run()\n}"),
+                         ["E0401"])
 
 
 class CompileTimeSafety(unittest.TestCase):
@@ -1702,8 +1759,12 @@ class RuntimeLimits(unittest.TestCase):
     def test_deeply_nested_source_is_a_diagnostic(self):
         src = "fn main() uses io {\n  print(" + "(" * 40000 + "1" + ")" * 40000 + ")\n}\n"
         self.assertEqual(errors(src), ["E0003"])
-        src = "fn main() uses io {\n  print(" + "(" * 1000 + "1" + ")" * 1000 + ")\n}\n"
+        src = "fn main() uses io {\n  print(" + "(" * 150 + "1" + ")" * 150 + ")\n}\n"
         self.assertEqual(errors(src), [])
+        # the limit (200 levels) keeps every later pass far from the stack limits, also on Windows
+        src = "fn main() uses io {\n  print(" + "[" * 250 + "1" + "]" * 250 + ")\n}\n"
+        self.assertEqual(errors(src), ["E0003"])
+        self.assertEqual(errors("fn f(x: " + "List[" * 300 + "Int" + "]" * 300 + ") {\n}"), ["E0003"])
 
 
 class LlmBenchmark(unittest.TestCase):

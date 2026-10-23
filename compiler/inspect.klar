@@ -112,7 +112,7 @@ fn w_type(st0: RS, t: TypeExpr) -> RS {
       }
       return st
     },
-    TypeExpr.FnType(_, params, ret) => {
+    TypeExpr.FnType(_, params, ret, _) => {
       var st = w_type(st0, ret)
       for p in params.reverse() {
         st = w_type(st, p)
@@ -497,7 +497,7 @@ fn cut(line: Str, a: Int, b: Int) -> Str {
 fn type_expr_span(t: TypeExpr) -> Span {
   return match t {
     TypeExpr.Named(s, _, _) => s,
-    TypeExpr.FnType(s, _, _) => s,
+    TypeExpr.FnType(s, _, _, _) => s,
   }
 }
 

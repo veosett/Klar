@@ -29,6 +29,7 @@ class TypeName(Node):
 class FnTypeExpr(Node):
     params: list
     ret: Any
+    effects: list = field(default_factory=list)   # `fn(Int) -> Unit uses io`
 
 
 # ---- declarations ---------------------------------------------------------

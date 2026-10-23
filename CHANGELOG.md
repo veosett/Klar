@@ -26,9 +26,18 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   `git.exe` in an untrusted project would have run); the runtime now searches `PATH` itself and passes the full path.
 - The language servers stopped (or crashed) on a malformed message; it is skipped now.
 - The interpreter crashed with Python errors on `Float.to_int()` of infinity or NaN (now R0009, like native code) and
-  on source nested thousands of brackets deep (now E0003; normal nesting up to thousands of levels is accepted).
+  on source nested thousands of brackets deep: expressions and types nested more than 200 levels are E0003 in
+  `klar` and `klarc` (the Python parser also runs in a thread with a large stack: on Windows with Python 3.10 the
+  test crashed the process).
 
 ### Added
+- **Effects in function types**: `fn(Int) -> Unit uses io`. Calling a function value needs the effects of its type,
+  a named function or a lambda passed as a value carries its effects, and a function with fewer effects fits where
+  more are allowed. Built-ins that take a function (`map`, `filter`, `fold`, ...) need the effects of that function.
+  A function without `uses` is now pure also when it calls function values, and `par_map` accepts any function value
+  whose type is pure (the E0406 rule about function values from outside its lambda is gone). A function that returns
+  an effectful function writes the return type in parentheses: `-> (fn(Str) -> Unit uses io)`. Example:
+  `examples/effects.klar`.
 - `docs/ROADMAP.md`: the plan after 1.0 (phases, acceptance criteria, status).
 - `bench/ai/llm_bench.py`: an LLM-in-the-loop benchmark — 24 tasks with hidden tests generated for Klar
   (`klar test`), Python and TypeScript (`tsc --strict`); the model gets the statement (for Klar also `klar spec`),

@@ -10,7 +10,7 @@ pub fn merge(a: Span, b: Span) -> Span {
 
 pub enum TypeExpr {
   Named(span: Span, name: Str, args: List[TypeExpr]),
-  FnType(span: Span, params: List[TypeExpr], ret: TypeExpr),
+  FnType(span: Span, params: List[TypeExpr], ret: TypeExpr, effects: List[Str]),
 }
 
 pub type Param { span: Span, name: Str, ty: Option[TypeExpr] }

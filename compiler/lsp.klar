@@ -311,7 +311,7 @@ fn w_type(acc: List[LspNode], t: TypeExpr) -> List[LspNode] {
       }
       return out
     },
-    TypeExpr.FnType(_, params, ret) => {
+    TypeExpr.FnType(_, params, ret, _) => {
       var out = acc
       for p in params {
         out = w_type(out, p)

@@ -5,11 +5,19 @@ Precedence (low -> high):
 """
 import copy
 import sys
+import threading
 from typing import List
 
 from . import nodes as N
 from .diagnostics import Diagnostic, KlarSyntaxError, Span
 from .lexer import Token, tokenize
+
+# the deepest nesting of expressions and types the parser accepts (E0003 beyond); the passes after the parser
+# recurse over the tree, so this keeps them far from the stack limits on every system
+MAX_NESTING = 200
+
+# the effects a function may declare (`uses io, fs`)
+EFFECT_NAMES = ("io", "time", "rand", "fs", "net", "proc")
 
 CMP_OPS = {"==", "!=", "<", ">", "<=", ">="}
 
@@ -282,7 +290,7 @@ class Parser:
         self.expect_op(")", " to close the parameter list")
         ret = None
         if self.accept_op("->"):
-            ret = self.parse_type()
+            ret = self.parse_type(decl_ret=True)
         elif self.at_op(":"):
             self.fail("return types are written with `->`", hint="write `fn f(x: Int) -> Int`")
         effects = []
@@ -347,7 +355,19 @@ class Parser:
                 break
         return params
 
-    def parse_type(self):
+    def parse_type(self, decl_ret=False):
+        """A type. `decl_ret`: the return type of a declaration, where `uses` after a function type belongs to the
+        declaration (write `-> (fn() -> Unit uses io)` for a function that returns an effectful function)."""
+        self.depth = getattr(self, "depth", 0) + 1
+        try:
+            if self.depth > MAX_NESTING:
+                self.fail("the code is nested too deeply to parse", tok=self.cur,
+                          hint="split deeply nested expressions or types into named parts")
+            return self.parse_type_at(decl_ret)
+        finally:
+            self.depth -= 1
+
+    def parse_type_at(self, decl_ret):
         start = self.cur.span
         if self.accept_kw("fn"):
             self.expect_op("(", " in function type")
@@ -358,8 +378,23 @@ class Parser:
                     break
             self.expect_op(")")
             self.expect_op("->", " in function type", hint="function types look like `fn(Int, Str) -> Bool`")
-            ret = self.parse_type()
-            return N.FnTypeExpr(span=self.span_from(start), params=ps, ret=ret)
+            ret = self.parse_type(decl_ret=decl_ret)
+            effects = []
+            if not decl_ret and self.accept_kw("uses"):
+                while True:
+                    effects.append(self.expect_ident("effect name (io, time, rand, fs, net, proc)").value)
+                    # `f: fn() -> Unit uses io, fs: Str`: a comma continues the effects only before an effect name
+                    # that does not start the next parameter or field
+                    if not (self.at_op(",") and self.peek().kind == "IDENT" and self.peek().value in EFFECT_NAMES
+                            and not (self.peek(2).kind == "OP" and self.peek(2).value == ":")):
+                        break
+                    self.advance()
+            return N.FnTypeExpr(span=self.span_from(start), params=ps, ret=ret, effects=effects)
+        if self.at_op("(") and self.peek().kind == "KW" and self.peek().value == "fn":
+            self.advance()
+            t = self.parse_type()
+            self.expect_op(")", " to close the parenthesized function type")
+            return t
         if self.at_op("("):
             self.fail("tuples are not supported in Klar 0.1", hint="define a record: `type Pair { a: Int, b: Int }`; for no value use `Unit`")
         tok = self.expect_ident("a type")
@@ -661,7 +696,16 @@ class Parser:
             self.no_struct = old
 
     def parse_expr(self):
-        return self.parse_or()
+        # an explicit limit: on Windows the C stack of the main thread (1 MB) overflows long before Python's
+        # recursion limit, which would kill the tool instead of reporting E0003
+        self.depth = getattr(self, "depth", 0) + 1
+        try:
+            if self.depth > MAX_NESTING:
+                self.fail("the code is nested too deeply to parse", tok=self.cur,
+                          hint="split deeply nested expressions or types into named parts")
+            return self.parse_or()
+        finally:
+            self.depth -= 1
 
     def parse_or(self):
         left = self.parse_and()
@@ -1018,16 +1062,47 @@ class Parser:
 
 def parse(src: str, file: str) -> N.Program:
     p = Parser(tokenize(src, file), file)
+
+    def run():
+        try:
+            return p.parse_program()
+        except RecursionError:
+            # (a crafted file of thousands of nested brackets would otherwise crash the tool)
+            p.fail("the code is nested too deeply to parse", tok=p.cur,
+                   hint="split deeply nested expressions or types into named parts")
+
     old = sys.getrecursionlimit()
-    sys.setrecursionlimit(max(old, 60000))      # deep but sane nesting (Python frames do not use the C stack)
+    sys.setrecursionlimit(max(old, 60000))
     try:
-        return p.parse_program()
-    except RecursionError:
-        # (a crafted file of thousands of nested brackets would otherwise crash the tool)
-        p.fail("the code is nested too deeply to parse", tok=p.cur,
-               hint="split deeply nested expressions or types into named parts")
+        return _with_big_stack(run)
     finally:
         sys.setrecursionlimit(old)
+
+
+def _with_big_stack(fn):
+    """Runs fn in a thread with a 256 MB stack: deep (but accepted) nesting needs more C stack than the main thread
+    has on Windows (1 MB), where Python before 3.11 uses the C stack for every call."""
+    out = {}
+
+    def target():
+        try:
+            out["value"] = fn()
+        except BaseException as ex:  # noqa: BLE001 (raised again in the calling thread)
+            out["error"] = ex
+
+    try:
+        old = threading.stack_size(256 * 1024 * 1024)
+    except (ValueError, RuntimeError):
+        return fn()
+    try:
+        th = threading.Thread(target=target)
+        th.start()
+        th.join()
+    finally:
+        threading.stack_size(old)
+    if "error" in out:
+        raise out["error"]
+    return out["value"]
 
 
 def parse_signature(sig: str) -> N.FnDecl:

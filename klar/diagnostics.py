@@ -177,11 +177,12 @@ CODES = {
     "E0302": ("invalid pattern", "The pattern does not fit the matched type, or the variant does not exist."),
     "W0303": ("unreachable match arm", "An earlier catch-all arm already matches everything."),
     # effects / values
-    "E0401": ("missing effect", "Functions must declare effects they use: `fn f() uses io { ... }`. Contracts are pure; tests may only use `io`."),
+    "E0401": ("missing effect", "Functions must declare effects they use: `fn f() uses io { ... }`, also those of the "
+              "function values they call (`f: fn(Int) -> Unit uses io`). Contracts are pure; tests may only use `io`."),
     "E0402": ("unhandled Result", "A `Result` may carry an error and must be handled with `?`, `match`, or discarded explicitly with `let _ = ...`."),
     "E0403": ("unknown effect", "Known effects: io, time, rand, fs, net, proc."),
     "E0406": ("par_map needs a pure function", "`xs.par_map(f)` runs `f` in worker processes: `f` must be a lambda "
-              "or a named function without effects, and its results must not contain functions."),
+              "without effects or a function whose type has no `uses`, and its results must not contain functions."),
     "E0405": ("discarded immutable update",
               "Values are immutable. Methods like `push`, `set`, `concat`, `with` return a NEW value; "
               "assign it: `xs = xs.push(1)` (requires `var xs`)."),
