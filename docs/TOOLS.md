@@ -6,7 +6,8 @@ Klar задуман так, что основной автор кода — яз
   встроенной функции, не создавая программу; исправлять ошибки по машинным подсказкам; видеть, что не покрыто тестами;
 * **человеку** нужно быстро понять, что делает программа, — в целом и углублённо по требованию.
 
-У всех команд есть `--json` (компактный однострочный JSON для агента), кроме `new`.
+`--json` (компактный однострочный JSON для агента) есть у всех команд, кроме `new`, `spec`, `explain`, `lsp`, `repl` и
+`ast` (он и так печатает JSON).
 
 ## Карта команд
 
@@ -28,7 +29,7 @@ Klar задуман так, что основной автор кода — яз
 | зависимости | `klar add имя --git URL --tag v1`, `klar fetch`, `klar update`, `klar deps`, `klar remove имя` | `klar.toml` + `klar.lock`; git-пакеты в `.klar/deps/` |
 | тесты | `klar test file.klar` | test, doc-тесты, property-тесты со сжатием контрпримера |
 | производительность | `klar profile file.klar` | время по функциям и горячие строки |
-| сборка | `klar build file.klar [--target windows\|linux-arm64]` | один исполняемый файл без зависимостей |
+| сборка | `klar build file.klar [--target windows\|linux-arm64\|macos]` (macos — экспериментально) | один исполняемый файл без зависимостей |
 | справка по языку | `klar spec`, `klar explain E0701` | полный справочник (~2 тыс. токенов), объяснение кода ошибки |
 | попробовать в диалоге | `klar repl` | интерактивная сессия: выражения, переменные, функции, `:type`, `:doc`, `:load` |
 | редактор | `klar lsp` | языковой сервер: ошибки при наборе, наведение, определения, ссылки, переименование, дополнение |
@@ -179,13 +180,13 @@ coverage of bank.klar: 83.3% of statements (10/12), 4 tests
 
 ## klarc — те же команды без Python
 
-`klarc` (компилятор на Klar, `compiler/klarc.klar`) постепенно получает все команды `klar`. Каждая перенесённая
+`klarc` (компилятор на Klar, `compiler/klarc.klar`) умеет все команды `klar`. Каждая
 команда выдаёт **тот же текст**, что Python-версия, — это проверяет `tests/selfhost.py` на всех файлах репозитория и
 сотнях случаев с ошибками:
 
 | команда | статус |
 |---|---|
-| `klarc build / run / test` | ✅ (`--target linux / windows / linux-arm64`) |
+| `klarc build / run / test` | ✅ (`--target linux / windows / linux-arm64 / macos`) |
 | `klarc check [--json]` | ✅ тот же отчёт и JSON, что у `klar check` |
 | `klarc fix [--dry-run] [--all] [--warnings] [--json]` | ✅ |
 | `klarc fmt [--check] [--json]` | ✅ |
@@ -194,7 +195,7 @@ coverage of bank.klar: 83.3% of statements (10/12), 4 tests
 | `klarc patch FILE PATCH [--dry-run] [--force] [--json]` | ✅ (с `--test` пока без запуска тестов) |
 | `klarc dev [--json] [--no-run] [--stdin TEXT]` | ✅ тот же отчёт; программа и тесты собираются в машинный код |
 | `klarc test [-k TEXT] [-q] [--runs N] [--seed N]` | ✅ тот же отчёт, что у `klar test`, включая `property`: те же входные данные и то же сжатие контрпримера |
-| `klarc add / remove / fetch / update / deps` | ✅ (git запускается через `run_capture`) |
+| `klarc add / remove / fetch / update / deps` | ✅ (git запускается через `run_capture`; на Windows он пока не поддержан, поэтому git-зависимости там подключает `klar`) |
 | `klarc eval [STATEMENTS...] EXPR [--in FILE] [--json]` | ✅ (выражение собирается в машинный код как тест) |
 | `klarc view [-o OUT] [--json] [--run]` | ✅ та же страница и те же данные; `--run` — вывод и ошибка запуска (счётчики вызовов — у `klar view --run`) |
 | `klarc lsp` | ✅ те же ответы на те же запросы (наведение, переход, ссылки, переименование, дополнение, подсказка параметров, символы, форматирование, быстрые исправления); в VS Code — настройка `klar.klarcPath` |
@@ -211,7 +212,7 @@ Python остаётся затравкой (`bootstrap`) и эталоном, с
 * сниппеты `fn`, `main`, `test`, `property`, `match`, `type`, `enum`, `trait`, `impl`;
 * разбор вывода `klar check` в список ошибок (`$klar`).
 
-Расширение подключает языковой сервер `klar lsp` (раздел ниже).
+Расширение подключает языковой сервер `klar lsp` (раздел ниже), а с настройкой `klar.klarcPath` — `klarc lsp`, без Python.
 
 ## klar lsp — языковой сервер
 

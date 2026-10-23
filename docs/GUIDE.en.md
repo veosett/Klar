@@ -1,7 +1,7 @@
 # Klar in 20 minutes — an illustrated guide
 
 This guide is for people: what the language is, how to read and write it, and why it is designed this way.
-The reference for models is `klar spec`, the full grammar is in [SPEC.md](SPEC.md) (Russian), the compiler
+The reference for models is `klar spec`, the full grammar is in [SPEC.en.md](SPEC.en.md), the compiler
 internals in [ARCHITECTURE.md](ARCHITECTURE.md) (Russian). [Русская версия](GUIDE.md).
 
 ---
@@ -12,7 +12,7 @@ internals in [ARCHITECTURE.md](ARCHITECTURE.md) (Russian). [Русская ве�
 flowchart LR
     ai["🤖 The AI writes code<br/>and tests next to it"] --> klar["⚙️ Klar compiler<br/>types · effects · exhaustiveness<br/>safety"]
     klar -- "error + hint + fix" --> ai
-    klar -- "everything checked" --> exe["📦 Fast executable<br/>Linux / Windows"]
+    klar -- "everything checked" --> exe["📦 Fast executable<br/>Linux / Windows / macOS"]
     klar --> view["👀 klar view<br/>a picture of the program"]
     view --> human["🧑 Human reviewer"]
 ```
@@ -304,9 +304,10 @@ flowchart TB
 | effect | allows |
 |---|---|
 | `io` | printing, reading input, `dbg` |
-| `fs` | files (`read_file`, `write_file`, `list_dir` return `Result`; `file_exists`, `is_dir`) |
+| `fs` | files (`read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file` return `Result`; `file_exists`, `is_dir`, `current_dir`) |
 | `time` | the clock (`now_ms`, `now_ns`) |
 | `rand` | random numbers |
+| `proc` | running other programs (`run_command`, `run_capture`) |
 | `net` | network (reserved) |
 
 A function without `uses` is **pure**: the same arguments always give the same result, so it is easy to test and

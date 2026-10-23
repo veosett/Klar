@@ -3399,3 +3399,102 @@ fn test_it() {
   let r = [1].par_map(fn(i) => [i].map(fn(k) => k + 1))
   assert r == [[2]]
 }
+=== par_map function values from outside (E0406)
+fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+  return f(x)
+}
+
+fn tw(x: Int) -> Int {
+  return x * 2
+}
+
+type H { f: fn(Int) -> Int }
+
+fn main() uses io {
+  let g = fn(n: Int) -> Int {
+    print(n)
+    return n
+  }
+  let h = H { f: tw }
+  let k = 3
+  print([1].par_map(fn(x) => g(x)))
+  print([1].par_map(fn(x) => apply(g, x)))
+  print([tw].par_map(fn(f) => f(1)))
+  print([h].par_map(fn(r) => r.f(1)))
+  print([1].par_map(fn(x) => h.f(x)))
+  print([1].par_map(fn(x) => apply(tw, x) + apply(fn(y) => y + k, x)))
+}
+=== comparing values with functions (E0211)
+type H { f: fn(Int) -> Int }
+
+fn main() uses io {
+  let f = fn(x: Int) => x
+  let h = H { f: f }
+  print(f == f)
+  print(Some(f) == Some(f))
+  print([f] != [f])
+  print(h == h)
+  print(Ok(1) == Err(f))
+}
+=== map keys (E0202)
+type P { x: Int }
+
+fn tw(x: Int) -> Int {
+  return x
+}
+
+fn main() uses io {
+  let a = Map { P { x: 1 }: 1, P { x: 2 }: 2 }
+  let b = Map { 1.5: "x" }
+  let c = Map { [1]: 1 }
+  let d = Map { [tw]: 1 }
+  let e = Map { Some(tw): 1 }
+  print(a.len() + b.len() + c.len() + d.len() + e.len())
+}
+=== newtype invariants and property inputs (E0605)
+type Pct = new Int
+  requires value >= 0
+type Id = new Int
+type Box { p: Pct }
+
+property "pct" (p: Pct) {
+  assert p.value >= 0
+}
+
+property "boxes" (bs: List[Box]) {
+  assert bs.len() >= 0
+}
+
+property "ids" (i: Id) {
+  assert i == i
+}
+=== exit ends a path
+fn first(n: Int) -> Int uses io {
+  if n > 0 {
+    return n
+  }
+  exit(3)
+}
+
+fn second(n: Int) -> Int uses io {
+  match n > 0 {
+    true => {
+      return n
+    },
+    false => exit(1),
+  }
+}
+
+fn main() uses io {
+  print(first(1) + second(2))
+}
+=== non-ASCII names (W0104)
+fn main() uses io {
+  let имя = 1
+  let camelName = 2
+  print(имя + camelName)
+}
+=== non-ASCII digits (E0001)
+fn main() uses io {
+  print(٣)
+}

@@ -2,7 +2,7 @@
   "name": "klar-lang",
   "displayName": "Klar",
   "description": "Klar language support: diagnostics with quick fixes, hover, go to definition, references, rename, completion, formatting (language server), highlighting and snippets",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "publisher": "veosett",
   "license": "MIT",
   "repository": {

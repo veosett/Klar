@@ -544,6 +544,19 @@ class Parallelism(unittest.TestCase):
         self.assertEqual(errors("fn main() uses io { print([1].par_map(fn(i) => fn(k: Int) => k + i).len()) }"),
                          ["E0406"])
 
+    def test_par_map_rejects_function_values_from_outside(self):
+        """Effects hide in function values (their type carries none): inside par_map's lambda only functions written
+        there or named pure functions may be called."""
+        g = "fn main() uses io {\n let g = fn(n: Int) -> Int {\n print(n)\n return n\n }\n"
+        apply = "fn apply(f: fn(Int) -> Int, x: Int) -> Int {\n return f(x)\n}\n"
+        self.assertEqual(errors(g + " print([1].par_map(fn(x) => g(x)))\n}"), ["E0406"])
+        self.assertEqual(errors(apply + g + " print([1].par_map(fn(x) => apply(g, x)))\n}"), ["E0406"])
+        self.assertEqual(errors("fn tw(x: Int) -> Int {\n return x * 2\n}\nfn main() uses io {\n"
+                                " print([tw].par_map(fn(f) => f(1)))\n}"), ["E0406"])
+        # functions written inside the lambda, named pure functions and captured plain values are fine
+        self.assertEqual(errors(apply + "fn tw(x: Int) -> Int {\n return x * 2\n}\nfn main() uses io {\n let k = 3\n"
+                                " print([1].par_map(fn(x) => apply(tw, x) + apply(fn(y) => y + k, x)))\n}"), [])
+
     def test_par_map_native_matches_map_and_reports_the_first_error(self):
         from klar.native.build import build, host_target
         if host_target() != "linux":
@@ -652,6 +665,37 @@ class Documentation(unittest.TestCase):
                         f.write(src)
                     code, out, err = cli("test", path)
                     self.assertEqual(code, 0, f"{name} block {i}:\n{src}\n{out}{err}")
+
+
+    def test_every_diagnostic_code_is_explained(self):
+        """`klar explain` knows every code that the compilers and the runtime can report."""
+        import glob
+        from klar.diagnostics import CODES
+        used = set()
+        files = glob.glob(os.path.join(ROOT, "klar", "**", "*.py"), recursive=True)
+        files += glob.glob(os.path.join(ROOT, "klar", "rt", "*.klar"))
+        files += glob.glob(os.path.join(ROOT, "compiler", "*.klar"))
+        for path in files:
+            if path.endswith(("diagnostics.py", "builtin_sigs.klar")):
+                continue
+            with open(path, encoding="utf-8") as f:
+                used |= set(re.findall(r"[\"(]([EWR]0\d{3})[\")]", f.read()))
+        missing = sorted(c for c in used - set(CODES) if c not in ("R0099", "E0000", "R0000"))
+        self.assertEqual(missing, [], "codes without an explanation in klar/diagnostics.py")
+
+    def test_spec_examples_and_versions(self):
+        """docs/SPEC.md and its translation describe the current version and keep the same sections."""
+        from klar import __version__
+        major_minor = ".".join(__version__.split(".")[:2])
+        heads = []
+        for name in ("SPEC.md", "SPEC.en.md"):
+            with open(os.path.join(ROOT, "docs", name), encoding="utf-8") as f:
+                text = f.read()
+            self.assertTrue(text.startswith(f"# Klar {major_minor} "), name)
+            heads.append(re.findall(r"^## (\d+)\.", text, re.M))
+        self.assertEqual(heads[0], heads[1])
+        with open(os.path.join(ROOT, "klar", "ai_reference.md"), encoding="utf-8") as f:
+            self.assertTrue(f.read().startswith(f"# Klar {major_minor} "))
 
 
 class DeveloperTools(unittest.TestCase):
@@ -1066,6 +1110,28 @@ class SelfHosting(unittest.TestCase):
         self.assertEqual(code, 0, out.getvalue()[-3000:])
 
 
+    def test_build_sh_builds_klarc_without_python(self):
+        """build.sh (from a seed klarc) builds klarc twice and checks that the compiler reproduces itself."""
+        import shutil
+        from klar.native.build import build, host_target
+        if host_target() != "linux" or not shutil.which("sh"):
+            self.skipTest("Linux x86-64 only")
+        with tempfile.TemporaryDirectory() as d:
+            for name in ("build.sh", "pyproject.toml"):
+                shutil.copy(os.path.join(ROOT, name), d)
+            for name in ("compiler", "klar"):
+                shutil.copytree(os.path.join(ROOT, name), os.path.join(d, name),
+                                ignore=shutil.ignore_patterns("__pycache__", "*.py"))
+            seed = os.path.join(d, "seed-klarc")
+            build(os.path.join(ROOT, "compiler", "klarc.klar"), out=seed, target="linux")
+            p = subprocess.run(["sh", os.path.join(d, "build.sh")], capture_output=True, text=True,
+                               env=dict(os.environ, KLARC=seed))
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertIn("ok: build/klarc", p.stdout)
+            with open(seed, "rb") as a, open(os.path.join(d, "build", "klarc"), "rb") as b:
+                self.assertEqual(a.read(), b.read())
+
+
 class LanguageServer(unittest.TestCase):
     GEO = ("pub trait Shape {\n  fn area(self) -> Float\n}\n\npub type Circle { r: Float }\n\nimpl Shape for Circle {\n"
            "  fn area(self) -> Float {\n    return 3.0 * self.r * self.r\n  }\n}\n\n"
@@ -1446,6 +1512,103 @@ fn main() uses io { print(fib(10)) }""", "t.klar")
         self.assertTrue(any(f["function"].startswith("area") for f in data["functions"]))
 
 
+    def write(self, d, src):
+        path = os.path.join(d, "p.klar")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(src)
+        return path
+
+    def test_profile_exit_is_a_normal_end(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.write(d, "fn main() uses io {\n  print(1)\n  exit(3)\n}\n")
+            code, out, _ = cli("profile", "--json", path)
+        self.assertEqual(code, 3)
+        self.assertTrue(json.loads(out)["ok"])
+
+    def test_profile_names_lambdas_after_the_calling_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.write(d, "fn main() uses io {\n  let xs = [1, 2, 3]\n    .map(fn(x) => x + 1)\n"
+                                 "  print(xs)\n}\n")
+            _, out, _ = cli("profile", "--json", path)
+        calls = {f["function"]: f["calls"] for f in json.loads(out)["functions"]}
+        self.assertEqual(calls.get("<lambda> (p.klar:2)"), 3)
+
+    def test_profile_reports_check_errors_as_json(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = self.write(d, "fn main() uses io {\n  print(x)\n}\n")
+            code, out, _ = cli("profile", "--json", path)
+        data = json.loads(out)
+        self.assertEqual((code, data["ok"], data["stage"]), (1, False, "check"))
+        self.assertEqual(data["diagnostics"][0]["code"], "E0201")
+
+
+class NativeTargets(unittest.TestCase):
+    """The executables for the targets this machine cannot run: their format, and runs under emulators."""
+
+    def build(self, d, src, target, tests=None):
+        from klar.native.build import build
+        path = os.path.join(d, "p.klar")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(src)
+        out = os.path.join(d, "p." + target)
+        build(path, out=out, target=target, tests=tests)
+        with open(out, "rb") as f:
+            return out, f.read()
+
+    def test_macos_executable_is_a_static_mach_o(self):
+        import struct
+        with tempfile.TemporaryDirectory() as d:
+            _, data = self.build(d, "fn main() uses io {\n  print(\"hi\")\n}\n", "macos")
+        magic, cpu, _, ftype, ncmds, size, flags, _ = struct.unpack_from("<IiiIIIII", data, 0)
+        self.assertEqual((magic, cpu, ftype, flags), (0xFEEDFACF, 0x01000007, 2, 1))
+        off, cmds, entry, segments = 32, [], None, {}
+        for _ in range(ncmds):
+            cmd, csize = struct.unpack_from("<II", data, off)
+            cmds.append(cmd)
+            if cmd == 0x19:
+                name, vmaddr, vmsize = struct.unpack_from("<16sQQ", data, off + 8)
+                segments[name.rstrip(b"\0").decode()] = (vmaddr, vmsize)
+            if cmd == 0x5:
+                entry = struct.unpack_from("<21Q", data, off + 16)[16]
+            off += csize
+        self.assertEqual(off, 32 + size)
+        self.assertNotIn(0xE, cmds)                       # no LC_LOAD_DYLINKER: static, no dyld
+        self.assertEqual(segments["__PAGEZERO"], (0, 1 << 32))
+        text = segments["__TEXT"]
+        self.assertTrue(text[0] < entry < text[0] + text[1])
+
+    def test_macos_executable_runs_under_the_emulator(self):
+        try:
+            import unicorn  # noqa: F401
+        except ImportError:
+            self.skipTest("needs the unicorn module")
+        src = ("fn main() uses io, fs {\n  print(cli_args())\n  print([1, 2, 3].par_map(fn(x) => x * x))\n"
+               "  print(list_dir(\".\").is_ok())\n  print(read_line())\n  exit(4)\n}\n")
+        with tempfile.TemporaryDirectory() as d:
+            exe, _ = self.build(d, src, "macos")
+            p = subprocess.run([sys.executable, os.path.join(ROOT, "tests", "macho_run.py"), exe, "a"],
+                               input="line\n", capture_output=True, text=True, cwd=d)
+        self.assertEqual((p.stdout, p.returncode), ('["a"]\n[1, 4, 9]\ntrue\nSome("line")\n', 4))
+
+    def test_windows_properties_run_without_fork(self):
+        wine = "/usr/lib/wine/wine64"
+        if not os.path.exists(wine):
+            self.skipTest("needs wine")
+        src = ('property "small" (n: Int) {\n  assert n < 50\n}\n\nproperty "fine" (xs: List[Int]) {\n'
+               '  assert xs.reverse().reverse() == xs\n}\n')
+        loaded = load_source(src, "p.klar")
+        tests = [d for d in loaded.program.decls if type(d).__name__ == "PropertyDecl"]
+        with tempfile.TemporaryDirectory() as d:
+            exe, _ = self.build(d, src, "windows", tests=tests)
+            env = dict(os.environ, WINEDEBUG="-all")
+            bad = subprocess.run([wine, exe, "100", "0", "0"], capture_output=True, text=True, env=env)
+            good = subprocess.run([wine, exe, "100", "0", "1"], capture_output=True, text=True, env=env)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("R0010", bad.stderr)
+        self.assertIn("n = 50", bad.stderr)                # shrunk to the smallest counterexample
+
+
 class Diagnostics(unittest.TestCase):
     def check_code(self, src, code):
         got = codes(src)
@@ -1518,6 +1681,50 @@ class Diagnostics(unittest.TestCase):
         self.assertEqual(errors("fn f(x: Int) -> Int { fail(\"no\") }"), [])
         self.assertEqual(errors("fn f(n: Int) -> Int {\n var i = 0\n while true {\n if i * i >= n { return i }\n"
                                 " i = i + 1\n }\n}"), [])
+
+    def test_exit_ends_a_path(self):
+        self.assertEqual(errors("fn f(n: Int) -> Int uses io {\n if n > 0 {\n return n\n }\n exit(3)\n}"), [])
+        self.assertEqual(runtime_code("fn f(n: Int) -> Int uses io {\n if n > 0 {\n return n\n }\n exit(3)\n}\n"
+                                      "fn main() uses io { print(f(0)) }"), "R0013")
+
+    def test_values_with_functions_cannot_be_compared(self):
+        self.check_code("fn main() uses io {\n let f = fn(x: Int) => x\n print(Some(f) == Some(f))\n}", "E0211")
+        self.check_code("type H { f: fn(Int) -> Int }\nfn main() uses io {\n let h = H { f: fn(x) => x }\n"
+                        " print(h == h)\n}", "E0211")
+        self.check_code("fn main() uses io {\n let f = fn(x: Int) => x\n print([f] != [f])\n}", "E0211")
+        self.assertEqual(errors("type P { x: Int }\nfn main() uses io { print(P { x: 1 } == P { x: 1 }) }"), [])
+
+    def test_map_keys_are_values_without_functions(self):
+        out = run("""
+type P { x: Int, s: Str }
+fn main() uses io {
+  let m = Map { P { x: 1, s: "a" }: 3, P { x: 2, s: "b" }: 4 }
+  print(m.get(P { x: 1, s: "a" }))
+  let f = Map { 1.5: "x", -0.0: "z" }.set(0.0, "y")
+  print(f)
+  print(Map { [1, 2]: 1 }.set([1, 2], 2))
+  print(Map { 1: 2, 3: 4 } == Map { 3: 4, 1: 2 })
+}""")
+        self.assertEqual(out, 'Some(3)\nMap { 1.5: "x", -0.0: "y" }\nMap { [1, 2]: 2 }\ntrue\n')
+        self.check_code("fn tw(x: Int) -> Int {\n return x\n}\nfn main() uses io { print(Map { [tw]: 1 }.len()) }",
+                        "E0202")
+
+    def test_property_inputs_cannot_break_newtype_invariants(self):
+        self.check_code("type Pct = new Int\n  requires value >= 0\nproperty \"p\" (p: Pct) {\n assert p.value >= 0\n}",
+                        "E0605")
+        self.check_code("type W = new Int\n  requires value >= 0\ntype Box { w: W }\n"
+                        "property \"p\" (b: List[Box]) {\n assert b.len() >= 0\n}", "E0605")
+        self.assertEqual(errors("type Id = new Int\nproperty \"p\" (i: Id) {\n assert i == i\n}"), [])
+
+    def test_lexer_digits_are_ascii(self):
+        self.check_code("fn main() uses io { print(\u0663) }", "E0001")      # Arabic-Indic three
+        self.check_code("fn main() uses io { print(2\u00b2) }", "E0001")     # superscript two (crashed the lexer)
+
+    def test_non_ascii_names_warn_with_a_useful_hint(self):
+        ds = [d for d in diags("fn main() uses io {\n let \u0438\u043c\u044f = 1\n print(\u0438\u043c\u044f)\n}")
+              if d.code == "W0104"]
+        self.assertEqual(len(ds), 1)
+        self.assertIn("ASCII", ds[0].hint)
 
     def test_loops(self):
         self.check_code("fn f() { break }", "E0213")

@@ -311,6 +311,14 @@ fn is_upper_snake(name: Str) -> Bool {
 }
 
 /// `fooBar` -> `foo_bar` (Python: `re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower().replace("__", "_")`).
+fn snake_hint(name: Str) -> Str {
+  let s = to_snake(name)
+  return match s == name {
+    true => "names use ASCII letters, digits and `_`",
+    false => "rename it to `{s}`",
+  }
+}
+
 fn to_snake(name: Str) -> Str {
   var out = ""
   var i = 0
@@ -1114,7 +1122,7 @@ fn collect(ck: Ck) -> Ck {
               None => {
                 if not is_snake(f.name) {
                   c = warn(c: c, code: "W0104", msg: "function name `{f.name}` should be snake_case", span: f.name_span,
-                    hint: Some("rename it to `{to_snake(f.name)}`"))
+                    hint: Some(snake_hint(f.name)))
                 }
               },
             }
@@ -1986,7 +1994,7 @@ fn declare(ck: Ck, name: Str, t: Type, mutable: Bool, span: Span, kind: Str, kw:
       hint: Some(hint))
   } else if not is_snake(name) {
     c = warn(c: c, code: "W0104", msg: "variable `{name}` should be snake_case", span: span,
-      hint: Some("rename it to `{to_snake(name)}`"))
+      hint: Some(snake_hint(name)))
   }
   return set_var(c: c, name: name, v: Var { ty: t, mutable: mutable, span: span, used: false, kind: kind, kw_span: kw })
 }

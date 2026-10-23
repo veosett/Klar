@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.7.0-informational)
+![Version](https://img.shields.io/badge/version-1.0.0-informational)
 
 [English](README.md) · [**Руководство в картинках**](docs/GUIDE.md) · [Инструменты](docs/TOOLS.md) ·
 [Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·
@@ -30,7 +30,7 @@
    местом, подсказкой и часто с готовой машинной правкой.
 2. **Дешёвый цикл исправления.** Одна команда `klar dev --json` проверяет, тестирует и запускает программу и
    возвращает компактный JSON с полем `next`. Весь справочник языка — ~2 тыс. токенов (`klar spec`).
-3. **Скорость.** Klar компилируется в машинный код x86-64 **собственным компилятором и линкером**: без C-компилятора,
+3. **Скорость.** Klar компилируется в машинный код x86-64 и ARM64 **собственным компилятором и линкером**: без C-компилятора,
    без libc, без виртуальной машины.
 4. **Автономность.** Рантайм и компилятор написаны на самом Klar: `klarc` собирает сам себя.
 
@@ -126,10 +126,11 @@ flowchart LR
     safe --> lower["Понижение → KIR"]
     lower --> opt["Оптимизатор<br/>инлайнинг · свёртка · слияние"]
     opt --> ra["Распределение регистров"]
-    ra --> asm["Ассемблер x86-64"]
+    ra --> asm["Ассемблеры x86-64 / AArch64"]
     asm --> link["Линкер"]
-    link --> elf["ELF (Linux)"]
+    link --> elf["ELF (Linux x86-64 / arm64)"]
     link --> pe["PE .exe (Windows)"]
+    link --> macho["Mach-O (macOS, экспериментально)"]
     rt["Рантайм на Klar<br/>klar/rt/*.klar"] --> lower
     safe -.-> interp["Эталонный интерпретатор<br/>тесты · профайлер"]
     safe -.-> py["Бэкенд в Python<br/>запасной путь"]
@@ -138,8 +139,8 @@ flowchart LR
 * Значения — 64-битные слова: маленькие `Int` хранятся прямо в слове (`(n << 1) | 1`, переполнение незаметно
   превращается в большое число), объекты кучи несут счётчик ссылок и дескриптор типа. Значения неизменяемы, поэтому
   сборщик циклов не нужен, а значения с единственной ссылкой обновляются на месте (`xs = xs.push(v)` — O(1)).
-* Исполняемый файл обращается только к ОС: системные вызовы на Linux, `KERNEL32.dll` на Windows. Размер — 50–150 КБ.
-* Все бэкенды обязаны давать одинаковый вывод и коды ошибок — это проверяет `tests/native_diff.py` на Linux и Windows.
+* Исполняемый файл обращается только к ОС: системные вызовы на Linux, `KERNEL32.dll` на Windows, системные вызовы BSD на macOS. Размер — 50–150 КБ.
+* Все бэкенды обязаны давать одинаковый вывод и коды ошибок — это проверяет `tests/native_diff.py` на Linux x86-64, Windows (wine), Linux arm64 (`--arm64`, qemu) и macOS (`--macos`, эмулятор).
 
 Подробно — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -156,12 +157,9 @@ flowchart TB
         v05["0.5 — языковой сервер + VS Code, REPL,<br/>быстрые вызовы, Bytes, CI на Windows"]
         v06["0.6 — self-hosting: компилятор на Klar собирает сам себя,<br/>обновление на месте через вызовы, run_command"]
         v07["0.7 — обобщённые impl, newtype с инвариантами,<br/>klar patch, контракты при компиляции"]
-        v01 --> v02 --> v03 --> v04 --> v05 --> v06 --> v07
+        v10["1.0 — стабильная спецификация, пакетный менеджер, ARM64,<br/>par_map, все инструменты в klarc, macOS (экспериментально)"]
+        v01 --> v02 --> v03 --> v04 --> v05 --> v06 --> v07 --> v10
     end
-    subgraph next["🔜 Планируется"]
-        v10["1.0 — ARM64 / macOS, пакетный менеджер, параллелизм,<br/>стабильная спецификация"]
-    end
-    v07 --> v10
 ```
 
 | направление | статус |
@@ -176,8 +174,8 @@ flowchart TB
 | Языковой сервер (`klar lsp`) и расширение VS Code: ошибки при наборе, наведение, определения, ссылки, переименование, дополнение | ✅ 0.5 |
 | Компилятор на самом Klar: `compiler/klarc.klar` собирает, запускает и тестирует программы и собирает сам себя (stage1 == stage2 == stage3 побайтно), быстрее Python-реализации | ✅ 0.6 |
 | Обобщённые `impl` (`impl[T: Show] Show for List[T]`), newtype с инвариантами (`type Percent = new Int` + `requires`), проверка простых контрактов при компиляции, `klar patch` (проверенные правки по имени) | ✅ 0.7 |
-| пакетный менеджер, ARM64 (Linux), параллельный `par_map` | ✅ 1.0 (в работе) |
-| macOS, стабильная спецификация | 🔜 1.0 |
+| Стабильная спецификация (`docs/SPEC.md`), пакетный менеджер, ARM64 (Linux), параллельный `par_map`, все команды `klar` в `klarc`, сборка без Python | ✅ 1.0 |
+| macOS (x86-64 Mach-O) | 🧪 1.0, экспериментально: проверено только в эмуляторе |
 
 ## Быстрый старт
 
@@ -191,6 +189,7 @@ python -m klar run examples/hello.klar          # компиляция в маш
 python -m klar build examples/shapes.klar       # один исполняемый файл без зависимостей
 python -m klar build app.klar --target windows  # .exe из Linux (и наоборот)
 python -m klar build app.klar --target linux-arm64  # статический ELF для AArch64
+python -m klar build app.klar --target macos    # Mach-O x86-64 (экспериментально)
 python -m klar dev examples/bank.klar --json    # один шаг цикла ИИ: проверка + тесты + запуск
 python -m klar test examples/bank.klar          # тесты, doc-тесты, property-тесты
 python -m klar fix examples/mistakes.klar       # применить все безопасные исправления
@@ -218,9 +217,10 @@ python -m klar build compiler/klarc.klar -o klarc   # stage 1: Python-компи
 
 ```
 klar/            фронтенд, анализ безопасности, интерпретатор, бэкенд Python, CLI
-klar/native/     компилятор в машинный код: понижение, KIR, оптимизатор, регистры, x86-64, линкер
+klar/native/     компилятор в машинный код: понижение, KIR, оптимизатор, регистры, x86-64 и AArch64, линкер (ELF/PE/Mach-O)
 klar/rt/         рантайм исполняемых файлов на Klar
-klar/std/        стандартные модули на Klar (std.math, std.text, std.list, std.result)
+compiler/        компилятор на самом Klar (self-hosting): klarc.klar + lexer … emit, link
+klar/std/        стандартные модули на Klar (std.math, std.text, std.list, std.result, std.set, std.json, std.time)
 examples/        примеры (examples/mistakes.klar — типичные ошибки ИИ)
 tests/           тесты компилятора, дифференциальные тесты native vs интерпретатор
 bench/           бенчмарк скорости (8 языков); bench/ai — бенчмарк для ИИ (7 языков)

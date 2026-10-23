@@ -333,7 +333,7 @@ class Checker:
                         self.records[d.constructs].invariant = bool(d.requires)
                 elif not SNAKE.match(d.name):
                     self.warn("W0104", f"function name `{d.name}` should be snake_case", d.name_span,
-                              hint=f"rename it to `{to_snake(d.name)}`")
+                              hint=snake_hint(d.name))
                 self.fns[d.name] = None  # placeholder
             elif isinstance(d, N.ConstDecl):
                 if not UPPER.match(d.name):
@@ -813,7 +813,7 @@ class Checker:
             self.error("E0102", f"`{name}` is already defined{where}; Klar forbids shadowing", span, hint=hint)
         elif not SNAKE.match(name):
             self.warn("W0104", f"variable `{name}` should be snake_case", span,
-                      hint=f"rename it to `{to_snake(name)}`")
+                      hint=snake_hint(name))
         self.scopes[-1][name] = Var(t, mutable, span, kind, kw_span)
 
     # ---- functions, constants & tests --------------------------------------------
@@ -2105,6 +2105,11 @@ def is_lit(e):
     if isinstance(e, N.Unary) and e.op == "-":
         return is_lit(e.operand)
     return False
+
+
+def snake_hint(name):
+    s = to_snake(name)
+    return "names use ASCII letters, digits and `_`" if s == name else f"rename it to `{s}`"
 
 
 def to_snake(name):

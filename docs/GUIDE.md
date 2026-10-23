@@ -11,7 +11,7 @@
 flowchart LR
     ai["🤖 ИИ пишет код<br/>и тесты рядом с ним"] --> klar["⚙️ Компилятор Klar<br/>типы · эффекты · полнота<br/>безопасность"]
     klar -- "ошибка + подсказка + правка" --> ai
-    klar -- "всё проверено" --> exe["📦 Быстрый исполняемый файл<br/>Linux / Windows"]
+    klar -- "всё проверено" --> exe["📦 Быстрый исполняемый файл<br/>Linux / Windows / macOS"]
     klar --> view["👀 klar view<br/>схема программы для человека"]
     view --> human["🧑 Человек-ревьюер"]
 ```
@@ -305,9 +305,10 @@ flowchart TB
 | эффект | что разрешает |
 |---|---|
 | `io` | печать, чтение ввода, `dbg` |
-| `fs` | файлы (`read_file`, `write_file`, `list_dir` возвращают `Result`; `file_exists`, `is_dir`) |
+| `fs` | файлы (`read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file` возвращают `Result`; `file_exists`, `is_dir`, `current_dir`) |
 | `time` | часы (`now_ms`, `now_ns`) |
 | `rand` | случайные числа |
+| `proc` | запуск других программ (`run_command`, `run_capture`) |
 | `net` | сеть (зарезервировано) |
 
 Функция без `uses` — **чистая**: при одних и тех же аргументах она всегда даёт один и тот же результат.

@@ -13,11 +13,12 @@
 ```sh
 cd editors/vscode
 npm install
-npx @vscode/vsce package          # -> klar-lang-0.7.0.vsix
-code --install-extension klar-lang-0.7.0.vsix
+npx @vscode/vsce package          # -> klar-lang-1.0.0.vsix
+code --install-extension klar-lang-1.0.0.vsix
 ```
 
-The extension runs `python3 -m klar lsp` (`python` on Windows). If Klar is not installed with pip, set
+The extension runs `python3 -m klar lsp` (`python` on Windows), or `klarc lsp` without Python when
+**klar.klarcPath** points to a `klarc` built with `build.sh` / `build.bat`. If Klar is not installed with pip, set
 **klar.compilerPath** to the folder of your Klar checkout (the one that contains `klar/`); a workspace that *is*
 a Klar checkout is detected automatically. **klar.pythonPath** selects the Python interpreter.
 

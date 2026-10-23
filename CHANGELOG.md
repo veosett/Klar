@@ -1,9 +1,15 @@
 # Changelog
 
 All notable changes to Klar. The format follows [Keep a Changelog](https://keepachangelog.com/),
-versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versions may break things).
+versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compatible is listed in
+[docs/SPEC.md](docs/SPEC.md), section 0.
 
 ## [Unreleased]
+
+## [1.0.0] — 2026-10-23
+
+The first stable version: the language of `docs/SPEC.md` (Klar 1.0), compatible within 1.x. `klarc`, the compiler
+written in Klar, now has every command of `klar` and builds itself without Python from a release seed.
 
 ### Added
 - Packages: a project is a directory with `klar.toml` (`[package]`, `[dependencies]` with `name = { path = "..." }` or
@@ -45,7 +51,7 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - `klarc patch` (compiler/patch.klar): the AI patch protocol in Klar — the same reports, diffs and written files as
   `klar patch` (`tests/selfhost.py` compares hundreds of patches on the repository's files); with `--test` the tests
   are not run yet. The Klar loader can take file texts instead of reading them (`load_program_with`).
-- `run_capture(args, dir)` (effect `proc`): runs a program in a directory and returns `[exit code, stdout, stderr]`;
+- `run_capture(args, dir, input)` (effect `proc`): runs a program in a directory and returns `[exit code, stdout, stderr]`;
   both pipes are read together (poll), so a chatty program cannot block. Linux x86-64 and arm64 (new intrinsics
   `os_dup2`, `os_chdir`, `os_execve`, `os_poll`) and the interpreter; Windows returns an error for now.
 - `klarc dev [--json] [--no-run] [--stdin TEXT]` (compiler/dev.klar): one AI-loop step without Python — check,
@@ -94,7 +100,12 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   emulator with the macOS system calls done by Python, `tests/native_diff.py --macos` checks every native test with
   it, and `tests/bootstrap.py` checks that the macOS build of klarc builds programs byte for byte like klarc on Linux.
   `par_map` uses worker processes there too (sysctl hw.ncpu). `klar run` on a Mac still uses the Python backend.
-- `docs/SPEC.md` is the Klar 1.0 specification, with the stability rules for 1.x.
+- `docs/SPEC.md` is the Klar 1.0 specification, with the stability rules for 1.x; `docs/SPEC.en.md` is its English
+  translation.
+- Tests for every 1.0 addition: the Mach-O format and a run under the emulator, property runs without fork (Windows,
+  under wine), `build.sh` building klarc from a seed, `klar profile` (exit, lambda names, check errors), the new
+  checker rules (also as `tests/selfhost_cases.txt` cases for klarc), and a check that `klar explain` knows every
+  diagnostic code the compilers and the runtime use.
 
 ### Fixed
 - The effects of `par_map`'s lambda could escape through function values: calling (or passing on) a captured function
@@ -102,6 +113,7 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - `==` on values that contain functions (`Some(f)`, records with function fields) is E0211, like `f == g`.
 - A property input of a newtype with `requires` is E0605: random values would break its invariant.
 - A path that ends in `exit(...)` counts as finished, like `fail(...)` (no more E0205 after it).
+- W0104 on a non-ASCII name suggested renaming it to itself; it now says names use ASCII letters, digits and `_`.
 - `klar explain R0013` (exit() in a test) was missing; Python's lexer read other scripts' digits (`٣`) as numbers
   and crashed on `²` (only `0`-`9` now, like klarc).
 - `klarc profile`: lambdas are named after the line of the call that runs them (like `klar profile`), `par_map`

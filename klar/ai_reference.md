@@ -1,4 +1,4 @@
-# Klar 0.7 — compact reference for AI authors
+# Klar 1.0 — compact reference for AI authors
 
 Klar is a small, strict, statically typed language compiled to native code. Follow these rules
 exactly; the compiler rejects everything else with a coded error (`klar explain CODE`).
@@ -88,7 +88,7 @@ assert x > 0, "message"
   `n.to_char()` → `Option[Str]`.
 - Bytes: `bytes_of([1, 2])`, `s.to_bytes()`, `b.push(255)`, `b.push_le(value, 4)` (little-endian, size 1/2/4/8),
   `b.get(i)`, `b.slice(a, z)`, `b.decode()` → `Result[Str, Str]`, `b.hex()`; files: `read_bytes`/`write_bytes` (fs).
-- Comparison `== != < > <= >=` (no chaining). `==` is structural for all values.
+- Comparison `== != < > <= >=` (no chaining). `==` is structural; values that contain functions cannot be compared (E0211).
 - Records: `Point { x: 1, y: 2 }`, field `p.x`, copy-with-changes `p with { x: 3 }`. Fields are never assigned.
 - Enum values: `Shape.Circle(radius: 1.0)`, `Shape.Empty` — always qualified.
 - Option: `Some(v)`, `None`. Result: `Ok(v)`, `Err(e)`. No null, no exceptions.
@@ -156,10 +156,11 @@ collections: `let xs: List[Int] = []`.
 
 ## Effects
 A function without `uses` is pure. Calling something with an effect requires declaring it:
-`print`/`eprint` (stderr)/`read_line`/`cli_args`/`dbg` → `io`, `now_ms` (wall clock, ms since 1970 UTC)/`now_ns` (monotonic, for measuring) → `time`, `random_int` → `rand`,
-`read_file`/`write_file`/`file_exists`/`list_dir` (sorted names)/`is_dir` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
+`print`/`eprint` (stderr)/`read_line`/`read_exact(n)`/`cli_args`/`dbg` → `io`, `now_ms` (wall clock, ms since 1970 UTC)/`now_ns` (monotonic, for measuring) → `time`, `random_int` → `rand`,
+`read_file`/`write_file`/`file_exists`/`list_dir` (sorted names)/`is_dir`/`make_dir`/`remove_file`/`current_dir` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
 `exit(code)` (type `Never`, flushes output) → `io`; `run_command(["prog", "arg"])` → `Result[Int, Str]` (exit code;
-inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
+inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `run_capture(args, dir, input)` → `Result[List[Str], Str]`
+(`[exit code, stdout, stderr]`; not on Windows yet) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
 pure. Tests may use only `io`.
 Lambdas inherit the effects of the enclosing function.
 Parallel: `xs.par_map(f)` = `xs.map(f)` computed on all CPU cores. `f` must be a lambda without effects or a

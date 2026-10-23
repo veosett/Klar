@@ -562,7 +562,7 @@ def main(argv=None):
     p.add_argument("-v", "--verbose", action="store_true", help="report which backend runs the program")
     p.add_argument("--emit-python", action="store_true", help="print the generated Python code and exit")
     p.set_defaults(fn=cmd_run)
-    p = sub.add_parser("build", help="compile to a standalone native executable (x86-64 Linux ELF / Windows PE)")
+    p = sub.add_parser("build", help="compile to a standalone native executable (Linux ELF, Windows PE, macOS Mach-O)")
     p.add_argument("file")
     p.add_argument("-o", "--output", help="output path (default: next to the source)")
     p.add_argument("--target", choices=["linux", "windows", "linux-arm64", "macos"],

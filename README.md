@@ -6,11 +6,11 @@
 
 [![CI](https://github.com/veosett/Klar/actions/workflows/ci.yml/badge.svg)](https://github.com/veosett/Klar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Version](https://img.shields.io/badge/version-0.7.0-informational)
-![Targets](https://img.shields.io/badge/targets-x86--64%20Linux%20%7C%20Windows-lightgrey)
+![Version](https://img.shields.io/badge/version-1.0.0-informational)
+![Targets](https://img.shields.io/badge/targets-x86--64%20%26%20ARM64%20Linux%20%7C%20Windows%20%7C%20macOS%20(exp.)-lightgrey)
 
 [Русская версия](README.ru.md) · [**Guide in pictures**](docs/GUIDE.en.md) · [Tools](docs/TOOLS.md) ·
-[Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.md) ·
+[Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.en.md) ·
 [Speed benchmark](bench/README.md) · [AI benchmark](bench/ai/README.md) · [Changelog](CHANGELOG.md)
 
 </div>
@@ -30,7 +30,7 @@ Worst of all, many of these mistakes **run without an error and silently print a
    rejected by the compiler, with the exact location, a hint and often a machine-applicable fix.
 2. **Make the feedback loop cheap** — one command (`klar dev --json`) checks, tests and runs, and returns compact
    JSON with a `next` step; the whole language reference fits into ~2,000 tokens (`klar spec`).
-3. **Be fast** — Klar compiles to native x86-64 machine code with its **own compiler and linker**: no C compiler,
+3. **Be fast** — Klar compiles to native x86-64 and ARM64 machine code with its **own compiler and linker**: no C compiler,
    no libc, no virtual machine.
 4. **Be autonomous** — the runtime and the compiler are written in Klar itself: `klarc` builds itself.
 
@@ -133,10 +133,11 @@ flowchart LR
     safe --> lower["Lowering → KIR"]
     lower --> opt["Optimizer<br/>inline · fold · fuse"]
     opt --> ra["Register allocator"]
-    ra --> asm["x86-64 assembler"]
+    ra --> asm["x86-64 / AArch64 assemblers"]
     asm --> link["Linker"]
-    link --> elf["ELF (Linux)"]
+    link --> elf["ELF (Linux x86-64 / arm64)"]
     link --> pe["PE .exe (Windows)"]
+    link --> macho["Mach-O (macOS, experimental)"]
     rt["Runtime in Klar<br/>klar/rt/*.klar"] --> lower
     safe -.-> interp["Reference interpreter<br/>tests · profiler"]
     safe -.-> py["Python back-end<br/>fallback"]
@@ -147,9 +148,9 @@ flowchart LR
   cycle collector, and uniquely referenced values are updated in place (`xs = xs.push(v)` is amortized O(1)) —
   also across function calls and inside records: a parameter the function consumes is passed owned, the last use of
   a variable moves it, and `s with { items: s.items.push(x) }` reuses a unique record.
-* Executables call only the OS: raw syscalls on Linux, `KERNEL32.dll` on Windows. Typical size: 50–150 KB.
-* Every back-end must produce identical output and error codes — `tests/native_diff.py` checks it on Linux and
-  Windows.
+* Executables call only the OS: raw syscalls on Linux, `KERNEL32.dll` on Windows, BSD syscalls on macOS. Typical size: 50–150 KB.
+* Every back-end must produce identical output and error codes — `tests/native_diff.py` checks it on Linux x86-64,
+  Windows (wine), Linux arm64 (`--arm64`, qemu) and macOS (`--macos`, emulator).
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (in Russian).
 
@@ -166,12 +167,9 @@ flowchart TB
         v05["0.5 — language server + VS Code, REPL,<br/>faster calls, Bytes, Windows CI"]
         v06["0.6 — self-hosting: the compiler in Klar builds itself,<br/>in-place updates across calls, run_command"]
         v07["0.7 — generic impls, newtypes with invariants,<br/>klar patch, contracts checked at compile time"]
-        v01 --> v02 --> v03 --> v04 --> v05 --> v06 --> v07
+        v10["1.0 — stable specification, package manager, ARM64,<br/>par_map, every tool in klarc, macOS (experimental)"]
+        v01 --> v02 --> v03 --> v04 --> v05 --> v06 --> v07 --> v10
     end
-    subgraph next["🔜 Planned"]
-        v10["1.0 — ARM64 / macOS, package manager, concurrency,<br/>stable specification"]
-    end
-    v07 --> v10
 ```
 
 | area | status |
@@ -186,8 +184,8 @@ flowchart TB
 | Language server (`klar lsp`) and VS Code extension: diagnostics, hover, definition, references, rename, completion | ✅ 0.5 |
 | Self-hosted compiler: `compiler/klarc.klar` builds, runs and tests programs and builds itself (stage1 == stage2 == stage3, byte for byte), faster than the Python implementation | ✅ 0.6 |
 | Generic impls (`impl[T: Show] Show for List[T]`), newtypes with invariants (`type Percent = new Int` + `requires`), simple contracts checked at compile time, `klar patch` (verified edits by name) | ✅ 0.7 |
-| package manager, ARM64 (Linux), parallel `par_map` | ✅ 1.0 (in progress) |
-| macOS, stable specification | 🔜 1.0 |
+| Stable specification (`docs/SPEC.md`), package manager, ARM64 (Linux), parallel `par_map`, every `klar` command in `klarc`, builds without Python | ✅ 1.0 |
+| macOS (x86-64 Mach-O) | 🧪 1.0, experimental: checked in an emulator only |
 
 ## Quick start
 
@@ -200,6 +198,7 @@ python -m klar run examples/hello.klar          # compile to machine code (cache
 python -m klar build examples/shapes.klar       # standalone executable
 python -m klar build app.klar --target windows  # cross-compile a .exe from Linux (or the reverse)
 python -m klar build app.klar --target linux-arm64  # a static AArch64 ELF
+python -m klar build app.klar --target macos    # x86-64 Mach-O (experimental)
 python -m klar dev examples/bank.klar --json    # one AI-loop step: check + tests + run
 python -m klar test examples/bank.klar          # tests, doc-tests, properties
 python -m klar fix examples/mistakes.klar       # apply all safe fixes
@@ -229,7 +228,7 @@ repository root, on Linux `sh klar.sh ...`.
 
 ```
 klar/            compiler front-end, safety pass, interpreter, Python back-end, CLI
-klar/native/     native compiler: lowering, KIR, optimizer, register allocator, x86-64, linker
+klar/native/     native compiler: lowering, KIR, optimizer, register allocator, x86-64 and AArch64 emitters, linker (ELF/PE/Mach-O)
 klar/rt/         runtime of native executables, written in Klar
 compiler/        the compiler written in Klar (self-hosted): klarc.klar + lexer … emit, link
 klar/std/        standard modules in Klar (std.math, std.text, std.list, std.result, std.set, std.json, std.time)

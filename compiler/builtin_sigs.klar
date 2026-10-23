@@ -443,7 +443,7 @@ pub fn agents_template() -> Str {
 
 /// The version of Klar.
 pub fn klar_version() -> Str {
-  return "0.7.0"
+  return "1.0.0"
 }
 
 /// The files of the runtime (klar/rt), which form one module.
