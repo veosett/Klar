@@ -6,6 +6,7 @@
 pub fn global_sigs() -> List[Str] {
   return [
     "fn print[T](value: T) -> Unit uses io",
+    "fn print_raw(text: Str) -> Unit uses io",
     "fn eprint[T](value: T) -> Unit uses io",
     "fn read_line() -> Option[Str] uses io",
     "fn fail(message: Str) -> Never",
@@ -19,9 +20,11 @@ pub fn global_sigs() -> List[Str] {
     "fn write_file(path: Str, content: Str) -> Result[Unit, Str] uses fs",
     "fn file_exists(path: Str) -> Bool uses fs",
     "fn list_dir(path: Str) -> Result[List[Str], Str] uses fs",
+    "fn make_dir(path: Str) -> Result[Unit, Str] uses fs",
     "fn is_dir(path: Str) -> Bool uses fs",
     "fn exit(code: Int) -> Never uses io",
     "fn run_command(args: List[Str]) -> Result[Int, Str] uses proc",
+    "fn run_capture(args: List[Str], dir: Str, input: Str) -> Result[List[Str], Str] uses proc",
     "fn set_executable(path: Str) -> Result[Unit, Str] uses fs",
     "fn env_var(name: Str) -> Option[Str] uses io",
     "fn cli_args() -> List[Str] uses io",
@@ -245,6 +248,11 @@ pub fn sys_sigs() -> List[Str] {
     "fn os_find_first(pattern: Word, data: Word) -> Word",
     "fn os_find_next(h: Word, data: Word) -> Word",
     "fn os_find_close(h: Word) -> Word",
+    "fn os_mkdir(path: Word) -> Word",
+    "fn os_dup2(old: Word, new: Word) -> Word",
+    "fn os_chdir(path: Word) -> Word",
+    "fn os_execve(path: Word, argv: Word, envp: Word) -> Word",
+    "fn os_poll(fds: Word, n: Word) -> Word",
   ]
 }
 
@@ -410,6 +418,19 @@ pub fn diag_codes() -> List[List[Str]] {
     ["R0012", "reached todo()", "The program executed a `todo(...)` placeholder."],
     ["R0014", "par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was killed, e.g. by the system running out of memory)."],
   ]
+}
+
+/// The templates of `klar new` (Python str.format fields: {name}, {pkg}).
+pub fn main_template() -> Str {
+  return "/// \{name\}: entry point.\nfn main() uses io \{\{\n  print(greeting(\"world\"))\n\}\}\n\n/// Builds a greeting.\n/// >>> assert greeting(\"Klar\") == \"Hello, Klar!\"\nfn greeting(who: Str) -> Str \{\{\n  return \"Hello, \{\{who\}\}!\"\n\}\}\n\ntest \"greeting mentions the name\" \{\{\n  assert greeting(\"AI\").contains(\"AI\")\n\}\}\n"
+}
+
+pub fn lib_template() -> Str {
+  return "// \{name\}: a Klar package. Other projects use it with `klar add \{pkg\} --git <url>` and `use \{pkg\}.\{\{greet\}\}`;\n// its other files are imported as `use \{pkg\}.<file>.\{\{...\}\}`.\n\n/// Says hello.\n/// >>> assert greet(\"Ada\") == \"Hello, Ada!\"\npub fn greet(name: Str) -> Str \{\{\n  return \"Hello, \{\{name\}\}!\"\n\}\}\n\ntest \"greets\" \{\{\n  assert greet(\"x\").starts_with(\"Hello\")\n\}\}\n"
+}
+
+pub fn agents_template() -> Str {
+  return "# Working on \{name\} (instructions for AI assistants)\n\nThis project is written in **Klar**. Get the full language reference (≈2k tokens) with `klar spec`.\n\n## Loop\n1. Edit `.klar` files; keep tests next to the code (`test`, doc-tests `/// >>>`, `property`).\n2. `klar dev main.klar --json` — check + all tests + run in one step; follow the `next` field.\n3. `klar fix main.klar` applies safe fixes; `klar fmt .` normalizes the layout.\n4. Look things up instead of guessing: `klar doc split` (built-ins, std, this project), `klar outline main.klar`,\n   `klar refs name`, `klar eval '\"a,b\".split(\",\")'`, `klar explain E0701`.\n5. Before finishing: `klar coverage main.klar` (untested statements), `klar build main.klar` (native executable).\n6. Packages: dependencies are in `klar.toml`; `klar add name --git URL --tag v1` / `--path ../dir`, then\n   `use name.\{\{item\}\}`; `klar fetch` after cloning, `klar deps` shows the tree.\n\n## Rules that the compiler enforces\nNo null/exceptions/indexing; handle `Option`/`Result`; values are immutable (`xs = xs.push(x)`);\nno shadowing; named arguments for 3+ parameters; `uses io` etc. for effects; Int division needs a\nprovably non-zero divisor.\n"
 }
 
 /// The version of Klar.

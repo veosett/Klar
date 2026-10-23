@@ -1732,6 +1732,10 @@ def lower_program(loaded, image, tests=None):
             um.emit("cmp", "eq", c, sel, k)
             um.emit("br", c, yes, no)
             um.emit("label", yes)
+            gf, at = um.reg(), um.reg()            # the test's own place, for its call stack
+            um.emit("addr", gf, "g_frames")
+            um.emit("addr", at, prog.span_sym(tests[i].span))
+            um.emit("store", gf, 8, at)
             um.emit("call", r, nm, [])
             um.emit("ret", r)
             um.emit("label", no)

@@ -3307,6 +3307,7 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
   if tests {
     w = finish_fn(w)
     var names: List[Str] = []
+    var test_spans: List[Span] = []
     var ti = 0
     for d in test_blocks {
       match d {
@@ -3314,6 +3315,7 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
           if ti == 0 {
             main_span = sp
           }
+          test_spans = test_spans.push(sp)
           let t = lower_test(w0: w, m: main_mod, name: test_name, body: body, index: ti)
           w = t.w
           names = names.push(t.v)
@@ -3339,6 +3341,13 @@ pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
       w = emit_always(w, [op("cmp"), op("eq"), r(c.v), r(sel.v), r(kr.v)])
       w = emit_always(w, [op("br"), r(c.v), KV.S(s: yes.v), KV.S(s: no.v)])
       w = emit_always(w, [op("label"), KV.S(s: yes.v)])
+      // the test's own place, for its call stack
+      let gf = reg(w)
+      let at = reg(gf.w)
+      let ss = span_sym(at.w, test_spans.get_or(ti, main_span))
+      w = emit_always(ss.w, [op("addr"), r(gf.v), KV.S(s: "g_frames")])
+      w = emit_always(w, [op("addr"), r(at.v), KV.S(s: ss.v)])
+      w = emit_always(w, [op("store"), r(gf.v), r(8), r(at.v)])
       w = emit_always(w, [op("call"), r(rr.v), KV.S(s: nm), KV.L(regs: [])])
       w = emit_always(w, [op("ret"), r(rr.v)])
       w = emit_always(w, [op("label"), KV.S(s: no.v)])

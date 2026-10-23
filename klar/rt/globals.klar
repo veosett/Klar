@@ -12,6 +12,11 @@ fn b_print(v: Word, td_T: Word) {
   out_byte(10)
 }
 
+// print_raw(text): the text as it is, without a line break
+fn b_print_raw(s: Word) {
+  out_bytes(s + 32, peek(s + 16))
+}
+
 // print to stderr (stdout is flushed first, so the two streams stay in order)
 fn b_eprint(v: Word, td_T: Word) {
   flush_out()
@@ -181,6 +186,8 @@ fn io_error_text(b: Word, code: Word) {
     sb_add_cstr(b, "Is a directory")
   } else if code == -20 {
     sb_add_cstr(b, "Not a directory")
+  } else if code == -17 {
+    sb_add_cstr(b, "File exists")
   } else {
     sb_add_cstr(b, "I/O error")
   }
@@ -588,4 +595,156 @@ fn b_list_dir(path: Word, rtd: Word) -> Word {
   let sorted = List_sort(names, 0)
   rc_dec(names)
   return ok_new(rtd, sorted)
+}
+
+// make_dir(path): creates the directory and the missing ones above it (like Python's os.makedirs(exist_ok=True))
+fn b_make_dir(path: Word, rtd: Word) -> Word {
+  let n = peek(path + 16)
+  let buf = alloc(n + 1)
+  copy_bytes(buf, path + 32, n)
+  var last: Word = 0
+  var i: Word = 1
+  while i <= n {
+    let c = peek8(path + 32 + i)
+    if i == n or c == 47 or c == 92 {
+      poke8(buf + i, 0)
+      if not os_is_dir(buf) {
+        last = os_mkdir(buf)
+      }
+      poke8(buf + i, c)
+    }
+    i = i + 1
+  }
+  poke8(buf + n, 0)
+  let ok = os_is_dir(buf)
+  block_free(buf)
+  if ok {
+    return ok_new(rtd, 0)
+  }
+  let b = sb_new()
+  sb_add_cstr(b, "cannot create '")
+  sb_add_str(b, path)
+  sb_add_cstr(b, "': ")
+  if last == 0 or last == -1 {
+    last = -17
+  }
+  io_error_text(b, last)
+  return err_new(rtd, sb_finish(b))
+}
+
+// run_capture(args, dir, input): runs a program (searched in PATH) in `dir` ("" = here) with `input` as its stdin
+// and returns [exit code, stdout, stderr]; both streams are read together (poll), so neither can fill up and block
+// the child. The input goes into the pipe before the child starts (so at most one pipe buffer: 64 KB).
+fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
+  let n = peek(args + 16)
+  if n == 0 {
+    return err_new(rtd, bits("run_capture: no program given"))
+  }
+  if peek(input + 16) > 65536 {
+    return err_new(rtd, bits("run_capture: the input is limited to 64 KB"))
+  }
+  if os_platform() != 0 {
+    return err_new(rtd, bits("run_capture: not supported on Windows yet"))
+  }
+  flush_out()
+  let prog = list_at(args, 0)
+  let path = find_program(prog)
+  if path == 0 {
+    return spawn_error(prog, -2, rtd)
+  }
+  let argv = alloc(8 * (n + 1))
+  poke(argv, path + 32)
+  var i: Word = 1
+  while i < n {
+    poke(argv + 8 * i, list_at(args, i) + 32)
+    i = i + 1
+  }
+  poke(argv + 8 * n, 0)
+  // the environment: the strings after argv's terminating null
+  var ne: Word = 0
+  while os_argv(os_argc() + 1 + ne) != 0 {
+    ne = ne + 1
+  }
+  let envp = alloc(8 * (ne + 1))
+  var e: Word = 0
+  while e <= ne {
+    poke(envp + 8 * e, os_argv(os_argc() + 1 + e))
+    e = e + 1
+  }
+  let fds = alloc(24)
+  os_pipe(fds)
+  os_pipe(fds + 8)
+  os_pipe(fds + 16)
+  if peek(input + 16) > 0 {
+    os_write(peek32(fds + 20), input + 32, peek(input + 16))
+  }
+  os_close(peek32(fds + 20))
+  let pid = os_fork()
+  if pid == 0 {
+    os_dup2(peek32(fds + 16), 0)
+    os_dup2(peek32(fds + 4), 1)
+    os_dup2(peek32(fds + 12), 2)
+    os_close(peek32(fds))
+    os_close(peek32(fds + 4))
+    os_close(peek32(fds + 8))
+    os_close(peek32(fds + 12))
+    os_close(peek32(fds + 16))
+    if peek(dir + 16) > 0 and os_chdir(dir + 32) < 0 {
+      os_exit(127)
+    }
+    os_execve(path + 32, argv, envp)
+    os_exit(127)
+  }
+  os_close(peek32(fds + 4))
+  os_close(peek32(fds + 12))
+  os_close(peek32(fds + 16))
+  let out = sb_new()
+  let err = sb_new()
+  let buf = alloc(65536)
+  let pfd = alloc(16)
+  var fd_out = peek32(fds)
+  var fd_err = peek32(fds + 8)
+  while fd_out >= 0 or fd_err >= 0 {
+    poke32(pfd, fd_out)
+    poke32(pfd + 4, 1)
+    poke32(pfd + 8, fd_err)
+    poke32(pfd + 12, 1)
+    os_poll(pfd, 2)
+    if fd_out >= 0 and w_and(w_shr(peek32(pfd + 4), 16), 65535) != 0 {
+      let r = os_read(fd_out, buf, 65536)
+      if r <= 0 {
+        os_close(fd_out)
+        fd_out = -1
+      } else {
+        sb_add_bytes(out, buf, r)
+      }
+    }
+    if fd_err >= 0 and w_and(w_shr(peek32(pfd + 12), 16), 65535) != 0 {
+      let r = os_read(fd_err, buf, 65536)
+      if r <= 0 {
+        os_close(fd_err)
+        fd_err = -1
+      } else {
+        sb_add_bytes(err, buf, r)
+      }
+    }
+  }
+  block_free(buf)
+  block_free(pfd)
+  block_free(fds)
+  block_free(argv)
+  block_free(envp)
+  rc_dec(path)
+  let st = os_wait(pid)
+  var code = w_and(w_shr(st, 8), 255)
+  if w_and(st, 127) != 0 {
+    code = 128 + w_and(st, 127)
+  }
+  let cs = sb_new()
+  sb_add_word(cs, code)
+  var res = list_new_str()
+  res = list_push_owned_raw(res, sb_finish(cs))
+  res = list_push_owned_raw(res, sb_finish(out))
+  res = list_push_owned_raw(res, sb_finish(err))
+  return ok_new(rtd, res)
 }

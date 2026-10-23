@@ -9,7 +9,9 @@ use loader.{Ld}
 /// position (a stable sort); never the prelude's, the runtime's only when they are errors.
 pub fn user_diags(ld: Ld, main: Str) -> List[Diag] {
   let sorted = ld.diags.sort_by(fn(d) => sort_key(d, main))
-  return sorted.filter(fn(d) => d.file != "prelude.klar" and not (d.file.starts_with("rt/") and d.severity != "error"))
+  // (the runtime, loaded as one module, reports as "rt")
+  return sorted.filter(fn(d) => d.file != "prelude.klar" and not ((d.file == "rt" or d.file.starts_with("rt/")) and
+      d.severity != "error"))
 }
 
 fn sort_key(d: Diag, main: Str) -> Str {

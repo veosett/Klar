@@ -1,0 +1,597 @@
+// `klarc patch`: structured, verified edits for AI authors (the "AI patch" protocol), the counterpart of
+// klar/tools/patch.py with the same reports.
+//
+// An edit names *what* it changes: a declaration by name (`area`, `Circle.area`, `test:totals`), a node by the id
+// `klar ast` prints, a unique piece of text, or a name everywhere (a rename). All edits refer to the file as it was
+// before the patch; they are applied together, then the program is checked, and the file is written only when the
+// result has no new errors (and, with "test": true, no failing tests).
+use ast.{Decl, Program, Span, TypeExpr}
+use astjson.{program_json, to_ast_tree}
+use checker.{Diag}
+use commands.{absolute, compact_diag, plan_rename}
+use difflib.{close_matches, lines_keep, unified_diff}
+use fmt.{format_checked}
+use jsonout.{J, compact, spaced}
+use loader.{Ld, load_program_with}
+use parser.{parse_program}
+use report.{user_diags}
+use std.json.{Json, as_bool, as_int, as_items, as_text, field, parse_json}
+
+/// A change of the original text: [start, end) becomes `text`.
+type Change { start: Int, end: Int, text: Str }
+
+/// The source with its line starts (offsets in characters).
+type Text { src: Str, cs: List[Str], starts: List[Int] }
+
+fn text_of(src: Str) -> Text {
+  let cs = src.chars()
+  var starts = [0]
+  var i = 0
+  for c in cs {
+    if c == "\n" {
+      starts = starts.push(i + 1)
+    }
+    i = i + 1
+  }
+  return Text { src: src, cs: cs, starts: starts }
+}
+
+fn off(t: Text, line: Int, col: Int) -> Int {
+  return t.starts.get_or(line - 1, 0) + col - 1
+}
+
+fn line_start(t: Text, offset: Int) -> Int {
+  var i = offset - 1
+  while i >= 0 {
+    if t.cs.get_or(i, "") == "\n" {
+      return i + 1
+    }
+    i = i - 1
+  }
+  return 0
+}
+
+fn line_end(t: Text, offset: Int) -> Int {
+  var i = offset
+  while i < t.cs.len() {
+    if t.cs.get_or(i, "") == "\n" {
+      return i
+    }
+    i = i + 1
+  }
+  return t.cs.len()
+}
+
+fn piece(t: Text, a: Int, b: Int) -> Str {
+  return t.cs.slice(a.max(0).min(t.cs.len()), b.max(0).min(t.cs.len())).join("")
+}
+
+/// The start of the `///` lines right above the line holding `offset` (or that line's start).
+fn doc_start(t: Text, offset: Int) -> Int {
+  var start = line_start(t, offset)
+  while start > 0 {
+    let prev = line_start(t, start - 1)
+    if piece(t: t, a: prev, b: start).trim().starts_with("///") {
+      start = prev
+    } else {
+      return start
+    }
+  }
+  return start
+}
+
+/// (target name, span) of the top-level declarations, in order (a later one with the same name wins).
+fn decl_targets(p: Program) -> Map[Str, Span] {
+  var out: Map[Str, Span] = Map {}
+  for d in p.decls {
+    match d {
+      Decl.Fn(f) => {
+        // a newtype's constructor: the type is the target
+        if f.constructs == None {
+          out = out.set(f.name, f.span)
+        }
+      },
+      Decl.TypeD(s, n, _, _, _, _) => {
+        out = out.set(n, s)
+      },
+      Decl.EnumD(s, n, _, _, _, _) => {
+        out = out.set(n, s)
+      },
+      Decl.Const(s, n, _, _, _, _, _) => {
+        out = out.set(n, s)
+      },
+      Decl.Alias(s, n, _, _, _, _) => {
+        out = out.set(n, s)
+      },
+      Decl.Trait(s, n, _, _, _, _, _) => {
+        out = out.set(n, s)
+      },
+      Decl.Test(s, n, _) => {
+        out = out.set("test:" + n, s)
+      },
+      Decl.Property(s, n, _, _) => {
+        out = out.set("property:" + n, s)
+      },
+      Decl.Impl(s, tr, _, target, _, _, _, _, _) => {
+        let tn = match target {
+          TypeExpr.Named(_, n, _) => n,
+          _ => "?",
+        }
+        out = out.set("impl {tr} for {tn}", s)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn unknown(name: Str, targets: Map[Str, Span]) -> Str {
+  let close = close_matches(word: name, possibilities: targets.keys(), n: 3, cutoff: 0.5)
+  var hint = ""
+  if not close.is_empty() {
+    hint = "; did you mean " + close.map(fn(c) => "`" + c + "`").join(", ") + "?"
+  }
+  return "no declaration `{name}` in the file{hint} (targets: names, `Type.method`, `test:name`)"
+}
+
+/// The span of the node with this id (pre-order numbering, as `klar ast` prints it).
+fn node_span(tree: J, id: Int) -> Option[Span] {
+  return match tree {
+    J.JObj(fields) => {
+      var mine = false
+      var sp: Option[Span] = None
+      for f in fields {
+        if f.first == "id" and f.second == J.JInt(id) {
+          mine = true
+        }
+        if f.first == "span" {
+          sp = match f.second {
+            J.JArr(xs) => Some(Span { line: jint(xs.get(0)), col: jint(xs.get(1)), end_line: jint(xs.get(2)),
+              end_col: jint(xs.get(3)) }),
+            _ => None,
+          }
+        }
+      }
+      if mine {
+        return sp
+      }
+      for f in fields {
+        match node_span(f.second, id) {
+          Some(found) => {
+            return Some(found)
+          },
+          None => {},
+        }
+      }
+      return None
+    },
+    J.JArr(items) => {
+      for x in items {
+        match node_span(x, id) {
+          Some(found) => {
+            return Some(found)
+          },
+          None => {},
+        }
+      }
+      return None
+    },
+    _ => None,
+  }
+}
+
+fn jint(j: Option[J]) -> Int {
+  return match j {
+    Some(J.JInt(i)) => i,
+    _ => 0,
+  }
+}
+
+fn strip_newlines(s: Str) -> Str {
+  var out = s
+  while out.starts_with("\n") {
+    out = out.slice(1, out.len())
+  }
+  while out.ends_with("\n") {
+    out = out.slice(0, out.len() - 1)
+  }
+  return out
+}
+
+fn has(e: Json, key: Str) -> Bool {
+  return field(e, key) != None
+}
+
+fn text_field(e: Json, key: Str) -> Str {
+  return field(e, key).map(fn(v) => as_text(v).unwrap_or("")).unwrap_or("")
+}
+
+/// Python's repr of a list of strings.
+fn repr_list(xs: List[Str]) -> Str {
+  return "[" + xs.map(fn(x) => "'" + x + "'").join(", ") + "]"
+}
+
+type Plan { changes: List[Change], renames: List[Pair[Str, Str]] }
+
+/// The text ranges the edits replace, and the renames to apply afterwards; or why the patch cannot be applied.
+fn plan(src: Str, edits: List[Json]) -> Result[Plan, Str] {
+  let t = text_of(src)
+  let parsed = parse_program(src)
+  let targets = match parsed {
+    Ok(p) => decl_targets(p),
+    Err(_) => Map {},
+  }
+  let tree = match parsed {
+    Ok(p) => to_ast_tree(p),
+    Err(_) => J.JNull,
+  }
+  var changes: List[Change] = []
+  var renames: List[Pair[Str, Str]] = []
+  var k = 0
+  for e in edits {
+    k = k + 1
+    let keys = match e {
+      Json.Obj(fs) => Some(fs.keys()),
+      _ => None,
+    }
+    if keys == None {
+      return Err("edit #{k} is not an object")
+    }
+    if has(e, "replace") and has(e, "with") {
+      let name = text_field(e, "replace")
+      let sp = match targets.get(name) {
+        Some(s) => s,
+        None => {
+          return Err(unknown(name, targets))
+        },
+      }
+      var a = off(t: t, line: sp.line, col: sp.col)
+      let b = off(t: t, line: sp.end_line, col: sp.end_col)
+      let code = strip_newlines(text_field(e, "with"))
+      if code.trim_start().starts_with("///") {
+        a = doc_start(t, a)
+      } else {
+        a = line_start(t, a)
+      }
+      changes = changes.push(Change { start: a, end: b, text: code })
+    } else if has(e, "insert") {
+      let code = strip_newlines(text_field(e, "insert"))
+      if has(e, "after") {
+        let name = text_field(e, "after")
+        let sp = match targets.get(name) {
+          Some(s) => s,
+          None => {
+            return Err(unknown(name, targets))
+          },
+        }
+        let b = line_end(t, off(t: t, line: sp.end_line, col: sp.end_col))
+        changes = changes.push(Change { start: b, end: b, text: "\n\n" + code })
+      } else if has(e, "before") {
+        let name = text_field(e, "before")
+        let sp = match targets.get(name) {
+          Some(s) => s,
+          None => {
+            return Err(unknown(name, targets))
+          },
+        }
+        let a = doc_start(t, off(t: t, line: sp.line, col: sp.col))
+        changes = changes.push(Change { start: a, end: a, text: code + "\n\n" })
+      } else if text_field(e, "at") == "end" {
+        var end = t.cs.len()
+        while end > 0 and t.cs.get_or(end - 1, "") == "\n" {
+          end = end - 1
+        }
+        changes = changes.push(Change { start: end, end: end, text: "\n\n" + code })
+      } else {
+        return Err("edit #{k}: `insert` needs `after`, `before` or `\"at\": \"end\"`")
+      }
+    } else if has(e, "delete") {
+      let name = text_field(e, "delete")
+      let sp = match targets.get(name) {
+        Some(s) => s,
+        None => {
+          return Err(unknown(name, targets))
+        },
+      }
+      let a = doc_start(t, off(t: t, line: sp.line, col: sp.col))
+      var b = line_end(t, off(t: t, line: sp.end_line, col: sp.end_col))
+      // also one blank line that separated it from the next declaration
+      if piece(t: t, a: b, b: b + 2) == "\n\n" {
+        b = b + 1
+      }
+      if b < t.cs.len() and t.cs.get_or(b, "") == "\n" {
+        b = b + 1
+      }
+      changes = changes.push(Change { start: a, end: b, text: "" })
+    } else if has(e, "id") and has(e, "with") {
+      let id = field(e, "id").map(fn(v) => as_int(v).unwrap_or(-1)).unwrap_or(-1)
+      let sp = match node_span(tree, id) {
+        Some(s) => s,
+        None => {
+          let shown = field(e, "id").map(fn(v) => json_value_text(v)).unwrap_or("")
+          return Err("edit #{k}: no node with id {shown} (ids come from `klar ast` of this file)")
+        },
+      }
+      changes = changes.push(Change { start: off(t: t, line: sp.line, col: sp.col), end: off(t: t, line: sp.end_line,
+        col: sp.end_col), text: text_field(e, "with") })
+    } else if has(e, "find") and has(e, "replace") {
+      var lo = 0
+      var hi = t.cs.len()
+      var place = ""
+      if has(e, "in") {
+        let name = text_field(e, "in")
+        let sp = match targets.get(name) {
+          Some(s) => s,
+          None => {
+            return Err(unknown(name, targets))
+          },
+        }
+        lo = off(t: t, line: sp.line, col: sp.col)
+        hi = off(t: t, line: sp.end_line, col: sp.end_col)
+        place = " in `{name}`"
+      }
+      let region = piece(t: t, a: lo, b: hi)
+      let find = text_field(e, "find")
+      let count = region.count(find)
+      if count != 1 {
+        return Err("edit #{k}: the text to find occurs {count} times{place} (it must be unique: add surrounding " +
+            "text or use `in`)")
+      }
+      let a = lo + region.index_of(find).unwrap_or(0)
+      changes = changes.push(Change { start: a, end: a + find.len(), text: text_field(e, "replace") })
+    } else if has(e, "rename") and has(e, "to") {
+      renames = renames.push(Pair { first: text_field(e, "rename"), second: text_field(e, "to") })
+    } else {
+      return Err("edit #{k}: unknown edit {repr_list(keys.unwrap_or([]).sort())} (replace/with, insert, delete, " +
+          "id/with, find/replace, rename/to)")
+    }
+  }
+  let sorted = changes.sort_by(fn(c) => c.start * 1000000000 + c.end)
+  var i = 0
+  while i + 1 < sorted.len() {
+    let c1 = sorted.get_or(i, Change { start: 0, end: 0, text: "" })
+    let c2 = sorted.get_or(i + 1, c1)
+    if c2.start < c1.end or (c1.start == c1.end and c1.end == c2.start and c2.start == c2.end) {
+      return Err("two edits change the same part of the file")
+    }
+    i = i + 1
+  }
+  return Ok(Plan { changes: sorted, renames: renames })
+}
+
+fn json_value_text(v: Json) -> Str {
+  return match v {
+    Json.Int(i) => i.to_str(),
+    Json.Text(s) => s,
+    Json.Null => "None",
+    Json.Bool(b) => match b {
+      true => "True",
+      false => "False",
+    },
+    _ => "?",
+  }
+}
+
+fn apply_changes(src: Str, changes: List[Change]) -> Str {
+  var cs = src.chars()
+  for c in changes.reverse() {
+    cs = cs.take(c.start).concat(c.text.chars()).concat(cs.drop(c.end))
+  }
+  return cs.join("")
+}
+
+/// The errors a user would see.
+fn errors_of(ld: Ld, shown: Str) -> List[Diag] {
+  return user_diags(ld, shown).filter(fn(d) => d.severity == "error")
+}
+
+/// The report of a patch ({"ok", "written", "file", ...}) as JSON fields, and the files to write.
+type Outcome { fields: List[Pair[Str, J]], files: List[Pair[Str, Str]], ok: Bool, error: Str }
+
+/// Applies a patch to a file (`write`: write it when the result is good, or always with `force`).
+pub fn patch_file(path: Str, lib: Str, edits: List[Json], run_tests: Bool, write: Bool, force: Bool) -> Outcome uses io, fs {
+  let full = absolute(path)
+  let shown = path.replace("\\", "/").split("/").last().unwrap_or(path)
+  let src = read_file(path).unwrap_or("").replace("\r\n", "\n").replace("\r", "\n")
+  var fields = [Pair { first: "ok", second: J.JBool(false) }, Pair { first: "written", second: J.JBool(false) },
+    Pair { first: "file", second: J.JStr(full) }]
+  let p = match plan(src, edits) {
+    Ok(x) => x,
+    Err(why) => {
+      return Outcome { fields: fields.push(Pair { first: "error", second: J.JStr(why) }), files: [], ok: false,
+        error: why }
+    },
+  }
+  var new_text = apply_changes(src, p.changes)
+  var others: Map[Str, Str] = Map {}
+  for r in p.renames {
+    let ld = load_program_with(path: path, lib: lib, overlay: Map {}.set(path, new_text))
+    match plan_rename(ld: ld, old: r.first, new: r.second) {
+      Err(why) => {
+        let msg = "rename `{r.first}` → `{r.second}`: {why}"
+        return Outcome { fields: fields.push(Pair { first: "error", second: J.JStr(msg) }), files: [], ok: false,
+          error: msg }
+      },
+      Ok(planned) => {
+        for f in planned.first {
+          if f.first == full {
+            new_text = f.second
+          } else {
+            others = others.set(f.first, f.second)
+          }
+        }
+      },
+    }
+  }
+  if format_checked(src) == Ok(src) {
+    match format_checked(new_text) {
+      Ok(t) => {
+        new_text = t
+      },
+      Err(_) => {},
+    }
+  }
+  let before = load_program_with(path: path, lib: lib, overlay: Map {}.set(path, src))
+  var overlay: Map[Str, Str] = Map {}.set(path, new_text)
+  for o in others.entries() {
+    // the loader reads a module by its own path (relative to the main file); the rename reports absolute ones
+    var key = o.key
+    for lp in before.order {
+      if absolute(lp) == o.key {
+        key = lp
+      }
+    }
+    overlay = overlay.set(key, o.value)
+  }
+  let after = load_program_with(path: path, lib: lib, overlay: overlay)
+  let old_errs = errors_of(before, shown).map(fn(d) => d.code + "\0" + d.message)
+  let new_errs = errors_of(after, shown).filter(fn(d) => not old_errs.contains(d.code + "\0" + d.message))
+  fields = fields.push(Pair { first: "applied", second: J.JInt(edits.len()) })
+  fields = fields.push(Pair { first: "diff", second: J.JStr(unified_diff(a: lines_keep(src), b: lines_keep(new_text),
+    from_file: shown, to_file: shown + " (patched)")) })
+  if not new_errs.is_empty() {
+    fields = fields.push(Pair { first: "errors", second: J.JArr(new_errs.map(compact_diag)) })
+  }
+  if run_tests {
+    if new_errs.is_empty() {
+      fields = fields.push(Pair { first: "tests", second: J.JObj([Pair { first: "skipped", second: J.JStr("klarc " +
+          "cannot run tests in a patch yet") }]) })
+    } else {
+      fields = fields.push(Pair { first: "tests", second: J.JObj([Pair { first: "skipped",
+        second: J.JStr("the patched program has errors") }]) })
+    }
+  }
+  let ok = new_errs.is_empty()
+  fields = fields.set(0, Pair { first: "ok", second: J.JBool(ok) })
+  var files = [Pair { first: path, second: new_text }]
+  for o in others.entries() {
+    files = files.push(Pair { first: o.key, second: o.value })
+  }
+  if write and (ok or force) {
+    for f in files {
+      match write_file(f.first, f.second) {
+        Ok(_) => {},
+        Err(e) => {
+          eprint(e)
+        },
+      }
+    }
+    fields = fields.set(1, Pair { first: "written", second: J.JBool(true) })
+  }
+  return Outcome { fields: fields, files: files, ok: ok, error: "" }
+}
+
+fn read_stdin() -> Str uses io {
+  var out: List[Str] = []
+  var reading = true
+  while reading {
+    match read_line() {
+      Some(line) => {
+        out = out.push(line)
+      },
+      None => {
+        reading = false
+      },
+    }
+  }
+  return out.join("\n")
+}
+
+fn get(fields: List[Pair[Str, J]], key: Str) -> Option[J] {
+  return fields.filter(fn(f) => f.first == key).get(0).map(fn(f) => f.second)
+}
+
+/// `klarc patch FILE PATCH [--test] [--dry-run] [--force] [--json]` (PATCH: a JSON file, `-` for stdin, or the
+/// JSON itself).
+pub fn patch_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  var pos: List[Str] = []
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--lib" {
+      i = i + 2
+    } else {
+      if not a.starts_with("--") or a == "-" {
+        pos = pos.push(a)
+      }
+      i = i + 1
+    }
+  }
+  let file = pos.get_or(0, "")
+  let arg = pos.get_or(1, "")
+  var text = arg
+  if arg == "-" {
+    text = read_stdin()
+  } else if file_exists(arg) {
+    text = read_file(arg).unwrap_or("")
+  }
+  let parsed = match parse_json(text) {
+    Ok(j) => j,
+    Err(e) => {
+      print(spaced(J.JObj([Pair { first: "ok", second: J.JBool(false) }, Pair { first: "error",
+        second: J.JStr("the patch is not valid JSON: {e}") }])))
+      return 1
+    },
+  }
+  let edits = match parsed {
+    Json.Obj(_) => field(parsed, "edits").map(fn(v) => as_items(v).unwrap_or([])).unwrap_or([]),
+    Json.Arr(items) => items,
+    _ => [],
+  }
+  let with_tests = args.contains("--test") or field(parsed, "test").map(fn(v) => as_bool(v).unwrap_or(false)).unwrap_or(false)
+  let out = patch_file(path: file, lib: lib, edits: edits, run_tests: with_tests, write: not args.contains("--dry-run"),
+    force: args.contains("--force"))
+  if args.contains("--json") {
+    print(compact(J.JObj(out.fields)))
+  } else if out.error != "" {
+    eprint("error: {out.error}")
+  } else {
+    match get(out.fields, "diff") {
+      Some(J.JStr(d)) => print_raw(d),
+      _ => {},
+    }
+    for e in out.fields {
+      if e.first == "errors" {
+        match e.second {
+          J.JArr(items) => {
+            for item in items {
+              print(error_line(item))
+            }
+          },
+          _ => {},
+        }
+      }
+    }
+    if get(out.fields, "written") == Some(J.JBool(true)) {
+      print("patched " + absolute(file))
+    } else if not out.ok {
+      print("not written: the patch would break the program (use --force to write anyway)")
+    } else {
+      print("not written (--dry-run)")
+    }
+  }
+  if out.ok {
+    return 0
+  }
+  return 1
+}
+
+fn jtext(j: Option[J]) -> Str {
+  return match j {
+    Some(J.JStr(s)) => s,
+    _ => "",
+  }
+}
+
+fn error_line(item: J) -> Str {
+  return match item {
+    J.JObj(fs) => {
+      var line = "error[" + jtext(get(fs, "code")) + "] " + jtext(get(fs, "at")) + ": " + jtext(get(fs, "msg"))
+      if get(fs, "hint") != None {
+        line = line + "\n  hint: " + jtext(get(fs, "hint"))
+      }
+      return line
+    },
+    _ => "",
+  }
+}

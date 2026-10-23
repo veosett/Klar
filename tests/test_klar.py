@@ -400,7 +400,7 @@ fn main() uses io, fs {{
 
     def test_eprint_goes_to_stderr(self):
         from klar.native.build import build, host_target
-        src = 'fn main() uses io {\n  print("out")\n  eprint("err {1 + 1}")\n  eprint([1, 2])\n}\n'
+        src = 'fn main() uses io {\n  print_raw("o")\n  print("ut")\n  eprint("err {1 + 1}")\n  eprint([1, 2])\n}\n'
         loaded = load_source(src, "t.klar")
         for runner in (Interpreter, CompiledProgram):
             out, err = io.StringIO(), io.StringIO()
@@ -423,6 +423,8 @@ fn main() uses io, fs {{
   print(list_dir("{d}/missing").is_err())
   print(list_dir("{d}/b.txt"))
   print([is_dir("{d}"), is_dir("{d}/sub"), is_dir("{d}/b.txt"), is_dir("{d}/nope")])
+  print(make_dir("{d}/x/y/z"))
+  print([is_dir("{d}/x/y/z"), make_dir("{d}/b.txt").is_err()])
 }}"""
         with tempfile.TemporaryDirectory() as d:
             for name in ("b.txt", "a.klar", "é.txt"):
@@ -431,10 +433,12 @@ fn main() uses io, fs {{
             os.mkdir(os.path.join(d, "sub"))
             root = d.replace("\\", "/")
             want = (f'Ok(["a.klar", "b.txt", "sub", "é.txt"])\ntrue\n'
-                    f'Err("cannot list \'{root}/b.txt\': Not a directory")\n[true, true, false, false]\n')
+                    f'Err("cannot list \'{root}/b.txt\': Not a directory")\n[true, true, false, false]\nOk(())\n[true, true]\n')
             program = src.format(d=root)
+            import shutil
             for compiled in (False, True):
                 out, ex = _run_backend(load_source(program, "t.klar"), compiled, "", ())
+                shutil.rmtree(os.path.join(d, "x"), ignore_errors=True)
                 self.assertIsNone(ex)
                 self.assertEqual(out, want)
             if host_target() == "linux":
@@ -444,6 +448,41 @@ fn main() uses io, fs {{
                         f.write(program)
                     build(path, out=exe, target="linux")
                     self.assertEqual(subprocess.run([exe], capture_output=True, text=True).stdout, want)
+
+    def test_run_capture(self):
+        from klar.native.build import build, host_target
+        if host_target() != "linux":
+            self.skipTest("run_capture needs Linux")
+        program = """
+fn show(r: Result[List[Str], Str]) uses io {
+  match r {
+    Ok(xs) => print(xs),
+    Err(e) => print("err " + e),
+  }
+}
+
+fn main() uses io, proc {
+  show(run_capture(args: ["sh", "-c", "echo out; echo err >&2; exit 3"], dir: "", input: ""))
+  show(run_capture(args: ["pwd"], dir: "/", input: ""))
+  show(run_capture(args: ["no-such-program-zz"], dir: "", input: ""))
+  show(run_capture(args: ["sh", "-c", "kill -9 $$"], dir: "", input: ""))
+  show(run_capture(args: ["sh", "-c", "head -c 200000 /dev/zero | tr '\\\\0' a >&2"], dir: "", input: "").map(fn(xs) => [
+    xs.get_or(2, "").len().to_str()]))
+  show(run_capture(args: ["tr", "a-z", "A-Z"], dir: "", input: "héllo\\nworld"))
+  show(run_capture(args: [], dir: "", input: ""))
+}"""
+        want = ('["3", "out\\n", "err\\n"]\n["0", "/\\n", ""]\nerr cannot run \'no-such-program-zz\': No such file or '
+                'directory\n["137", "", ""]\n[\"200000\"]\n[\"0\", \"HéLLO\\nWORLD\", \"\"]\nerr run_capture: no program given\n')
+        for compiled in (False, True):
+            out, ex = _run_backend(load_source(program, "t.klar"), compiled, "", ())
+            self.assertIsNone(ex)
+            self.assertEqual(out, want)
+        with tempfile.TemporaryDirectory() as b:
+            path, exe = os.path.join(b, "t.klar"), os.path.join(b, "t")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(program)
+            build(path, out=exe, target="linux")
+            self.assertEqual(subprocess.run([exe], capture_output=True, text=True).stdout, want)
 
     def test_dbg_and_todo(self):
         loaded = load_source("fn main() uses io { let x = dbg(2 + 3)\n print(x) }", "t.klar")

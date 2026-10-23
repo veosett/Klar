@@ -1,0 +1,265 @@
+// Python's difflib.unified_diff (with SequenceMatcher and its "popular element" heuristic), written in Klar, so
+// that `klarc` prints exactly the diffs `klar` prints.
+
+/// A matching block: a[a..a+size] == b[b..b+size].
+type Blk { a: Int, b: Int, size: Int }
+
+/// An opcode: tag "equal" / "replace" / "delete" / "insert" for a[i1..i2] and b[j1..j2].
+type Op { tag: Str, i1: Int, i2: Int, j1: Int, j2: Int }
+
+type Matcher { a: List[Str], b: List[Str], b2j: Map[Str, List[Int]] }
+
+fn matcher(a: List[Str], b: List[Str]) -> Matcher {
+  var b2j: Map[Str, List[Int]] = Map {}
+  var i = 0
+  for elt in b {
+    b2j = b2j.set(elt, b2j.get(elt).unwrap_or([]).push(i))
+    i = i + 1
+  }
+  // autojunk: in sequences of 200+ items, elements in more than 1% of the positions are ignored when matching
+  let n = b.len()
+  if n >= 200 {
+    let ntest = n / 100 + 1
+    var kept: Map[Str, List[Int]] = Map {}
+    for e in b2j.entries() {
+      if e.value.len() <= ntest {
+        kept = kept.set(e.key, e.value)
+      }
+    }
+    b2j = kept
+  }
+  return Matcher { a: a, b: b, b2j: b2j }
+}
+
+fn longest(m: Matcher, alo: Int, ahi: Int, blo: Int, bhi: Int) -> Blk {
+  var besti = alo
+  var bestj = blo
+  var bestsize = 0
+  var j2len: Map[Int, Int] = Map {}
+  var i = alo
+  while i < ahi {
+    var newj2len: Map[Int, Int] = Map {}
+    var going = true
+    for j in m.b2j.get(m.a.get_or(i, "")).unwrap_or([]) {
+      if going and j >= blo {
+        if j >= bhi {
+          going = false
+        } else {
+          let k = j2len.get(j - 1).unwrap_or(0) + 1
+          newj2len = newj2len.set(j, k)
+          if k > bestsize {
+            besti = i - k + 1
+            bestj = j - k + 1
+            bestsize = k
+          }
+        }
+      }
+    }
+    j2len = newj2len
+    i = i + 1
+  }
+  while besti > alo and bestj > blo and m.a.get_or(besti - 1, "") == m.b.get_or(bestj - 1, "") {
+    besti = besti - 1
+    bestj = bestj - 1
+    bestsize = bestsize + 1
+  }
+  while besti + bestsize < ahi and bestj + bestsize < bhi and m.a.get_or(besti + bestsize, "") == m.b.get_or(bestj +
+      bestsize, "") {
+      bestsize = bestsize + 1
+    }
+  return Blk { a: besti, b: bestj, size: bestsize }
+}
+
+fn matching_blocks(m: Matcher) -> List[Blk] {
+  let la = m.a.len()
+  let lb = m.b.len()
+  var queue = [[0, la, 0, lb]]
+  var blocks: List[Blk] = []
+  while not queue.is_empty() {
+    let q = queue.last().unwrap_or([0, 0, 0, 0])
+    queue = queue.take(queue.len() - 1)
+    let alo = q.get_or(0, 0)
+    let ahi = q.get_or(1, 0)
+    let blo = q.get_or(2, 0)
+    let bhi = q.get_or(3, 0)
+    let x = longest(m: m, alo: alo, ahi: ahi, blo: blo, bhi: bhi)
+    if x.size > 0 {
+      blocks = blocks.push(x)
+      if alo < x.a and blo < x.b {
+        queue = queue.push([alo, x.a, blo, x.b])
+      }
+      if x.a + x.size < ahi and x.b + x.size < bhi {
+        queue = queue.push([x.a + x.size, ahi, x.b + x.size, bhi])
+      }
+    }
+  }
+  blocks = blocks.sort_by(fn(x) => x.a * 4294967296 + x.b)
+  var out: List[Blk] = []
+  var i1 = 0
+  var j1 = 0
+  var k1 = 0
+  for x in blocks {
+    if i1 + k1 == x.a and j1 + k1 == x.b {
+      k1 = k1 + x.size
+    } else {
+      if k1 > 0 {
+        out = out.push(Blk { a: i1, b: j1, size: k1 })
+      }
+      i1 = x.a
+      j1 = x.b
+      k1 = x.size
+    }
+  }
+  if k1 > 0 {
+    out = out.push(Blk { a: i1, b: j1, size: k1 })
+  }
+  return out.push(Blk { a: la, b: lb, size: 0 })
+}
+
+fn opcodes(m: Matcher) -> List[Op] {
+  var i = 0
+  var j = 0
+  var out: List[Op] = []
+  for x in matching_blocks(m) {
+    var tag = ""
+    if i < x.a and j < x.b {
+      tag = "replace"
+    } else if i < x.a {
+      tag = "delete"
+    } else if j < x.b {
+      tag = "insert"
+    }
+    if tag != "" {
+      out = out.push(Op { tag: tag, i1: i, i2: x.a, j1: j, j2: x.b })
+    }
+    i = x.a + x.size
+    j = x.b + x.size
+    if x.size > 0 {
+      out = out.push(Op { tag: "equal", i1: x.a, i2: i, j1: x.b, j2: j })
+    }
+  }
+  return out
+}
+
+fn grouped(m: Matcher, n: Int) -> List[List[Op]] {
+  var codes = opcodes(m)
+  if codes.is_empty() {
+    codes = [Op { tag: "equal", i1: 0, i2: 1, j1: 0, j2: 1 }]
+  }
+  let first = codes.get_or(0, Op { tag: "", i1: 0, i2: 0, j1: 0, j2: 0 })
+  if first.tag == "equal" {
+    codes = codes.set(0, first with { i1: first.i1.max(first.i2 - n), j1: first.j1.max(first.j2 - n) })
+  }
+  let last = codes.last().unwrap_or(first)
+  if last.tag == "equal" {
+    codes = codes.set(codes.len() - 1, last with { i2: last.i2.min(last.i1 + n), j2: last.j2.min(last.j1 + n) })
+  }
+  var groups: List[List[Op]] = []
+  var group: List[Op] = []
+  for c0 in codes {
+    var c = c0
+    if c.tag == "equal" and c.i2 - c.i1 > n + n {
+      group = group.push(c with { i2: c.i2.min(c.i1 + n), j2: c.j2.min(c.j1 + n) })
+      groups = groups.push(group)
+      group = []
+      c = c with { i1: c.i1.max(c.i2 - n), j1: c.j1.max(c.j2 - n) }
+    }
+    group = group.push(c)
+  }
+  if not group.is_empty() and not (group.len() == 1 and group.get_or(0, first).tag == "equal") {
+    groups = groups.push(group)
+  }
+  return groups
+}
+
+fn range_text(start: Int, stop: Int) -> Str {
+  var beginning = start + 1
+  let length = stop - start
+  if length == 1 {
+    return beginning.to_str()
+  }
+  if length == 0 {
+    beginning = beginning - 1
+  }
+  return "{beginning},{length}"
+}
+
+/// The lines of a text with their line breaks (Python's `splitlines(True)` for `\n` texts).
+pub fn lines_keep(text: Str) -> List[Str] {
+  if text == "" {
+    return []
+  }
+  let parts = text.split("\n")
+  var out: List[Str] = []
+  var k = 0
+  for p in parts {
+    if k < parts.len() - 1 {
+      out = out.push(p + "\n")
+    } else if p != "" {
+      out = out.push(p)
+    }
+    k = k + 1
+  }
+  return out
+}
+
+/// `"".join(difflib.unified_diff(a, b, from_file, to_file))` for lists of lines that keep their line breaks.
+pub fn unified_diff(a: List[Str], b: List[Str], from_file: Str, to_file: Str) -> Str {
+  let m = matcher(a, b)
+  var out = ""
+  var started = false
+  for group in grouped(m, 3) {
+    if not started {
+      started = true
+      out = out + "--- {from_file}\n+++ {to_file}\n"
+    }
+    let first = group.get_or(0, Op { tag: "", i1: 0, i2: 0, j1: 0, j2: 0 })
+    let last = group.last().unwrap_or(first)
+    out = out + "@@ -{range_text(first.i1, last.i2)} +{range_text(first.j1, last.j2)} @@\n"
+    for c in group {
+      if c.tag == "equal" {
+        for line in a.slice(c.i1, c.i2) {
+          out = out + " " + line
+        }
+      } else {
+        if c.tag == "replace" or c.tag == "delete" {
+          for line in a.slice(c.i1, c.i2) {
+            out = out + "-" + line
+          }
+        }
+        if c.tag == "replace" or c.tag == "insert" {
+          for line in b.slice(c.j1, c.j2) {
+            out = out + "+" + line
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+/// `SequenceMatcher(None, a, b).ratio()` of two strings (by characters).
+pub fn ratio(a: Str, b: Str) -> Float {
+  let total = a.len() + b.len()
+  if total == 0 {
+    return 1.0
+  }
+  var matched = 0
+  for x in matching_blocks(matcher(a.chars(), b.chars())) {
+    matched = matched + x.size
+  }
+  return 2.0 * matched.to_float() / total.to_float()
+}
+
+/// `difflib.get_close_matches(word, possibilities, n, cutoff)`: the best matches, best first (ties: larger first).
+pub fn close_matches(word: Str, possibilities: List[Str], n: Int, cutoff: Float) -> List[Str] {
+  var scored: List[Pair[Float, Str]] = []
+  for x in possibilities {
+    let r = ratio(x, word)
+    if r >= cutoff {
+      scored = scored.push(Pair { first: r, second: x })
+    }
+  }
+  let by_name = scored.sort_by(fn(p) => p.second).reverse()
+  return by_name.sort_by(fn(p) => 0.0 - p.first).take(n).map(fn(p) => p.second)
+}

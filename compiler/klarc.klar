@@ -11,7 +11,10 @@
 // same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
 use ast.{Decl}
 use builtin_sigs.{klar_version}
-use commands.{explain, fix_command, fmt_command}
+use commands.{doc_command, explain, fix_command, fmt_command, new_command, outline_command, refs_command}
+use commands.{ast_command, rename_command, spec_command}
+use patch.{patch_command}
+use dev.{dev_command, show_failure, test_items}
 use report.{check_json, render_report, user_diags}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
@@ -21,15 +24,25 @@ use lower.{fnv1a, lower_program}
 
 const TARGETS: List[Str] = ["linux", "windows", "linux-arm64"]
 
-type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, args: List[Str] }
+type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, quiet: Bool, filter: Str,
+  args: List[Str] }
 
 fn usage() -> Never uses io {
   print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64] [--lib <dir>] [--time]")
   print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
-  print("       klarc test <file.klar> [--lib <dir>]")
+  print("       klarc test <file.klar> [-k <text>] [-q] [--lib <dir>]")
+  print("       klarc patch <file.klar> <patch.json | - | json> [--dry-run] [--force] [--json]")
+  print("       klarc dev <file.klar> [--json] [--no-run] [--stdin <text>] [--max-output <n>] [--max-warnings <n>]")
   print("       klarc check <file.klar> [--lib <dir>] [--json]")
   print("       klarc fmt [files or directories] [--check] [--json]")
   print("       klarc explain <code>")
+  print("       klarc new <dir> [--lib]")
+  print("       klarc outline <file.klar> [--all] [--json]")
+  print("       klarc refs <file.klar> <name> [--json]")
+  print("       klarc spec")
+  print("       klarc ast <file.klar> [--pretty]")
+  print("       klarc doc <query> [--in <file.klar>] [--limit <n>] [--json]")
+  print("       klarc rename <file.klar> <old> <new> [--dry-run] [--json]")
   print("       klarc fix <file.klar> [--dry-run] [--all] [--warnings] [--json] [--lib <dir>]")
   return exit(2)
 }
@@ -44,7 +57,7 @@ fn lib_dir(args: List[Str]) -> Str uses io {
 
 fn parse_args(args: List[Str]) -> Options uses io {
   var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "linux", lib: env_var("KLAR_LIB").unwrap_or(
-    "klar"), time: false, json: false, args: [] }
+    "klar"), time: false, json: false, quiet: false, filter: "", args: [] }
   var i = 1
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -67,6 +80,12 @@ fn parse_args(args: List[Str]) -> Options uses io {
     } else if a == "--json" {
       o = o with { json: true }
       i = i + 1
+    } else if a == "-q" or a == "--quiet" {
+      o = o with { quiet: true }
+      i = i + 1
+    } else if a == "-k" or a == "--filter" {
+      o = o with { filter: v }
+      i = i + 2
     } else if o.file == "" and not a.starts_with("-") {
       o = o with { file: a }
       i = i + 1
@@ -190,6 +209,34 @@ fn main() uses io, fs, time, proc {
     print("klarc {klar_version()}")
     return
   }
+  let tool = argv.get_or(0, "")
+  if tool == "outline" {
+    exit(outline_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "ast" {
+    exit(ast_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "spec" {
+    exit(spec_command(lib_dir(argv)))
+  }
+  if tool == "doc" {
+    exit(doc_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "refs" {
+    exit(refs_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "dev" {
+    exit(dev_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "patch" {
+    exit(patch_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "rename" {
+    exit(rename_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if argv.get_or(0, "") == "new" {
+    exit(new_command(argv.drop(1)))
+  }
   if argv.get_or(0, "") == "fix" {
     exit(fix_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
@@ -229,9 +276,27 @@ fn main() uses io, fs, time, proc {
   }
   let tests = o.cmd == "test"
   let names = test_names(ld, o.file)
-  if tests and names.is_empty() {
-    print("no tests found")
-    print("\n0 passed, 0 failed")
+  let items = test_items(ld, o.file).filter(fn(t) => t.name.contains(o.filter))
+  if tests {
+    let warnings = diags.filter(fn(d) => d.severity == "warning")
+    if not o.quiet {
+      show_report(text: render_report(ld, warnings), to_stderr: true)
+    }
+  }
+  if tests and (names.is_empty() or not items.any(fn(t) => not t.is_property)) {
+    var skipped = 0
+    for t in items {
+      print("  SKIP  {t.name} [property: klarc cannot run properties yet]")
+      skipped = skipped + 1
+    }
+    if items.is_empty() {
+      print("no tests found")
+    }
+    if skipped > 0 {
+      print("\n0 passed, 0 failed, {skipped} skipped")
+    } else {
+      print("\n0 passed, 0 failed")
+    }
     return
   }
   let w = lower_program(ld: ld, main_path: o.file, tests: tests)
@@ -260,18 +325,41 @@ fn main() uses io, fs, time, proc {
     write_exe(exe, image)
     var passed = 0
     var failed = 0
-    var i = 0
-    for name in names {
-      if run_or_fail([exe, i.to_str()]) == 0 {
-        print("  PASS  {name}")
-        passed = passed + 1
+    var skipped = 0
+    for t in items {
+      if t.is_property {
+        print("  SKIP  {t.name} [property: klarc cannot run properties yet]")
+        skipped = skipped + 1
       } else {
-        print("  FAIL  {name}")
-        failed = failed + 1
+        match run_capture(args: [exe, t.index.to_str()], dir: "", input: "") {
+          Ok(res) => {
+            if res.get_or(0, "") == "0" {
+              print("  PASS  {t.name}")
+              passed = passed + 1
+            } else {
+              print("  FAIL  {t.name}")
+              show_failure(out: res.get_or(1, ""), err: res.get_or(2, ""))
+              failed = failed + 1
+            }
+          },
+          Err(_) => {
+            // no captured output here (Windows): the test prints its own failure
+            if run_or_fail([exe, t.index.to_str()]) == 0 {
+              print("  PASS  {t.name}")
+              passed = passed + 1
+            } else {
+              print("  FAIL  {t.name}")
+              failed = failed + 1
+            }
+          },
+        }
       }
-      i = i + 1
     }
-    print("\n{passed} passed, {failed} failed")
+    if skipped > 0 {
+      print("\n{passed} passed, {failed} failed, {skipped} skipped")
+    } else {
+      print("\n{passed} passed, {failed} failed")
+    }
     if failed > 0 {
       exit(1)
     }

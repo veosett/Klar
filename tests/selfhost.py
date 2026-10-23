@@ -105,7 +105,8 @@ def write_cases(d):
 
 
 def klar_string(text):
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("{", "\\{").replace("}", "\\}") + '"'
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("{", "\\{").replace("}", "\\}") \
+        .replace("\n", "\\n").replace("\t", "\\t") + '"'
 
 
 def builtin_sigs_source():
@@ -114,6 +115,7 @@ def builtin_sigs_source():
     from klar.builtins import FOREIGN_METHODS, FOREIGN_NOTES, GLOBALS, METHODS
     from klar import __version__
     from klar.diagnostics import CODES
+    from klar.tools.runtools import AGENTS_TEMPLATE, LIB_TEMPLATE, MAIN_TEMPLATE
     from klar.native.intrinsics import SYS_SIGNATURES
 
     def str_list(items, indent="    "):
@@ -141,6 +143,10 @@ def builtin_sigs_source():
            "pub fn diag_codes() -> List[List[Str]] {",
            "  return [\n" + "".join(f"    [{klar_string(c)}, {klar_string(t)}, {klar_string(x)}],\n"
                                     for c, (t, x) in CODES.items()) + "  ]", "}", "",
+           "/// The templates of `klar new` (Python str.format fields: {name}, {pkg}).",
+           "pub fn main_template() -> Str {", f"  return {klar_string(MAIN_TEMPLATE)}", "}", "",
+           "pub fn lib_template() -> Str {", f"  return {klar_string(LIB_TEMPLATE)}", "}", "",
+           "pub fn agents_template() -> Str {", f"  return {klar_string(AGENTS_TEMPLATE)}", "}", "",
            "/// The version of Klar.",
            "pub fn klar_version() -> Str {", f"  return {klar_string(__version__)}", "}", "",
            "/// The files of the runtime (klar/rt), which form one module.",
@@ -684,6 +690,186 @@ def tree(folder):
     return out
 
 
+def check_new(klarc, d):
+    """`klarc new` == `klar new`: the same messages and the same files."""
+    from contextlib import redirect_stderr, redirect_stdout
+    from klar.cli import main as cli_main
+    py_dir, k_dir = os.path.join(d, "new_py"), os.path.join(d, "new_k")
+    os.makedirs(py_dir)
+    os.makedirs(k_dir)
+    bad = 0
+    old = os.getcwd()
+    for args in (["My-App"], ["123x", "--lib"], ["a/b/c"], ["_x_"], ["My-App"]):
+        out = io.StringIO()
+        os.chdir(py_dir)
+        try:
+            with redirect_stdout(out), redirect_stderr(out):
+                code = cli_main(["new"] + args)
+        finally:
+            os.chdir(old)
+        proc = subprocess.run([klarc, "new"] + args, capture_output=True, text=True, cwd=k_dir)
+        if (proc.stdout + proc.stderr, proc.returncode) != (out.getvalue(), code):
+            bad += 1
+            print(f"DIFF new {args}: {proc.stdout + proc.stderr!r} / {out.getvalue()!r}")
+    if tree(py_dir) != tree(k_dir):
+        bad += 1
+        print("DIFF new: the projects differ")
+    print(f"new: {'identical' if not bad else 'DIFFERENT'}")
+    return bad
+
+
+def names_of(path):
+    """Names to look up in a file: its declarations, parameters, variables, fields and variants (at most 12)."""
+    from klar.loader import load_path
+    from klar.safety import iter_nodes
+    loaded = load_path(path)
+    if loaded.program is None:
+        return []
+    out = []
+    for n in iter_nodes(loaded.program):
+        name = getattr(n, "name", None) or getattr(n, "var", None) or getattr(n, "method", None)
+        if isinstance(name, str) and "." not in name and name not in out:
+            out.append(name)
+    return out[:12]
+
+
+def cli_output(argv, cwd=None):
+    from contextlib import redirect_stderr, redirect_stdout
+    from klar.cli import main as cli_main
+    out, err = io.StringIO(), io.StringIO()
+    old = os.getcwd()
+    if cwd:
+        os.chdir(cwd)
+    try:
+        with redirect_stdout(out), redirect_stderr(err):
+            code = cli_main(argv)
+    finally:
+        os.chdir(old)
+    return out.getvalue(), err.getvalue(), code
+
+
+def check_inspect(klarc, files):
+    """`klarc outline` and `klarc refs` == `klar outline` / `klar refs` (text and --json) on every file, for the
+    names declared and used in it."""
+    import klar.tools.commands as commands
+    from klar.loader import load_path
+    bad = runs = 0
+    lib = os.path.join(ROOT, "klar")
+    original = commands.load_path
+    for path in files:
+        loaded = load_path(path)
+        commands.load_path = lambda p, *a, **k: loaded if p == path else original(p, *a, **k)
+        jobs = [["outline", path], ["outline", path, "--json"], ["outline", path, "--all"]]
+        jobs += [["doc", q, "--in", path] for q in names_of(path)[:2]]
+        big = len(loaded.sources.get(loaded.main.display, "").split("\n")) > 1500 if loaded.main else False
+        for name in names_of(path)[:4 if big else 12]:
+            jobs += [["refs", path, name], ["refs", path, name, "--json"]]
+        for job in jobs:
+            runs += 1
+            want = cli_output(job)
+            proc = subprocess.run([klarc] + job + ["--lib", lib], capture_output=True, text=True, encoding="utf-8")
+            if (proc.stdout, proc.stderr, proc.returncode) != want:
+                bad += 1
+                if bad <= 10:
+                    wl, hl = want[0].split("\n"), proc.stdout.split("\n")
+                    i = next((i for i, (x, y) in enumerate(zip(wl, hl)) if x != y), min(len(wl), len(hl)))
+                    print(f"DIFF {' '.join(job[:1] + [short(path)] + job[2:])}: line {i + 1}\n"
+                          f"  python: {wl[i] if i < len(wl) else None!r} {want[1][:200]!r}\n"
+                          f"  klar:   {hl[i] if i < len(hl) else None!r} {proc.stderr[:200]!r}")
+    commands.load_path = original
+    print(f"inspect: {runs - bad}/{runs} outputs identical")
+    return bad
+
+
+def check_fmt_cli(klarc, d):
+    """`klarc fmt` == `klar fmt` as commands: --diff, --check, --json and in-place formatting of damaged files."""
+    import shutil
+    files = [p for p in klar_files() if os.sep + "rt" + os.sep not in p][:60]
+    src_dir = os.path.join(d, "fmt_src")
+    os.makedirs(src_dir, exist_ok=True)
+    messy_variants(files, src_dir)
+    bad = 0
+    for flags in (["--diff"], ["--check"], ["--json"], []):
+        py_dir, k_dir = os.path.join(d, "fmt_py"), os.path.join(d, "fmt_k")
+        for x in (py_dir, k_dir):
+            shutil.rmtree(x, ignore_errors=True)
+            shutil.copytree(src_dir, x)
+        want = cli_output(["fmt", "."] + flags, cwd=py_dir)
+        proc = subprocess.run([klarc, "fmt", "."] + flags, capture_output=True, text=True, encoding="utf-8", cwd=k_dir)
+        if (proc.stdout, proc.stderr, proc.returncode) != want or tree(py_dir) != tree(k_dir):
+            bad += 1
+            print(f"DIFF fmt {flags}: exit {want[2]}/{proc.returncode}, output {proc.stdout == want[0]}, "
+                  f"errors {proc.stderr == want[1]}, files {tree(py_dir) == tree(k_dir)}")
+    print(f"fmt (command): {'identical' if not bad else 'DIFFERENT'}")
+    return bad
+
+
+def check_patch(klarc, files):
+    """`klarc patch` == `klar patch` (--dry-run, text and --json): deletions, renames, node edits and unknown targets
+    on repository files."""
+    import json
+    from klar.parser import parse
+    from klar.tools.patch import decl_targets
+    bad = runs = 0
+    lib = os.path.join(ROOT, "klar")
+    for path in files:
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        try:
+            targets = list(decl_targets(parse(src, os.path.basename(path))))
+        except Exception:
+            continue
+        if not targets:
+            continue
+        fns = [t for t in targets if t.isidentifier() and t[0].islower()]
+        patches = [[{"delete": targets[0]}], [{"delete": targets[-1]}], [{"replace": targets[0][:-1] + "q", "with": ""}],
+                   [{"id": 7, "with": "x"}], [{"insert": "fn zz_added() -> Int {\n  return 1\n}", "after": targets[-1]}]]
+        if fns:
+            patches.append([{"rename": fns[0], "to": fns[0] + "_x"}])
+            patches.append([{"replace": fns[0], "with": "fn " + fns[0] + "() {}"}, {"rename": fns[-1], "to": "zz"}])
+        for edits in patches:
+            for flags in (["--dry-run", "--json"], ["--dry-run"]):
+                runs += 1
+                job = ["patch", path, json.dumps({"edits": edits})] + flags
+                want = cli_output(job)
+                proc = subprocess.run([klarc] + job + ["--lib", lib], capture_output=True, text=True, encoding="utf-8")
+                if (proc.stdout, proc.stderr, proc.returncode) != want:
+                    bad += 1
+                    if bad <= 10:
+                        print(f"DIFF patch {short(path)} {job[2]} {flags}: exit {want[2]}/{proc.returncode}\n"
+                              f"  python: {want[0][:300]!r} {want[1][:200]!r}\n"
+                              f"  klar:   {proc.stdout[:300]!r} {proc.stderr[:200]!r}")
+    print(f"patch: {runs - bad}/{runs} outputs identical")
+    return bad
+
+
+def check_dev(klarc):
+    """`klarc dev` == `klar dev` (text and --json) on the examples and native test programs without properties
+    (klarc does not run properties yet)."""
+    import glob
+    bad = runs = 0
+    lib = os.path.join(ROOT, "klar")
+    files = sorted(glob.glob(os.path.join(ROOT, "examples", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "tests", "native", "*.klar")))
+    for path in files:
+        with open(path, encoding="utf-8") as f:
+            if "\nproperty " in "\n" + f.read():
+                continue
+        for flags in (["--json"], []):
+            runs += 1
+            job = ["dev", path] + flags
+            want = cli_output(job)
+            proc = subprocess.run([klarc] + job + ["--lib", lib], capture_output=True, text=True, encoding="utf-8",
+                                  stdin=subprocess.DEVNULL)
+            if (proc.stdout, proc.returncode) != (want[0], want[2]):
+                bad += 1
+                if bad <= 10:
+                    print(f"DIFF dev {short(path)} {flags}: exit {want[2]}/{proc.returncode}\n"
+                          f"  python: {want[0][:300]!r}\n  klar:   {proc.stdout[:300]!r} {proc.stderr[:200]!r}")
+    print(f"dev: {runs - bad}/{runs} outputs identical")
+    return bad
+
+
 def check_fix(cases):
     """`klarc fix` (compiler/commands.klar) == `klar fix` on every checker case: the same output and exit code and the
     same files afterwards, with the default fixes, with `--all --warnings`, and with `--json`."""
@@ -695,6 +881,12 @@ def check_fix(cases):
     with tempfile.TemporaryDirectory() as d:
         klarc = os.path.join(d, "klarc")
         build(os.path.join(ROOT, "compiler", "klarc.klar"), out=klarc, target="linux")
+        bad += check_new(klarc, d)
+        bad += check_fmt_cli(klarc, d)
+        bad += check_dev(klarc)
+        bad += check_patch(klarc, [p for p in klar_files() if os.sep + "rt" + os.sep not in p
+                                   and os.sep + "compiler" + os.sep not in p][:80])
+        bad += check_inspect(klarc, [p for p in cases + list(klar_files()) if not p.startswith(os.path.join(ROOT, "klar", "rt"))])
         for k, main in enumerate(cases):
             for m, flags in enumerate(([], ["--all", "--warnings"], ["--json"])):
                 runs += 1

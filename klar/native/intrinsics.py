@@ -69,6 +69,11 @@ SYS_SIGNATURES = [
     "fn os_find_first(pattern: Word, data: Word) -> Word",
     "fn os_find_next(h: Word, data: Word) -> Word",
     "fn os_find_close(h: Word) -> Word",
+    "fn os_mkdir(path: Word) -> Word",
+    "fn os_dup2(old: Word, new: Word) -> Word",
+    "fn os_chdir(path: Word) -> Word",
+    "fn os_execve(path: Word, argv: Word, envp: Word) -> Word",
+    "fn os_poll(fds: Word, n: Word) -> Word",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

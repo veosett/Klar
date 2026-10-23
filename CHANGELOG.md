@@ -39,6 +39,25 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   code frame). `tests/selfhost.py` compares the report and `--json` of every checker case (340/340) and runs `fix` in
   three modes on each of them (747/747 identical outputs and files). `klarc build` prints the `built ...` line and
   `klarc run` shows warnings, like `klar`.
+- `klarc new`, `outline`, `refs`, `rename`, `doc`, `spec`, `ast` (compiler/inspect.klar, astjson.klar): the same
+  output and files as the Python commands, checked by `tests/selfhost.py` on every file of the repository and every
+  checker case. New built-in `make_dir(path)` (creates missing parents; effect `fs`).
+- `klarc patch` (compiler/patch.klar): the AI patch protocol in Klar — the same reports, diffs and written files as
+  `klar patch` (`tests/selfhost.py` compares hundreds of patches on the repository's files); with `--test` the tests
+  are not run yet. The Klar loader can take file texts instead of reading them (`load_program_with`).
+- `run_capture(args, dir)` (effect `proc`): runs a program in a directory and returns `[exit code, stdout, stderr]`;
+  both pipes are read together (poll), so a chatty program cannot block. Linux x86-64 and arm64 (new intrinsics
+  `os_dup2`, `os_chdir`, `os_execve`, `os_poll`) and the interpreter; Windows returns an error for now.
+- `klarc dev [--json] [--no-run] [--stdin TEXT]` (compiler/dev.klar): one AI-loop step without Python — check,
+  native tests, native run, the same compact report as `klar dev` (runtime errors are read back from the text the
+  runtime prints). Properties are reported as `skipped`.
+- `klarc test` reports like `klar test`: each failure with its runtime error and the test's output, `-k`/`--filter`,
+  `-q`, warnings first. Properties are listed as skipped (klarc does not generate inputs yet).
+
+### Fixed
+- `klar ast` crashed on functions with trait bounds (a dict of spans was not converted to JSON).
+- Native test executables reported every test's call stack at the place of the first test.
+- `klarc run`/`build` showed the runtime's own warnings (the runtime reports as `rt`).
 
 ### Changed
 - `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm

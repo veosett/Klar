@@ -6,6 +6,7 @@ pub enum J {
   JNull,
   JBool(b: Bool),
   JInt(i: Int),
+  JFloat(f: Float),
   JStr(s: Str),
   JArr(items: List[J]),
   JObj(fields: List[Pair[Str, J]]),
@@ -54,6 +55,7 @@ pub fn compact(j: J) -> Str {
     J.JNull => "null",
     J.JBool(b) => b.to_str(),
     J.JInt(i) => i.to_str(),
+    J.JFloat(f) => f.to_str(),
     J.JStr(s) => json_str(s),
     J.JArr(items) => "[" + items.map(compact).join(",") + "]",
     J.JObj(fields) => "\{" + fields.map(fn(f) => json_str(f.first) + ":" + compact(f.second)).join(",") + "\}",
@@ -62,17 +64,32 @@ pub fn compact(j: J) -> Str {
 
 /// Pretty JSON (`indent=2`), starting at nesting level `level`.
 pub fn pretty(j: J, level: Int) -> Str {
-  let inner = "  ".repeat(level + 1)
-  let outer = "  ".repeat(level)
+  return pretty_by(j: j, width: 2, level: level)
+}
+
+/// One line with Python's default separators `, ` and `: `.
+pub fn spaced(j: J) -> Str {
+  return match j {
+    J.JArr(items) => "[" + items.map(spaced).join(", ") + "]",
+    J.JObj(fields) => "\{" + fields.map(fn(f) => json_str(f.first) + ": " + spaced(f.second)).join(", ") + "\}",
+    _ => compact(j),
+  }
+}
+
+/// Pretty JSON with `indent=width`.
+pub fn pretty_by(j: J, width: Int, level: Int) -> Str {
+  let inner = " ".repeat(width * (level + 1))
+  let outer = " ".repeat(width * level)
   return match j {
     J.JArr(items) => match items.is_empty() {
       true => "[]",
-      false => "[\n" + items.map(fn(x) => inner + pretty(x, level + 1)).join(",\n") + "\n" + outer + "]",
+      false => "[\n" + items.map(fn(x) => inner + pretty_by(j: x, width: width, level: level + 1)).join(",\n") + "\n" +
+        outer + "]",
     },
     J.JObj(fields) => match fields.is_empty() {
       true => "\{\}",
-      false => "\{\n" + fields.map(fn(f) => inner + json_str(f.first) + ": " + pretty(f.second, level + 1)).join(
-        ",\n") + "\n" + outer + "\}",
+      false => "\{\n" + fields.map(fn(f) => inner + json_str(f.first) + ": " + pretty_by(j: f.second, width: width,
+        level: level + 1)).join(",\n") + "\n" + outer + "\}",
     },
     _ => compact(j),
   }

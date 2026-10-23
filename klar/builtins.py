@@ -47,6 +47,12 @@ def _print(it, a, sp):
     return UNIT
 
 
+@glob("fn print_raw(text: Str) -> Unit uses io")
+def _print_raw(it, a, sp):
+    it.out.write(a[0])
+    return UNIT
+
+
 @glob("fn eprint[T](value: T) -> Unit uses io")
 def _eprint(it, a, sp):
     it.err.write(show(a[0], True) + "\n")
@@ -138,6 +144,16 @@ def _list_dir(it, a, sp):
         return err(f"cannot list '{a[0]}': {ex.strerror}")
 
 
+@glob("fn make_dir(path: Str) -> Result[Unit, Str] uses fs")
+def _make_dir(it, a, sp):
+    import os
+    try:
+        os.makedirs(a[0], exist_ok=True)
+        return ok(UNIT)
+    except OSError as ex:
+        return err(f"cannot create '{a[0]}': {ex.strerror}")
+
+
 @glob("fn is_dir(path: Str) -> Bool uses fs")
 def _is_dir(it, a, sp):
     import os
@@ -169,6 +185,28 @@ def _run_command(it, a, sp):
     except OSError:
         return ok(127)            # found but not runnable: the exit code of a shell that cannot run it
     return ok(128 - code if code < 0 else code)
+
+
+@glob("fn run_capture(args: List[Str], dir: Str, input: Str) -> Result[List[Str], Str] uses proc")
+def _run_capture(it, a, sp):
+    """Runs a program (searched in PATH) in `dir` ("": here) with `input` as its stdin (at most 64 KB) and its output
+    captured: Ok([exit code, stdout, stderr])."""
+    import os
+    import shutil
+    import subprocess
+    args = list(a[0])
+    if not args:
+        return err("run_capture: no program given")
+    if len(a[2].encode("utf-8")) > 65536:
+        return err("run_capture: the input is limited to 64 KB")
+    if shutil.which(args[0]) is None and not os.path.isfile(args[0]):
+        return err(f"cannot run '{args[0]}': No such file or directory")
+    try:
+        p = subprocess.run(args, cwd=a[1] or None, input=a[2].encode("utf-8"), capture_output=True)
+    except OSError:
+        return ok(("127", "", ""))
+    code = 128 - p.returncode if p.returncode < 0 else p.returncode
+    return ok((str(code), p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")))
 
 
 @glob("fn set_executable(path: Str) -> Result[Unit, Str] uses fs")

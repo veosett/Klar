@@ -20,12 +20,14 @@ SOFT = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
             "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir",
-            "os_getdents", "os_find_first", "os_find_next", "os_find_close"]
+            "os_getdents", "os_find_first", "os_find_next", "os_find_close", "os_mkdir",
+            "os_dup2", "os_chdir", "os_execve", "os_poll"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
                "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
-               "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose"]
+               "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose",
+               "CreateDirectoryA"]
 
 
 def udiv_magic(d):
@@ -1179,6 +1181,23 @@ class Emitter:
         a.mov_ri(RAX, 0)
         self.stub_end()
         sys("os_getdents", 217, 3)
+        self.stub_begin("os_mkdir")            # mkdir(path, 0755) -> 0 or -errno
+        self.arg(RDI, 0)
+        a.mov_ri(RSI, 0o755)
+        a.mov_ri(RAX, 83)
+        a.syscall()
+        self.stub_end()
+        # programs with captured output (run_capture)
+        sys("os_dup2", 33, 2)
+        sys("os_chdir", 80, 1)
+        sys("os_execve", 59, 3)
+        self.stub_begin("os_poll")             # poll(fds, n, -1)
+        self.arg(RDI, 0)
+        self.arg(RSI, 1)
+        a.mov_ri(RDX, -1)
+        a.mov_ri(RAX, 7)
+        a.syscall()
+        self.stub_end()
         for name in ("os_find_first", "os_find_next", "os_find_close"):     # (Windows)
             self.stub_begin(name)
             a.mov_ri(RAX, -1)
@@ -1445,6 +1464,18 @@ class Emitter:
         win_begin("os_find_close")
         self.arg(RCX, 0)
         call("FindClose")
+        win_end()
+        for name in ("os_dup2", "os_chdir", "os_execve", "os_poll"):          # (Linux)
+            self.stub_begin(name)
+            a.mov_ri(RAX, -1)
+            self.stub_end()
+        win_begin("os_mkdir")                  # CreateDirectoryA(path, NULL) -> 0, or -1 (also when it exists)
+        self.arg(RCX, 0)
+        a.mov_ri(RDX, 0)
+        call("CreateDirectoryA")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)
+        a.alu_ri("sub", RAX, 1)        # TRUE (1) -> 0, FALSE (0) -> -1
         win_end()
         self.test_index_stub()
 

@@ -1315,6 +1315,18 @@ fn linux_layer(a0: A64, main_entry: Str) -> A64 {
   a = stub_end(cset(a: a, rd: X0, cc: "eq"))
   a = stub_end(mov_ri(a: label64(a, dn.l), rd: X0, imm: 0))
   a = sys_stub(a0: a, name: "os_getdents", nr: 61, nargs: 3)
+  a = arg(a: mov_ri(a: stub_begin(a, "os_mkdir"), rd: X0, imm: AT_FDCWD), reg: X1, i: 0)   // mkdirat(AT_FDCWD, path, 0755)
+  a = stub_end(syscall(mov_ri(a: a, rd: X2, imm: 493), 34))
+  // programs with captured output (run_capture)
+  a = mov_ri(a: arg(a: arg(a: stub_begin(a, "os_dup2"), reg: X0, i: 0), reg: X1, i: 1), rd: X2, imm: 0)   // dup3
+  a = stub_end(syscall(a, 24))
+  a = sys_stub(a0: a, name: "os_chdir", nr: 49, nargs: 1)
+  a = sys_stub(a0: a, name: "os_execve", nr: 221, nargs: 3)
+  a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: X0, i: 0), reg: X1, i: 1)                         // ppoll
+  for r in [X2, X3, X4] {
+    a = mov_ri(a: a, rd: r, imm: 0)
+  }
+  a = stub_end(syscall(a, 73))
   for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
     a = stub_end(mov_ri(a: stub_begin(a, name), rd: X0, imm: -1))
   }

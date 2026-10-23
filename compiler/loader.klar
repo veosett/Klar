@@ -59,6 +59,8 @@ pub type Ld {
   project: Option[Str],
   /// package root -> its manifest
   manifests: Map[Str, ManState],
+  /// texts that replace files on disk (path as the loader reads it), e.g. a patched file before it is written
+  overlay: Map[Str, Str],
   /// dependency name -> its registration (a name means one package in the whole program)
   packages: Map[Str, PkgReg],
   /// dependency root -> its name (module names inside it start with it)
@@ -373,7 +375,11 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
     return Loaded { ld: ld, path: None }
   }
   let is_sys = path.starts_with(rt_dir(ld) + "/")
-  let source = match read_file(path) {
+  let read = match ld.overlay.get(path) {
+    Some(t) => Ok(t),
+    None => read_file(path),
+  }
+  let source = match read {
     Ok(text) => text,
     Err(e) => {
       let at = match importer {
@@ -546,10 +552,15 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
 
 /// Loads and checks a program (its main file is `path`, absolute); `lib` is the directory of `klar/`.
 pub fn load_program(path: Str, lib: Str) -> Ld uses fs {
+  return load_program_with(path: path, lib: lib, overlay: Map {})
+}
+
+/// `load_program`, with some files' texts given instead of read (`overlay`: path -> text).
+pub fn load_program_with(path: Str, lib: Str, overlay: Map[Str, Str]) -> Ld uses fs {
   let root = dirname(path)
   var ld = Ld { root: root, lib: lib, b: load_builtins(), uni: empty_universe(), by_path: Map {}, stack: [], diags: [],
     prelude: None, order: [], sources: Map {}, runtime: None, project: find_root(root), manifests: Map {}, packages: Map {},
-    dep_names: Map {} }
+    dep_names: Map {}, overlay: overlay }
   let prelude_path = lib + "/prelude.klar"
   ld = load(ld0: ld, path: prelude_path, name: "prelude", display: "prelude.klar", importer: None, pkg: None).ld
   ld = ld with { prelude: Some(prelude_path) }

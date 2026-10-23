@@ -1,0 +1,1135 @@
+// Code-navigation tools of `klarc`: outline, doc, refs and rename (the counterparts of klar/tools/inspect.py, with
+// the same output). Because Klar forbids shadowing and type names are unique in a program, a name identifies one
+// thing — search and rename are exact without a full IDE.
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldDecl, FieldInit, FnDecl, MapEntry, MatchArm, Param, Pattern, Span}
+use ast.{Stmt, StrPiece, TypeExpr, VariantDecl}
+use checker.{Resolution, span_key}
+use jsonout.{J, compact}
+use loader.{Ld}
+
+/// A place where a name is defined or used.
+pub type NameOcc { file: Str, span: Span, role: Str }
+
+/// A module the user wrote: its display name, path, source lines, declarations and the checker's resolutions.
+pub type UMod { display: Str, path: Str, lines: List[Str], decls: List[Decl], res: Map[Str, Resolution] }
+
+/// The modules of the program the user wrote (not the prelude, std or the runtime), in dependency order.
+pub fn user_modules(ld: Ld) -> List[UMod] {
+  var out: List[UMod] = []
+  for p in ld.order {
+    match ld.by_path.get(p) {
+      Some(m) => {
+        match m.checker {
+          Some(ck) => {
+            if not m.is_sys and m.display != "prelude.klar" {
+              out = out.push(UMod { display: m.display, path: m.path, lines: ld.sources.get(m.display).unwrap_or("")
+                  .split("\n"), decls: ck.decls, res: ck.resolutions })
+            }
+          },
+          None => {},
+        }
+      },
+      None => {},
+    }
+  }
+  return out
+}
+
+// ---- words ----------------------------------------------------------------------------------------------------
+
+fn is_word_char(c: Str) -> Bool {
+  if c.len() != 1 {
+    return false
+  }
+  return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_" or c.codes().get_or(
+    0, 0) > 127
+}
+
+/// The span of the first whole-word occurrence of `word` inside `span` (None if there is none).
+pub fn find_word_span(lines: List[Str], span: Span, word: Str) -> Option[Span] {
+  let wl = word.len()
+  var ln = span.line
+  while ln <= span.end_line {
+    if ln - 1 >= lines.len() {
+      return None
+    }
+    let cs = lines.get_or(ln - 1, "").chars()
+    var start = 0
+    if ln == span.line {
+      start = span.col - 1
+    }
+    var stop = cs.len()
+    if ln == span.end_line {
+      stop = span.end_col - 1
+    }
+    let limit = stop.max(start + 1)
+    var i = 0
+    while i + wl <= cs.len() {
+      let before_ok = i == 0 or not is_word_char(cs.get_or(i - 1, ""))
+      let after_ok = not is_word_char(cs.get_or(i + wl, ""))
+      if before_ok and after_ok and cs.slice(i, i + wl).join("") == word {
+        if start <= i and i < limit {
+          return Some(Span { line: ln, col: i + 1, end_line: ln, end_col: i + wl + 1 })
+        }
+        i = i + wl
+      } else {
+        i = i + 1
+      }
+    }
+    ln = ln + 1
+  }
+  return None
+}
+
+// ---- references -----------------------------------------------------------------------------------------------
+
+/// The state of a search for one name in one module.
+type RS { name: Str, file: Str, lines: List[Str], res: Map[Str, Resolution], out: List[NameOcc] }
+
+fn add(st: RS, span: Option[Span], role: Str) -> RS {
+  return match span {
+    Some(sp) => st with { out: st.out.push(NameOcc { file: st.file, span: sp, role: role }) },
+    None => st,
+  }
+}
+
+fn word_at(st: RS, span: Span) -> Option[Span] {
+  return find_word_span(lines: st.lines, span: span, word: st.name)
+}
+
+// The nodes are visited like Python's `iter_nodes` (a stack): the node, then its children from the last to the
+// first, so that two roles at one position resolve the same way.
+
+fn w_type(st0: RS, t: TypeExpr) -> RS {
+  return match t {
+    TypeExpr.Named(span, name, args) => {
+      var st = st0
+      if name == st.name {
+        st = add(st: st, span: word_at(st, span), role: "type")
+      }
+      for a in args.reverse() {
+        st = w_type(st, a)
+      }
+      return st
+    },
+    TypeExpr.FnType(_, params, ret) => {
+      var st = w_type(st0, ret)
+      for p in params.reverse() {
+        st = w_type(st, p)
+      }
+      return st
+    },
+  }
+}
+
+fn w_opt_type(st: RS, t: Option[TypeExpr]) -> RS {
+  return match t {
+    Some(x) => w_type(st, x),
+    None => st,
+  }
+}
+
+fn w_param(st0: RS, p: Param) -> RS {
+  var st = st0
+  if p.name == st.name {
+    st = add(st: st, span: word_at(st, p.span), role: "parameter")
+  }
+  return w_opt_type(st, p.ty)
+}
+
+fn w_params(st0: RS, ps: List[Param]) -> RS {
+  var st = st0
+  for p in ps.reverse() {
+    st = w_param(st, p)
+  }
+  return st
+}
+
+fn w_block(st0: RS, b: Block) -> RS {
+  var st = st0
+  for s in b.stmts.reverse() {
+    st = w_stmt(st, s)
+  }
+  return st
+}
+
+fn w_opt(st: RS, e: Option[Expr]) -> RS {
+  return match e {
+    Some(x) => w_expr(st, x),
+    None => st,
+  }
+}
+
+fn w_stmt(st0: RS, s: Stmt) -> RS {
+  var st = st0
+  return match s {
+    Stmt.Let(_, name, name_span, _, ty, value, _) => {
+      if name == st.name {
+        st = add(st: st, span: Some(name_span), role: "definition")
+      }
+      return w_opt_type(w_expr(st, value), ty)
+    },
+    Stmt.Assign(span, name, value) => {
+      if name == st.name {
+        st = add(st: st, span: word_at(st, span), role: "assign")
+      }
+      return w_expr(st, value)
+    },
+    Stmt.Return(_, value) => w_opt(st, value),
+    Stmt.If(_, cond, then, else_) => {
+      st = match else_ {
+        Else.NoElse => st,
+        Else.ElseBlock(b) => w_block(st, b),
+        Else.ElseIf(x) => w_stmt(st, x),
+      }
+      return w_expr(w_block(st, then), cond)
+    },
+    Stmt.While(_, cond, body) => w_expr(w_block(st, body), cond),
+    Stmt.For(_, var_name, var_span, iter, body) => {
+      if var_name == st.name {
+        st = add(st: st, span: Some(var_span), role: "definition")
+      }
+      return w_expr(w_block(st, body), iter)
+    },
+    Stmt.Break(_) => st,
+    Stmt.Continue(_) => st,
+    Stmt.Assert(_, cond, message) => w_expr(w_opt(st, message), cond),
+    Stmt.ExprStmt(_, e) => w_expr(st, e),
+  }
+}
+
+fn w_body(st: RS, b: Body) -> RS {
+  return match b {
+    Body.ExprBody(e) => w_expr(st, e),
+    Body.BlockBody(blk) => w_block(st, blk),
+  }
+}
+
+fn w_args(st0: RS, args: List[Arg]) -> RS {
+  var st = st0
+  for a in args.reverse() {
+    match a.name {
+      Some(n) => {
+        if n == st.name {
+          st = add(st: st, span: word_at(st, a.span), role: "named argument")
+        }
+      },
+      None => {},
+    }
+    st = w_expr(st, a.value)
+  }
+  return st
+}
+
+fn w_inits(st0: RS, fields: List[FieldInit]) -> RS {
+  var st = st0
+  for f in fields.reverse() {
+    if f.name == st.name {
+      st = add(st: st, span: word_at(st, f.span), role: "field")
+    }
+    st = w_expr(st, f.value)
+  }
+  return st
+}
+
+fn w_pattern(st0: RS, p: Pattern) -> RS {
+  var st = st0
+  return match p {
+    Pattern.Bind(span, name) => {
+      if name == st.name {
+        st = add(st: st, span: Some(span), role: "binding")
+      }
+      return st
+    },
+    Pattern.Variant(span, enum_name, variant, args) => {
+      if enum_name == Some(st.name) or variant == st.name {
+        st = add(st: st, span: word_at(st, span), role: "pattern")
+      }
+      for a in args.reverse() {
+        st = w_pattern(st, a)
+      }
+      return st
+    },
+    _ => st,
+  }
+}
+
+fn w_expr(st0: RS, e: Expr) -> RS {
+  var st = st0
+  return match e {
+    Expr.StrLit(_, parts) => {
+      for p in parts.reverse() {
+        st = match p {
+          StrPiece.Code(x) => w_expr(st, x),
+          _ => st,
+        }
+      }
+      return st
+    },
+    Expr.ListLit(_, items) => {
+      for x in items.reverse() {
+        st = w_expr(st, x)
+      }
+      return st
+    },
+    Expr.MapLit(_, entries) => {
+      for m in entries.reverse() {
+        st = w_expr(w_expr(st, m.value), m.key)
+      }
+      return st
+    },
+    Expr.Name(span, name) => {
+      if name == st.name {
+        st = add(st: st, span: Some(span), role: "use")
+      }
+      return st
+    },
+    Expr.Unary(_, _, operand) => w_expr(st, operand),
+    Expr.Binary(_, _, left, right) => w_expr(w_expr(st, right), left),
+    Expr.Call(_, callee, args) => w_expr(w_args(st, args), callee),
+    Expr.MethodCall(span, obj, m, mspan, args) => {
+      if m == st.name {
+        let kind = st.res.get(span_key(st.file, span)).map(fn(r) => r.kind).unwrap_or("")
+        if ["ufcs", "field_fn", "variant", "trait"].contains(kind) {
+          st = add(st: st, span: Some(mspan), role: "method call")
+        }
+      }
+      return w_expr(w_args(st, args), obj)
+    },
+    Expr.FieldAccess(_, obj, name, nspan) => {
+      if name == st.name {
+        st = add(st: st, span: Some(nspan), role: "field")
+      }
+      return w_expr(st, obj)
+    },
+    Expr.Try(_, x) => w_expr(st, x),
+    Expr.RecordLit(span, type_name, fields) => {
+      if type_name == st.name {
+        st = add(st: st, span: word_at(st, span), role: "type")
+      }
+      return w_inits(st, fields)
+    },
+    Expr.WithExpr(_, base, fields) => w_expr(w_inits(st, fields), base),
+    Expr.Match(_, subject, arms) => {
+      for a in arms.reverse() {
+        st = w_pattern(w_opt(w_body(st, a.body), a.guard), a.pattern)
+      }
+      return w_expr(st, subject)
+    },
+    Expr.Lambda(_, params, ret, body) => w_params(w_opt_type(w_body(st, body), ret), params),
+    _ => st,
+  }
+}
+
+fn w_fields(st0: RS, fields: List[FieldDecl]) -> RS {
+  var st = st0
+  for f in fields.reverse() {
+    if f.name == st.name {
+      st = add(st: st, span: word_at(st, f.span), role: "field definition")
+    }
+    st = w_type(st, f.ty)
+  }
+  return st
+}
+
+fn w_fn(st0: RS, f: FnDecl) -> RS {
+  var st = st0
+  st = match f.body {
+    Some(b) => w_block(st, b),
+    None => st,
+  }
+  for x in f.post.reverse() {
+    st = w_expr(st, x)
+  }
+  for x in f.pre.reverse() {
+    st = w_expr(st, x)
+  }
+  return w_params(w_opt_type(st, f.ret), f.params)
+}
+
+fn w_decl(st0: RS, d: Decl) -> RS {
+  var st = st0
+  return match d {
+    Decl.Fn(f) => w_fn(st, f),
+    Decl.TypeD(_, _, _, fields, _, _) => w_fields(st, fields),
+    Decl.Alias(_, _, _, target, _, _) => w_type(st, target),
+    Decl.Const(_, _, _, ty, value, _, _) => w_type(w_expr(st, value), ty),
+    Decl.Use(_, _, _, _) => st,
+    Decl.Property(_, _, params, body) => w_params(w_block(st, body), params),
+    Decl.EnumD(_, _, _, variants, _, _) => {
+      for v in variants.reverse() {
+        if v.name == st.name {
+          st = add(st: st, span: word_at(st, v.span), role: "variant definition")
+        }
+        st = w_fields(st, v.fields)
+      }
+      return st
+    },
+    Decl.Test(_, _, body) => w_block(st, body),
+    Decl.Trait(_, _, _, methods, _, _, _) => {
+      for m in methods.reverse() {
+        st = w_fn(st, m)
+      }
+      return st
+    },
+    Decl.Impl(_, _, _, target, _, _, _, _, _) => w_type(st, target),
+  }
+}
+
+fn method_name(f: FnDecl) -> Str {
+  return f.method_name.unwrap_or(f.name)
+}
+
+/// Declaration-level occurrences (definitions, impls, bounds, imports).
+fn decl_level(st0: RS, d: Decl) -> RS {
+  var st = st0
+  match d {
+    Decl.Fn(f) => {
+      if f.owner_kind == None {
+        for b in f.bounds {
+          for item in b.second {
+            if item.first == st.name {
+              st = add(st: st, span: Some(item.second), role: "bound")
+            }
+          }
+        }
+      }
+    },
+    _ => {},
+  }
+  return match d {
+    Decl.Fn(f) => {
+      if f.owner_kind != None {
+        if method_name(f) == st.name {
+          st = add(st: st, span: Some(f.name_span), role: "method definition")
+        }
+      } else if f.name == st.name {
+        st = add(st: st, span: Some(f.name_span), role: "definition")
+      }
+      return st
+    },
+    Decl.Trait(_, name, name_span, methods, _, _, _) => {
+      if name == st.name {
+        st = add(st: st, span: Some(name_span), role: "definition")
+      }
+      for m in methods {
+        if method_name(m) == st.name {
+          st = add(st: st, span: Some(m.name_span), role: "method definition")
+        }
+      }
+      return st
+    },
+    Decl.Impl(_, trait_name, trait_span, _, _, _, _, _, _) => {
+      if trait_name == st.name {
+        st = add(st: st, span: Some(trait_span), role: "impl")
+      }
+      return st
+    },
+    Decl.Const(_, name, name_span, _, _, _, _) => {
+      if name == st.name {
+        st = add(st: st, span: Some(name_span), role: "definition")
+      }
+      return st
+    },
+    Decl.TypeD(span, name, _, _, _, _) => def_word(st: st, span: span, name: name),
+    Decl.EnumD(span, name, _, _, _, _) => def_word(st: st, span: span, name: name),
+    Decl.Alias(span, name, _, _, _, _) => def_word(st: st, span: span, name: name),
+    Decl.Use(_, _, items, spans) => {
+      var k = 0
+      for item in items {
+        if item == st.name {
+          st = add(st: st, span: spans.get(k), role: "import")
+        }
+        k = k + 1
+      }
+      return st
+    },
+    _ => st,
+  }
+}
+
+fn def_word(st: RS, span: Span, name: Str) -> RS {
+  if name != st.name {
+    return st
+  }
+  return add(st: st, span: word_at(st, span), role: "definition")
+}
+
+/// Every place `name` is defined or used, across the user's modules, by file and position.
+pub fn name_occurrences(mods: List[UMod], name: Str) -> List[NameOcc] {
+  var found: List[NameOcc] = []
+  for m in mods {
+    var st = RS { name: name, file: m.display, lines: m.lines, res: m.res, out: [] }
+    for d in m.decls {
+      st = decl_level(st, d)
+    }
+    for d in m.decls.reverse() {
+      st = w_decl(st, d)
+    }
+    found = found.concat(st.out)
+  }
+  var seen: Map[Str, Bool] = Map {}
+  var uniq: List[NameOcc] = []
+  for o in found {
+    let key = "{o.file}:{o.span.line}:{o.span.col}"
+    if not seen.has(key) {
+      seen = seen.set(key, true)
+      uniq = uniq.push(o)
+    }
+  }
+  return uniq.sort_by(fn(o) => o.file + "\0" + o.span.line.to_str().pad_left(10, "0") + o.span.col.to_str().pad_left(10,
+    "0"))
+}
+
+// ---- signatures -----------------------------------------------------------------------------------------------
+
+/// Characters [a, b) of a line (Python slicing: clamped, empty when b <= a).
+fn cut(line: Str, a: Int, b: Int) -> Str {
+  let n = line.len()
+  let lo = a.max(0).min(n)
+  let hi = b.max(0).min(n)
+  if hi <= lo {
+    return ""
+  }
+  return line.slice(lo, hi)
+}
+
+fn type_expr_span(t: TypeExpr) -> Span {
+  return match t {
+    TypeExpr.Named(s, _, _) => s,
+    TypeExpr.FnType(s, _, _) => s,
+  }
+}
+
+fn type_text(lines: List[Str], t: TypeExpr) -> Str {
+  let sp = type_expr_span(t)
+  let line = lines.get_or(sp.line - 1, "")
+  if sp.line == sp.end_line {
+    return cut(line: line, a: sp.col - 1, b: sp.end_col - 1)
+  }
+  return cut(line: line, a: sp.col - 1, b: line.len()).trim()
+}
+
+fn collapse_spaces(s: Str) -> Str {
+  var out = ""
+  var space = false
+  for c in s.chars() {
+    if c == " " or c == "\t" or c == "\n" or c == "\r" {
+      space = true
+    } else {
+      if space and out != "" {
+        out = out + " "
+      }
+      space = false
+      out = out + c
+    }
+  }
+  return out
+}
+
+fn strip_pub(s: Str) -> Str {
+  if s.starts_with("pub ") {
+    return s.slice(4, s.len()).trim_start()
+  }
+  return s
+}
+
+fn tparams_text(tps: List[Str]) -> Str {
+  if tps.is_empty() {
+    return ""
+  }
+  return "[" + tps.join(", ") + "]"
+}
+
+/// The text of the lines from `from` to `to` (1-based) cut at the end column and the start column.
+fn joined(lines: List[Str], first: Int, first_col: Int, last: Int, last_col: Int) -> Str {
+  var parts: List[Str] = []
+  var ln = first
+  while ln <= last and ln - 1 < lines.len() {
+    var text = lines.get_or(ln - 1, "")
+    if ln == last {
+      text = cut(line: text, a: 0, b: last_col - 1)
+    }
+    if ln == first and first_col > 0 {
+      text = cut(line: text, a: first_col - 1, b: text.len())
+    }
+    parts = parts.push(text.trim())
+    ln = ln + 1
+  }
+  return parts.join(" ")
+}
+
+/// The text of a function up to its body.
+fn fn_sig_text(lines: List[Str], f: FnDecl) -> Str {
+  let text = match f.body {
+    Some(b) => joined(lines: lines, first: f.span.line, first_col: 0, last: b.span.line, last_col: b.span.col),
+    None => joined(lines: lines, first: f.span.line, first_col: f.span.col, last: f.span.end_line,
+      last_col: f.span.end_col),
+  }
+  return strip_pub(collapse_spaces(text))
+}
+
+/// The declaration's text up to (not including) its body, on one line (a newtype: as written).
+fn sig_text(lines: List[Str], d: Decl, newtype: Bool) -> Str {
+  return match d {
+    Decl.TypeD(span, name, tps, fields, _, _) => {
+      if newtype {
+        return strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: span.col, last: span.end_line,
+          last_col: span.end_col)))
+      }
+      let fs = fields.map(fn(f) => f.name + ": " + type_text(lines, f.ty)).join(", ")
+      return "type {name}{tparams_text(tps)} \{ " + fs + " \}"
+    },
+    Decl.EnumD(_, name, tps, variants, _, _) => {
+      let vs = variants.map(fn(v) => match v.fields.is_empty() {
+        true => v.name,
+        false => v.name + "(" + v.fields.map(fn(f) => f.name + ": " + type_text(lines, f.ty)).join(", ") + ")",
+      }).join(", ")
+      return "enum {name}{tparams_text(tps)} \{ " + vs + " \}"
+    },
+    Decl.Fn(f) => fn_sig_text(lines, f),
+    Decl.Test(span, _, body) => strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: 0,
+      last: body.span.line, last_col: body.span.col))),
+    Decl.Property(span, _, _, body) => strip_pub(collapse_spaces(joined(lines: lines, first: span.line, first_col: 0,
+      last: body.span.line, last_col: body.span.col))),
+    _ => {
+      let sp = decl_span(d)
+      return strip_pub(collapse_spaces(joined(lines: lines, first: sp.line, first_col: sp.col, last: sp.end_line,
+        last_col: sp.end_col)))
+    },
+  }
+}
+
+pub fn decl_span(d: Decl) -> Span {
+  return match d {
+    Decl.Fn(f) => f.span,
+    Decl.TypeD(s, _, _, _, _, _) => s,
+    Decl.Alias(s, _, _, _, _, _) => s,
+    Decl.Const(s, _, _, _, _, _, _) => s,
+    Decl.Use(s, _, _, _) => s,
+    Decl.Property(s, _, _, _) => s,
+    Decl.EnumD(s, _, _, _, _, _) => s,
+    Decl.Test(s, _, _) => s,
+    Decl.Trait(s, _, _, _, _, _, _) => s,
+    Decl.Impl(s, _, _, _, _, _, _, _, _) => s,
+  }
+}
+
+/// The `/// >>> ...` lines of a declaration (the parser turns them into a test `doc: <name>`).
+fn doc_examples(decls: List[Decl], lines: List[Str], name: Str) -> List[Str] {
+  var out: List[Str] = []
+  for d in decls {
+    match d {
+      Decl.Test(span, tname, _) => {
+        if tname == "doc: " + name {
+          var ln = span.line
+          while ln <= span.end_line {
+            let text = lines.get_or(ln - 1, "").trim()
+            if text.starts_with("///") and text.slice(3, text.len()).trim().starts_with(">>>") {
+              let rest = text.slice(3, text.len()).trim()
+              out = out.push(rest.slice(3, rest.len()).trim())
+            }
+            ln = ln + 1
+          }
+        }
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+// ---- outline --------------------------------------------------------------------------------------------------
+
+/// One entry of an outline ("" / [] / 0: absent).
+type OItem {
+  kind: Str,
+  line: Int,
+  name: Str,
+  signature: Str,
+  methods: List[Str],
+  items: List[Str],
+  public: Bool,
+  doc: Str,
+  doctests: Int,
+}
+
+/// The outline of one module.
+pub type OMod { display: Str, lines: Int, items: List[OItem] }
+
+fn decl_kind(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(_) => "fn",
+    Decl.TypeD(_, _, _, _, _, _) => "type",
+    Decl.Alias(_, _, _, _, _, _) => "alias",
+    Decl.Const(_, _, _, _, _, _, _) => "const",
+    Decl.Use(_, _, _, _) => "use",
+    Decl.Property(_, _, _, _) => "property",
+    Decl.EnumD(_, _, _, _, _, _) => "enum",
+    Decl.Test(_, _, _) => "test",
+    Decl.Trait(_, _, _, _, _, _, _) => "trait",
+    Decl.Impl(_, _, _, _, _, _, _, _, _) => "impl",
+  }
+}
+
+pub fn decl_name(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(f) => f.name,
+    Decl.TypeD(_, n, _, _, _, _) => n,
+    Decl.Alias(_, n, _, _, _, _) => n,
+    Decl.Const(_, n, _, _, _, _, _) => n,
+    Decl.Use(_, path, _, _) => path.join("."),
+    Decl.Property(_, n, _, _) => n,
+    Decl.EnumD(_, n, _, _, _, _) => n,
+    Decl.Test(_, n, _) => n,
+    Decl.Trait(_, n, _, _, _, _, _) => n,
+    Decl.Impl(_, t, _, _, _, _, _, _, _) => t,
+  }
+}
+
+pub fn decl_doc_text(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(f) => f.doc.unwrap_or(""),
+    Decl.TypeD(_, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.Alias(_, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.Const(_, _, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.EnumD(_, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.Trait(_, _, _, _, _, doc, _) => doc.unwrap_or(""),
+    _ => "",
+  }
+}
+
+fn decl_public(d: Decl) -> Bool {
+  return match d {
+    Decl.Fn(f) => f.public,
+    Decl.TypeD(_, _, _, _, _, p) => p,
+    Decl.Alias(_, _, _, _, _, p) => p,
+    Decl.Const(_, _, _, _, _, _, p) => p,
+    Decl.EnumD(_, _, _, _, _, p) => p,
+    Decl.Trait(_, _, _, _, _, _, p) => p,
+    Decl.Impl(_, _, _, _, _, _, p, _, _) => p,
+    _ => false,
+  }
+}
+
+fn first_doc_line(doc: Str) -> Str {
+  for x in doc.split("\n") {
+    if x.trim() != "" {
+      return x.trim()
+    }
+  }
+  return ""
+}
+
+fn default_methods(lines: List[Str], decls: List[Decl], trait_name: Str, suffix: Str) -> List[Str] {
+  var out: List[Str] = []
+  for f in decls {
+    match f {
+      Decl.Fn(fd) => {
+        if fd.owner_kind == Some("default") and fd.trait_name == Some(trait_name) {
+          out = out.push(fn_sig_text(lines, fd) + suffix)
+        }
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn module_outline(m: UMod) -> OMod {
+  let lines = m.lines
+  let decls = m.decls
+  var newtypes: List[Str] = []
+  for d in decls {
+    match d {
+      Decl.Fn(f) => {
+        match f.constructs {
+          Some(t) => {
+            newtypes = newtypes.push(t)
+          },
+          None => {},
+        }
+      },
+      _ => {},
+    }
+  }
+  var items: List[OItem] = []
+  var i = 0
+  for d in decls {
+    let kind = decl_kind(d)
+    let skip = match d {
+      Decl.Fn(f) => f.owner_kind != None or f.constructs != None,
+      _ => false,
+    }
+    if not skip {
+      var item = OItem { kind: kind, line: decl_span(d).line, name: decl_name(d), signature: "", methods: [], items: [],
+        public: false, doc: "", doctests: 0 }
+      match d {
+        Decl.Trait(_, name, _, methods, _, _, public) => {
+          var sig = "trait {name}"
+          if public {
+            sig = "pub " + sig
+          }
+          item = item with { signature: sig, methods: methods.map(fn(f) => fn_sig_text(lines, f)).concat(
+            default_methods(lines: lines, decls: decls, trait_name: name, suffix: "   (default)")) }
+        },
+        Decl.Impl(span, trait_name, _, target, methods, _, _, _, _) => {
+          let tname = match target {
+            TypeExpr.Named(_, n, _) => n,
+            _ => "?",
+          }
+          let head = lines.get_or(span.line - 1, "").trim()
+          var sig = "impl {trait_name} for {tname}"
+          match head.index_of("\{") {
+            Some(k) => {
+              if head.starts_with("impl") {
+                sig = head.slice(0, k).trim()
+              }
+            },
+            None => {},
+          }
+          var ms: List[Str] = []
+          var k = i + 1
+          while k < i + 1 + methods.len() {
+            match decls.get(k) {
+              Some(Decl.Fn(f)) => {
+                if f.owner_kind == Some("impl") {
+                  ms = ms.push(fn_sig_text(lines, f))
+                }
+              },
+              _ => {},
+            }
+            k = k + 1
+          }
+          item = item with { name: "{trait_name} for {tname}", signature: sig, methods: ms }
+        },
+        Decl.Test(_, _, _) => {},
+        Decl.Property(_, _, _, _) => {},
+        Decl.Use(_, _, names, _) => {
+          item = item with { items: names }
+        },
+        _ => {
+          var sig = sig_text(lines: lines, d: d, newtype: kind == "type" and newtypes.contains(decl_name(d)))
+          if decl_public(d) {
+            sig = "pub " + sig
+          }
+          item = item with { signature: sig, public: decl_public(d) }
+        },
+      }
+      item = item with { doc: first_doc_line(decl_doc_text(d)) }
+      if not ["test", "property", "use", "impl"].contains(kind) {
+        item = item with { doctests: doc_examples(decls: decls, lines: lines, name: decl_name(d)).len() }
+      }
+      if not (kind == "test" and item.name.starts_with("doc: ")) {
+        items = items.push(item)
+      }
+    }
+    i = i + 1
+  }
+  return OMod { display: m.display, lines: lines.len(), items: items }
+}
+
+/// The outline of the main module (or of every user module).
+pub fn outline(mods: List[UMod], main: UMod, all: Bool) -> List[OMod] {
+  if all {
+    return mods.map(module_outline)
+  }
+  return [module_outline(main)]
+}
+
+/// The main module of a program that parsed.
+pub fn main_module(ld: Ld, path: Str) -> Option[UMod] {
+  return match ld.by_path.get(path) {
+    Some(m) => match m.checker {
+      Some(ck) => Some(UMod { display: m.display, path: m.path, lines: ld.sources.get(m.display).unwrap_or("").split(
+        "\n"), decls: ck.decls, res: ck.resolutions }),
+      None => None,
+    },
+    None => None,
+  }
+}
+
+fn py_repr(s: Str) -> Str {
+  var quote = "'"
+  if s.contains("'") and not s.contains("\"") {
+    quote = "\""
+  }
+  return quote + s.replace("\\", "\\\\").replace(quote, "\\" + quote) + quote
+}
+
+pub fn outline_text(data: List[OMod]) -> Str {
+  var res: List[Str] = []
+  for m in data {
+    let tests = m.items.filter(fn(i) => i.kind == "test" or i.kind == "property")
+    res = res.push("{m.display} ({m.lines} lines, {tests.len()} tests)")
+    for i in m.items {
+      let num = i.line.to_str().pad_left(4, " ")
+      if i.kind == "use" {
+        res = res.push("  {num}  use {i.name}.\{" + i.items.join(", ") + "\}")
+      } else if i.kind != "test" and i.kind != "property" {
+        var doc = ""
+        if i.doc != "" {
+          doc = "   // " + i.doc
+        }
+        var dt = ""
+        if i.doctests > 0 {
+          dt = " [{i.doctests} doc-tests]"
+        }
+        res = res.push("  {num}  {i.signature}{doc}{dt}")
+        for meth in i.methods {
+          res = res.push("          " + meth)
+        }
+      }
+    }
+    if not tests.is_empty() {
+      res = res.push("        tests: " + tests.map(fn(t) => py_repr(t.name)).join(", "))
+    }
+  }
+  return res.join("\n")
+}
+
+fn item_json(i: OItem) -> J {
+  var out = [Pair { first: "kind", second: J.JStr(i.kind) }, Pair { first: "line", second: J.JInt(i.line) }, Pair {
+    first: "name", second: J.JStr(i.name) }]
+  if i.kind == "trait" or i.kind == "impl" {
+    out = out.push(Pair { first: "signature", second: J.JStr(i.signature) })
+    out = out.push(Pair { first: "methods", second: J.JArr(i.methods.map(fn(x) => J.JStr(x))) })
+  } else if i.kind == "use" {
+    out = out.push(Pair { first: "items", second: J.JArr(i.items.map(fn(x) => J.JStr(x))) })
+  } else if i.kind != "test" and i.kind != "property" {
+    out = out.push(Pair { first: "signature", second: J.JStr(i.signature) })
+    if i.public {
+      out = out.push(Pair { first: "public", second: J.JBool(true) })
+    }
+  }
+  if i.doc != "" {
+    out = out.push(Pair { first: "doc", second: J.JStr(i.doc) })
+  }
+  if i.doctests > 0 {
+    out = out.push(Pair { first: "doctests", second: J.JInt(i.doctests) })
+  }
+  return J.JObj(out)
+}
+
+pub fn outline_json(data: List[OMod]) -> Str {
+  let mods = data.map(fn(m) => J.JObj([Pair { first: "module", second: J.JStr(m.display) }, Pair { first: "lines",
+    second: J.JInt(m.lines) }, Pair { first: "items", second: J.JArr(m.items.map(item_json)) }]))
+  return compact(J.JObj([Pair { first: "ok", second: J.JBool(true) }, Pair { first: "modules", second: J.JArr(mods) }]))
+}
+
+// ---- doc ------------------------------------------------------------------------------------------------------
+
+/// One answer of `klar doc` ("" / []: absent; `has_doc`: the entry has a `doc` field).
+pub type DocHit { kind: Str, name: Str, signature: Str, doc: Str, has_doc: Bool, examples: List[Str], exact: Bool }
+
+/// The name in a signature `fn name[T](...)`.
+fn sig_name(sig: Str) -> Str {
+  var rest = sig
+  if rest.starts_with("fn ") {
+    rest = rest.slice(3, rest.len())
+  }
+  var out = ""
+  for c in rest.chars() {
+    if c == "(" or c == "[" {
+      return out
+    }
+    out = out + c
+  }
+  return out
+}
+
+/// Usage lines from the built-in test-suite (always correct: they are tested).
+fn builtin_examples(test_lines: List[Str], name: Str) -> List[Str] {
+  var out: List[Str] = []
+  for line in test_lines {
+    let s = line.trim()
+    if s.starts_with("assert") and mentions_call(s, name) {
+      out = out.push(s.split("//").get_or(0, "").trim())
+      if out.len() >= 3 {
+        return out
+      }
+    }
+  }
+  return out
+}
+
+/// `(\.|\b)name\(` — a call of `name`, as a method or a function.
+fn mentions_call(s: Str, name: Str) -> Bool {
+  let cs = s.chars()
+  let target = (name + "(").chars()
+  let n = target.len()
+  var i = 0
+  while i + n <= cs.len() {
+    if cs.slice(i, i + n) == target {
+      let prev = cs.get_or(i - 1, "")
+      if i == 0 or prev == "." or not is_word_char(prev) {
+        return true
+      }
+    }
+    i = i + 1
+  }
+  return false
+}
+
+fn doc_join(doc: Str) -> Str {
+  return doc.split("\n").map(fn(x) => x.trim()).filter(fn(x) => x != "").join(" ")
+}
+
+fn kind_word(d: Decl) -> Str {
+  let k = decl_kind(d)
+  if k == "test" or k == "property" or k == "use" or k == "trait" or k == "impl" {
+    return k
+  }
+  return k
+}
+
+fn decl_doc(d: Decl, lines: List[Str], place: Str, exact: Bool, decls: List[Decl]) -> DocHit {
+  let ex = doc_examples(decls: decls, lines: lines, name: decl_name(d))
+  var hint = "{place}:{decl_span(d).line}"
+  if place.starts_with("std.") {
+    hint = "use {place}.\{{decl_name(d)}\}"
+  }
+  return DocHit { kind: kind_word(d) + " ({hint})", name: decl_name(d), signature: sig_text(lines: lines, d: d,
+    newtype: false), doc: doc_join(decl_doc_text(d)), has_doc: true, examples: ex.take(3), exact: exact }
+}
+
+type Query { owner: Str, meth: Str }
+
+fn matches(q: Query, name: Str) -> Bool {
+  return name == q.meth or (q.meth.len() >= 3 and name.lower().contains(q.meth.lower()))
+}
+
+fn trait_docs(d: Decl, lines: List[Str], place: Str, q: Query, decls: List[Decl]) -> List[DocHit] {
+  var loc = "{place}:{decl_span(d).line}"
+  if place.starts_with("std.") {
+    loc = "use {place}.\{...\}"
+  }
+  return match d {
+    Decl.Trait(_, name, _, methods, _, doc, _) => {
+      if q.owner != "" or not matches(q, name) {
+        return []
+      }
+      let ms = methods.map(fn(f) => fn_sig_text(lines, f)).concat(default_methods(lines: lines, decls: decls,
+        trait_name: name, suffix: " (default)"))
+      return [DocHit { kind: "trait ({loc})", name: name, signature: "trait {name} \{ " + ms.join("; ") + " \}",
+        doc: doc_join(doc.unwrap_or("")), has_doc: true, examples: doc_examples(decls: decls, lines: lines, name: name)
+          .take(3), exact: name == q.meth }]
+    },
+    Decl.Fn(f) => {
+      let m = f.method_name.unwrap_or("")
+      let owner = f.owner.unwrap_or("")
+      let tr = f.trait_name.unwrap_or("")
+      if f.owner_kind == None or not matches(q, m) or (q.owner != "" and q.owner != owner and q.owner != tr) {
+        return []
+      }
+      let r = decl_doc(d: d, lines: lines, place: place, exact: m == q.meth, decls: decls)
+      var kind = "default method of trait `{tr}` ({loc})"
+      if f.owner_kind == Some("impl") {
+        kind = "method of `impl {tr} for {owner}` ({loc})"
+      }
+      return [r with { kind: kind }]
+    },
+    _ => [],
+  }
+}
+
+/// Matches for `name`, `Type.method` or a fragment: built-ins, std modules and the user's modules.
+pub fn doc_lookup(query: Str, globals: List[Str], methods: List[Pair[Str, Str]], test_lines: List[Str],
+  std: List[Pair[Str, Pair[List[Str], List[Decl]]]], mods: List[UMod]) -> List[DocHit] {
+    let qs = query.trim()
+    var q = Query { owner: "", meth: qs }
+    let dot = qs.split(".")
+    if dot.len() > 1 {
+      q = Query { owner: dot.take(dot.len() - 1).join("."), meth: dot.last().unwrap_or("") }
+    }
+    var results: List[DocHit] = []
+    for sig in globals {
+      let name = sig_name(sig)
+      if q.owner == "" and matches(q, name) {
+        results = results.push(DocHit { kind: "built-in function", name: name, signature: sig, doc: "", has_doc: false,
+          examples: builtin_examples(test_lines, name), exact: name == q.meth })
+      }
+    }
+    for m in methods {
+      let typ = m.first
+      let name = sig_name(m.second)
+      if (q.owner == "" or q.owner == typ) and matches(q, name) {
+        results = results.push(DocHit { kind: "{typ} method", name: "{typ}.{name}", signature: m.second, doc: "",
+          has_doc: false, examples: builtin_examples(test_lines, name), exact: name == q.meth })
+      }
+    }
+    for entry in std {
+      let place = "std." + entry.first
+      let lines = entry.second.first
+      let decls = entry.second.second
+      for d in decls {
+        let plain_fn = match d {
+          Decl.Fn(f) => f.owner_kind == None,
+          _ => false,
+        }
+        if plain_fn and q.owner == "" and matches(q, decl_name(d)) {
+          results = results.push(decl_doc(d: d, lines: lines, place: place, exact: decl_name(d) == q.meth, decls: decls))
+        } else {
+          results = results.concat(trait_docs(d: d, lines: lines, place: place, q: q, decls: decls))
+        }
+      }
+    }
+    for m in mods {
+      for d in m.decls {
+        let k = decl_kind(d)
+        let plain = match d {
+          Decl.Fn(f) => f.owner_kind == None,
+          _ => ["type", "enum", "const", "alias"].contains(k),
+        }
+        if plain and q.owner == "" and matches(q, decl_name(d)) {
+          results = results.push(decl_doc(d: d, lines: m.lines, place: m.display, exact: decl_name(d) == q.meth,
+            decls: m.decls))
+        } else {
+          results = results.concat(trait_docs(d: d, lines: m.lines, place: m.display, q: q, decls: m.decls))
+        }
+      }
+    }
+    // exact matches first, then by name (a stable sort)
+    return results.sort_by(fn(r) => match r.exact {
+      true => "0",
+      false => "1",
+    } + r.name)
+  }
+
+pub fn doc_text(results: List[DocHit], limit: Int) -> Str {
+  if results.is_empty() {
+    return "nothing found (try a shorter fragment, e.g. `klar doc split`)"
+  }
+  var out: List[Str] = []
+  for r in results.take(limit) {
+    out = out.push(r.signature)
+    var line = "    " + r.kind
+    if r.doc != "" {
+      line = line + " — " + r.doc
+    }
+    out = out.push(line)
+    for e in r.examples {
+      out = out.push("    e.g. " + e)
+    }
+  }
+  if results.len() > limit {
+    let last = results.get(0).map(fn(r) => r.name.split(".").last().unwrap_or(r.name)).unwrap_or("")
+    out = out.push("... {results.len() - limit} more (narrow the query, e.g. `List.{last}`)")
+  }
+  return out.join("\n")
+}
+
+pub fn doc_json(results: List[DocHit], limit: Int) -> Str {
+  let items = results.take(limit).map(fn(r) {
+    var f = [Pair { first: "kind", second: J.JStr(r.kind) }, Pair { first: "name", second: J.JStr(r.name) }, Pair {
+      first: "signature", second: J.JStr(r.signature) }]
+    if r.has_doc {
+      f = f.push(Pair { first: "doc", second: J.JStr(r.doc) })
+    }
+    f = f.push(Pair { first: "examples", second: J.JArr(r.examples.map(fn(e) => J.JStr(e))) })
+    f = f.push(Pair { first: "exact", second: J.JBool(r.exact) })
+    return J.JObj(f)
+  })
+  return compact(J.JObj([Pair { first: "ok", second: J.JBool(not results.is_empty()) }, Pair { first: "results",
+    second: J.JArr(items) }]))
+}

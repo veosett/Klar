@@ -399,6 +399,8 @@ def to_json(n):
         return d
     if isinstance(n, (list, tuple)):
         return [to_json(x) for x in n]
+    if isinstance(n, dict):
+        return {k: to_json(v) for k, v in n.items()}
     if isinstance(n, Span):
         return [n.line, n.col, n.end_line, n.end_col]
     return n
