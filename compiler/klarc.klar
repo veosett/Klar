@@ -18,6 +18,7 @@ use pkg.{pkg_command}
 use evaluate.{eval_command}
 use view.{view_command}
 use lsp.{lsp_command}
+use mcp.{mcp_command}
 use repl.{repl_command}
 use coverage.{coverage_command}
 use profile.{profile_command}
@@ -45,6 +46,7 @@ fn usage() -> Never uses io {
   print("       klarc coverage <file.klar> [--main] [--runs <n>] [--min <percent>] [--json]")
   print("       klarc repl [--plain]                       an interactive session (--plain: no banner, no prompts)")
   print("       klarc lsp                                  the language server (LSP over stdin/stdout)")
+  print("       klarc mcp [--klarc <path>]                 the MCP server with the Klar tools for AI agents (stdio)")
   print("       klarc view <file.klar> [-o <out.html>] [--run] [--stdin <text>] [--json]")
   print("       klarc eval [statements...] <expression> [--in <file.klar>] [--json]")
   print("       klarc dev <file.klar> [--json] [--no-run] [--stdin <text>] [--max-output <n>] [--max-warnings <n>]")
@@ -241,6 +243,9 @@ fn main() uses io, fs, time, proc {
   }
   if tool == "repl" {
     exit(repl_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "mcp" {
+    exit(mcp_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
   if tool == "lsp" {
     exit(lsp_command(lib_dir(argv)))

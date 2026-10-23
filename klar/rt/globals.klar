@@ -406,6 +406,86 @@ fn has_byte(s: Word, c: Word) -> Bool {
 }
 
 // Linux: the program file for a name: itself when it contains '/', else the first match in PATH (0: none)
+// Windows: `dir\prog` + ext when that file exists, else 0
+fn win_candidate(dir: Word, n: Word, prog: Word, ext: Str) -> Word {
+  let b = sb_new()
+  sb_add_bytes(b, dir, n)
+  if n > 0 and peek8(dir + n - 1) != 92 {
+    sb_add_byte(b, 92)
+  }
+  sb_add_str(b, prog)
+  sb_add_cstr(b, ext)
+  let cand = sb_finish(b)
+  if os_file_exists(cand + 32) {
+    return cand
+  }
+  rc_dec(cand)
+  return 0
+}
+
+// Windows: the program's full path, searched in PATH only (CreateProcessA would look in the current directory
+// first, where an untrusted project could put its own git.exe); a name with a directory is taken as it is. A name
+// without an extension tries .exe, .com, .bat, .cmd. 0 when nothing is found.
+fn win_find_program(prog: Word) -> Word {
+  if has_byte(prog, 92) or has_byte(prog, 47) or has_byte(prog, 58) {
+    rc_inc(prog)
+    return prog
+  }
+  let cap: Word = 32768
+  let path = alloc(cap)
+  let len = os_getenv(bits("PATH") + 32, path, cap)
+  var found: Word = 0
+  if len > 0 and len < cap {
+    var start = path
+    var q = path
+    let end = path + len
+    while found == 0 and q <= end {
+      if q == end or peek8(q) == 59 {
+        let n = q - start
+        if n > 0 {
+          if has_byte(prog, 46) {
+            found = win_candidate(start, n, prog, "")
+          } else {
+            found = win_candidate(start, n, prog, ".exe")
+            if found == 0 {
+              found = win_candidate(start, n, prog, ".com")
+            }
+            if found == 0 {
+              found = win_candidate(start, n, prog, ".bat")
+            }
+            if found == 0 {
+              found = win_candidate(start, n, prog, ".cmd")
+            }
+          }
+        }
+        start = q + 1
+      }
+      q = q + 1
+    }
+  }
+  block_free(path)
+  return found
+}
+
+// the Windows command line of args, the program replaced by its full path (0 when it is not found)
+fn win_command_line(args: Word) -> Word {
+  let n = peek(args + 16)
+  let prog = win_find_program(list_at(args, 0))
+  if prog == 0 {
+    return 0
+  }
+  let b = sb_new()
+  add_win_arg(b, prog)
+  rc_dec(prog)
+  var j: Word = 1
+  while j < n {
+    sb_add_byte(b, 32)
+    add_win_arg(b, list_at(args, j))
+    j = j + 1
+  }
+  return sb_finish(b)
+}
+
 fn find_program(prog: Word) -> Word {
   if has_byte(prog, 47) {
     if not os_file_exists(prog + 32) {
@@ -519,16 +599,10 @@ fn b_run_command(args: Word, rtd: Word) -> Word {
     }
     return ok_new(rtd, bits(tag(code)))
   }
-  let b = sb_new()
-  var j: Word = 0
-  while j < n {
-    if j > 0 {
-      sb_add_byte(b, 32)
-    }
-    add_win_arg(b, list_at(args, j))
-    j = j + 1
+  let cl = win_command_line(args)
+  if cl == 0 {
+    return spawn_error(prog, -2, rtd)
   }
-  let cl = sb_finish(b)
   let r = os_spawn(cl + 32)
   rc_dec(cl)
   if r < 0 {
@@ -704,6 +778,98 @@ fn b_remove_file(path: Word, rtd: Word) -> Word {
   return err_new(rtd, sb_finish(b))
 }
 
+// Windows: a temporary file name `%TEMP%\klar-<time>-<what>`
+fn win_temp(stamp: Word, what: Str) -> Word {
+  let b = sb_new()
+  let buf = alloc(4096)
+  let len = os_getenv(bits("TEMP") + 32, buf, 4096)
+  if len > 0 and len < 4096 {
+    sb_add_bytes(b, buf, len)
+    sb_add_byte(b, 92)
+  }
+  block_free(buf)
+  sb_add_cstr(b, "klar-")
+  sb_add_word(b, stamp)
+  sb_add_byte(b, 45)
+  sb_add_cstr(b, what)
+  return sb_finish(b)
+}
+
+// the whole content of a file as a string ("" when it cannot be read)
+fn slurp(path: Word) -> Word {
+  let b = sb_new()
+  let fd = os_open(path + 32, 0)
+  if fd >= 0 {
+    let chunk = alloc(65536)
+    var reading = true
+    while reading {
+      let n = os_read(fd, chunk, 65536)
+      if n <= 0 {
+        reading = false
+      } else {
+        sb_add_bytes(b, chunk, n)
+      }
+    }
+    block_free(chunk)
+    os_close(fd)
+  }
+  return sb_finish(b)
+}
+
+// run_capture on Windows: the input, stdout and stderr go through temporary files (no deadlock without poll); the
+// program is found in PATH by CreateProcessA, like run_command
+fn run_capture_win(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
+  flush_out()
+  let prog = list_at(args, 0)
+  let cl = win_command_line(args)
+  if cl == 0 {
+    return spawn_error(prog, -2, rtd)
+  }
+  let stamp = os_time_ns()
+  let p_in = win_temp(stamp, "in")
+  let p_out = win_temp(stamp, "out")
+  let p_err = win_temp(stamp, "err")
+  let w = os_open(p_in + 32, 1)
+  if w >= 0 {
+    if peek(input + 16) > 0 {
+      os_write(w, input + 32, peek(input + 16))
+    }
+    os_close(w)
+  }
+  let hin = os_open(p_in + 32, 0)
+  let hout = os_open(p_out + 32, 1)
+  let herr = os_open(p_err + 32, 1)
+  var dirp: Word = 0
+  if peek(dir + 16) > 0 {
+    dirp = dir + 32
+  }
+  let code = os_spawn_std(cl + 32, dirp, hin, hout, herr)
+  os_close(hin)
+  os_close(hout)
+  os_close(herr)
+  rc_dec(cl)
+  let out = slurp(p_out)
+  let err = slurp(p_err)
+  os_unlink(p_in + 32)
+  os_unlink(p_out + 32)
+  os_unlink(p_err + 32)
+  rc_dec(p_in)
+  rc_dec(p_out)
+  rc_dec(p_err)
+  if code < 0 {
+    rc_dec(out)
+    rc_dec(err)
+    return spawn_error(prog, -2, rtd)
+  }
+  let cs = sb_new()
+  sb_add_word(cs, code)
+  var res = list_new_str()
+  res = list_push_owned_raw(res, sb_finish(cs))
+  res = list_push_owned_raw(res, out)
+  res = list_push_owned_raw(res, err)
+  return ok_new(rtd, res)
+}
+
 // run_capture(args, dir, input): runs a program (searched in PATH) in `dir` ("" = here) with `input` as its stdin
 // and returns [exit code, stdout, stderr]; both streams are read together (poll), so neither can fill up and block
 // the child. The input goes into the pipe before the child starts (so at most one pipe buffer: 64 KB).
@@ -716,7 +882,7 @@ fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
     return err_new(rtd, bits("run_capture: the input is limited to 64 KB"))
   }
   if os_platform() == 1 {
-    return err_new(rtd, bits("run_capture: not supported on Windows yet"))
+    return run_capture_win(args, dir, input, rtd)
   }
   flush_out()
   let prog = list_at(args, 0)

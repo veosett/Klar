@@ -6,6 +6,40 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 
 ## [Unreleased]
 
+### Fixed
+- On Windows the interpreter printed Windows' own texts for file errors ("The directory name is invalid"); it uses
+  the same words as native code on every system ("Not a directory").
+- `tests/selfhost.py` (and its unit test) ran the Linux build of klarc on Windows; it is skipped on hosts other than
+  Linux x86-64, like `tests/bootstrap.py`.
+
+### Security
+A security review of the language, the runtime and the tools (`SECURITY.md` describes the model):
+- Native code: `"x".repeat(n)` and lists sized from a huge count (`range(0, 2^61)`) overflowed the size of the
+  allocation and wrote past it; every allocation size is now checked (new runtime error R0015, "out of memory", also
+  in the interpreter instead of a Python exception). Printing, `==` and hashing of values nested more than 100 000
+  levels deep overflowed the machine stack; they are R0006 now.
+- `klarc` wrote its temporary executables to `/tmp` under predictable names (a symlink planted there by another
+  user was followed); they live in `~/.klar-cache/klarc` now, and an existing file is removed before writing.
+- `klar fetch` / `klarc fetch`: a git URL or revision from `klar.toml` or `klar.lock` that starts with `-` reached
+  git as an option; such values are refused (and `git clone` gets `--` before the URL).
+- Windows: `run_command` / `run_capture` let CreateProcessA find the program in the current directory first (a
+  `git.exe` in an untrusted project would have run); the runtime now searches `PATH` itself and passes the full path.
+- The language servers stopped (or crashed) on a malformed message; it is skipped now.
+- The interpreter crashed with Python errors on `Float.to_int()` of infinity or NaN (now R0009, like native code) and
+  on source nested thousands of brackets deep (now E0003; normal nesting up to thousands of levels is accepted).
+
+### Added
+- `docs/ROADMAP.md`: the plan after 1.0 (phases, acceptance criteria, status).
+- `klar mcp` / `klarc mcp`: a Model Context Protocol server (stdio, newline-delimited JSON-RPC) that gives AI agents
+  the Klar tools directly — `klar_check`, `klar_dev`, `klar_test`, `klar_eval`, `klar_doc`, `klar_outline`,
+  `klar_refs`, `klar_patch`, `klar_fix`, `klar_fmt`, `klar_explain`, `klar_spec`. Each runs the command of the same
+  name (`--json` where there is one); `klarc mcp` gives the same answer to every message (`tests/selfhost.py`
+  replays a session that uses every tool). `claude mcp add klar -- python3 -m klar mcp`.
+- `run_capture` on Windows: the input, stdout and stderr of the program go through temporary files and the new
+  intrinsic `os_spawn_std` (CreateProcessA with STARTF_USESTDHANDLES and inheritable handles). With it every klarc
+  command that runs programs works on Windows: `klarc dev`, `eval`, `view --run`, `coverage`, `profile` and the
+  git dependencies of `klarc add` / `fetch`.
+
 ## [1.0.0] — 2026-10-23
 
 The first stable version: the language of `docs/SPEC.md` (Klar 1.0), compatible within 1.x. `klarc`, the compiler

@@ -182,17 +182,16 @@ fn git(args: List[Str], dir: Str) -> Result[Str, Str] uses proc {
 }
 
 /// Clones / updates a git dependency into `target` and checks out `rev` (or its tag / branch / rev); the commit.
+/// A value from klar.toml or klar.lock that goes into git's command line must not look like an option.
+fn no_option(value: Str, what: Str) -> Result[Unit, Str] {
+  if value.starts_with("-") {
+    return Err("refusing the {what} `{value}`: it starts with `-` (git would read it as an option)")
+  }
+  return Ok(())
+}
+
 fn checkout(target: Str, d: Dep, rev: Option[Str]) -> Result[Str, Str] uses fs, proc {
   let url = d.git.unwrap_or("")
-  if not is_dir(target + "/.git") {
-    make_dir(parent(target))?
-    let _ = git(["clone", "--quiet", url, target], "")?
-  } else {
-    if git(["remote", "get-url", "origin"], target)? != url {
-      let _ = git(["remote", "set-url", "origin", url], target)?
-    }
-    let _ = git(["fetch", "--quiet", "--tags", "--force", "origin"], target)?
-  }
   let kind = d.ref_kind.unwrap_or("")
   let r = d.ref.unwrap_or("")
   var want = "origin/HEAD"
@@ -209,6 +208,17 @@ fn checkout(target: Str, d: Dep, rev: Option[Str]) -> Result[Str, Str] uses fs, 
         want = r
       }
     },
+  }
+  no_option(url, "git URL")?
+  no_option(want, "revision")?
+  if not is_dir(target + "/.git") {
+    make_dir(parent(target))?
+    let _ = git(["clone", "--quiet", "--", url, target], "")?
+  } else {
+    if git(["remote", "get-url", "origin"], target)? != url {
+      let _ = git(["remote", "set-url", "origin", url], target)?
+    }
+    let _ = git(["fetch", "--quiet", "--tags", "--force", "origin"], target)?
   }
   let _ = git(["checkout", "--quiet", "--detach", want], target)?
   return git(["rev-parse", "HEAD"], target)

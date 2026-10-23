@@ -21,13 +21,13 @@ OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
             "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir",
             "os_getdents", "os_find_first", "os_find_next", "os_find_close", "os_mkdir",
-            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd", "os_setjmp", "os_longjmp"]
+            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd", "os_setjmp", "os_longjmp", "os_spawn_std"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
                "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
                "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose",
-               "CreateDirectoryA", "DeleteFileA", "GetCurrentDirectoryA"]
+               "CreateDirectoryA", "DeleteFileA", "GetCurrentDirectoryA", "SetHandleInformation"]
 
 
 def udiv_magic(d):
@@ -1233,7 +1233,7 @@ class Emitter:
         a.mov_ri(RAX, 7)
         a.syscall()
         self.stub_end()
-        for name in ("os_find_first", "os_find_next", "os_find_close"):     # (Windows)
+        for name in ("os_find_first", "os_find_next", "os_find_close", "os_spawn_std"):     # (Windows)
             self.stub_begin(name)
             a.mov_ri(RAX, -1)
             self.stub_end()
@@ -1541,7 +1541,7 @@ class Emitter:
         a.mov_ri(RDX, -1)
         call(230)
         self.stub_end()
-        for name in ("os_find_first", "os_find_next", "os_find_close"):     # (Windows)
+        for name in ("os_find_first", "os_find_next", "os_find_close", "os_spawn_std"):     # (Windows)
             self.stub_begin(name)
             a.mov_ri(RAX, -1)
             self.stub_end()
@@ -1826,6 +1826,59 @@ class Emitter:
         call("GetCurrentDirectoryA")
         a.mov_ri(RCX, 0xFFFFFFFF)
         a.alu_rr("and", RAX, RCX)
+        win_end()
+        # os_spawn_std(command line, dir or 0, stdin, stdout, stderr handles) -> exit code (-1: could not start):
+        # the handles become inheritable and the child's standard handles (STARTF_USESTDHANDLES)
+        win_begin("os_spawn_std", 160)
+        for i in (2, 3, 4):
+            self.arg(RCX, i)
+            a.mov_ri(RDX, 1)                   # HANDLE_FLAG_INHERIT
+            a.mov_ri(R8, 1)
+            call("SetHandleInformation")
+        a.mov_ri(RAX, 0)
+        for k in range(17):
+            a.store(RSP, 80 + 8 * k, RAX)
+        a.mov_ri(RAX, 104)
+        a.store(RSP, 80, RAX)                  # cb
+        a.mov_ri(RAX, 0x100)
+        a.store32(RSP, 140, RAX)               # dwFlags = STARTF_USESTDHANDLES
+        for i, off in ((2, 160), (3, 168), (4, 176)):
+            self.arg(RAX, i)
+            a.store(RSP, off, RAX)
+        a.mov_ri(RCX, 0)
+        self.arg(RDX, 0)
+        a.mov_ri(R8, 0)
+        a.mov_ri(R9, 0)
+        a.mov_ri(RAX, 1)
+        a.store(RSP, 32, RAX)                  # inherit handles
+        a.mov_ri(RAX, 0)
+        a.store(RSP, 40, RAX)
+        a.store(RSP, 48, RAX)
+        self.arg(RAX, 1)
+        a.store(RSP, 56, RAX)                  # current directory (0: this one)
+        a.lea(RAX, RSP, 80)
+        a.store(RSP, 64, RAX)
+        a.lea(RAX, RSP, 184)
+        a.store(RSP, 72, RAX)
+        call("CreateProcessA")
+        fail = a.new_label("qf")
+        a.mov_ri(RCX, 0xFFFFFFFF)
+        a.alu_rr("and", RAX, RCX)
+        a.jcc("e", fail)
+        a.load(RCX, RSP, 184)
+        a.mov_ri(RDX, 0xFFFFFFFF)              # INFINITE
+        call("WaitForSingleObject")
+        a.load(RCX, RSP, 184)
+        a.lea(RDX, RSP, 208)
+        call("GetExitCodeProcess")
+        a.load(RCX, RSP, 184)
+        call("CloseHandle")
+        a.load(RCX, RSP, 192)
+        call("CloseHandle")
+        a.load32(RAX, RSP, 208)
+        win_end()
+        a.label(fail)
+        a.mov_ri(RAX, -1)
         win_end()
         self.test_index_stub()
 

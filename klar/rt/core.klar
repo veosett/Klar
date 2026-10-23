@@ -37,6 +37,7 @@ const G_WFD: Word = 1008
 const G_PROP: Word = 1016
 const G_PROF: Word = 1024
 const G_PROPJB: Word = 1032
+const G_NEST: Word = 1040
 
 const OUT_CAP: Word = 65536
 
@@ -82,7 +83,25 @@ fn bump(bytes: Word, cls: Word) -> Word {
   return p + 8
 }
 
+// the most memory one object may ask for (64 TB): larger sizes, and sizes that overflowed, are R0015
+const MAX_ALLOC: Word = 70368744177664
+
+fn out_of_memory() -> Word {
+  return fail_msg("R0015", "out of memory: the program asked for more memory than a computer has", current_span())
+}
+
+// count * elem bytes (elem > 0), or R0015 when that is more than MAX_ALLOC (or the product overflows)
+fn mem_size(count: Word, elem: Word) -> Word {
+  if count < 0 or count > w_udiv(MAX_ALLOC, elem) {
+    out_of_memory()
+  }
+  return count * elem
+}
+
 fn alloc(size: Word) -> Word {
+  if w_ult(MAX_ALLOC, size) {
+    out_of_memory()
+  }
   let need = size + 8
   let gp = g()
   if need <= 1024 {

@@ -77,6 +77,7 @@ SYS_SIGNATURES = [
     "fn os_unlink(path: Word) -> Word",
     "fn os_getcwd(buf: Word, n: Word) -> Word",
     "fn os_setjmp(buf: Word) -> Word",
+    "fn os_spawn_std(cl: Word, dir: Word, hin: Word, hout: Word, herr: Word) -> Word",
     "fn os_longjmp(buf: Word, v: Word) -> Never",
 ]
 

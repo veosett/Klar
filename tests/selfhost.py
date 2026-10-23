@@ -1048,6 +1048,53 @@ def lsp_session(path, limit):
     return b"".join(lsp_frame(r) for r in reqs)
 
 
+def mcp_session():
+    """MCP messages (one per line) that use every tool on files of the repository, plus protocol edge cases."""
+    def call(i, tool, **args):
+        return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": tool, "arguments": args}}
+    msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": "p", "method": "ping"}]
+    i = 10
+    for f in ("examples/bank.klar", "examples/mistakes.klar", "examples/shapes.klar", "tests/native/traits.klar"):
+        for name in ("klar_check", "klar_dev", "klar_outline", "klar_test"):
+            msgs.append(call(i, name, file=f))
+            i += 1
+    msgs += [call(50, "klar_test", file="examples/bank.klar", filter="withdraw"),
+             call(51, "klar_dev", file="examples/hello.klar", run=False),
+             call(52, "klar_eval", expression="[1, 2].map(fn(x) => x * 3)"),
+             call(53, "klar_eval", statements=["let a = 2"], expression="a * 21"),
+             call(54, "klar_eval", expression="area(Shape.Circle(radius: 1.0))", file="examples/shapes.klar"),
+             call(55, "klar_doc", query="split"), call(56, "klar_doc", query="List.sort"),
+             call(57, "klar_refs", file="examples/bank.klar", name="deposit"),
+             call(58, "klar_explain", code="E0201"), call(59, "klar_explain", code="X9999"), call(60, "klar_spec"),
+             call(61, "klar_patch", file="examples/bank.klar", patch='{"edits": [{"find": "Alice", "in": "main"}]}',
+                  dry_run=True),
+             call(62, "klar_fix", file="examples/mistakes.klar", dry_run=True),
+             call(63, "klar_check"), call(64, "klar_check", file=""), call(65, "nope"),
+             {"jsonrpc": "2.0", "id": 66, "method": "resources/list"},
+             {"jsonrpc": "2.0", "id": None, "method": "ping"}, [1, 2]]
+    lines = [json.dumps(m) for m in msgs] + ["not json", "", "   "]
+    return ("\n".join(lines) + "\n").encode()
+
+
+def check_mcp(klarc):
+    """`klarc mcp` == `klar mcp`: the same answer to every message of a session that uses every tool."""
+    data = mcp_session()
+    want = subprocess.run([sys.executable, "-m", "klar", "mcp"], input=data, capture_output=True, cwd=ROOT)
+    got = subprocess.run([klarc, "mcp", "--klarc", klarc, "--lib", os.path.join(ROOT, "klar")], input=data,
+                         capture_output=True, cwd=ROOT)
+    a, b = want.stdout.decode().splitlines(), got.stdout.decode().splitlines()
+    bad = sum(1 for x, y in zip(a, b) if x != y) + abs(len(a) - len(b))
+    if bad:
+        k = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+        print(f"DIFF mcp: message {k} of {len(a)}/{len(b)}\n  python: {a[k][:300] if k < len(a) else None}\n"
+              f"  klar:   {b[k][:300] if k < len(b) else None}")
+    print(f"mcp: {len(a) - bad}/{len(a)} messages identical")
+    return bad
+
+
 def check_lsp(klarc):
     """`klarc lsp` == `klar lsp`: the same messages for sessions on the examples, native tests and a few compiler
     files (and the code actions of the diagnostics of examples/mistakes.klar)."""
@@ -1171,6 +1218,7 @@ def check_fix(cases):
         bad += check_coverage(klarc)
         bad += check_repl(klarc, d)
         bad += check_lsp(klarc)
+        bad += check_mcp(klarc)
         bad += check_view(klarc, d)
         bad += check_eval(klarc, d)
         bad += check_pkg(klarc, d)
@@ -1207,6 +1255,11 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     interp = "--interp" in argv
     only = [a for a in argv if not a.startswith("--")]
+    from klar.native.build import host_target
+    if host_target() != "linux" and not interp and "--update" not in argv:
+        # the Klar compiler is built and run as a Linux x86-64 executable; elsewhere only `--interp` works (slowly)
+        print(f"selfhost: skipped on {host_target() or sys.platform} (needs Linux x86-64, or --interp)")
+        return 0
     files = list(klar_files())
     with tempfile.TemporaryDirectory() as d:
         lex_files = files + write_snippets(d, "lex", ERROR_SNIPPETS)

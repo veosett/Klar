@@ -1,0 +1,289 @@
+// `klarc mcp`: the Model Context Protocol server of klar/tools/mcp.py in Klar — stdio, one JSON-RPC message per
+// line, the same tools and the same answers, character for character (tests/selfhost.py). A tool runs the klarc
+// command of the same name as a child process (`--klarc PATH`, default `klarc` from PATH) and returns its output.
+use builtin_sigs.{klar_version}
+use jsonout.{J, compact}
+use std.json.{Json, parse_json}
+
+const PROTOCOL: Str = "2025-06-18"
+
+const INSTRUCTIONS: Str = "Klar tools. Write Klar with tests next to the code; call klar_dev (check + tests + run) after each change and follow its `next` field; edit by name with klar_patch; look names up with klar_doc and klar_outline instead of guessing; klar_spec gives the language reference."
+
+type McpTool { name: Str, desc: Str, props: List[Pair[Str, J]], required: List[Str] }
+
+fn kv(k: Str, v: J) -> Pair[Str, J] {
+  return Pair { first: k, second: v }
+}
+
+fn s_prop(name: Str, desc: Str) -> Pair[Str, J] {
+  return kv(name, J.JObj([kv("type", J.JStr("string")), kv("description", J.JStr(desc))]))
+}
+
+fn b_prop(name: Str, desc: Str) -> Pair[Str, J] {
+  return kv(name, J.JObj([kv("type", J.JStr("boolean")), kv("description", J.JStr(desc))]))
+}
+
+fn file_prop() -> Pair[Str, J] {
+  return s_prop("file", "path of a .klar file")
+}
+
+fn tools() -> List[McpTool] {
+  return [McpTool { name: "klar_check", desc: "Type-check a Klar file: diagnostics with codes, positions, hints and " +
+      "machine fixes (JSON).", props: [file_prop()], required: ["file"] }, McpTool { name: "klar_dev",
+      desc: "One AI-loop step: check, run all tests and run main; compact JSON report with a `next` field.",
+      props: [file_prop(), s_prop("stdin", "input for read_line() when main runs"), b_prop("run",
+        "run main (default true)")], required: ["file"] }, McpTool { name: "klar_test",
+          desc: "Run the tests, doc-tests and properties of a Klar file (report text).", props: [file_prop(), s_prop("filter",
+            "only tests whose name contains this text")], required: ["file"] }, McpTool { name: "klar_eval",
+              desc: "Evaluate a Klar expression (after optional statements, optionally in the context of a file): its value " +
+                "and static type (JSON).", props: [s_prop("expression", "the expression"), kv("statements", J.JObj([kv("type",
+                J.JStr("array")), kv("items", J.JObj([kv("type", J.JStr("string"))])), kv("description",
+                  J.JStr("statements run before it"))])), s_prop("file", "a .klar file whose declarations are visible")],
+              required: ["expression"] }, McpTool { name: "klar_doc", desc: "Look up a built-in, std or project name: " +
+                  "signatures, documentation and tested examples (JSON).", props: [s_prop("query",
+                  "a name such as split, List.sort, std.math"), s_prop("file", "also search this file's modules")],
+                required: ["query"] }, McpTool { name: "klar_outline", desc: "The API of a Klar file and its modules: " +
+                    "declarations with signatures and lines (JSON).", props: [file_prop()], required: ["file"] }, McpTool {
+                    name: "klar_refs", desc: "Every definition and use of a name in a Klar file and its modules (JSON).",
+                    props: [file_prop(), s_prop("name", "the name")], required: ["file", "name"] }, McpTool { name: "klar_patch",
+                      desc: "Edit a Klar file by name with the AI patch protocol, e.g. \{\"edits\": [\{\"replace\": \"fname\", " +
+                        "\"with\": \"fn ...\"\}]\}; written only when it adds no errors (JSON report).", props: [file_prop(),
+                        s_prop("patch", "the patch as JSON text"), b_prop("dry_run", "only report, do not write")], required: ["file",
+                          "patch"] }, McpTool { name: "klar_fix", desc: "Apply the safe machine fixes of the diagnostics to a Klar file " +
+                              "(JSON report).", props: [file_prop(), b_prop("dry_run", "only report, do not write")], required: ["file"] },
+    McpTool { name: "klar_fmt", desc: "Format a Klar file in place in the canonical layout (JSON report).",
+      props: [file_prop()], required: ["file"] }, McpTool { name: "klar_explain", desc: "Explain a diagnostic code " +
+          "(E0201, R0002, W0401, ...) with an example and the fix.", props: [s_prop("code", "the code")],
+        required: ["code"] }, McpTool { name: "klar_spec", desc: "The compact Klar language reference for AI " +
+            "authors (syntax, types, effects, std library).", props: [], required: [] }]
+}
+
+fn tool_list() -> J {
+  return J.JArr(tools().map(fn(t) => J.JObj([kv("name", J.JStr(t.name)), kv("description", J.JStr(t.desc)), kv(
+    "inputSchema", J.JObj([kv("type", J.JStr("object")), kv("properties", J.JObj(t.props)), kv("required", J.JArr(
+      t.required.map(fn(r) => J.JStr(r))))]))])))
+}
+
+/// A parsed message (Json) as an output value (J), keeping the order of the fields.
+fn to_j(j: Json) -> J {
+  return match j {
+    Json.Null => J.JNull,
+    Json.Bool(b) => J.JBool(b),
+    Json.Int(i) => J.JInt(i),
+    Json.Num(x) => J.JFloat(x),
+    Json.Text(s) => J.JStr(s),
+    Json.Arr(items) => J.JArr(items.map(to_j)),
+    Json.Obj(fields) => J.JObj(fields.entries().map(fn(e) => kv(e.key, to_j(e.value)))),
+  }
+}
+
+fn get(j: Json, key: Str) -> Json {
+  return match j {
+    Json.Obj(fs) => fs.get(key).unwrap_or(Json.Null),
+    _ => Json.Null,
+  }
+}
+
+/// A non-empty string argument.
+fn opt_str(a: Json, key: Str) -> Option[Str] {
+  return match get(a, key) {
+    Json.Text(s) => match s == "" {
+      true => None,
+      false => Some(s),
+    },
+    _ => None,
+  }
+}
+
+fn arg(a: Json, key: Str) -> Str {
+  return opt_str(a, key).unwrap_or("")
+}
+
+fn flag(a: Json, key: Str, value: Bool) -> Bool {
+  return get(a, key) == Json.Bool(value)
+}
+
+fn opt_arg(a: Json, key: Str, option: Str) -> List[Str] {
+  return match opt_str(a, key) {
+    Some(v) => [option, v],
+    None => [],
+  }
+}
+
+/// The command line of a tool (the arguments of `klar <command>`).
+fn command(name: Str, a: Json) -> List[Str] {
+  let file = arg(a, "file")
+  if name == "klar_check" {
+    return ["check", file, "--json"]
+  }
+  if name == "klar_dev" {
+    var no_run: List[Str] = []
+    if flag(a: a, key: "run", value: false) {
+      no_run = ["--no-run"]
+    }
+    return ["dev", file, "--json"].concat(opt_arg(a: a, key: "stdin", option: "--stdin")).concat(no_run)
+  }
+  if name == "klar_test" {
+    return ["test", file].concat(opt_arg(a: a, key: "filter", option: "-k"))
+  }
+  if name == "klar_eval" {
+    let stmts = match get(a, "statements") {
+      Json.Arr(items) => items.flat_map(fn(x) => match x {
+        Json.Text(s) => [s],
+        _ => [],
+      }),
+      _ => [],
+    }
+    return ["eval"].concat(stmts).concat([arg(a, "expression")]).concat(opt_arg(a: a, key: "file", option: "--in")).concat(["--json"])
+  }
+  if name == "klar_doc" {
+    return ["doc", arg(a, "query"), "--json"].concat(opt_arg(a: a, key: "file", option: "--in"))
+  }
+  if name == "klar_outline" {
+    return ["outline", file, "--json"]
+  }
+  if name == "klar_refs" {
+    return ["refs", file, arg(a, "name"), "--json"]
+  }
+  var dry: List[Str] = []
+  if flag(a: a, key: "dry_run", value: true) {
+    dry = ["--dry-run"]
+  }
+  if name == "klar_patch" {
+    return ["patch", file, arg(a, "patch"), "--json"].concat(dry)
+  }
+  if name == "klar_fix" {
+    return ["fix", file, "--json"].concat(dry)
+  }
+  if name == "klar_fmt" {
+    return ["fmt", file, "--json"]
+  }
+  if name == "klar_explain" {
+    return ["explain", arg(a, "code")]
+  }
+  return ["spec"]
+}
+
+fn text_result(text: Str, is_error: Bool) -> J {
+  return J.JObj([kv("content", J.JArr([J.JObj([kv("type", J.JStr("text")), kv("text", J.JStr(text))])])), kv("isError",
+    J.JBool(is_error))])
+}
+
+/// Runs a tool: None for an unknown name.
+fn call_tool(name: Str, a: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
+  let found = tools().filter(fn(t) => t.name == name)
+  let tool = match found.get(0) {
+    Some(t) => t,
+    None => {
+      return None
+    },
+  }
+  for r in tool.required {
+    if opt_str(a, r) == None {
+      return Some(text_result("missing argument: " + r, true))
+    }
+  }
+  var argv = [klarc].concat(command(name, a))
+  if name != "klar_explain" {
+    argv = argv.concat(["--lib", lib])
+  }
+  return match run_capture(args: argv, dir: "", input: "") {
+    Ok(res) => Some(text_result(res.get_or(1, "") + res.get_or(2, ""), res.get_or(0, "0") != "0")),
+    Err(e) => Some(text_result(e, true)),
+  }
+}
+
+fn error_reply(id: J, code: Int, msg: Str) -> J {
+  return J.JObj([kv("jsonrpc", J.JStr("2.0")), kv("id", id), kv("error", J.JObj([kv("code", J.JInt(code)), kv(
+    "message", J.JStr(msg))]))])
+}
+
+/// The answer to one message (None for a notification).
+fn handle(msg: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
+  let fields = match msg {
+    Json.Obj(fs) => fs,
+    _ => {
+      return Some(error_reply(id: J.JNull, code: -32600, msg: "invalid request"))
+    },
+  }
+  if not fields.has("id") {
+    return None
+  }
+  let id = to_j(get(msg, "id"))
+  let method = match get(msg, "method") {
+    Json.Text(s) => s,
+    Json.Null => "None",
+    other => compact(to_j(other)),
+  }
+  let params = match get(msg, "params") {
+    Json.Obj(fs) => Json.Obj(fs),
+    _ => Json.Obj(Map {}),
+  }
+  var result = J.JNull
+  if method == "initialize" {
+    let version = match get(params, "protocolVersion") {
+      Json.Text(v) => v,
+      _ => PROTOCOL,
+    }
+    result = J.JObj([kv("protocolVersion", J.JStr(version)), kv("capabilities", J.JObj([kv("tools", J.JObj([]))])),
+      kv("serverInfo", J.JObj([kv("name", J.JStr("klar")), kv("version", J.JStr(klar_version()))])), kv(
+        "instructions", J.JStr(INSTRUCTIONS))])
+  } else if method == "ping" {
+    result = J.JObj([])
+  } else if method == "tools/list" {
+    result = J.JObj([kv("tools", tool_list())])
+  } else if method == "tools/call" {
+    let name = match get(params, "name") {
+      Json.Text(s) => s,
+      _ => "",
+    }
+    let args = match get(params, "arguments") {
+      Json.Obj(fs) => Json.Obj(fs),
+      _ => Json.Obj(Map {}),
+    }
+    match call_tool(name: name, a: args, klarc: klarc, lib: lib) {
+      Some(r) => {
+        result = r
+      },
+      None => {
+        return Some(error_reply(id: id, code: -32602, msg: "unknown tool: " + name))
+      },
+    }
+  } else {
+    return Some(error_reply(id: id, code: -32601, msg: "method not found: " + method))
+  }
+  return Some(J.JObj([kv("jsonrpc", J.JStr("2.0")), kv("id", id), kv("result", result)]))
+}
+
+/// `klarc mcp [--klarc PATH]`
+pub fn mcp_command(args: List[Str], lib: Str) -> Int uses io, proc {
+  var klarc = "klarc"
+  match args.index_of("--klarc") {
+    Some(k) => {
+      klarc = args.get_or(k + 1, "klarc")
+    },
+    None => {},
+  }
+  var reading = true
+  while reading {
+    match read_line() {
+      Some(line) => {
+        let text = line.trim()
+        if text != "" {
+          let reply = match parse_json(text) {
+            Ok(msg) => handle(msg: msg, klarc: klarc, lib: lib),
+            Err(_) => Some(error_reply(id: J.JNull, code: -32700, msg: "parse error")),
+          }
+          match reply {
+            Some(r) => print(compact(r)),
+            None => {},
+          }
+        }
+      },
+      None => {
+        reading = false
+      },
+    }
+  }
+  return 0
+}

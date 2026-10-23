@@ -960,12 +960,14 @@ fn try_prop_here(clo: Word, args: Word) -> Word {
   let gp = g()
   let jb = alloc(72)
   poke(jb + 64, 0)
+  let nest = peek(gp + G_NEST)
   poke(gp + G_PROP, 1)
   poke(gp + G_PROPJB, jb)
   if os_setjmp(jb) == 0 {
     call1(clo, args)
   }
   // (back here after the run, or from prop_failure)
+  poke(gp + G_NEST, nest)
   poke(gp + G_OUTLEN, 0)
   poke(gp + G_PROP, 0)
   poke(gp + G_PROPJB, 0)

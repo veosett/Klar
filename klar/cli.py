@@ -22,7 +22,8 @@ def emit_json(obj):
     print(json.dumps(obj, ensure_ascii=False, indent=2))
 
 
-def print_diags(loaded, diags, stream=sys.stderr):
+def print_diags(loaded, diags, stream=None):
+    stream = stream or sys.stderr       # (looked up at the call: `klar mcp` captures it)
     for d in diags:
         print(d.format(loaded.sources.get(d.span.file)), file=stream)
         print(file=stream)

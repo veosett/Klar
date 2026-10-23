@@ -10,7 +10,7 @@ fn list_with_cap(td: Word, cap: Word) -> Word {
     c = 4
   }
   poke(l + 24, c)
-  poke(l + 32, alloc(c * 8))
+  poke(l + 32, alloc(mem_size(c, 8)))
   return l
 }
 
@@ -56,7 +56,7 @@ fn list_grow(l: Word, need: Word) {
   while nc < need {
     nc = nc * 2
   }
-  let nd = alloc(nc * 8)
+  let nd = alloc(mem_size(nc, 8))
   copy_words(nd, peek(l + 32), peek(l + 16))
   block_free(peek(l + 32))
   poke(l + 32, nd)

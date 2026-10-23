@@ -1330,7 +1330,7 @@ fn linux_layer(a0: A64, main_entry: Str) -> A64 {
     a = mov_ri(a: a, rd: r, imm: 0)
   }
   a = stub_end(syscall(a, 73))
-  for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
+  for name in ["os_find_first", "os_find_next", "os_find_close", "os_spawn_std"] {     // (Windows)
     a = stub_end(mov_ri(a: stub_begin(a, name), rd: X0, imm: -1))
   }
   a = stub_end(mov_ri(a: stub_begin(a, "os_setjmp"), rd: X0, imm: -1))     // (Windows: property runs without fork)

@@ -313,9 +313,18 @@ class Server:
                 break
             k, _, v = line.partition(":")
             headers[k.strip().lower()] = v.strip()
-        n = int(headers.get("content-length", "0"))
+        try:
+            n = int(headers.get("content-length", "0"))
+        except ValueError:
+            return {}                   # a malformed message is skipped (not the end of the session)
+        if n < 0:
+            return {}
         body = self.inp.read(n)
-        return json.loads(body.decode("utf-8"))
+        try:
+            msg = json.loads(body.decode("utf-8", "replace"))
+        except ValueError:
+            return {}
+        return msg if isinstance(msg, dict) else {}
 
     def send(self, msg):
         msg["jsonrpc"] = "2.0"
@@ -331,7 +340,8 @@ class Server:
             msg = self.read_message()
             if msg is None:
                 break
-            self.handle(msg)
+            if msg:
+                self.handle(msg)
         return 0 if self.shutdown_requested else 1
 
     def handle(self, msg):

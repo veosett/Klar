@@ -4,6 +4,7 @@ Precedence (low -> high):
   or < and < not < comparison (non-chaining) < + - < * / % < unary - < postfix (call . ? with)
 """
 import copy
+import sys
 from typing import List
 
 from . import nodes as N
@@ -1016,7 +1017,17 @@ class Parser:
 
 
 def parse(src: str, file: str) -> N.Program:
-    return Parser(tokenize(src, file), file).parse_program()
+    p = Parser(tokenize(src, file), file)
+    old = sys.getrecursionlimit()
+    sys.setrecursionlimit(max(old, 60000))      # deep but sane nesting (Python frames do not use the C stack)
+    try:
+        return p.parse_program()
+    except RecursionError:
+        # (a crafted file of thousands of nested brackets would otherwise crash the tool)
+        p.fail("the code is nested too deeply to parse", tok=p.cur,
+               hint="split deeply nested expressions or types into named parts")
+    finally:
+        sys.setrecursionlimit(old)
 
 
 def parse_signature(sig: str) -> N.FnDecl:

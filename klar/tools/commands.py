@@ -268,3 +268,5 @@ def register(sub):
     register_lsp(sub)
     from .repl import register as register_repl
     register_repl(sub)
+    from .mcp import register as register_mcp
+    register_mcp(sub)

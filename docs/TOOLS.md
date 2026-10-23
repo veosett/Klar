@@ -33,6 +33,7 @@ Klar задуман так, что основной автор кода — яз
 | справка по языку | `klar spec`, `klar explain E0701` | полный справочник (~2 тыс. токенов), объяснение кода ошибки |
 | попробовать в диалоге | `klar repl` | интерактивная сессия: выражения, переменные, функции, `:type`, `:doc`, `:load` |
 | редактор | `klar lsp` | языковой сервер: ошибки при наборе, наведение, определения, ссылки, переименование, дополнение |
+| агент | `klar mcp` | сервер Model Context Protocol: инструменты `klar_check`, `klar_dev`, `klar_patch`, … для Claude и других агентов |
 
 ## klar view — программа глазами человека
 
@@ -195,9 +196,10 @@ coverage of bank.klar: 83.3% of statements (10/12), 4 tests
 | `klarc patch FILE PATCH [--dry-run] [--force] [--json]` | ✅ (с `--test` пока без запуска тестов) |
 | `klarc dev [--json] [--no-run] [--stdin TEXT]` | ✅ тот же отчёт; программа и тесты собираются в машинный код |
 | `klarc test [-k TEXT] [-q] [--runs N] [--seed N]` | ✅ тот же отчёт, что у `klar test`, включая `property`: те же входные данные и то же сжатие контрпримера |
-| `klarc add / remove / fetch / update / deps` | ✅ (git запускается через `run_capture`; на Windows он пока не поддержан, поэтому git-зависимости там подключает `klar`) |
+| `klarc add / remove / fetch / update / deps` | ✅ (git запускается через `run_capture`, в том числе на Windows) |
 | `klarc eval [STATEMENTS...] EXPR [--in FILE] [--json]` | ✅ (выражение собирается в машинный код как тест) |
 | `klarc view [-o OUT] [--json] [--run]` | ✅ та же страница и те же данные; `--run` — вывод и ошибка запуска (счётчики вызовов — у `klar view --run`) |
+| `klarc mcp [--klarc PATH]` | ✅ те же ответы на каждое сообщение MCP |
 | `klarc lsp` | ✅ те же ответы на те же запросы (наведение, переход, ссылки, переименование, дополнение, подсказка параметров, символы, форматирование, быстрые исправления); в VS Code — настройка `klar.klarcPath` |
 | `klarc repl [--plain]` | ✅ те же сообщения и значения; ввод выполняется в машинном коде (прежние инструкции повторяются со скрытым выводом) |
 | `klarc coverage [--main] [--runs N] [--min P] [--json]` | ✅ тот же отчёт: тесты и программа собираются с отметками строк и запускаются в машинном коде |
@@ -249,6 +251,33 @@ end })
 
 Если редактор ведёт себя странно, запустите сервер с `KLAR_LSP_LOG=/tmp/klar-lsp.log`: в журнал попадут
 все сообщения и ошибки.
+
+## klar mcp — инструменты для ИИ-агентов
+
+`klar mcp` — сервер [Model Context Protocol](https://modelcontextprotocol.io) (stdio, одно сообщение JSON-RPC на
+строку). Агент вызывает инструменты Klar напрямую, без обёрток над командной строкой:
+
+| инструмент | что делает | команда |
+|---|---|---|
+| `klar_dev` | проверка + все тесты + запуск `main`, отчёт с полем `next` | `klar dev --json` |
+| `klar_check` | диагностики с кодами, позициями, подсказками и правками | `klar check --json` |
+| `klar_test` | тесты, doc-тесты и свойства (`filter`) | `klar test` |
+| `klar_eval` | значение и тип выражения (`statements`, `file`) | `klar eval --json` |
+| `klar_doc` / `klar_outline` / `klar_refs` | поиск имён, API файла, все упоминания | `--json` |
+| `klar_patch` | правка по имени, записывается, только если не добавляет ошибок (`dry_run`) | `klar patch --json` |
+| `klar_fix` / `klar_fmt` | машинные исправления, канонический вид | `--json` |
+| `klar_explain` / `klar_spec` | объяснение кода ошибки, справочник по языку | |
+
+Результат инструмента — текст вывода команды; `isError` — команда завершилась с ошибкой. `klarc mcp` отвечает на
+каждое сообщение так же (проверяет `tests/selfhost.py`); дочерние команды он запускает через `klarc`, путь к
+которому задаёт `--klarc`. Подключение в Claude Code:
+
+```sh
+claude mcp add klar -- python3 -m klar mcp                    # или без Python:
+claude mcp add klar -- /path/to/klarc mcp --klarc /path/to/klarc --lib /path/to/Klar/klar
+```
+
+В других клиентах (Claude Desktop, Cursor, …) — та же команда в их настройках MCP-серверов.
 
 ## AGENTS.md
 

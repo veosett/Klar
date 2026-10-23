@@ -235,7 +235,9 @@ otherwise); `sort`, `min`, `max` for lists of them (E0215; records via `sort_by`
   `io`/`fs`/`net`/`proc`) a program is deterministic.
 * **Constants.** `const NAME: T = expr` is evaluated once before `main`; the expression is pure.
 * **Entry point.** `fn main()` or `fn main() -> Result[Unit, E]` (with the `uses` it needs). `exit(code)` ends the
-  program with `code` clamped to 0..255 (output is flushed). Recursion is limited to 10 000 nested calls (R0006).
+  program with `code` clamped to 0..255 (output is flushed). Recursion is limited to 10 000 nested calls (R0006);
+  printing, comparing or hashing a value nested more than 100 000 levels deep is R0006 too; a value that would need
+  more memory than a computer has (`"x".repeat(10 ** 18)`) is R0015.
 * **Traits and methods.** An `impl` method repeats the names and types of the trait method's parameters; it cannot be
   named like a built-in method of the type (or `to_str`) (E0221).
 

@@ -1061,7 +1061,7 @@ fn notify(method: Str, params: J) uses io {
   send([kv("method", js(method)), kv("params", params)])
 }
 
-/// The next message, or None at the end of the input.
+/// The next message, or None at the end of the input (a malformed message is Json.Null: skipped, like in klar lsp).
 fn read_message() -> Option[Json] uses io {
   var length = 0
   var reading = true
@@ -1077,14 +1077,23 @@ fn read_message() -> Option[Json] uses io {
         } else {
           let parts = line.split(":")
           if parts.get_or(0, "").trim().lower() == "content-length" {
-            length = parts.drop(1).join(":").trim().to_int().unwrap_or(0)
+            length = parts.drop(1).join(":").trim().to_int().unwrap_or(-1)
           }
         }
       },
     }
   }
+  if length < 0 {
+    return Some(Json.Null)
+  }
   let body = read_exact(length).unwrap_or("")
-  return parse_json(body).ok()
+  return match parse_json(body) {
+    Ok(Json.Obj(fs)) => match fs.is_empty() {
+      true => Some(Json.Null),
+      false => Some(Json.Obj(fs)),
+    },
+    _ => Some(Json.Null),
+  }
 }
 
 fn analyse(s0: LspServer, uri: Str) -> Pair[LspServer, Option[LspAnalysis]] uses io, fs {
@@ -2567,6 +2576,7 @@ pub fn lsp_command(lib: Str) -> Int uses io, fs {
       None => {
         s = s with { running: false }
       },
+      Some(Json.Null) => {},
       Some(msg) => {
         s = handle(s, msg)
       },

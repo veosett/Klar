@@ -1100,7 +1100,7 @@ class A64Emitter:
             a.mov_ri(r, 0)
         self.syscall(73)
         self.stub_end()
-        for name in ("os_find_first", "os_find_next", "os_find_close"):     # (Windows)
+        for name in ("os_find_first", "os_find_next", "os_find_close", "os_spawn_std"):     # (Windows)
             self.stub_begin(name)
             a.mov_ri(X0, -1)
             self.stub_end()

@@ -12,6 +12,15 @@ import time
 from .errors import KlarExit, KlarRuntimeError
 from .values import (UNIT, KMap, NONE, Record, err, ok, show, some)
 
+def os_reason(ex):
+    """The reason of an OS error in the words of the native runtime on every system (Windows' own texts, such as
+    "The directory name is invalid", would make programs print different things on different systems)."""
+    import errno
+    return {errno.ENOENT: "No such file or directory", errno.EACCES: "Permission denied",
+            errno.EPERM: "Permission denied", errno.EISDIR: "Is a directory", errno.ENOTDIR: "Not a directory",
+            errno.EEXIST: "File exists"}.get(ex.errno, ex.strerror or "I/O error")
+
+
 GLOBALS = {}   # name -> (signature, impl)
 METHODS = {}   # owner -> name -> (signature, impl)
 
@@ -126,7 +135,7 @@ def _read_file(it, a, sp):
         with open(a[0], encoding="utf-8") as f:
             return ok(f.read())
     except OSError as ex:
-        return err(f"cannot read '{a[0]}': {ex.strerror}")
+        return err(f"cannot read '{a[0]}': {os_reason(ex)}")
     except UnicodeDecodeError:
         return err(f"cannot read '{a[0]}': not valid UTF-8 text")
 
@@ -138,7 +147,7 @@ def _write_file(it, a, sp):
             f.write(a[1])
         return ok(UNIT)
     except OSError as ex:
-        return err(f"cannot write '{a[0]}': {ex.strerror}")
+        return err(f"cannot write '{a[0]}': {os_reason(ex)}")
 
 
 @glob("fn file_exists(path: Str) -> Bool uses fs")
@@ -153,7 +162,7 @@ def _list_dir(it, a, sp):
     try:
         return ok(tuple(sorted(os.listdir(a[0]))))
     except OSError as ex:
-        return err(f"cannot list '{a[0]}': {ex.strerror}")
+        return err(f"cannot list '{a[0]}': {os_reason(ex)}")
 
 
 @glob("fn make_dir(path: Str) -> Result[Unit, Str] uses fs")
@@ -163,7 +172,7 @@ def _make_dir(it, a, sp):
         os.makedirs(a[0], exist_ok=True)
         return ok(UNIT)
     except OSError as ex:
-        return err(f"cannot create '{a[0]}': {ex.strerror}")
+        return err(f"cannot create '{a[0]}': {os_reason(ex)}")
 
 
 @glob("fn current_dir() -> Str uses fs")
@@ -183,7 +192,7 @@ def _remove_file(it, a, sp):
         os.remove(a[0])
         return ok(UNIT)
     except OSError as ex:
-        reason = ex.strerror if ex.strerror in ("No such file or directory", "Permission denied") else "I/O error"
+        reason = os_reason(ex) if os_reason(ex) in ("No such file or directory", "Permission denied") else "I/O error"
         return err(f"cannot remove '{a[0]}': {reason}")
 
 
@@ -252,7 +261,7 @@ def _set_executable(it, a, sp):
         os.chmod(a[0], 0o755)
         return ok(UNIT)
     except OSError as ex:
-        reason = ex.strerror if ex.strerror in ("No such file or directory", "Permission denied") else "I/O error"
+        reason = os_reason(ex) if os_reason(ex) in ("No such file or directory", "Permission denied") else "I/O error"
         return err(f"cannot change '{a[0]}': {reason}")
 
 
@@ -362,20 +371,26 @@ def _(it, a, sp):
     return a[0] ** a[1]
 
 
+def _finite(f, sp):
+    if not math.isfinite(f):
+        raise rt_error("R0009", "cannot convert infinity or NaN to an integer", sp)
+    return f
+
+
 @method("Float", "fn to_int(self: Float) -> Int")
-def _(it, a, sp): return int(a[0])
+def _(it, a, sp): return int(_finite(a[0], sp))
 
 
 @method("Float", "fn round(self: Float) -> Int")
-def _(it, a, sp): return int(math.floor(a[0] + 0.5))
+def _(it, a, sp): return int(math.floor(_finite(a[0], sp) + 0.5))
 
 
 @method("Float", "fn floor(self: Float) -> Int")
-def _(it, a, sp): return int(math.floor(a[0]))
+def _(it, a, sp): return int(math.floor(_finite(a[0], sp)))
 
 
 @method("Float", "fn ceil(self: Float) -> Int")
-def _(it, a, sp): return int(math.ceil(a[0]))
+def _(it, a, sp): return int(math.ceil(_finite(a[0], sp)))
 
 
 @method("Float", "fn abs(self: Float) -> Float")
@@ -535,7 +550,7 @@ def _read_bytes(it, a, sp):
         with open(a[0], "rb") as f:
             return ok(f.read())
     except OSError as ex:
-        return err(f"cannot read '{a[0]}': {ex.strerror}")
+        return err(f"cannot read '{a[0]}': {os_reason(ex)}")
 
 
 @glob("fn write_bytes(path: Str, data: Bytes) -> Result[Unit, Str] uses fs")
@@ -545,7 +560,7 @@ def _write_bytes(it, a, sp):
             f.write(a[1])
         return ok(UNIT)
     except OSError as ex:
-        return err(f"cannot write '{a[0]}': {ex.strerror}")
+        return err(f"cannot write '{a[0]}': {os_reason(ex)}")
 
 
 @method("Bytes", "fn len(self: Bytes) -> Int")

@@ -83,16 +83,15 @@ def git(*args, cwd=None):
     return proc.stdout.strip()
 
 
+def no_option(value, what):
+    """A value from klar.toml or klar.lock that goes into git's command line must not look like an option."""
+    if value.startswith("-"):
+        raise PkgError(f"refusing the {what} `{value}`: it starts with `-` (git would read it as an option)")
+
+
 def checkout(target, dep, rev=None):
     """Clones / updates the git dependency into `target` and checks out `rev` (or its tag/branch/rev); returns the
     commit."""
-    if not os.path.isdir(os.path.join(target, ".git")):
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        git("clone", "--quiet", dep.git, target)
-    else:
-        if git("remote", "get-url", "origin", cwd=target) != dep.git:
-            git("remote", "set-url", "origin", dep.git, cwd=target)
-        git("fetch", "--quiet", "--tags", "--force", "origin", cwd=target)
     if rev is not None:
         want = rev
     elif dep.ref_kind == "tag":
@@ -103,6 +102,15 @@ def checkout(target, dep, rev=None):
         want = dep.ref
     else:
         want = "origin/HEAD"
+    no_option(dep.git, "git URL")
+    no_option(want, "revision")
+    if not os.path.isdir(os.path.join(target, ".git")):
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        git("clone", "--quiet", "--", dep.git, target)
+    else:
+        if git("remote", "get-url", "origin", cwd=target) != dep.git:
+            git("remote", "set-url", "origin", dep.git, cwd=target)
+        git("fetch", "--quiet", "--tags", "--force", "origin", cwd=target)
     git("checkout", "--quiet", "--detach", want, cwd=target)
     return git("rev-parse", "HEAD", cwd=target)
 

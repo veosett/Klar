@@ -99,20 +99,27 @@ pub fn native_image(ld: Ld, main_path: Str, target: Str, tests: Bool) -> Bytes {
   return image_of(lower_program(ld: ld, main_path: main_path, tests: tests), target)
 }
 
-/// A temporary executable for this program.
-pub fn temp_path(file: Str, what: Str) -> Str uses io {
+/// A temporary executable for this program, in a directory of this user (`~/.klar-cache/klarc`, on Windows the
+/// user's %TEMP%): a shared /tmp would let another user plant a file or symlink under the predictable name.
+pub fn temp_path(file: Str, what: Str) -> Str uses io, fs {
   let tag = fnv1a(file + "|" + what)
   let name = "klarc-{what}-{tag}"
   let win = env_var("TEMP").unwrap_or("")
   if win.contains("\\") {
     return "{win}\\{name}.exe"
   }
-  let dir = env_var("TMPDIR").unwrap_or("/tmp")
+  let dir = match env_var("HOME") {
+    Some(h) => h + "/.klar-cache/klarc",
+    None => env_var("TMPDIR").unwrap_or("/tmp"),
+  }
+  let _ = make_dir(dir)
   return "{dir}/{name}"
 }
 
-/// Writes an executable; the error if it cannot.
+/// Writes an executable (a new file: whatever was at the path, a symlink too, is removed first); the error if it
+/// cannot.
 pub fn save_exe(path: Str, image: Bytes) -> Result[Unit, Str] uses fs {
+  let _ = remove_file(path)
   write_bytes(path, image)?
   return set_executable(path)
 }

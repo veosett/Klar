@@ -419,9 +419,15 @@ fn Str_repeat(s: Word, times: Int) -> Word {
   if times <= 0 {
     return str_new(0)
   }
-  let k = untag(times)
   let n = peek(s + 16)
-  let r = str_new(n * k)
+  if n == 0 {
+    return str_new(0)
+  }
+  if not is_small(times) {
+    out_of_memory()
+  }
+  let k = untag(times)
+  let r = str_new(mem_size(k, n))
   var i: Word = 0
   while i < k {
     copy_bytes(r + 32 + i * n, s + 32, n)

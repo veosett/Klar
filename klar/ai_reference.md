@@ -4,6 +4,7 @@ Klar is a small, strict, statically typed language compiled to native code. Foll
 exactly; the compiler rejects everything else with a coded error (`klar explain CODE`).
 
 ## Workflow
+0. With an MCP client, use the `klar mcp` server: tools `klar_dev`, `klar_check`, `klar_patch`, `klar_eval`, `klar_doc`, ….
 1. Write code (with `test` blocks / doc-tests next to it).
 2. `klar dev file.klar --json` — ONE step: check + all tests + run `main`; compact JSON with a `next` field.
    Or separately: `klar check --json`, `klar test --json`, `klar run`.
@@ -160,7 +161,7 @@ A function without `uses` is pure. Calling something with an effect requires dec
 `read_file`/`write_file`/`file_exists`/`list_dir` (sorted names)/`is_dir`/`make_dir`/`remove_file`/`current_dir` → `fs` (they return `Result`, never crash), `env_var(name)` → `Option[Str]` and
 `exit(code)` (type `Never`, flushes output) → `io`; `run_command(["prog", "arg"])` → `Result[Int, Str]` (exit code;
 inherits stdin/stdout/stderr, searches `PATH`) → `proc`; `run_capture(args, dir, input)` → `Result[List[Str], Str]`
-(`[exit code, stdout, stderr]`; not on Windows yet) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
+(`[exit code, stdout, stderr]`) → `proc`; `set_executable(path)` → `fs`. Contracts and constants must be
 pure. Tests may use only `io`.
 Lambdas inherit the effects of the enclosing function.
 Parallel: `xs.par_map(f)` = `xs.map(f)` computed on all CPU cores. `f` must be a lambda without effects or a

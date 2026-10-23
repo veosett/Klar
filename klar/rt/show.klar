@@ -1,6 +1,45 @@
 // Klar runtime: generic operations driven by type descriptors (show, ==, hash, ordering).
 
+// Printing, comparing and hashing walk values recursively; a value nested deeper than NEST_MAX (a list of lists of
+// ... built in a loop) would overflow the machine stack, so the depth is counted (g_rt + G_NEST) and is R0006 past it.
+const NEST_MAX: Word = 100000
+
+fn nest_in() {
+  let gp = g()
+  let d = peek(gp + G_NEST) + 1
+  poke(gp + G_NEST, d)
+  if d > NEST_MAX {
+    poke(gp + G_NEST, 0)
+    fail_msg("R0006", "stack overflow: a value nested more than 100000 levels deep", current_span())
+  }
+}
+
+fn nest_out() {
+  let gp = g()
+  poke(gp + G_NEST, peek(gp + G_NEST) - 1)
+}
+
 fn show_into(b: Word, v: Word, td: Word, top: Bool) {
+  nest_in()
+  show_into_at(b, v, td, top)
+  nest_out()
+}
+
+fn eq_v(a: Word, b: Word, td: Word) -> Bool {
+  nest_in()
+  let r = eq_v_at(a, b, td)
+  nest_out()
+  return r
+}
+
+fn hash_v(v: Word, td: Word) -> Word {
+  nest_in()
+  let r = hash_v_at(v, td)
+  nest_out()
+  return r
+}
+
+fn show_into_at(b: Word, v: Word, td: Word, top: Bool) {
   let k = peek(td)
   if k == K_INT {
     int_show(b, v)
@@ -184,7 +223,7 @@ fn Str_cmp(a: Word, b: Word) -> Word {
   return 0
 }
 
-fn eq_v(a: Word, b: Word, td: Word) -> Bool {
+fn eq_v_at(a: Word, b: Word, td: Word) -> Bool {
   let k = peek(td)
   if k == K_INT {
     if w_and(w_and(a, b), 1) == 1 {
@@ -279,7 +318,7 @@ fn hash_bytes(p: Word, n: Word) -> Word {
   return h
 }
 
-fn hash_v(v: Word, td: Word) -> Word {
+fn hash_v_at(v: Word, td: Word) -> Word {
   let k = peek(td)
   if k == K_INT {
     return int_hash(v)

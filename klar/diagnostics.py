@@ -259,6 +259,9 @@ CODES = {
     "R0012": ("reached todo()", "The program executed a `todo(...)` placeholder."),
     "R0013": ("exit() in a test", "A test called `exit(code)`, which would end the whole test run. Tests should "
                                   "check return values instead."),
+    "R0015": ("out of memory", "A value (a string, a list, a number) would need more memory than a computer has — "
+                               "usually a count that is far too large, such as `\"x\".repeat(1_000_000_000_000_000)`. "
+                               "Check the size before building the value."),
     "R0014": ("par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was "
                                      "killed, e.g. by the system running out of memory)."),
 }

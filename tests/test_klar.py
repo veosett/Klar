@@ -1087,6 +1087,9 @@ class SelfHosting(unittest.TestCase):
     def test_klar_compiler_matches_python(self):
         """compiler/*.klar give exactly the tokens, trees, diagnostics, KIR and executables of the Python compiler
         (native builds)."""
+        from klar.native.build import host_target
+        if host_target() != "linux":
+            self.skipTest("the Klar compiler runs as a Linux x86-64 executable")
         sys.path.insert(0, os.path.join(ROOT, "tests"))
         import selfhost
         out = io.StringIO()
@@ -1159,6 +1162,16 @@ class LanguageServer(unittest.TestCase):
             else:
                 notes.append(msg)
         return results, notes
+
+    def test_malformed_messages_are_skipped(self):
+        """A bad header or body does not end the session (it used to crash the server)."""
+        from klar.tools.lsp import Server
+        good = json.dumps({"jsonrpc": "2.0", "id": 7, "method": "shutdown"}).encode()
+        data = (b"Content-Length: abc\r\n\r\n" + b"Content-Length: -1\r\n\r\n" + b"Content-Length: 5\r\n\r\n{bad!"
+                + b"Content-Length: 3\r\n\r\n[1]" + b"Content-Length: %d\r\n\r\n" % len(good) + good)
+        out = io.BytesIO()
+        Server(io.BytesIO(data), out, io.StringIO()).serve()
+        self.assertIn(b'"id": 7', out.getvalue())
 
     def test_features(self):
         from klar.tools.lsp import path_to_uri
@@ -1354,6 +1367,18 @@ class Packages(unittest.TestCase):
             write_tree(d, {"klar.toml": "[dependencies]\ngeo = { path = \"geo\", tag = \"v1\" }\n"})
             ds = [x for x in load_path(os.path.join(d, "main.klar")).diags if x.code == "E0610"]
             self.assertEqual((ds[0].span.file, ds[0].span.line), ("klar.toml", 2))
+
+    @unittest.skipUnless(git_available(), "needs git")
+    def test_git_values_cannot_become_options(self):
+        """A klar.toml or klar.lock value that starts with `-` would be read by git as an option: refused."""
+        with tempfile.TemporaryDirectory() as d:
+            for toml in ('[dependencies]\nx = { git = "--upload-pack=touch PWNED" }\n',
+                         '[dependencies]\nx = { git = "https://example.invalid/x.git", rev = "--output=PWNED" }\n'):
+                write_tree(d, {"klar.toml": "[package]\nname = \"app\"\n\n" + toml})
+                code, out, err = cli("fetch", "--dir", d)
+                self.assertNotEqual(code, 0)
+                self.assertIn("starts with `-`", out + err)
+                self.assertFalse(os.path.exists(os.path.join(d, "PWNED")))
 
     @unittest.skipUnless(git_available(), "needs git")
     def test_git_dependencies_lock_and_update(self):
@@ -1590,6 +1615,39 @@ class NativeTargets(unittest.TestCase):
                                input="line\n", capture_output=True, text=True, cwd=d)
         self.assertEqual((p.stdout, p.returncode), ('["a"]\n[1, 4, 9]\ntrue\nSome("line")\n', 4))
 
+    def test_windows_run_capture(self):
+        wine = "/usr/lib/wine/wine64"
+        if not os.path.exists(wine):
+            self.skipTest("needs wine")
+        src = ('fn main() uses io, proc {\n'
+               '  print(run_capture(args: ["cmd", "/c", "echo hello"], dir: "", input: ""))\n'
+               '  print(run_capture(args: ["cmd", "/c", "echo oops 1>&2 & exit 3"], dir: "", input: ""))\n'
+               '  print(run_capture(args: ["findstr", "x"], dir: "", input: "ax\\nb\\n"))\n'
+               '  print(run_capture(args: ["klar-surely-missing-42"], dir: "", input: ""))\n}\n')
+        with tempfile.TemporaryDirectory() as d:
+            exe, _ = self.build(d, src, "windows")
+            p = subprocess.run([wine, exe], capture_output=True, env=dict(os.environ, WINEDEBUG="-all"))
+        lines = p.stdout.decode().replace("\r", "").split("\n")      # (Windows programs end lines with \r\n)
+        self.assertEqual(lines[0], 'Ok(["0", "hello\\n", ""])')
+        self.assertTrue(lines[1].startswith('Ok(["3", "", "oops'))
+        self.assertTrue(lines[2].startswith('Ok(["0", "ax\\n'))
+        self.assertEqual(lines[3], "Err(\"cannot run 'klar-surely-missing-42': No such file or directory\")")
+
+    def test_windows_programs_are_not_taken_from_the_current_directory(self):
+        """CreateProcessA would run ./findstr.exe before the one in PATH: the runtime passes the full PATH match."""
+        wine = "/usr/lib/wine/wine64"
+        if not os.path.exists(wine):
+            self.skipTest("needs wine")
+        with tempfile.TemporaryDirectory() as d:
+            fake, _ = self.build(d, 'fn main() uses io {\n  print("HIJACK")\n}\n', "windows")
+            os.rename(fake, os.path.join(d, "findstr.exe"))
+            exe, _ = self.build(d, 'fn main() uses io, proc {\n  print(run_capture(args: ["findstr", "x"], dir: "", '
+                                   'input: "ax\\n"))\n  print(run_command(["findstr", "zz"]))\n}\n', "windows")
+            p = subprocess.run([wine, exe], capture_output=True, cwd=d, env=dict(os.environ, WINEDEBUG="-all"),
+                               input=b"")
+        self.assertNotIn(b"HIJACK", p.stdout)
+        self.assertIn(b'Ok(["0", "ax', p.stdout)
+
     def test_windows_properties_run_without_fork(self):
         wine = "/usr/lib/wine/wine64"
         if not os.path.exists(wine):
@@ -1607,6 +1665,92 @@ class NativeTargets(unittest.TestCase):
         self.assertNotEqual(bad.returncode, 0)
         self.assertIn("R0010", bad.stderr)
         self.assertIn("n = 50", bad.stderr)                # shrunk to the smallest counterexample
+
+
+class RuntimeLimits(unittest.TestCase):
+    """Sizes and depths that would break the machine (heap overflow, stack overflow) end with a Klar runtime error
+    in native code and in the interpreter — never with a crash."""
+
+    CASES = [
+        ('fn main() uses io {\n  print("AAAAAAAA".repeat(2305843009213693952).len())\n}\n', "R0015"),
+        ('fn main() uses io {\n  print(range(0, 2305843009213693952).len())\n}\n', "R0015"),
+        ('fn main() uses io {\n  var x = 1.0\n  var i = 0\n  while i < 400 {\n    x = x * 10.0\n    i = i + 1\n  }\n'
+         '  print(x.to_int())\n}\n', "R0009"),
+        ('enum T {\n  Leaf,\n  Node(t: T),\n}\n\nfn main() uses io {\n  var t = T.Leaf\n  var i = 0\n'
+         '  while i < 300000 {\n    t = T.Node(t: t)\n    i = i + 1\n  }\n  print(t.to_str().len())\n}\n', "R0006"),
+        ('enum T {\n  Leaf,\n  Node(t: T),\n}\n\nfn main() uses io {\n  var a = T.Leaf\n  var b = T.Leaf\n'
+         '  var i = 0\n  while i < 300000 {\n    a = T.Node(t: a)\n    b = T.Node(t: b)\n    i = i + 1\n  }\n'
+         '  print(a == b)\n}\n', "R0006"),
+    ]
+
+    def test_native_and_interpreter(self):
+        from klar.native.build import build, host_target
+        for src, code in self.CASES:
+            with tempfile.TemporaryDirectory() as d:
+                path = os.path.join(d, "p.klar")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(src)
+                _, _, err = cli("run", "--interp", path)
+                self.assertIn(f"runtime error[{code}]", err, src)
+                if host_target() == "linux":
+                    exe = os.path.join(d, "p")
+                    build(path, out=exe, target="linux")
+                    p = subprocess.run([exe], capture_output=True, text=True)
+                    self.assertEqual(p.returncode, 1, src + p.stderr)
+                    self.assertIn(f"runtime error[{code}]", p.stderr, src)
+
+    def test_deeply_nested_source_is_a_diagnostic(self):
+        src = "fn main() uses io {\n  print(" + "(" * 40000 + "1" + ")" * 40000 + ")\n}\n"
+        self.assertEqual(errors(src), ["E0003"])
+        src = "fn main() uses io {\n  print(" + "(" * 1000 + "1" + ")" * 1000 + ")\n}\n"
+        self.assertEqual(errors(src), [])
+
+
+class Mcp(unittest.TestCase):
+    """`klar mcp`: the Model Context Protocol server (klarc mcp gives the same answers: tests/selfhost.py)."""
+
+    def session(self, msgs):
+        from klar.tools.mcp import serve
+        out = io.StringIO()
+        serve(io.StringIO("\n".join(m if isinstance(m, str) else json.dumps(m) for m in msgs) + "\n"), out)
+        return [json.loads(line) for line in out.getvalue().splitlines()]
+
+    def test_protocol(self):
+        got = self.session([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "x"}},
+                            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                            {"jsonrpc": "2.0", "id": 3, "method": "nope"}, "not json"])
+        self.assertEqual(len(got), 4)                     # no answer to the notification
+        self.assertEqual(got[0]["result"]["protocolVersion"], "x")
+        self.assertIn("tools", got[0]["result"]["capabilities"])
+        names = [t["name"] for t in got[1]["result"]["tools"]]
+        for name in ("klar_check", "klar_dev", "klar_test", "klar_eval", "klar_doc", "klar_patch", "klar_spec"):
+            self.assertIn(name, names)
+        for t in got[1]["result"]["tools"]:
+            self.assertEqual(t["inputSchema"]["type"], "object")
+            self.assertTrue(set(t["inputSchema"]["required"]) <= set(t["inputSchema"]["properties"]))
+        self.assertEqual(got[2]["error"]["code"], -32601)
+        self.assertEqual(got[3]["error"]["code"], -32700)
+
+    def test_tools(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("fn double(x: Int) -> Int {\n  return x * 2\n}\n\n"
+                        "test \"double\" {\n  assert double(2) == 4\n}\n\nfn main() uses io {\n  print(double(21))\n}\n")
+
+            def call(i, tool, **args):
+                return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": tool, "arguments": args}}
+            got = self.session([call(1, "klar_dev", file=path), call(2, "klar_eval", expression="double(5)", file=path),
+                                call(3, "klar_check", file=os.path.join(d, "missing.klar")), call(4, "klar_check"),
+                                call(5, "nope")])
+        dev = json.loads(got[0]["result"]["content"][0]["text"])
+        self.assertEqual((dev["ok"], dev["tests"]["passed"], dev["run"]["stdout"]), (True, 1, "42\n"))
+        self.assertFalse(got[0]["result"]["isError"])
+        self.assertEqual(json.loads(got[1]["result"]["content"][0]["text"])["value"], "10")
+        self.assertTrue(got[2]["result"]["isError"])
+        self.assertEqual(got[3]["result"]["content"][0]["text"], "missing argument: file")
+        self.assertEqual(got[4]["error"]["code"], -32602)
 
 
 class Diagnostics(unittest.TestCase):

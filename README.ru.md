@@ -9,7 +9,7 @@
 ![Version](https://img.shields.io/badge/version-1.0.0-informational)
 
 [English](README.md) · [**Руководство в картинках**](docs/GUIDE.md) · [Инструменты](docs/TOOLS.md) ·
-[Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) ·
+[Архитектура](docs/ARCHITECTURE.md) · [Спецификация](docs/SPEC.md) · [План](docs/ROADMAP.md) ·
 [Анализ языков](docs/FEATURES.md) · [Бенчмарк скорости](bench/README.md) · [Бенчмарк для ИИ](bench/ai/README.md) ·
 [История изменений](CHANGELOG.md)
 
@@ -194,6 +194,7 @@ python -m klar dev examples/bank.klar --json    # один шаг цикла И�
 python -m klar test examples/bank.klar          # тесты, doc-тесты, property-тесты
 python -m klar fix examples/mistakes.klar       # применить все безопасные исправления
 python -m klar spec                             # справка по языку для промпта
+python -m klar mcp                              # MCP-сервер: инструменты Klar для ИИ-агентов
 python -m klar explain E0701
 ```
 

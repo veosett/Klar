@@ -186,13 +186,20 @@ class Interpreter:
         return out
 
     # ---- calls -----------------------------------------------------------------
+    def builtin(self, impl, args, span):
+        """A built-in; Python's own limits (a list or string larger than memory) become R0015, like in native code."""
+        try:
+            return impl(self, args, span)
+        except (MemoryError, OverflowError):
+            raise self.error("R0015", "out of memory: the program asked for more memory than a computer has", span)
+
     def call_value(self, fv, args, span):
         if isinstance(fv, Builtin):
             if self.prof is None:
-                return fv.impl(self, args, span)
+                return self.builtin(fv.impl, args, span)
             self.prof.enter(f"<builtin> {fv.name}")
             try:
-                return fv.impl(self, args, span)
+                return self.builtin(fv.impl, args, span)
             finally:
                 self.prof.exit()
         if not isinstance(fv, Closure):
@@ -430,10 +437,10 @@ class Interpreter:
             sig, impl = entry
             args = self.order_args(param_names(sig, skip_self=True), e.args, env)
             if self.prof is None:
-                return impl(self, [recv] + args, e.span)
+                return self.builtin(impl, [recv] + args, e.span)
             self.prof.enter(f"<builtin> {h}.{m}")
             try:
-                return impl(self, [recv] + args, e.span)
+                return self.builtin(impl, [recv] + args, e.span)
             finally:
                 self.prof.exit()
         res = getattr(e, "resolved", None)

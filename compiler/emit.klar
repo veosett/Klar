@@ -27,13 +27,13 @@ pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
   "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir", "os_getdents", "os_find_first",
   "os_find_next", "os_find_close", "os_mkdir", "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink",
-  "os_getcwd", "os_setjmp", "os_longjmp"]
+  "os_getcwd", "os_setjmp", "os_longjmp", "os_spawn_std"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
   "GetCommandLineA", "SetConsoleOutputCP", "GetEnvironmentVariableA", "GetSystemTimeAsFileTime", "CreateProcessA",
   "WaitForSingleObject", "GetExitCodeProcess", "FindFirstFileA", "FindNextFileA", "FindClose", "CreateDirectoryA",
-  "DeleteFileA", "GetCurrentDirectoryA"]
+  "DeleteFileA", "GetCurrentDirectoryA", "SetHandleInformation"]
 
 /// Instructions that know where floats live in XMM registers.
 const XMM_AWARE: List[Str] = ["fbin", "fcmp", "fbr", "i2f", "f2i", "const", "mov", "fun", "fpow"]
@@ -1615,7 +1615,7 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   a = sys_stub(a0: a, name: "os_getcwd", nr: 79, nargs: 2)                                  // -> length with the NUL
   a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: RDI, i: 0), reg: RSI, i: 1)          // poll(fds, n, -1)
   a = stub_end(syscall(mov_ri(a: mov_ri(a: a, dst: RDX, imm: -1), dst: RAX, imm: 7)))
-  for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
+  for name in ["os_find_first", "os_find_next", "os_find_close", "os_spawn_std"] {     // (Windows)
     a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
   }
   a = test_index_stub(a, "linux")
@@ -1800,7 +1800,7 @@ fn macos_layer(a0: Asm, main_entry: Str) -> Asm {
   a = stub_end(label(label(jmp(a, scan.l), end.l), gd.l))
   a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: RDI, i: 0), reg: RSI, i: 1)          // poll(fds, n, -1)
   a = stub_end(mac_call(mov_ri(a: a, dst: RDX, imm: -1), 230))
-  for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
+  for name in ["os_find_first", "os_find_next", "os_find_close", "os_spawn_std"] {     // (Windows)
     a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
   }
   a = test_index_stub(a, "macos")
@@ -1852,6 +1852,47 @@ fn win_rw(a0: Asm, name: Str, std_codes: List[Pair[Int, Int]], func: Str) -> Asm
   a = store(a: a, base: RSP, disp: 48, src: RAX)
   a = store(a: a, base: RSP, disp: 32, src: RAX)
   return win_end(load(a: win_call(a, func), dst: RAX, base: RSP, disp: 48))
+}
+
+/// os_spawn_std(command line, dir or 0, stdin, stdout, stderr handles) -> exit code (-1: could not start): the
+/// handles become inheritable and the child's standard handles (STARTF_USESTDHANDLES).
+fn spawn_std_stub(a0: Asm) -> Asm {
+  var a = win_begin(a: a0, name: "os_spawn_std", extra: 160)
+  for i in [2, 3, 4] {
+    a = mov_ri(a: mov_ri(a: arg(a: a, reg: RCX, i: i), dst: RDX, imm: 1), dst: R8, imm: 1)     // HANDLE_FLAG_INHERIT
+    a = win_call(a, "SetHandleInformation")
+  }
+  a = mov_ri(a: a, dst: RAX, imm: 0)
+  var k = 0
+  while k < 17 {
+    a = store(a: a, base: RSP, disp: 80 + 8 * k, src: RAX)
+    k = k + 1
+  }
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 104), base: RSP, disp: 80, src: RAX)               // cb
+  a = store32(a: mov_ri(a: a, dst: RAX, imm: 256), base: RSP, disp: 140, src: RAX)            // STARTF_USESTDHANDLES
+  for h in [Pair { first: 2, second: 160 }, Pair { first: 3, second: 168 }, Pair { first: 4, second: 176 }] {
+    a = store(a: arg(a: a, reg: RAX, i: h.first), base: RSP, disp: h.second, src: RAX)
+  }
+  a = arg(a: mov_ri(a: a, dst: RCX, imm: 0), reg: RDX, i: 0)
+  a = mov_ri(a: mov_ri(a: a, dst: R8, imm: 0), dst: R9, imm: 0)
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 1), base: RSP, disp: 32, src: RAX)                 // inherit handles
+  a = mov_ri(a: a, dst: RAX, imm: 0)
+  a = store(a: store(a: a, base: RSP, disp: 40, src: RAX), base: RSP, disp: 48, src: RAX)
+  a = store(a: arg(a: a, reg: RAX, i: 1), base: RSP, disp: 56, src: RAX)                       // the directory
+  a = store(a: lea(a: a, dst: RAX, base: RSP, disp: 80), base: RSP, disp: 64, src: RAX)
+  a = store(a: lea(a: a, dst: RAX, base: RSP, disp: 184), base: RSP, disp: 72, src: RAX)
+  a = win_call(a, "CreateProcessA")
+  let failed = new_label(a, "qf")
+  a = alu_rr(a: mov_ri(a: failed.a, dst: RCX, imm: 4294967295), op: "and", dst: RAX, src: RCX)
+  a = jcc(a: a, cc: "e", target: failed.l)
+  a = mov_ri(a: load(a: a, dst: RCX, base: RSP, disp: 184), dst: RDX, imm: 4294967295)      // INFINITE
+  a = win_call(a, "WaitForSingleObject")
+  a = lea(a: load(a: a, dst: RCX, base: RSP, disp: 184), dst: RDX, base: RSP, disp: 208)
+  a = win_call(a, "GetExitCodeProcess")
+  a = win_call(load(a: a, dst: RCX, base: RSP, disp: 184), "CloseHandle")
+  a = win_call(load(a: a, dst: RCX, base: RSP, disp: 192), "CloseHandle")
+  a = win_end(load32(a: a, dst: RAX, base: RSP, disp: 208))
+  return win_end(mov_ri(a: label(a, failed.l), dst: RAX, imm: -1))
 }
 
 fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
@@ -1961,6 +2002,7 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
   a = arg(a: arg(a: win_begin(a: a, name: "os_getcwd", extra: 0), reg: RCX, i: 1), reg: RDX, i: 0)   // GetCurrentDirectoryA
   a = mov_ri(a: win_call(a, "GetCurrentDirectoryA"), dst: RCX, imm: 4294967295)
   a = win_end(alu_rr(a: a, op: "and", dst: RAX, src: RCX))
+  a = spawn_std_stub(a)
   a = test_index_stub(a, "windows")
   a = alu_ri(a: alu_ri(a: label(a, "_start"), op: "and", dst: RSP, imm: -16), op: "sub", dst: RSP, imm: 32)
   a = win_call(mov_ri(a: a, dst: RCX, imm: 65001), "SetConsoleOutputCP")

@@ -10,8 +10,8 @@
 ![Targets](https://img.shields.io/badge/targets-x86--64%20%26%20ARM64%20Linux%20%7C%20Windows%20%7C%20macOS%20(exp.)-lightgrey)
 
 [Русская версия](README.ru.md) · [**Guide in pictures**](docs/GUIDE.en.md) · [Tools](docs/TOOLS.md) ·
-[Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.en.md) ·
-[Speed benchmark](bench/README.md) · [AI benchmark](bench/ai/README.md) · [Changelog](CHANGELOG.md)
+[Architecture](docs/ARCHITECTURE.md) · [Specification](docs/SPEC.en.md) · [Roadmap](docs/ROADMAP.md) (Russian) ·
+[Speed benchmark](bench/README.md) · [AI benchmark](bench/ai/README.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -203,6 +203,7 @@ python -m klar dev examples/bank.klar --json    # one AI-loop step: check + test
 python -m klar test examples/bank.klar          # tests, doc-tests, properties
 python -m klar fix examples/mistakes.klar       # apply all safe fixes
 python -m klar spec                             # the language reference for a prompt
+python -m klar mcp                              # MCP server: the Klar tools for AI agents
 python -m klar explain E0701
 ```
 
