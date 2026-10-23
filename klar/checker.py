@@ -39,6 +39,7 @@ class RecordInfo:
         self.name, self.tparams, self.module, self.span = name, tparams, module, span
         self.fields = {}
         self.newtype = False      # `type X = new T`: built only by its constructor `X(value)`
+        self.invariant = False    # a newtype with `requires` lines
 
 
 class EnumInfo:
@@ -329,6 +330,7 @@ class Checker:
                 if d.constructs:
                     if d.constructs in self.records and self.records[d.constructs].module == self.module:
                         self.records[d.constructs].newtype = True
+                        self.records[d.constructs].invariant = bool(d.requires)
                 elif not SNAKE.match(d.name):
                     self.warn("W0104", f"function name `{d.name}` should be snake_case", d.name_span,
                               hint=f"rename it to `{to_snake(d.name)}`")
@@ -781,6 +783,17 @@ class Checker:
                                               f"and use `{name}_now` inside it")
                 return
 
+    def par_fn_value(self, name, span, v):
+        """Inside the lambda given to `par_map`: a function value that comes from outside it (captured, or a
+        parameter) may do effects that the checker cannot see, so it may not be used there."""
+        for i in range(len(self.scopes) - 1, -1, -1):
+            if name in self.scopes[i]:
+                if i <= self.par_depth and self.holds_fn(v.type, set()):
+                    self.error("E0406", f"`par_map` runs this lambda in worker processes, so it must be pure, but "
+                                        f"`{name}` holds a function from outside it, whose effects are unknown", span,
+                               hint="call functions by name (declared without `uses`) or write the lambda inside")
+                return
+
     def declare(self, name, t, mutable, span, kind, kw_span=None):
         if name == "_":
             return
@@ -871,7 +884,7 @@ class Checker:
             if not self.generatable(t, set()):
                 self.error("E0605", f"cannot generate random values of type `{show(t)}` for property input `{p.name}`",
                            p.span, hint="property inputs may be Int, Float, Bool, Str, Unit, List, Map, Option, "
-                                        "Result and records/enums built from them")
+                                        "Result and records/enums built from them (not newtypes with `requires`)")
             d.param_types.append(t)
             self.declare(p.name, t, False, p.span, "param")
         self.ctx = Ctx(f'property "{d.name}"', UNIT, {"io"}, is_test=True, purpose="test")
@@ -892,6 +905,8 @@ class Checker:
         info = self.records.get(t.name) or self.enums.get(t.name)
         if info is None:
             return False
+        if isinstance(info, RecordInfo) and info.invariant:
+            return False        # random values would break the invariant
         m = self.args_map(info, t)
         seen = seen | {t.name}
         if isinstance(info, RecordInfo):
@@ -1051,7 +1066,7 @@ class Checker:
         return False
 
     def diverges(self, e) -> bool:
-        if isinstance(e, N.Call) and isinstance(e.callee, N.Name) and e.callee.name in ("fail", "todo"):
+        if isinstance(e, N.Call) and isinstance(e.callee, N.Name) and e.callee.name in ("fail", "todo", "exit"):
             return True
         if isinstance(e, N.Match):
             return all(self.returns(a.body) if isinstance(a.body, N.Block) else self.diverges(a.body)
@@ -1142,8 +1157,9 @@ class Checker:
             k, v = TVar(), TVar()
         for en in e.entries:
             kt = prune(self.expr(en.key, k))
-            if head(kt) not in (None, "Int", "Str", "Bool") and not isinstance(kt, TVar):
-                self.error("E0202", f"map keys must be `Int`, `Str` or `Bool`, found `{show(kt)}`", en.key.span)
+            if self.holds_fn(kt, set()):
+                self.error("E0202", f"map keys cannot contain functions, found `{show(kt)}`", en.key.span,
+                           hint="keys are compared with `==`, which functions do not have")
             self.expr(en.value, v)
         return map_of(k, v)
 
@@ -1163,6 +1179,8 @@ class Checker:
             v.used = True
             if v.mutable:
                 self.captured_var(e.name, e.span)
+            if getattr(self, "par_depth", None) is not None:
+                self.par_fn_value(e.name, e.span, v)
             return v.type
         if e.name == "None":
             return option_of(TVar())
@@ -1239,8 +1257,9 @@ class Checker:
         if op in ("==", "!="):
             if not unify(lt, rt):
                 self.error("E0211", f"cannot compare `{show(lt)}` with `{show(rt)}`", e.span, hint=num_hint)
-            elif isinstance(prune(lt), TFn):
-                self.error("E0211", "functions cannot be compared", e.span)
+            elif self.holds_fn(lt, set()):
+                self.error("E0211", "functions cannot be compared", e.span,
+                           hint=None if isinstance(prune(lt), TFn) else f"`{show(prune(lt))}` contains functions")
             return BOOL
         if op in ("<", ">", "<=", ">="):
             if not unify(lt, rt):
@@ -1411,6 +1430,8 @@ class Checker:
         c = e.callee
         if isinstance(c, N.Name):
             v = self.lookup(c.name)
+            if v is not None and getattr(self, "par_depth", None) is not None:
+                self.par_fn_value(c.name, c.span, v)
             if v is None:
                 sig = self.fns.get(c.name) or self.globals.get(c.name)
                 if sig is not None:
@@ -1794,9 +1815,11 @@ class Checker:
         outer = self.ctx
         purpose = outer.purpose if outer.purpose in ("test", "contract", "const", "parallel") else "lambda"
         effects = outer.effects
+        par_depth = getattr(self, "par_depth", None)
         if getattr(self, "pure_lambda", None) is e:
             purpose, effects = "parallel", set()
             self.pure_lambda = None
+            self.par_depth = len(self.scopes)
         e.ptypes, e.ret_t = ptypes, ret
         self.ctx = Ctx(outer.name, ret, effects, purpose=purpose, sig_end=outer.sig_end)
         self.ctx.is_test = False
@@ -1822,6 +1845,7 @@ class Checker:
         self.pop()
         self.lambda_bounds.pop()
         self.ctx = outer
+        self.par_depth = par_depth
         return TFn(ptypes, ret)
 
     # ---- match -----------------------------------------------------------------

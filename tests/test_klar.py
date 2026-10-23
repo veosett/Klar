@@ -370,6 +370,16 @@ fn main() uses io {
 }""", stdin="hello\n", args=("a", "b"))
         self.assertEqual(out, 'got hello\nNone\n["a", "b"]\n')
 
+    def test_read_exact(self):
+        out = run("""
+fn main() uses io {
+  print(read_exact(3))
+  print(read_line())
+  print(read_exact(10))
+  print(read_exact(1))
+}""", stdin="abcdef\nxy")
+        self.assertEqual(out, 'Some("abc")\nSome("def")\nSome("xy")\nNone\n')
+
     def test_time_and_random(self):
         out = run("""
 fn main() uses io, time, rand {

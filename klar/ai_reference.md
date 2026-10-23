@@ -19,7 +19,7 @@ exactly; the compiler rejects everything else with a coded error (`klar explain 
    clone; `klar deps --json` shows the tree.
 4. Failures show values, both sides of `assert`, the Klar call stack, minimal property counterexamples.
 5. `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
-   `.exe`/ELF (`--target windows|linux|linux-arm64`); `klar profile file.klar` shows where time goes.
+   `.exe`/ELF (`--target windows|linux|linux-arm64`, experimental `macos`); `klar profile file.klar` shows where time goes.
 
 ## Lexical
 - One statement per line. NO semicolons. Blocks use `{ }`. Comments: `// ...`, doc comments: `/// ...`.
@@ -150,8 +150,8 @@ Generic types get generic impls that cover every instance: `impl[T: Show] Show f
 `klar fix` adds `todo(...)` stubs for missing impl methods.
 
 ## Types
-`Int` (arbitrary precision), `Float`, `Bool`, `Str`, `Bytes`, `Unit`, `Never`, `List[T]`, `Map[K, V]` (K: Int/Str/Bool,
-insertion-ordered), `Option[T]`, `Result[T, E]`, `fn(A, B) -> R`, user `type`/`enum`. Annotate empty
+`Int` (arbitrary precision), `Float`, `Bool`, `Str`, `Bytes`, `Unit`, `Never`, `List[T]`, `Map[K, V]` (K: any value without
+functions, insertion-ordered), `Option[T]`, `Result[T, E]`, `fn(A, B) -> R`, user `type`/`enum`. Annotate empty
 collections: `let xs: List[Int] = []`.
 
 ## Effects

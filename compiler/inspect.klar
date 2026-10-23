@@ -501,7 +501,7 @@ fn type_expr_span(t: TypeExpr) -> Span {
   }
 }
 
-fn type_text(lines: List[Str], t: TypeExpr) -> Str {
+pub fn type_text(lines: List[Str], t: TypeExpr) -> Str {
   let sp = type_expr_span(t)
   let line = lines.get_or(sp.line - 1, "")
   if sp.line == sp.end_line {
@@ -570,7 +570,7 @@ fn fn_sig_text(lines: List[Str], f: FnDecl) -> Str {
 }
 
 /// The declaration's text up to (not including) its body, on one line (a newtype: as written).
-fn sig_text(lines: List[Str], d: Decl, newtype: Bool) -> Str {
+pub fn sig_text(lines: List[Str], d: Decl, newtype: Bool) -> Str {
   return match d {
     Decl.TypeD(span, name, tps, fields, _, _) => {
       if newtype {
@@ -616,7 +616,7 @@ pub fn decl_span(d: Decl) -> Span {
 }
 
 /// The `/// >>> ...` lines of a declaration (the parser turns them into a test `doc: <name>`).
-fn doc_examples(decls: List[Decl], lines: List[Str], name: Str) -> List[Str] {
+pub fn doc_examples(decls: List[Decl], lines: List[Str], name: Str) -> List[Str] {
   var out: List[Str] = []
   for d in decls {
     match d {

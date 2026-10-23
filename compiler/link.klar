@@ -1,5 +1,6 @@
-// Writes standalone executables, in Klar (self-hosting, stage 4d): ELF64 (Linux, no libc) and PE32+ (Windows,
-// imports only kernel32.dll). Mirrors klar/native/link.py byte for byte.
+// Writes standalone executables, in Klar (self-hosting, stage 4d): ELF64 (Linux, no libc), PE32+ (Windows,
+// imports only kernel32.dll) and Mach-O 64 (macOS x86-64, experimental: static, LC_UNIXTHREAD, no dyld). Mirrors
+// klar/native/link.py byte for byte.
 //
 // Input: the machine code with rel32 fixups to data symbols / import slots, the data image with absolute 64-bit
 // pointer relocations, and zero-initialised bss.
@@ -184,6 +185,76 @@ pub fn write_elf(x: Exe) -> Bytes {
     i = i + 1
   }
   return out
+}
+
+// ---- Mach-O (macOS x86-64) ------------------------------------------------------------------------------------
+
+fn name16(b: Bytes, name: Str) -> Bytes {
+  return zeros(text(b, name), 16 - name.len())
+}
+
+fn mach_segment(b: Bytes, name: Str, nums: List[Int], nsects: Int) -> Bytes {
+  var out = name16(le(b: le(b: b, v: 25, n: 4), v: 72 + 80 * nsects, n: 4), name)
+  for v in nums.take(4) {
+    out = le(b: out, v: v, n: 8)
+  }
+  let prot = nums.get_or(4, 0)
+  return le(b: le(b: le(b: le(b: out, v: prot, n: 4), v: prot, n: 4), v: nsects, n: 4), v: 0, n: 4)
+}
+
+fn mach_section(b: Bytes, name: Str, seg: Str, nums: List[Int]) -> Bytes {
+  var out = name16(name16(b, name), seg)
+  out = le(b: le(b: out, v: nums.get_or(0, 0), n: 8), v: nums.get_or(1, 0), n: 8)
+  out = le(b: le(b: out, v: nums.get_or(2, 0), n: 4), v: nums.get_or(3, 0), n: 4)
+  out = le(b: le(b: le(b: out, v: 0, n: 4), v: 0, n: 4), v: nums.get_or(4, 0), n: 4)
+  return le(b: le(b: le(b: out, v: 0, n: 4), v: 0, n: 4), v: 0, n: 4)
+}
+
+pub fn write_macho(x: Exe) -> Bytes {
+  let base = 4294967296                             // above the 4 GB __PAGEZERO
+  let page = 4096
+  let text_off = page                               // the headers fill the start of __TEXT
+  let text_vaddr = base + text_off
+  let data_off = align(text_off + x.code.len(), page)
+  let data_vaddr = base + data_off
+  let bss_vaddr = data_vaddr + align(x.img.data.len(), 16)
+  let l = Layout { code_base: text_vaddr, data_base: data_vaddr, bss_base: bss_vaddr, imports: Map {} }
+  let code = patched_code(x, l)
+  let data = patched_data(x, l)
+  let data_vsize = align((align(data.len(), 16) + x.img.bss_size).max(1), page)
+  var cmds = mach_segment(b: bytes_of([]), name: "__PAGEZERO", nums: [0, base, 0, 0, 0], nsects: 0)
+  cmds = mach_segment(b: cmds, name: "__TEXT", nums: [base, data_off, 0, text_off + code.len(), 5], nsects: 1)
+  cmds = mach_section(b: cmds, name: "__text", seg: "__TEXT", nums: [text_vaddr, code.len(), text_off, 4, 2147484672])
+  cmds = mach_segment(b: cmds, name: "__DATA", nums: [data_vaddr, data_vsize, data_off, data.len(), 3], nsects: 1)
+  cmds = mach_section(b: cmds, name: "__data", seg: "__DATA", nums: [data_vaddr, data.len(), data_off, 4, 0])
+  // LC_UNIXTHREAD, x86_THREAD_STATE64: 21 registers, rip = the entry point
+  cmds = le(b: le(b: le(b: le(b: cmds, v: 5, n: 4), v: 184, n: 4), v: 4, n: 4), v: 42, n: 4)
+  var r = 0
+  while r < 21 {
+    var v = 0
+    if r == 16 {
+      v = addr(x: x, l: l, name: x.entry)
+    }
+    cmds = le(b: cmds, v: v, n: 8)
+    r = r + 1
+  }
+  // LC_BUILD_VERSION: macOS 10.15, no tools
+  for v in [50, 24, 1, 659200, 659200, 0] {
+    cmds = le(b: cmds, v: v, n: 4)
+  }
+  var out = bytes_of([])
+  for v in [4277009103, 16777223, 3, 2, 5, cmds.len(), 1, 0] {
+    out = le(b: out, v: v, n: 4)
+  }
+  out = out.concat(cmds)
+  while out.len() < text_off {
+    out = out.push(0)
+  }
+  out = out.concat(code)
+  while out.len() < data_off {
+    out = out.push(0)
+  }
+  return out.concat(data)
 }
 
 // ---- PE32+ ----------------------------------------------------------------------------------------------------

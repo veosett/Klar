@@ -2,6 +2,7 @@
 
     python tests/native_diff.py [files...]          (default: examples, std modules, built-in tests, benchmarks)
     python tests/native_diff.py --windows / --arm64  (Windows executables under wine, arm64 ones under qemu-aarch64)
+    python tests/native_diff.py --macos              (macOS executables under tests/macho_run.py: needs unicorn)
 
 For programs with main(): stdout and exit status must match.
 For test files: every `test` / doc-test block is compiled into one executable
@@ -73,6 +74,8 @@ def run_exe(exe, args=()):
         cmd = ["/usr/lib/wine/wine64", *cmd]
     elif exe.endswith(".a64") and host_target() != "linux-arm64":
         cmd = [QEMU, *cmd]
+    elif exe.endswith(".macho"):
+        cmd = [sys.executable, os.path.join(ROOT, "tests", "macho_run.py"), *cmd]
     env = dict(os.environ, WINEDEBUG="-all")
     return subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
@@ -81,7 +84,7 @@ def check_file(path, target, tmp):
     loaded = load_path(path, with_runtime=True)
     has_main = any(isinstance(d, N.FnDecl) and d.name == "main" for d in loaded.program.decls)
     problems = []
-    suffix = {"windows": ".exe", "linux-arm64": ".a64"}.get(target, "")
+    suffix = {"windows": ".exe", "linux-arm64": ".a64", "macos": ".macho"}.get(target, "")
     if has_main:
         exe = os.path.join(tmp, "main" + suffix)
         build(path, out=exe, target=target, loaded=loaded)
@@ -115,6 +118,9 @@ def main(argv):
     if "--arm64" in argv:
         target = "linux-arm64"
         argv = [a for a in argv if a != "--arm64"]
+    if "--macos" in argv:
+        target = "macos"
+        argv = [a for a in argv if a != "--macos"]
     files = argv or default_files()
     failed = 0
     with tempfile.TemporaryDirectory() as tmp:

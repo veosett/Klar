@@ -1,10 +1,10 @@
-// Builds each program given on the command line for Linux (x86-64 and arm64) and Windows with the backend written
-// in Klar and writes the executables `<out>/<k>.elf`, `<out>/<k>.exe` and `<out>/<k>.a64` (used by tests/selfhost.py
-// to compare them byte for byte with `klar build`). Arguments: the directory of `klar/`, the output directory, then
+// Builds each program given on the command line for Linux (x86-64 and arm64), Windows and macOS with the backend
+// written in Klar and writes the executables `<out>/<k>.elf`, `<out>/<k>.exe`, `<out>/<k>.a64` and `<out>/<k>.macho`
+// (used by tests/selfhost.py to compare them byte for byte with `klar build`). Arguments: the directory of `klar/`, the output directory, then
 // the programs.
 use emit.{emit_program}
 use emit_a64.{emit_a64}
-use link.{write_elf, write_pe}
+use link.{write_elf, write_macho, write_pe}
 use loader.{load_program, load_runtime}
 use lower.{lower_program}
 
@@ -29,6 +29,7 @@ fn main() uses io, fs {
       save("{out}/{k}.elf", write_elf(emit_program(w, "linux")))
       save("{out}/{k}.exe", write_pe(emit_program(w, "windows")))
       save("{out}/{k}.a64", write_elf(emit_a64(w)))
+      save("{out}/{k}.macho", write_macho(emit_program(w, "macos")))
       print("{path}\t{k}")
     }
     k = k + 1

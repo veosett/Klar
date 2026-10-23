@@ -1333,6 +1333,8 @@ fn linux_layer(a0: A64, main_entry: Str) -> A64 {
   for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
     a = stub_end(mov_ri(a: stub_begin(a, name), rd: X0, imm: -1))
   }
+  a = stub_end(mov_ri(a: stub_begin(a, "os_setjmp"), rd: X0, imm: -1))     // (Windows: property runs without fork)
+  a = udf(stub_begin(a, "os_longjmp"))
   a = test_index_stub(a)
   // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
   a = mov_rr(a: label64(a, "_start"), rd: X0, rn: SP)

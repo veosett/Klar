@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the seed compilers (klarc for Linux x86-64, Linux arm64 and Windows x86-64) and attaches them to the GitHub
+# Builds the seed compilers (klarc for Linux x86-64, Linux arm64, Windows x86-64 and, experimental, macOS x86-64) and attaches them to the GitHub
 # release of a tag. With them, `build.sh` / `build.bat` build Klar without Python. Start it by hand (Actions → Release
 # → Run workflow) with the tag, e.g. v1.0.0, after pushing that tag.
 on:
@@ -31,14 +31,16 @@ jobs:
           python -m klar build compiler/klarc.klar -o dist/klarc-linux --target linux
           python -m klar build compiler/klarc.klar -o dist/klarc-linux-arm64 --target linux-arm64
           python -m klar build compiler/klarc.klar -o dist/klarc-windows.exe --target windows
-          # the seeds reproduce themselves: klarc-linux builds the same three files
-          for t in linux linux-arm64 windows; do
+          python -m klar build compiler/klarc.klar -o dist/klarc-macos --target macos
+          # the seeds reproduce themselves: klarc-linux builds the same four files
+          for t in linux linux-arm64 windows macos; do
             out=check-$t; [ $t = windows ] && out=check-$t.exe
             dist/klarc-linux build compiler/klarc.klar -o $out --target $t --lib klar
           done
           cmp check-linux dist/klarc-linux
           cmp check-linux-arm64 dist/klarc-linux-arm64
           cmp check-windows.exe dist/klarc-windows.exe
+          cmp check-macos dist/klarc-macos
           (cd dist && sha256sum klarc-* > SHA256SUMS)
       - name: Attach to the release
         env:

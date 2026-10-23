@@ -1,0 +1,2587 @@
+// `klarc lsp`: the Language LspServer Protocol server of klar/tools/lsp.py, written in Klar — the same answers to
+// the same requests. Every feature reuses the compiler: the loader and checker give diagnostics, types and
+// resolutions, the formatter formats, `name_occurrences` gives references. Klar forbids shadowing, so a name inside
+// a function means one thing and a top-level name one thing in the whole program: definition, references and rename
+// are exact without an index.
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldDecl, FieldInit, FnDecl, MatchArm, Param, Pattern, Span, Stmt}
+use ast.{StrPiece, TypeExpr, VariantDecl, expr_span}
+use builtin_sigs.{global_sigs, klar_version, method_sigs}
+use checker.{Ck, Diag, Sig, span_key}
+use commands.{absolute}
+use fmt.{format_checked}
+use inspect.{UMod, find_word_span, name_occurrences, sig_text, user_modules}
+use jsonout.{J, spaced}
+use loader.{Ld, Module, load_program_with}
+use report.{user_diags}
+use std.json.{Json, parse_json}
+use types.{Type, show}
+
+const KEYWORDS: List[Str] = ["fn", "let", "var", "if", "else", "while", "for", "in", "return", "match", "type", "enum",
+  "trait", "impl", "pub", "use", "const", "test", "property", "assert", "requires", "ensures", "uses", "break",
+  "continue", "and", "or", "not", "true", "false", "with", "None", "Some", "Ok", "Err"]
+
+fn snippets() -> List[Pair[Str, Str]] {
+  return [Pair { first: "fn", second: "fn $\{1:name\}($\{2:x\}: $\{3:Int\}) -> $\{4:Int\} \{\n  return $0\n\}" },
+    Pair { first: "main", second: "fn main() uses io \{\n  $0\n\}" }, Pair { first: "test",
+      second: "test \"$\{1:what\}\" \{\n  assert $0\n\}" }, Pair { first: "match",
+        second: "match $\{1:value\} \{\n  $\{2:pattern\} => $0,\n\}" }, Pair { first: "trait",
+          second: "trait $\{1:Name\} \{\n  fn $\{2:method\}(self) -> $\{3:Str\}\n\}" }, Pair { first: "impl",
+            second: "impl $\{1:Trait\} for $\{2:Type\} \{\n  $0\n\}" }]
+}
+
+fn ck_kind(kind: Str) -> Int {
+  return match kind {
+    "method" => 2,
+    "function" => 3,
+    "field" => 5,
+    "variable" => 6,
+    "class" => 7,
+    "interface" => 8,
+    "keyword" => 14,
+    "snippet" => 15,
+    "enum" => 13,
+    "member" => 20,
+    "constant" => 21,
+    "struct" => 22,
+    _ => 1,
+  }
+}
+
+fn sk_kind(kind: Str) -> Int {
+  return match kind {
+    "fn" => 12,
+    "type" => 23,
+    "enum" => 10,
+    "alias" => 26,
+    "const" => 14,
+    "trait" => 11,
+    "impl" => 5,
+    "test" => 24,
+    "property" => 24,
+    "method" => 6,
+    _ => 13,
+  }
+}
+
+// ---- JSON helpers --------------------------------------------------------------------------------------------
+
+fn kv(k: Str, v: J) -> Pair[Str, J] {
+  return Pair { first: k, second: v }
+}
+
+fn js(s: Str) -> J {
+  return J.JStr(s)
+}
+
+fn ji(i: Int) -> J {
+  return J.JInt(i)
+}
+
+/// A parsed message (Json) as an output value (J), keeping the order of the fields.
+fn to_j(j: Json) -> J {
+  return match j {
+    Json.Null => J.JNull,
+    Json.Bool(b) => J.JBool(b),
+    Json.Int(i) => J.JInt(i),
+    Json.Num(x) => J.JFloat(x),
+    Json.Text(s) => J.JStr(s),
+    Json.Arr(items) => J.JArr(items.map(to_j)),
+    Json.Obj(fields) => J.JObj(fields.entries().map(fn(e) => kv(e.key, to_j(e.value)))),
+  }
+}
+
+fn get(j: Json, key: Str) -> Json {
+  return match j {
+    Json.Obj(fs) => fs.get(key).unwrap_or(Json.Null),
+    _ => Json.Null,
+  }
+}
+
+fn text_of(j: Json) -> Str {
+  return match j {
+    Json.Text(s) => s,
+    _ => "",
+  }
+}
+
+fn int_of(j: Json) -> Int {
+  return match j {
+    Json.Int(i) => i,
+    Json.Num(x) => x.to_int(),
+    _ => 0,
+  }
+}
+
+fn items_of(j: Json) -> List[Json] {
+  return match j {
+    Json.Arr(xs) => xs,
+    _ => [],
+  }
+}
+
+fn has(j: Json, key: Str) -> Bool {
+  return match j {
+    Json.Obj(fs) => fs.has(key),
+    _ => false,
+  }
+}
+
+// ---- paths, positions -------------------------------------------------------------------------------------------
+
+fn hex_value(c: Str) -> Int {
+  let digits = "0123456789abcdef"
+  return digits.index_of(c.lower()).unwrap_or(0)
+}
+
+/// `%XX` escapes decoded (as UTF-8).
+fn unquote(s: Str) -> Str {
+  let bs = s.to_bytes()
+  var out: List[Int] = []
+  var i = 0
+  while i < bs.len() {
+    let b = bs.get_or(i, 0)
+    if b == 37 and i + 2 < bs.len() {
+      let hi = bytes_of([bs.get_or(i + 1, 0)]).decode().unwrap_or("0")
+      let lo = bytes_of([bs.get_or(i + 2, 0)]).decode().unwrap_or("0")
+      out = out.push(hex_value(hi) * 16 + hex_value(lo))
+      i = i + 3
+    } else {
+      out = out.push(b)
+      i = i + 1
+    }
+  }
+  return bytes_of(out).decode().unwrap_or(s)
+}
+
+/// Python's urllib.parse.quote (safe: letters, digits, `_.-~/`).
+fn quote(s: Str) -> Str {
+  let hexd = "0123456789ABCDEF"
+  var out = ""
+  for b in s.to_bytes().to_list() {
+    let ok = (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or [95, 46, 45, 126, 47].contains(b)
+    if ok {
+      out = out + bytes_of([b]).decode().unwrap_or("")
+    } else {
+      out = out + "%" + hexd.slice(b / 16, b / 16 + 1) + hexd.slice(b % 16, b % 16 + 1)
+    }
+  }
+  return out
+}
+
+fn norm(path: Str) -> Str {
+  var out: List[Str] = []
+  for part in path.split("/") {
+    if part == ".." {
+      if not out.is_empty() and out.last() != Some("") and out.last() != Some("..") {
+        out = out.take(out.len() - 1)
+      } else {
+        out = out.push(part)
+      }
+    } else if part != "." and not (part.is_empty() and not out.is_empty()) {
+      out = out.push(part)
+    }
+  }
+  let joined = out.join("/")
+  if joined.is_empty() {
+    return "/"
+  }
+  return joined
+}
+
+fn uri_to_path(uri: Str) -> Str uses fs {
+  var p = uri
+  if p.starts_with("file://") {
+    p = p.slice(7, p.len())
+    // file://host/path: the path starts at the first slash
+    match p.index_of("/") {
+      Some(i) => {
+        p = p.slice(i, p.len())
+      },
+      None => {},
+    }
+  }
+  p = unquote(p)
+  let cs = p.chars()
+  if cs.len() >= 3 and cs.get_or(0, "") == "/" and cs.get_or(2, "") == ":" {
+    p = p.slice(1, p.len())
+  }
+  return norm(absolute(p))
+}
+
+fn path_to_uri(path: Str) -> Str uses fs {
+  var p = norm(absolute(path)).replace("\\", "/")
+  if not p.starts_with("/") {
+    p = "/" + p
+  }
+  return "file://" + quote(p)
+}
+
+fn utf16_len(s: Str) -> Int {
+  var n = 0
+  for c in s.chars() {
+    if c.to_bytes().len() == 4 {
+      n = n + 2
+    } else {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+/// Klar 1-based line / character column -> LSP 0-based line / UTF-16 column.
+fn to_pos(lines: List[Str], line: Int, col: Int) -> J {
+  var text = ""
+  if line > 0 and line <= lines.len() {
+    text = lines.get_or(line - 1, "")
+  }
+  let cs = text.chars()
+  return J.JObj([kv("line", ji((line - 1).max(0))), kv("character", ji(utf16_len(cs.take((col - 1).max(0)).join(""))))])
+}
+
+/// LSP position -> Klar (line, col), both 1-based.
+fn from_pos(lines: List[Str], pos: Json) -> Pair[Int, Int] {
+  let line = int_of(get(pos, "line")) + 1
+  let want = int_of(get(pos, "character"))
+  var text = ""
+  if line > 0 and line <= lines.len() {
+    text = lines.get_or(line - 1, "")
+  }
+  var units = 0
+  var col = 0
+  for c in text.chars() {
+    if units >= want {
+      return Pair { first: line, second: col + 1 }
+    }
+    if c.to_bytes().len() == 4 {
+      units = units + 2
+    } else {
+      units = units + 1
+    }
+    col = col + 1
+  }
+  return Pair { first: line, second: col + 1 }
+}
+
+fn to_range(lines: List[Str], sp: Span) -> J {
+  return J.JObj([kv("start", to_pos(lines: lines, line: sp.line, col: sp.col)), kv("end", to_pos(lines: lines,
+    line: sp.end_line, col: sp.end_col))])
+}
+
+fn contains(sp: Span, line: Int, col: Int) -> Bool {
+  if sp.line <= 0 {
+    return false
+  }
+  if line < sp.line or (line == sp.line and col < sp.col) {
+    return false
+  }
+  return line < sp.end_line or (line == sp.end_line and col <= sp.end_col)
+}
+
+fn span_size(sp: Span) -> Int {
+  return (sp.end_line - sp.line) * 10000 + (sp.end_col - sp.col)
+}
+
+// ---- the nodes of a declaration (klar/nodes.py walk: pre-order, fields in order) ------------------------------
+
+/// The nodes that have a name the cursor can be on.
+enum LspNode {
+  NName(span: Span, name: Str),
+  NMethod(span: Span, method: Str, method_span: Span),
+  NField(span: Span, obj: Expr, name: Str, name_span: Span),
+  NFn(decl: FnDecl),
+  NConst(name: Str, name_span: Span),
+  NLet(name: Str, name_span: Span, value: Expr),
+  NTrait(name: Str, name_span: Span),
+  NFor(var_name: Str, var_span: Span),
+  NBind(span: Span, name: Str),
+  NParam(span: Span, name: Str),
+  NTypeName(span: Span, name: Str),
+  NRecord(span: Span, type_name: Str),
+  NTypeDecl(span: Span, name: Str),
+  NVariantPat(span: Span, variant: Str, has_enum: Bool, enum_name: Str),
+  NBound(name: Str),
+}
+
+fn w_type(acc: List[LspNode], t: TypeExpr) -> List[LspNode] {
+  return match t {
+    TypeExpr.Named(sp, name, args) => {
+      var out = acc.push(LspNode.NTypeName(span: sp, name: name))
+      for a in args {
+        out = w_type(out, a)
+      }
+      return out
+    },
+    TypeExpr.FnType(_, params, ret) => {
+      var out = acc
+      for p in params {
+        out = w_type(out, p)
+      }
+      return w_type(out, ret)
+    },
+  }
+}
+
+fn w_opt_type(acc: List[LspNode], t: Option[TypeExpr]) -> List[LspNode] {
+  return match t {
+    Some(x) => w_type(acc, x),
+    None => acc,
+  }
+}
+
+fn w_params(acc: List[LspNode], ps: List[Param]) -> List[LspNode] {
+  var out = acc
+  for p in ps {
+    out = w_opt_type(out.push(LspNode.NParam(span: p.span, name: p.name)), p.ty)
+  }
+  return out
+}
+
+fn w_block(acc: List[LspNode], b: Block) -> List[LspNode] {
+  var out = acc
+  for s in b.stmts {
+    out = w_stmt(out, s)
+  }
+  return out
+}
+
+fn w_opt(acc: List[LspNode], e: Option[Expr]) -> List[LspNode] {
+  return match e {
+    Some(x) => w_expr(acc, x),
+    None => acc,
+  }
+}
+
+fn w_body(acc: List[LspNode], b: Body) -> List[LspNode] {
+  return match b {
+    Body.ExprBody(e) => w_expr(acc, e),
+    Body.BlockBody(blk) => w_block(acc, blk),
+  }
+}
+
+fn w_stmt(acc: List[LspNode], s: Stmt) -> List[LspNode] {
+  return match s {
+    Stmt.Let(_, name, name_span, _, ty, value, _) => w_expr(w_opt_type(acc.push(LspNode.NLet(name: name, name_span: name_span,
+      value: value)), ty), value),
+    Stmt.Assign(_, _, value) => w_expr(acc, value),
+    Stmt.Return(_, value) => w_opt(acc, value),
+    Stmt.If(_, cond, then, else_) => {
+      let out = w_block(w_expr(acc, cond), then)
+      return match else_ {
+        Else.NoElse => out,
+        Else.ElseBlock(b) => w_block(out, b),
+        Else.ElseIf(x) => w_stmt(out, x),
+      }
+    },
+    Stmt.While(_, cond, body) => w_block(w_expr(acc, cond), body),
+    Stmt.For(_, var_name, var_span, iter, body) => w_block(w_expr(acc.push(LspNode.NFor(var_name: var_name, var_span:
+      var_span)), iter), body),
+    Stmt.Assert(_, cond, message) => w_opt(w_expr(acc, cond), message),
+    Stmt.ExprStmt(_, e) => w_expr(acc, e),
+    _ => acc,
+  }
+}
+
+fn w_args(acc: List[LspNode], args: List[Arg]) -> List[LspNode] {
+  var out = acc
+  for a in args {
+    out = w_expr(out, a.value)
+  }
+  return out
+}
+
+fn w_inits(acc: List[LspNode], fields: List[FieldInit]) -> List[LspNode] {
+  var out = acc
+  for f in fields {
+    out = w_expr(out, f.value)
+  }
+  return out
+}
+
+fn w_pattern(acc: List[LspNode], p: Pattern) -> List[LspNode] {
+  return match p {
+    Pattern.Bind(sp, name) => acc.push(LspNode.NBind(span: sp, name: name)),
+    Pattern.Variant(sp, enum_name, variant, args) => {
+      var out = acc.push(LspNode.NVariantPat(span: sp, variant: variant, has_enum: enum_name != None, enum_name: enum_name
+          .unwrap_or("")))
+      for a in args {
+        out = w_pattern(out, a)
+      }
+      return out
+    },
+    _ => acc,
+  }
+}
+
+fn w_expr(acc: List[LspNode], e: Expr) -> List[LspNode] {
+  return match e {
+    Expr.StrLit(_, parts) => {
+      var out = acc
+      for p in parts {
+        out = match p {
+          StrPiece.Code(x) => w_expr(out, x),
+          _ => out,
+        }
+      }
+      return out
+    },
+    Expr.ListLit(_, items) => {
+      var out = acc
+      for x in items {
+        out = w_expr(out, x)
+      }
+      return out
+    },
+    Expr.MapLit(_, entries) => {
+      var out = acc
+      for m in entries {
+        out = w_expr(w_expr(out, m.key), m.value)
+      }
+      return out
+    },
+    Expr.Name(sp, name) => acc.push(LspNode.NName(span: sp, name: name)),
+    Expr.Unary(_, _, operand) => w_expr(acc, operand),
+    Expr.Binary(_, _, left, right) => w_expr(w_expr(acc, left), right),
+    Expr.Call(_, callee, args) => w_args(w_expr(acc, callee), args),
+    Expr.MethodCall(sp, o, m, mspan, args) => w_args(w_expr(acc.push(LspNode.NMethod(span: sp, method: m, method_span: mspan)),
+      o), args),
+    Expr.FieldAccess(sp, o, name, nspan) => w_expr(acc.push(LspNode.NField(span: sp, obj: o, name: name, name_span: nspan)), o),
+    Expr.Try(_, x) => w_expr(acc, x),
+    Expr.RecordLit(sp, type_name, fields) => w_inits(acc.push(LspNode.NRecord(span: sp, type_name: type_name)), fields),
+    Expr.WithExpr(_, base, fields) => w_inits(w_expr(acc, base), fields),
+    Expr.Match(_, subject, arms) => {
+      var out = w_expr(acc, subject)
+      for a in arms {
+        out = w_body(w_opt(w_pattern(out, a.pattern), a.guard), a.body)
+      }
+      return out
+    },
+    Expr.Lambda(_, params, ret, body) => w_body(w_opt_type(w_params(acc, params), ret), body),
+    _ => acc,
+  }
+}
+
+fn w_fn(acc: List[LspNode], f: FnDecl) -> List[LspNode] {
+  var out = w_opt_type(w_params(acc.push(LspNode.NFn(decl: f)), f.params), f.ret)
+  for r in f.pre {
+    out = w_expr(out, r)
+  }
+  for r in f.post {
+    out = w_expr(out, r)
+  }
+  return match f.body {
+    Some(b) => w_block(out, b),
+    None => out,
+  }
+}
+
+fn w_fields(acc: List[LspNode], fields: List[FieldDecl]) -> List[LspNode] {
+  var out = acc
+  for f in fields {
+    out = w_type(out, f.ty)
+  }
+  return out
+}
+
+fn walk_decl(d: Decl) -> List[LspNode] {
+  return match d {
+    Decl.Fn(f) => w_fn([], f),
+    Decl.TypeD(sp, name, _, fields, _, _) => w_fields([LspNode.NTypeDecl(span: sp, name: name)], fields),
+    Decl.Alias(sp, name, _, target, _, _) => w_type([LspNode.NTypeDecl(span: sp, name: name)], target),
+    Decl.Const(_, name, name_span, ty, value, _, _) => w_expr(w_type([LspNode.NConst(name: name, name_span: name_span)], ty),
+      value),
+    Decl.Property(_, _, params, body) => w_block(w_params([], params), body),
+    Decl.EnumD(sp, name, _, variants, _, _) => {
+      var out = [LspNode.NTypeDecl(span: sp, name: name)]
+      for v in variants {
+        out = w_fields(out, v.fields)
+      }
+      return out
+    },
+    Decl.Test(_, _, body) => w_block([], body),
+    Decl.Trait(_, name, name_span, methods, _, _, _) => {
+      var out = [LspNode.NTrait(name: name, name_span: name_span)]
+      for m in methods {
+        out = w_fn(out, m)
+      }
+      return out
+    },
+    Decl.Impl(_, _, _, target, _, _, _, _, _) => w_type([], target),
+    _ => [],
+  }
+}
+
+fn decl_span_of(d: Decl) -> Span {
+  return match d {
+    Decl.Fn(f) => f.span,
+    Decl.TypeD(s, _, _, _, _, _) => s,
+    Decl.Alias(s, _, _, _, _, _) => s,
+    Decl.Const(s, _, _, _, _, _, _) => s,
+    Decl.Use(s, _, _, _) => s,
+    Decl.Property(s, _, _, _) => s,
+    Decl.EnumD(s, _, _, _, _, _) => s,
+    Decl.Test(s, _, _) => s,
+    Decl.Trait(s, _, _, _, _, _, _) => s,
+    Decl.Impl(s, _, _, _, _, _, _, _, _) => s,
+  }
+}
+
+// ---- one analysed program ----------------------------------------------------------------------------------------
+
+type LspAnalysis { path: Str, text: Str, lines: List[Str], ld: Ld, main: Module, ok: Bool }
+
+fn analyse_text(path: Str, text: Str, overlay: Map[Str, Str], lib: Str) -> LspAnalysis uses fs {
+  let ld = load_program_with(path: path, lib: lib, overlay: overlay.set(path, text))
+  let main = ld.by_path.get(path).unwrap_or(Module { name: "", path: path, display: path.split("/").last()
+      .unwrap_or(path), failed: true, is_sys: false, checker: None, exports: Map {}, import_from: Map {}, pkg: None })
+  return LspAnalysis { path: path, text: text, lines: text.split("\n"), ld: ld, main: main, ok: main.checker != None }
+}
+
+fn main_decls(a: LspAnalysis) -> List[Decl] {
+  return match a.main.checker {
+    Some(c) => c.decls,
+    None => [],
+  }
+}
+
+fn module_named(a: LspAnalysis, name: Str) -> Option[Module] {
+  for m in a.ld.by_path.values() {
+    if m.name == name {
+      return Some(m)
+    }
+  }
+  return None
+}
+
+fn module_by_display(a: LspAnalysis, display: Str) -> Option[Module] {
+  for m in a.ld.by_path.values() {
+    if m.display == display {
+      return Some(m)
+    }
+  }
+  return None
+}
+
+fn lines_of(a: LspAnalysis, display: Str) -> List[Str] {
+  return a.ld.sources.get(display).unwrap_or("").split("\n")
+}
+
+fn dir_of(path: Str) -> Str {
+  let parts = path.split("/")
+  if parts.len() <= 1 {
+    return "."
+  }
+  return parts.take(parts.len() - 1).join("/")
+}
+
+fn path_of(a: LspAnalysis, display: Str) -> Str {
+  return match module_by_display(a, display) {
+    Some(m) => m.path,
+    None => dir_of(a.path) + "/" + display,
+  }
+}
+
+fn location(a: LspAnalysis, file: Str, sp: Span) -> J uses fs {
+  if file == "" or file == "<builtin>" or sp.line <= 0 {
+    return J.JNull
+  }
+  var path = ""
+  if file.starts_with("std/") or file == "prelude.klar" {
+    match module_by_display(a, file) {
+      Some(m) => {
+        path = m.path
+      },
+      None => {
+        return J.JNull
+      },
+    }
+  } else {
+    path = path_of(a, file)
+  }
+  return J.JObj([kv("uri", js(path_to_uri(path))), kv("range", to_range(lines_of(a, file), sp))])
+}
+
+fn types_of(m: Module) -> Map[Str, Type] {
+  return match m.checker {
+    Some(c) => c.types,
+    None => Map {},
+  }
+}
+
+fn type_at(m: Module, sp: Span) -> Option[Type] {
+  return types_of(m).get(span_key(m.display, sp))
+}
+
+fn bind_type(m: Module, sp: Span) -> Option[Type] {
+  return match m.checker {
+    Some(c) => c.bind_types.get(span_key(m.display, sp)),
+    None => None,
+  }
+}
+
+fn tshow(t: Type) -> Str {
+  return show(Map {}, t)
+}
+
+fn head(t: Type) -> Option[Str] {
+  return match t {
+    Type.Con(name, _) => Some(name),
+    _ => None,
+  }
+}
+
+/// The span of a node's name or word.
+fn node_name_span(a: LspAnalysis, n: LspNode) -> Option[Span] {
+  let lines = a.lines
+  return match n {
+    LspNode.NName(sp, _) => Some(sp),
+    LspNode.NMethod(_, _, msp) => Some(msp),
+    LspNode.NField(_, _, _, nsp) => Some(nsp),
+    LspNode.NFn(f) => Some(f.name_span),
+    LspNode.NConst(_, nsp) => Some(nsp),
+    LspNode.NLet(_, nsp, _) => Some(nsp),
+    LspNode.NTrait(_, nsp) => Some(nsp),
+    LspNode.NFor(_, vsp) => Some(vsp),
+    LspNode.NBind(sp, _) => Some(sp),
+    LspNode.NParam(sp, name) => find_word_span(lines: lines, span: sp, word: name),
+    LspNode.NTypeName(sp, name) => find_word_span(lines: lines, span: sp, word: name),
+    LspNode.NRecord(sp, tn) => find_word_span(lines: lines, span: sp, word: tn),
+    LspNode.NTypeDecl(sp, name) => find_word_span(lines: lines, span: sp, word: name),
+    LspNode.NVariantPat(sp, variant, has_enum, _) => match has_enum {
+      true => find_word_span(lines: lines, span: sp, word: variant),
+      false => None,
+    },
+    LspNode.NBound(_) => None,
+  }
+}
+
+/// The node under the cursor: (node, the span of its name, the enclosing top-level declaration).
+type LspAt { node: LspNode, span: Span, top: Decl }
+
+fn node_at(a: LspAnalysis, line: Int, col: Int) -> Option[LspAt] {
+  if not a.ok {
+    return None
+  }
+  var best: Option[LspAt] = None
+  for d in main_decls(a) {
+    let is_method = match d {
+      Decl.Fn(f) => f.owner_kind != None,
+      _ => false,
+    }
+    if contains(sp: decl_span_of(d), line: line, col: col) or is_method {
+      for n in walk_decl(d) {
+        match node_name_span(a, n) {
+          Some(sp) => {
+            if contains(sp: sp, line: line, col: col) {
+              let better = match best {
+                None => true,
+                Some(b) => span_size(sp) < span_size(b.span),
+              }
+              if better {
+                best = Some(LspAt { node: n, span: sp, top: d })
+              }
+            }
+          },
+          None => {},
+        }
+      }
+      match d {
+        Decl.Fn(f) => {
+          for items in f.bounds {
+            for bound in items.second {
+              if contains(sp: bound.second, line: line, col: col) {
+                best = Some(LspAt { node: LspNode.NBound(name: bound.first), span: bound.second, top: d })
+              }
+            }
+          }
+        },
+        Decl.Impl(_, tr, tspan, _, _, _, _, _, _) => {
+          if contains(sp: tspan, line: line, col: col) {
+            best = Some(LspAt { node: LspNode.NBound(name: tr), span: tspan, top: d })
+          }
+        },
+        _ => {},
+      }
+    }
+  }
+  return best
+}
+
+// ---- what a name refers to -----------------------------------------------------------------------------------
+
+/// A symbol: its kind, name, definition (file + span), declaration and module.
+type LspTarget { kind: Str, name: Str, file: Str, span: Option[Span], decl: Option[Decl], owner: Option[Module] }
+
+fn no_target() -> LspTarget {
+  return LspTarget { kind: "", name: "", file: "", span: None, decl: None, owner: None }
+}
+
+/// The binding of a local name inside one top-level declaration (unique: no shadowing).
+fn local_decl(a: LspAnalysis, top: Decl, name: Str) -> Option[Span] {
+  for n in walk_decl(top) {
+    match n {
+      LspNode.NLet(nm, nsp, _) => {
+        if nm == name {
+          return Some(nsp)
+        }
+      },
+      LspNode.NParam(sp, nm) => {
+        if nm == name {
+          return find_word_span(lines: a.lines, span: sp, word: name)
+        }
+      },
+      LspNode.NFor(nm, vsp) => {
+        if nm == name {
+          return Some(vsp)
+        }
+      },
+      LspNode.NBind(sp, nm) => {
+        if nm == name {
+          return Some(sp)
+        }
+      },
+      _ => {},
+    }
+  }
+  return None
+}
+
+fn named_decl_name(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(f) => f.name,
+    Decl.Const(_, n, _, _, _, _, _) => n,
+    Decl.TypeD(_, n, _, _, _, _) => n,
+    Decl.EnumD(_, n, _, _, _, _) => n,
+    Decl.Alias(_, n, _, _, _, _) => n,
+    Decl.Trait(_, n, _, _, _, _, _) => n,
+    _ => "\0",
+  }
+}
+
+/// (declaration, module) of a top-level `name` as seen from `m` (following imports).
+fn module_decl(a: LspAnalysis, m: Option[Module], name: Str) -> Option[Pair[Decl, Module]] {
+  let md = match m {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  let decls = match md.checker {
+    Some(c) => c.decls,
+    None => {
+      return None
+    },
+  }
+  for d in decls {
+    if named_decl_name(d) == name {
+      return Some(Pair { first: d, second: md })
+    }
+  }
+  return match md.import_from.get(name) {
+    Some(dep) => module_decl(a: a, m: module_named(a, dep.first), name: name),
+    None => None,
+  }
+}
+
+fn type_owner(a: LspAnalysis, name: Str) -> Option[Str] {
+  let u = a.ld.uni
+  match u.records.get(name) {
+    Some(r) => {
+      return Some(r.mod_name)
+    },
+    None => {},
+  }
+  match u.enums.get(name) {
+    Some(r) => {
+      return Some(r.mod_name)
+    },
+    None => {},
+  }
+  match u.aliases.get(name) {
+    Some(r) => {
+      return Some(r.mod_name)
+    },
+    None => {},
+  }
+  return u.traits.get(name).map(fn(r) => r.mod_name)
+}
+
+fn type_decl(a: LspAnalysis, name: Str) -> Option[Pair[Decl, Module]] {
+  return match type_owner(a, name) {
+    Some(owner) => module_decl(a: a, m: module_named(a, owner), name: name),
+    None => None,
+  }
+}
+
+fn decl_def_span(a: LspAnalysis, dm: Option[Pair[Decl, Module]]) -> Option[Span] {
+  return match dm {
+    None => None,
+    Some(p) => match p.first {
+      Decl.Fn(f) => Some(f.name_span),
+      Decl.Const(_, _, nsp, _, _, _, _) => Some(nsp),
+      Decl.Trait(_, _, nsp, _, _, _, _) => Some(nsp),
+      _ => Some(find_word_span(lines: lines_of(a, p.second.display), span: decl_span_of(p.first), word: named_decl_name(
+        p.first)).unwrap_or(decl_span_of(p.first))),
+    },
+  }
+}
+
+fn target_of(kind: Str, name: Str, span: Option[Span], dm: Option[Pair[Decl, Module]]) -> LspTarget {
+  return LspTarget { kind: kind, name: name, file: dm.map(fn(p) => p.second.display).unwrap_or(""), span: span, decl: dm.map(
+    fn(p) => p.first), owner: dm.map(fn(p) => p.second) }
+}
+
+fn variant_target(a: LspAnalysis, dm: Option[Pair[Decl, Module]], vname: Str) -> Option[LspTarget] {
+  match dm {
+    Some(p) => {
+      match p.first {
+        Decl.EnumD(_, _, _, variants, _, _) => {
+          for v in variants {
+            if v.name == vname {
+              return Some(target_of(kind: "variant", name: vname, span: find_word_span(lines: lines_of(a,
+                p.second.display), span: v.span, word: v.name), dm: dm))
+            }
+          }
+        },
+        _ => {},
+      }
+    },
+    None => {},
+  }
+  return None
+}
+
+fn is_trait_decl(dm: Option[Pair[Decl, Module]]) -> Bool {
+  return match dm {
+    Some(p) => match p.first {
+      Decl.Trait(_, _, _, _, _, _, _) => true,
+      _ => false,
+    },
+    None => false,
+  }
+}
+
+fn find_target(a: LspAnalysis, node: LspNode, top: Decl) -> LspTarget {
+  let main = a.main
+  let mdisp = main.display
+  return match node {
+    LspNode.NBound(name) => {
+      let dm = type_decl(a, name)
+      return target_of(kind: "trait", name: name, span: decl_def_span(a, dm), dm: dm)
+    },
+    LspNode.NName(_, name) => {
+      match local_decl(a: a, top: top, name: name) {
+        Some(sp) => {
+          return LspTarget { kind: "local", name: name, file: mdisp, span: Some(sp), decl: None, owner: Some(main) }
+        },
+        None => {},
+      }
+      let dm = module_decl(a: a, m: Some(main), name: name)
+      return match dm {
+        Some(p) => match p.first {
+          Decl.Const(_, _, _, _, _, _, _) => target_of(kind: "const", name: name, span: decl_def_span(a, dm), dm: dm),
+          _ => target_of(kind: "fn", name: name, span: decl_def_span(a, dm), dm: dm),
+        },
+        None => LspTarget { kind: "builtin", name: name, file: "", span: None, decl: None, owner: None },
+      }
+    },
+    LspNode.NLet(name, _, _) => LspTarget { kind: "local", name: name, file: mdisp, span: node_name_span(a, node), decl: None,
+      owner: Some(main) },
+    LspNode.NParam(_, name) => LspTarget { kind: "local", name: name, file: mdisp, span: node_name_span(a, node), decl: None,
+      owner: Some(main) },
+    LspNode.NFor(name, _) => LspTarget { kind: "local", name: name, file: mdisp, span: node_name_span(a, node), decl: None,
+      owner: Some(main) },
+    LspNode.NBind(_, name) => LspTarget { kind: "local", name: name, file: mdisp, span: node_name_span(a, node), decl: None,
+      owner: Some(main) },
+    LspNode.NMethod(sp, method, _) => {
+      let res = match main.checker {
+        Some(c) => c.resolutions.get(span_key(mdisp, sp)),
+        None => None,
+      }
+      let kind = res.map(fn(r) => r.kind).unwrap_or("")
+      let owner = res.map(fn(r) => r.owner).unwrap_or("")
+      if kind == "ufcs" {
+        let sig = match main.checker {
+          Some(c) => c.calls.get(span_key(mdisp, sp)).map(fn(ci) => ci.sig),
+          None => None,
+        }
+        match sig {
+          Some(s) => {
+            match s.fdecl {
+              Some(f) => {
+                let m = module_named(a, s.mod_name)
+                return LspTarget { kind: "method", name: method, file: m.map(fn(x) => x.display).unwrap_or(""), span: Some(
+                  f.name_span), decl: Some(Decl.Fn(decl: f)), owner: m }
+              },
+              None => {},
+            }
+          },
+          None => {},
+        }
+      }
+      if kind == "trait" {
+        let m = a.ld.uni.traits.get(owner).map(fn(info) => module_named(a, info.mod_name)).unwrap_or(None)
+        let decls = match m {
+          Some(x) => match x.checker {
+            Some(c) => c.decls,
+            None => [],
+          },
+          None => [],
+        }
+        for d in decls {
+          match d {
+            Decl.Trait(_, tname, _, methods, _, _, _) => {
+              if tname == owner {
+                for f in methods {
+                  if f.method_name == Some(method) {
+                    return LspTarget { kind: "method", name: method, file: m.map(fn(x) => x.display).unwrap_or(""),
+                      span: Some(f.name_span), decl: Some(Decl.Fn(decl: f)), owner: m }
+                  }
+                }
+              }
+            },
+            Decl.Fn(f) => {
+              if f.owner_kind == Some("default") and f.trait_name == Some(owner) and f.method_name == Some(method) {
+                return LspTarget { kind: "method", name: method, file: m.map(fn(x) => x.display).unwrap_or(""), span: Some(
+                  f.name_span), decl: Some(d), owner: m }
+              }
+            },
+            _ => {},
+          }
+        }
+      }
+      if kind == "variant" {
+        match variant_target(a: a, dm: type_decl(a, owner), vname: method) {
+          Some(t) => {
+            return t
+          },
+          None => {},
+        }
+      }
+      if kind == "field_fn" {
+        return LspTarget { kind: "field", name: method, file: "", span: None, decl: None, owner: None }
+      }
+      return LspTarget { kind: "builtin_method", name: method, file: "", span: None, decl: None, owner: None }
+    },
+    LspNode.NField(_, o, name, _) => {
+      match o {
+        Expr.Name(_, oname) => {
+          if a.ld.uni.enums.has(oname) {
+            match variant_target(a: a, dm: type_decl(a, oname), vname: name) {
+              Some(t) => {
+                return t
+              },
+              None => {},
+            }
+          }
+        },
+        _ => {},
+      }
+      let h = type_at(main, ast_span(o)).map(fn(t) => head(t)).unwrap_or(None)
+      match h {
+        Some(hn) => {
+          if a.ld.uni.records.has(hn) {
+            let dm = type_decl(a, hn)
+            match dm {
+              Some(p) => {
+                match p.first {
+                  Decl.TypeD(_, _, _, fields, _, _) => {
+                    for f in fields {
+                      if f.name == name {
+                        return target_of(kind: "field", name: name, span: find_word_span(lines: lines_of(a,
+                          p.second.display), span: f.span, word: f.name), dm: dm)
+                      }
+                    }
+                  },
+                  _ => {},
+                }
+              },
+              None => {},
+            }
+          }
+        },
+        None => {},
+      }
+      return LspTarget { kind: "field", name: name, file: "", span: None, decl: None, owner: None }
+    },
+    LspNode.NTypeName(_, name) => type_target(a, name),
+    LspNode.NRecord(_, name) => type_target(a, name),
+    LspNode.NTypeDecl(_, name) => type_target(a, name),
+    LspNode.NTrait(name, _) => type_target(a, name),
+    LspNode.NVariantPat(_, variant, _, enum_name) => variant_target(a: a, dm: type_decl(a, enum_name), vname: variant)
+      .unwrap_or(no_target()),
+    LspNode.NFn(f) => {
+      var name = f.name
+      if f.owner_kind != None {
+        name = f.method_name.unwrap_or(f.name)
+      }
+      return LspTarget { kind: "fn", name: name, file: mdisp, span: Some(f.name_span), decl: Some(Decl.Fn(decl: f)),
+        owner: Some(main) }
+    },
+    LspNode.NConst(name, nsp) => {
+      var found: Option[Decl] = None
+      for d in main_decls(a) {
+        match d {
+          Decl.Const(_, n, _, _, _, _, _) => {
+            if n == name and found == None {
+              found = Some(d)
+            }
+          },
+          _ => {},
+        }
+      }
+      return LspTarget { kind: "const", name: name, file: mdisp, span: Some(nsp), decl: found, owner: Some(main) }
+    },
+  }
+}
+
+fn ast_span(e: Expr) -> Span {
+  return expr_span(e)
+}
+
+fn type_target(a: LspAnalysis, name: Str) -> LspTarget {
+  let dm = type_decl(a, name)
+  var kind = "type"
+  if is_trait_decl(dm) {
+    kind = "trait"
+  }
+  return target_of(kind: kind, name: name, span: decl_def_span(a, dm), dm: dm)
+}
+
+// ---- the server --------------------------------------------------------------------------------------------------
+
+type LspServer { lib: Str, docs: Map[Str, Str], analyses: Map[Str, LspAnalysis], good: Map[Str, LspAnalysis], running: Bool,
+  shutdown: Bool, log: Str }
+
+fn send(msg: List[Pair[Str, J]]) uses io {
+  let data = spaced(J.JObj(msg.push(kv("jsonrpc", js("2.0")))))
+  print_raw("Content-Length: {data.to_bytes().len()}\r\n\r\n" + data)
+}
+
+fn notify(method: Str, params: J) uses io {
+  send([kv("method", js(method)), kv("params", params)])
+}
+
+/// The next message, or None at the end of the input.
+fn read_message() -> Option[Json] uses io {
+  var length = 0
+  var reading = true
+  while reading {
+    match read_line() {
+      None => {
+        return None
+      },
+      Some(raw) => {
+        let line = raw.trim()
+        if line == "" {
+          reading = false
+        } else {
+          let parts = line.split(":")
+          if parts.get_or(0, "").trim().lower() == "content-length" {
+            length = parts.drop(1).join(":").trim().to_int().unwrap_or(0)
+          }
+        }
+      },
+    }
+  }
+  let body = read_exact(length).unwrap_or("")
+  return parse_json(body).ok()
+}
+
+fn analyse(s0: LspServer, uri: Str) -> Pair[LspServer, Option[LspAnalysis]] uses io, fs {
+  var s = s0
+  let text = match s.docs.get(uri) {
+    Some(t) => t,
+    None => {
+      return Pair { first: s, second: None }
+    },
+  }
+  let path = uri_to_path(uri)
+  var overlay: Map[Str, Str] = Map {}
+  for e in s.docs.entries() {
+    if e.key != uri {
+      overlay = overlay.set(uri_to_path(e.key), e.value)
+    }
+  }
+  let a = analyse_text(path: path, text: text, overlay: overlay, lib: s.lib)
+  s = s with { analyses: s.analyses.set(uri, a) }
+  if a.ok {
+    s = s with { good: s.good.set(uri, a) }
+  }
+  publish(uri, a)
+  return Pair { first: s, second: Some(a) }
+}
+
+fn reanalyse_all(s0: LspServer, first: Str) -> LspServer uses io, fs {
+  var s = analyse(s0, first).first
+  for uri in s.docs.keys() {
+    if uri != first {
+      s = analyse(s, uri).first
+    }
+  }
+  return s
+}
+
+fn sev(severity: Str) -> Int {
+  return match severity {
+    "error" => 1,
+    "warning" => 2,
+    _ => 3,
+  }
+}
+
+fn publish(uri: Str, a: LspAnalysis) uses io, fs {
+  let display = a.path.split("/").last().unwrap_or(a.path)
+  var out: List[J] = []
+  for d in user_diags(a.ld, display) {
+    if d.file == display {
+      var msg = d.message
+      match d.hint {
+        Some(h) => {
+          if h != "" {
+            msg = msg + "\nhint: " + h
+          }
+        },
+        None => {},
+      }
+      for n in d.notes {
+        msg = msg + "\nnote: " + n
+      }
+      var diag = [kv("range", to_range(a.lines, d.span)), kv("severity", ji(sev(d.severity))), kv("code", js(d.code)),
+        kv("source", js("klar")), kv("message", js(msg))]
+      match d.fix {
+        Some(f) => {
+          var edits: List[J] = []
+          for e in f.edits {
+            var tfile = e.file
+            if tfile == "" {
+              tfile = d.file
+            }
+            edits = edits.push(J.JObj([kv("uri", js(path_to_uri(path_of(a, tfile)))), kv("range", to_range(lines_of(a,
+              tfile), e.span)), kv("newText", js(e.text))]))
+          }
+          var title = d.hint.unwrap_or("")
+          if title == "" {
+            title = d.message
+          }
+          if d.code == "E0606" {
+            title = "make it public (`pub`)"
+          }
+          diag = diag.push(kv("data", J.JObj([kv("edits", J.JArr(edits)), kv("title", js(title)), kv("safe", J.JBool(
+            f.safe))])))
+        },
+        None => {},
+      }
+      out = out.push(J.JObj(diag))
+    }
+  }
+  notify("textDocument/publishDiagnostics", J.JObj([kv("uri", js(uri)), kv("diagnostics", J.JArr(out))]))
+}
+
+fn current(s0: LspServer, params: Json) -> Pair[LspServer, Option[LspAnalysis]] uses io, fs {
+  let uri = text_of(get(get(params, "textDocument"), "uri"))
+  return match s0.analyses.get(uri) {
+    Some(a) => Pair { first: s0, second: Some(a) },
+    None => match s0.docs.has(uri) {
+      true => analyse(s0, uri),
+      false => Pair { first: s0, second: None },
+    },
+  }
+}
+
+// ---- hover ---------------------------------------------------------------------------------------------------
+
+fn public_of(d: Decl) -> Bool {
+  return match d {
+    Decl.Fn(f) => f.public,
+    Decl.TypeD(_, _, _, _, _, p) => p,
+    Decl.Alias(_, _, _, _, _, p) => p,
+    Decl.Const(_, _, _, _, _, _, p) => p,
+    Decl.EnumD(_, _, _, _, _, p) => p,
+    Decl.Trait(_, _, _, _, _, _, p) => p,
+    _ => false,
+  }
+}
+
+fn doc_of(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(f) => f.doc.unwrap_or(""),
+    Decl.TypeD(_, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.Alias(_, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.Const(_, _, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.EnumD(_, _, _, _, doc, _) => doc.unwrap_or(""),
+    Decl.Trait(_, _, _, _, _, doc, _) => doc.unwrap_or(""),
+    _ => "",
+  }
+}
+
+/// The static type recorded for a node (expressions, `let` and pattern bindings).
+fn node_type(a: LspAnalysis, n: LspNode) -> Option[Type] {
+  return match n {
+    LspNode.NName(sp, _) => type_at(a.main, sp),
+    LspNode.NMethod(sp, _, _) => type_at(a.main, sp),
+    LspNode.NField(sp, _, _, _) => type_at(a.main, sp),
+    LspNode.NRecord(sp, _) => type_at(a.main, sp),
+    LspNode.NLet(_, nsp, _) => bind_type(a.main, nsp),
+    LspNode.NBind(sp, _) => bind_type(a.main, sp),
+    _ => None,
+  }
+}
+
+fn builtin_sig(name: Str) -> Option[Str] {
+  for g in global_sigs() {
+    if sig_name(g) == name {
+      return Some(g)
+    }
+  }
+  return None
+}
+
+fn sig_name(sig: Str) -> Str {
+  var rest = sig.trim_start()
+  if rest.starts_with("fn") {
+    rest = rest.slice(2, rest.len()).trim_start()
+  }
+  var out = ""
+  for c in rest.chars() {
+    if is_alnum_char(c) or c == "_" {
+      out = out + c
+    } else {
+      return out
+    }
+  }
+  return out
+}
+
+fn method_sig(owner: Str, name: Str) -> Option[Str] {
+  var found: Option[Str] = None
+  for p in method_sigs() {
+    if p.first == owner and sig_name(p.second) == name and found == None {
+      found = Some(p.second)
+    }
+  }
+  return found
+}
+
+fn describe(a: LspAnalysis, node: LspNode, top: Decl) -> Option[Str] {
+  let t = find_target(a: a, node: node, top: top)
+  var code: Option[Str] = None
+  var doc = match t.decl {
+    Some(d) => doc_of(d),
+    None => "",
+  }
+  if t.kind == "local" {
+    var ty = node_type(a, node)
+    if ty == None {
+      for n in walk_decl(top) {
+        match n {
+          LspNode.NName(sp, nm) => {
+            if nm == t.name and ty == None {
+              ty = type_at(a.main, sp)
+            }
+          },
+          _ => {},
+        }
+      }
+    }
+    code = Some(match ty {
+      Some(x) => t.name + ": " + tshow(x),
+      None => t.name,
+    })
+  } else if t.decl != None and t.owner != None {
+    let d = t.decl.unwrap_or(Decl.Use(span: Span { line: 0, col: 0, end_line: 0, end_col: 0 }, path: [], items: [],
+      item_spans: []))
+    let m = t.owner.unwrap_or(a.main)
+    let lines = lines_of(a, m.display)
+    match d {
+      Decl.Trait(_, tname, _, methods, _, _, _) => {
+        let ms = methods.map(fn(f) => "  " + sig_text(lines: lines, d: Decl.Fn(decl: f), newtype: false)).join("\n")
+        code = Some("trait " + tname + " \{\n" + ms + "\n\}")
+      },
+      _ => {
+        var c = sig_text(lines: lines, d: d, newtype: false)
+        if public_of(d) {
+          c = "pub " + c
+        }
+        code = Some(c)
+      },
+    }
+    if t.kind == "variant" {
+      let ename = named_decl_name(d)
+      code = Some(ename + "." + t.name + "  // variant of enum " + ename)
+    }
+    var where_ = ""
+    if m.display != a.main.display {
+      where_ = m.display
+    }
+    match d {
+      Decl.Fn(f) => {
+        if f.owner_kind == Some("impl") {
+          where_ = "impl " + f.trait_name.unwrap_or("") + " for " + f.owner.unwrap_or("")
+          if m.display != a.main.display {
+            where_ = where_ + " — " + m.display
+          }
+        } else if f.owner_kind == Some("default") {
+          where_ = "default method of trait " + f.trait_name.unwrap_or("")
+        } else if f.trait_name != None and f.owner_kind == None {
+          where_ = "trait " + f.trait_name.unwrap_or("")
+        }
+      },
+      _ => {},
+    }
+    if where_ != "" {
+      if doc != "" {
+        doc = doc + "\n\n"
+      }
+      doc = doc + "*" + where_ + "*"
+    }
+  } else if t.kind == "builtin" and builtin_sig(t.name) != None {
+    code = builtin_sig(t.name)
+    doc = "built-in function"
+  } else if t.kind == "builtin_method" {
+    match node {
+      LspNode.NMethod(sp, _, _) => {
+        let res = match a.main.checker {
+          Some(c) => c.resolutions.get(span_key(a.main.display, sp)),
+          None => None,
+        }
+        match res {
+          Some(r) => {
+            if r.kind == "builtin" {
+              code = method_sig(owner: r.owner, name: r.name)
+              doc = "built-in method of `" + r.owner + "`"
+            } else if r.kind == "to_str" {
+              code = Some("fn to_str(self) -> Str")
+            }
+          },
+          None => {},
+        }
+      },
+      _ => {},
+    }
+  } else if t.kind == "field" {
+    code = Some(match node_type(a, node) {
+      Some(x) => t.name + ": " + tshow(x),
+      None => t.name,
+    })
+  }
+  if code == None {
+    match node_type(a, node) {
+      Some(x) => {
+        code = Some(tshow(x))
+      },
+      None => {
+        return None
+      },
+    }
+  }
+  var out = "```klar\n" + code.unwrap_or("") + "\n```"
+  if doc != "" {
+    out = out + "\n\n" + doc
+  }
+  return Some(out)
+}
+
+fn on_hover(s0: LspServer, params: Json) -> Pair[LspServer, J] uses io, fs {
+  let c = current(s0, params)
+  let a = match c.second {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JNull }
+    },
+  }
+  if not a.ok {
+    return Pair { first: c.first, second: J.JNull }
+  }
+  let pos = from_pos(a.lines, get(params, "position"))
+  return Pair { first: c.first, second: match node_at(a: a, line: pos.first, col: pos.second) {
+    None => J.JNull,
+    Some(at) => match describe(a: a, node: at.node, top: at.top) {
+      None => J.JNull,
+      Some(text) => J.JObj([kv("contents", J.JObj([kv("kind", js("markdown")), kv("value", js(text))])), kv("range",
+        to_range(a.lines, at.span))]),
+    },
+  } }
+}
+
+// ---- definition, references, rename -------------------------------------------------------------------------
+
+fn on_definition(s0: LspServer, params: Json) -> Pair[LspServer, J] uses io, fs {
+  let c = current(s0, params)
+  let uri = text_of(get(get(params, "textDocument"), "uri"))
+  let a = match c.second {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JNull }
+    },
+  }
+  if not a.ok {
+    return Pair { first: c.first, second: J.JNull }
+  }
+  let pos = from_pos(a.lines, get(params, "position"))
+  let at = match node_at(a: a, line: pos.first, col: pos.second) {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JNull }
+    },
+  }
+  let t = find_target(a: a, node: at.node, top: at.top)
+  return Pair { first: c.first, second: match t.span {
+    None => J.JNull,
+    Some(sp) => match t.kind == "local" {
+      true => J.JObj([kv("uri", js(uri)), kv("range", to_range(a.lines, sp))]),
+      false => location(a: a, file: t.file, sp: sp),
+    },
+  } }
+}
+
+type LspOcc { kind: Str, name: Str, places: List[Pair[Str, Span]] }
+
+fn occurrences(a: LspAnalysis, node: LspNode, top: Decl) -> LspOcc {
+  let t = find_target(a: a, node: node, top: top)
+  if t.kind == "" or t.kind == "builtin" or t.kind == "builtin_method" {
+    return LspOcc { kind: t.kind, name: t.name, places: [] }
+  }
+  let all = name_occurrences(user_modules(a.ld), t.name)
+  if t.kind == "local" {
+    let display = a.main.display
+    let ts = decl_span_of(top)
+    return LspOcc { kind: t.kind, name: t.name, places: all.filter(fn(o) => o.file == display and ts.line <= o.span.line and
+        o.span.line <= ts.end_line).map(fn(o) => Pair { first: o.file, second: o.span }) }
+  }
+  return LspOcc { kind: t.kind, name: t.name, places: all.map(fn(o) => Pair { first: o.file, second: o.span }) }
+}
+
+fn on_references(s0: LspServer, params: Json) -> Pair[LspServer, J] uses io, fs {
+  let c = current(s0, params)
+  let a = match c.second {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JArr([]) }
+    },
+  }
+  if not a.ok {
+    return Pair { first: c.first, second: J.JArr([]) }
+  }
+  let pos = from_pos(a.lines, get(params, "position"))
+  return Pair { first: c.first, second: match node_at(a: a, line: pos.first, col: pos.second) {
+    None => J.JArr([]),
+    Some(at) => J.JArr(occurrences(a: a, node: at.node, top: at.top).places.map(fn(p) => location(a: a, file: p.first,
+      sp: p.second)).filter(fn(l) => l != J.JNull)),
+  } }
+}
+
+fn on_prepare_rename(s0: LspServer, params: Json) -> Pair[LspServer, J] uses io, fs {
+  let c = current(s0, params)
+  let a = match c.second {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JNull }
+    },
+  }
+  if not a.ok {
+    return Pair { first: c.first, second: J.JNull }
+  }
+  let pos = from_pos(a.lines, get(params, "position"))
+  let at = match node_at(a: a, line: pos.first, col: pos.second) {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JNull }
+    },
+  }
+  let t = find_target(a: a, node: at.node, top: at.top)
+  if t.kind == "" or t.kind == "builtin" or t.kind == "builtin_method" {
+    return Pair { first: c.first, second: J.JNull }
+  }
+  let word = find_word_span(lines: a.lines, span: at.span, word: t.name).unwrap_or(at.span)
+  return Pair { first: c.first, second: J.JObj([kv("range", to_range(a.lines, word)), kv("placeholder", js(t.name))]) }
+}
+
+fn is_name(s: Str) -> Bool {
+  let cs = s.chars()
+  if cs.is_empty() {
+    return false
+  }
+  let first = cs.get_or(0, "")
+  if not (first == "_" or (is_alpha_char(first) and first.to_bytes().len() == 1)) {
+    return false
+  }
+  return cs.all(fn(c) => c == "_" or (is_alnum_char(c) and c.to_bytes().len() == 1))
+}
+
+fn is_upper_start(s: Str) -> Bool {
+  let c = s.slice(0, s.len().min(1))
+  return c != "" and c == c.upper() and c != c.lower()
+}
+
+fn on_rename(s0: LspServer, params: Json) -> Pair[LspServer, Result[J, Str]] uses io, fs {
+  let c = current(s0, params)
+  let a = match c.second {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: Err("fix the syntax errors first") }
+    },
+  }
+  if not a.ok {
+    return Pair { first: c.first, second: Err("fix the syntax errors first") }
+  }
+  let new = text_of(get(params, "newName"))
+  let pos = from_pos(a.lines, get(params, "position"))
+  let occ = match node_at(a: a, line: pos.first, col: pos.second) {
+    Some(at) => occurrences(a: a, node: at.node, top: at.top),
+    None => LspOcc { kind: "", name: "", places: [] },
+  }
+  if occ.places.is_empty() {
+    return Pair { first: c.first, second: Err("nothing to rename here") }
+  }
+  if not is_name(new) {
+    return Pair { first: c.first, second: Err("`{new}` is not a valid name") }
+  }
+  if is_upper_start(occ.name) != is_upper_start(new) {
+    return Pair { first: c.first, second: Err("keep the case convention: types and variants PascalCase, values " +
+        "snake_case") }
+  }
+  if not name_occurrences(user_modules(a.ld), new).is_empty() {
+    return Pair { first: c.first, second: Err("`{new}` is already used in the program (Klar forbids shadowing)") }
+  }
+  var changes: List[Pair[Str, List[J]]] = []
+  for p in occ.places {
+    let lines = lines_of(a, p.first)
+    let sp = p.second
+    var word: Option[Span] = Some(sp)
+    if not (sp.end_col - sp.col == occ.name.len() and sp.line == sp.end_line) {
+      word = find_word_span(lines: lines, span: sp, word: occ.name)
+    }
+    match word {
+      Some(w) => {
+        let u = path_to_uri(path_of(a, p.first))
+        let edit = J.JObj([kv("range", to_range(lines, w)), kv("newText", js(new))])
+        var found = false
+        var updated: List[Pair[Str, List[J]]] = []
+        for ch in changes {
+          if ch.first == u {
+            updated = updated.push(Pair { first: u, second: ch.second.push(edit) })
+            found = true
+          } else {
+            updated = updated.push(ch)
+          }
+        }
+        if not found {
+          updated = updated.push(Pair { first: u, second: [edit] })
+        }
+        changes = updated
+      },
+      None => {},
+    }
+  }
+  return Pair { first: c.first, second: Ok(J.JObj([kv("changes", J.JObj(changes.map(fn(ch) => kv(ch.first, J.JArr(
+    ch.second)))))])) }
+}
+
+// ---- symbols, formatting, code actions -----------------------------------------------------------------------
+
+fn decl_kind(d: Decl) -> Str {
+  return match d {
+    Decl.Fn(_) => "fn",
+    Decl.TypeD(_, _, _, _, _, _) => "type",
+    Decl.Alias(_, _, _, _, _, _) => "alias",
+    Decl.Const(_, _, _, _, _, _, _) => "const",
+    Decl.Use(_, _, _, _) => "use",
+    Decl.Property(_, _, _, _) => "property",
+    Decl.EnumD(_, _, _, _, _, _) => "enum",
+    Decl.Test(_, _, _) => "test",
+    Decl.Trait(_, _, _, _, _, _, _) => "trait",
+    Decl.Impl(_, _, _, _, _, _, _, _, _) => "impl",
+  }
+}
+
+fn decl_sel(a: LspAnalysis, d: Decl) -> Option[Span] {
+  return match d {
+    Decl.Fn(f) => Some(f.name_span),
+    Decl.Const(_, _, nsp, _, _, _, _) => Some(nsp),
+    Decl.Trait(_, _, nsp, _, _, _, _) => Some(nsp),
+    Decl.TypeD(sp, name, _, _, _, _) => find_word_span(lines: a.lines, span: sp, word: name),
+    Decl.EnumD(sp, name, _, _, _, _) => find_word_span(lines: a.lines, span: sp, word: name),
+    Decl.Alias(sp, name, _, _, _, _) => find_word_span(lines: a.lines, span: sp, word: name),
+    _ => None,
+  }
+}
+
+fn on_document_symbol(s0: LspServer, params: Json) -> Pair[LspServer, J] uses io, fs {
+  let c = current(s0, params)
+  let a = match c.second {
+    Some(x) => x,
+    None => {
+      return Pair { first: c.first, second: J.JArr([]) }
+    },
+  }
+  if not a.ok {
+    return Pair { first: c.first, second: J.JArr([]) }
+  }
+  var out: List[J] = []
+  let decls = main_decls(a)
+  var i = 0
+  for d in decls {
+    let kind = decl_kind(d)
+    var skip = kind == "use"
+    var name = named_decl_name(d)
+    var methods: List[FnDecl] = []
+    match d {
+      Decl.Test(_, n, _) => {
+        skip = n.starts_with("doc: ")
+        name = n
+      },
+      Decl.Property(_, n, _, _) => {
+        name = n
+      },
+      Decl.Fn(f) => {
+        skip = f.owner_kind != None or f.constructs != None
+      },
+      Decl.Impl(_, tr, _, target, ms, _, _, _, _) => {
+        let tn = match target {
+          TypeExpr.Named(_, n, _) => n,
+          _ => "?",
+        }
+        name = "impl " + tr + " for " + tn
+        for x in decls.slice(i + 1, (i + 1 + ms.len()).min(decls.len())) {
+          match x {
+            Decl.Fn(f) => {
+              methods = methods.push(f)
+            },
+            _ => {},
+          }
+        }
+      },
+      Decl.Trait(_, tname, _, ms, _, _, _) => {
+        methods = ms
+        for x in decls {
+          match x {
+            Decl.Fn(f) => {
+              if f.owner_kind == Some("default") and f.trait_name == Some(tname) {
+                methods = methods.push(f)
+              }
+            },
+            _ => {},
+          }
+        }
+      },
+      _ => {},
+    }
+    if not skip {
+      let span = decl_span_of(d)
+      let sel = decl_sel(a, d).unwrap_or(span)
+      var sym = [kv("name", js(name)), kv("kind", ji(sk_kind(kind))), kv("range", to_range(a.lines, span)), kv(
+        "selectionRange", to_range(a.lines, sel))]
+      if kind == "fn" {
+        sym = sym.push(kv("detail", js(sig_text(lines: a.lines, d: d, newtype: false))))
+      }
+      if not methods.is_empty() {
+        sym = sym.push(kv("children", J.JArr(methods.map(fn(f) => J.JObj([kv("name", js(f.method_name.unwrap_or(f.name))),
+          kv("kind", ji(sk_kind("method"))), kv("detail", js(sig_text(lines: a.lines, d: Decl.Fn(decl: f), newtype:
+            false))), kv("range", to_range(a.lines, f.span)), kv("selectionRange", to_range(a.lines, f.name_span))])))))
+      }
+      out = out.push(J.JObj(sym))
+    }
+    i = i + 1
+  }
+  return Pair { first: c.first, second: J.JArr(out) }
+}
+
+fn on_formatting(s: LspServer, params: Json) -> J uses io {
+  let uri = text_of(get(get(params, "textDocument"), "uri"))
+  let text = match s.docs.get(uri) {
+    Some(t) => t,
+    None => {
+      return J.JNull
+    },
+  }
+  return match format_checked(text) {
+    Err(e) => {
+      notify("window/showMessage", J.JObj([kv("type", ji(2)), kv("message", js("klar fmt: " + e))]))
+      return J.JNull
+    },
+    Ok(new) => match new == text {
+      true => J.JArr([]),
+      false => J.JArr([J.JObj([kv("range", J.JObj([kv("start", J.JObj([kv("line", ji(0)), kv("character", ji(0))])), kv(
+        "end", J.JObj([kv("line", ji(text.split("\n").len())), kv("character", ji(0))]))])), kv("newText", js(new))])]),
+    },
+  }
+}
+
+fn on_code_action(params: Json) -> J {
+  var out: List[J] = []
+  for diag in items_of(get(get(params, "context"), "diagnostics")) {
+    let data = get(diag, "data")
+    let edits = items_of(get(data, "edits"))
+    if not edits.is_empty() {
+      var changes: List[Pair[Str, List[J]]] = []
+      for e in edits {
+        let u = text_of(get(e, "uri"))
+        let edit = J.JObj([kv("range", to_j(get(e, "range"))), kv("newText", to_j(get(e, "newText")))])
+        var found = false
+        var updated: List[Pair[Str, List[J]]] = []
+        for ch in changes {
+          if ch.first == u {
+            updated = updated.push(Pair { first: u, second: ch.second.push(edit) })
+            found = true
+          } else {
+            updated = updated.push(ch)
+          }
+        }
+        if not found {
+          updated = updated.push(Pair { first: u, second: [edit] })
+        }
+        changes = updated
+      }
+      var title = text_of(get(data, "title"))
+      if title == "" {
+        title = "apply the fix"
+      }
+      if title.starts_with("did you mean ") {
+        title = "replace with " + title.slice(13, title.len())
+      }
+      let safe = match get(data, "safe") {
+        Json.Bool(b) => b,
+        Json.Null => true,
+        _ => true,
+      }
+      out = out.push(J.JObj([kv("title", js("Klar: " + title)), kv("kind", js("quickfix")), kv("diagnostics", J.JArr([to_j(
+        diag)])), kv("isPreferred", J.JBool(safe)), kv("edit", J.JObj([kv("changes", J.JObj(changes.map(fn(ch) => kv(
+          ch.first, J.JArr(ch.second)))))]))]))
+    }
+  }
+  return J.JArr(out)
+}
+
+// ---- completion --------------------------------------------------------------------------------------------------
+
+fn is_ident_char(c: Str) -> Bool {
+  return c == "_" or (c.to_bytes().len() == 1 and is_alnum_char(c))
+}
+
+fn is_ident_start(c: Str) -> Bool {
+  return c == "_" or (c.to_bytes().len() == 1 and is_alpha_char(c))
+}
+
+fn is_space_char(c: Str) -> Bool {
+  return c == " " or c == "\t" or c == "\r" or c == "\n"
+}
+
+/// The receiver before a trailing `.` (`x.`, `x.pa`, `"…".`, `].`, `).`), as Python's
+/// `([A-Za-z_][A-Za-z0-9_]*|\"|\]|\))\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)?$` finds it.
+fn member_receiver(prefix: Str) -> Option[Str] {
+  let cs = prefix.chars()
+  var i = cs.len()
+  // an optional identifier being typed
+  var j = i
+  while j > 0 and is_ident_char(cs.get_or(j - 1, "")) {
+    j = j - 1
+  }
+  if j < i {
+    // it must be an identifier (a letter or `_` first): skip leading digits
+    var k = j
+    while k < i and not is_ident_start(cs.get_or(k, "")) {
+      k = k + 1
+    }
+    if k > j {
+      return None
+    }
+    i = j
+  }
+  while i > 0 and is_space_char(cs.get_or(i - 1, "")) {
+    i = i - 1
+  }
+  if i == 0 or cs.get_or(i - 1, "") != "." {
+    return None
+  }
+  i = i - 1
+  while i > 0 and is_space_char(cs.get_or(i - 1, "")) {
+    i = i - 1
+  }
+  if i == 0 {
+    return None
+  }
+  let c = cs.get_or(i - 1, "")
+  if c == "\"" or c == "]" or c == ")" {
+    return Some(c)
+  }
+  var start = i
+  while start > 0 and is_ident_char(cs.get_or(start - 1, "")) {
+    start = start - 1
+  }
+  while start < i and not is_ident_start(cs.get_or(start, "")) {
+    start = start + 1
+  }
+  if start >= i {
+    return None
+  }
+  return Some(cs.slice(start, i).join(""))
+}
+
+fn completion_item(label: Str, kind: Str, detail: Option[Str]) -> J {
+  var fs = [kv("label", js(label)), kv("kind", ji(ck_kind(kind)))]
+  match detail {
+    Some(d) => {
+      fs = fs.push(kv("detail", js(d)))
+    },
+    None => {},
+  }
+  return J.JObj(fs)
+}
+
+fn receiver_type(a: Option[LspAnalysis], ident: Str) -> Option[Type] {
+  if ident == "\"" {
+    return Some(Type.Con(name: "Str", args: []))
+  }
+  if ident == "]" {
+    return Some(Type.Con(name: "List", args: [Type.Param(name: "T")]))
+  }
+  let an = match a {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  for d in main_decls(an) {
+    for n in walk_decl(d) {
+      match n {
+        LspNode.NName(sp, nm) => {
+          if nm == ident {
+            match type_at(an.main, sp) {
+              Some(t) => {
+                if head(t) != None {
+                  return Some(t)
+                }
+              },
+              None => {},
+            }
+          }
+        },
+        _ => {},
+      }
+    }
+  }
+  for d in main_decls(an) {
+    for n in walk_decl(d) {
+      match n {
+        LspNode.NLet(nm, _, value) => {
+          if nm == ident {
+            match type_at(an.main, ast_span(value)) {
+              Some(t) => {
+                return Some(t)
+              },
+              None => {},
+            }
+          }
+        },
+        _ => {},
+      }
+    }
+  }
+  return None
+}
+
+fn member_items(a: Option[LspAnalysis], ident: Str) -> List[J] {
+  var items: List[J] = []
+  match a {
+    Some(an) => {
+      match an.ld.uni.enums.get(ident) {
+        Some(info) => {
+          for v in info.variants.entries() {
+            var detail = ident + "." + v.key
+            if not v.value.is_empty() {
+              detail = detail + "(" + v.value.map(fn(f) => f.first).join(", ") + ")"
+            }
+            items = items.push(completion_item(label: v.key, kind: "member", detail: Some(detail)))
+          }
+          return items
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  let h = match receiver_type(a, ident) {
+    Some(t) => head(t),
+    None => None,
+  }
+  let hn = match h {
+    Some(x) => x,
+    None => {
+      return items
+    },
+  }
+  var seen: List[Str] = []
+  var adds: List[Pair[Str, J]] = []
+  match a {
+    Some(an) => {
+      match an.ld.uni.records.get(hn) {
+        Some(info) => {
+          for f in info.fields.entries() {
+            adds = adds.push(Pair { first: f.key, second: completion_item(label: f.key, kind: "field", detail: Some(f.key + ": " +
+                tshow(f.value))) })
+          }
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  var builtin: List[Pair[Str, Str]] = []
+  for p in method_sigs() {
+    if p.first == hn and not builtin.any(fn(b) => b.first == sig_name(p.second)) {
+      builtin = builtin.push(Pair { first: sig_name(p.second), second: p.second })
+    }
+  }
+  for b in builtin.sort_by(fn(b) => b.first) {
+    adds = adds.push(Pair { first: b.first, second: completion_item(label: b.first, kind: "method", detail: Some(b.second)) })
+  }
+  match a {
+    Some(an) => {
+      let tm = an.ld.uni.type_methods.get(hn).unwrap_or(Map {})
+      for name in tm.keys().sort() {
+        let e = tm.get(name).unwrap_or(Pair { first: "", second: dummy_sig() })
+        adds = adds.push(Pair { first: name, second: completion_item(label: name, kind: "method", detail: Some(e.first + ": " +
+            e.second.name.split(".").last().unwrap_or(""))) })
+      }
+      let fns = match an.main.checker {
+        Some(c) => c.fns,
+        None => Map {},
+      }
+      for name in fns.keys().sort() {
+        match fns.get(name).unwrap_or(None) {
+          Some(sig) => {
+            let first = sig.params.get(0)
+            match first {
+              Some(p) => {
+                if head(p.second) == Some(hn) {
+                  adds = adds.push(Pair { first: name, second: completion_item(label: name, kind: "function", detail: Some("fn " +
+                      name + "(...)")) })
+                }
+              },
+              None => {},
+            }
+          },
+          None => {},
+        }
+      }
+    },
+    None => {},
+  }
+  adds = adds.push(Pair { first: "to_str", second: completion_item(label: "to_str", kind: "method", detail: Some("fn to_str(self) " +
+      "-> Str")) })
+  for x in adds {
+    if not seen.contains(x.first) {
+      seen = seen.push(x.first)
+      items = items.push(x.second)
+    }
+  }
+  return items
+}
+
+fn dummy_sig() -> Sig {
+  return Sig { name: "", tparams: [], params: [], ret: Type.Any, effects: [], user: false, mod_name: "", bounds: Map {},
+    decl: -1, name_span: Span { line: 0, col: 0, end_line: 0, end_col: 0 }, self_type: None, fdecl: None }
+}
+
+fn decl_line_span(d: Decl) -> Span {
+  return decl_span_of(d)
+}
+
+fn name_items(a: Option[LspAnalysis], line: Int) -> List[J] {
+  var items: List[J] = []
+  var seen: List[Str] = []
+  var adds: List[Pair[Str, J]] = []
+  match a {
+    Some(an) => {
+      for d in main_decls(an) {
+        let sp = decl_line_span(d)
+        if sp.line <= line and line <= sp.end_line {
+          for n in walk_decl(d) {
+            match n {
+              LspNode.NLet(nm, nsp, _) => {
+                if nm != "self" {
+                  adds = adds.push(Pair { first: nm, second: completion_item(label: nm, kind: "variable", detail: bind_type(an.main,
+                    nsp).map(tshow)) })
+                }
+              },
+              LspNode.NParam(_, nm) => {
+                if nm != "self" {
+                  adds = adds.push(Pair { first: nm, second: completion_item(label: nm, kind: "variable", detail: None) })
+                }
+              },
+              LspNode.NBind(bsp, nm) => {
+                if nm != "self" {
+                  adds = adds.push(Pair { first: nm, second: completion_item(label: nm, kind: "variable", detail: bind_type(an.main,
+                    bsp).map(tshow)) })
+                }
+              },
+              LspNode.NFor(nm, _) => {
+                adds = adds.push(Pair { first: nm, second: completion_item(label: nm, kind: "variable", detail: None) })
+              },
+              _ => {},
+            }
+          }
+        }
+      }
+      match an.main.checker {
+        Some(c) => {
+          for name in c.fns.keys().sort() {
+            match c.fns.get(name).unwrap_or(None) {
+              Some(sig) => {
+                let ps = sig.params.map(fn(p) => p.first + ": " + tshow(p.second)).join(", ")
+                adds = adds.push(Pair { first: name, second: completion_item(label: name, kind: "function", detail: Some("fn " +
+                    name + "(" + ps + ") -> " + tshow(sig.ret))) })
+              },
+              None => {},
+            }
+          }
+          for name in c.consts.keys().sort() {
+            adds = adds.push(Pair { first: name, second: completion_item(label: name, kind: "constant", detail: c.consts.get(name)
+                .unwrap_or(None).map(tshow)) })
+          }
+          for name in c.visible.keys().sort() {
+            let u = an.ld.uni
+            var kind = "struct"
+            if u.traits.has(name) {
+              kind = "interface"
+            } else if u.enums.has(name) {
+              kind = "enum"
+            }
+            adds = adds.push(Pair { first: name, second: completion_item(label: name, kind: kind, detail: None) })
+          }
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  var globals: List[Pair[Str, Str]] = []
+  for g in global_sigs() {
+    if not globals.any(fn(x) => x.first == sig_name(g)) {
+      globals = globals.push(Pair { first: sig_name(g), second: g })
+    }
+  }
+  for g in globals.sort_by(fn(x) => x.first) {
+    adds = adds.push(Pair { first: g.first, second: completion_item(label: g.first, kind: "function", detail: Some(g.second)) })
+  }
+  for t in ["Int", "Float", "Bool", "Str", "Unit", "List", "Map", "Option", "Result"] {
+    adds = adds.push(Pair { first: t, second: completion_item(label: t, kind: "class", detail: None) })
+  }
+  for kw in KEYWORDS {
+    adds = adds.push(Pair { first: kw, second: completion_item(label: kw, kind: "keyword", detail: None) })
+  }
+  for x in adds {
+    if not seen.contains(x.first) {
+      seen = seen.push(x.first)
+      items = items.push(x.second)
+    }
+  }
+  for sn in snippets() {
+    items = items.push(J.JObj([kv("label", js(sn.first)), kv("kind", ji(ck_kind("snippet"))), kv("insertText", js(
+      sn.second)), kv("insertTextFormat", ji(2)), kv("detail", js("snippet"))]))
+  }
+  return items
+}
+
+fn on_completion(s: LspServer, params: Json) -> J {
+  let uri = text_of(get(get(params, "textDocument"), "uri"))
+  let text = s.docs.get(uri).unwrap_or("")
+  let lines = text.split("\n")
+  let pos = from_pos(lines, get(params, "position"))
+  var prefix = ""
+  if pos.first - 1 < lines.len() {
+    prefix = lines.get_or(pos.first - 1, "").chars().take(pos.second - 1).join("")
+  }
+  let a = s.good.get(uri)
+  let items = match member_receiver(prefix) {
+    Some(ident) => member_items(a, ident),
+    None => name_items(a, pos.first),
+  }
+  return J.JObj([kv("isIncomplete", J.JBool(false)), kv("items", J.JArr(items))])
+}
+
+// ---- signature help ----------------------------------------------------------------------------------------------
+
+/// Character offset of a 1-based (line, col).
+fn offset(cs: List[Str], line: Int, col: Int) -> Int {
+  var pos = 0
+  var l = 1
+  while l < line {
+    var k = pos
+    while k < cs.len() and cs.get_or(k, "") != "\n" {
+      k = k + 1
+    }
+    if k >= cs.len() {
+      return cs.len()
+    }
+    pos = k + 1
+    l = l + 1
+  }
+  return (pos + col - 1).min(cs.len())
+}
+
+fn split_params(text: Str) -> List[Str] {
+  var out: List[Str] = []
+  var depth = 0
+  var cur = ""
+  for c in text.chars() {
+    if c == "(" or c == "[" {
+      depth = depth + 1
+    } else if c == ")" or c == "]" {
+      depth = depth - 1
+    }
+    if c == "," and depth == 0 {
+      out = out.push(cur.trim())
+      cur = ""
+    } else {
+      cur = cur + c
+    }
+  }
+  if cur.trim() != "" {
+    out = out.push(cur.trim())
+  }
+  return out
+}
+
+/// A signature from its text (`fn name[T](params) -> R`), as `name(params) -> R` with its parameters.
+fn from_text(sig: Str, name: Str, skip_self: Bool) -> Option[Pair[Str, List[Str]]] {
+  let cs = sig.chars()
+  if not sig.starts_with("fn") {
+    return None
+  }
+  var i = 2
+  var spaces = 0
+  while i < cs.len() and is_space_char(cs.get_or(i, "")) {
+    i = i + 1
+    spaces = spaces + 1
+  }
+  if spaces == 0 or i >= cs.len() or not (is_ident_start(cs.get_or(i, "")) or is_alpha_char(cs.get_or(i, ""))) {
+    return None
+  }
+  i = i + 1
+  while i < cs.len() and (is_ident_char(cs.get_or(i, "")) or cs.get_or(i, "") == "." or is_alnum_char(cs.get_or(i, ""))) {
+    i = i + 1
+  }
+  if cs.get_or(i, "") == "[" {
+    var k = i + 1
+    while k < cs.len() and cs.get_or(k, "") != "]" {
+      k = k + 1
+    }
+    if k >= cs.len() {
+      return None
+    }
+    i = k + 1
+  }
+  if cs.get_or(i, "") != "(" {
+    return None
+  }
+  // the last `)` closes the parameters (greedy, like the regular expression)
+  var close = -1
+  var k = cs.len() - 1
+  while k > i and close < 0 {
+    if cs.get_or(k, "") == ")" {
+      close = k
+    }
+    k = k - 1
+  }
+  if close < 0 {
+    return None
+  }
+  var params = split_params(cs.slice(i + 1, close).join(""))
+  if skip_self and not params.is_empty() and (params.get_or(0, "").starts_with("self:") or params.get_or(0, "") == "self") {
+    params = params.drop(1)
+  }
+  let label = name + "(" + params.join(", ") + ")" + cs.drop(close + 1).join("")
+  return Some(Pair { first: label, second: params })
+}
+
+fn sig_json(p: Pair[Str, List[Str]], doc: Str) -> J {
+  var fs = [kv("label", js(p.first)), kv("parameters", J.JArr(p.second.map(fn(x) => J.JObj([kv("label", js(x))]))))]
+  if doc != "" {
+    fs = fs.push(kv("documentation", js(doc)))
+  }
+  return J.JObj(fs)
+}
+
+fn signatures(a: Option[LspAnalysis], name: Str, is_method: Bool) -> List[J] {
+  var out: List[J] = []
+  var labels: List[Str] = []
+  match a {
+    Some(an) => {
+      let sig = match an.main.checker {
+        Some(c) => c.fns.get(name).unwrap_or(None),
+        None => None,
+      }
+      match sig {
+        Some(s) => {
+          match s.fdecl {
+            Some(f) => {
+              let lines = match module_named(an, s.mod_name) {
+                Some(m) => lines_of(an, m.display),
+                None => an.lines,
+              }
+              match from_text(sig: sig_text(lines: lines, d: Decl.Fn(decl: f), newtype: false), name: name, skip_self:
+                is_method) {
+                  Some(p) => {
+                    out = out.push(sig_json(p, f.doc.unwrap_or("")))
+                    labels = labels.push(p.first)
+                  },
+                  None => {},
+                }
+            },
+            None => {},
+          }
+        },
+        None => {},
+      }
+      if is_method {
+        for methods in an.ld.uni.type_methods.values() {
+          match methods.get(name) {
+            Some(e) => {
+              let msig = e.second
+              match module_named(an, msig.mod_name) {
+                Some(mm) => {
+                  match msig.fdecl {
+                    Some(f) => {
+                      match from_text(sig: sig_text(lines: lines_of(an, mm.display), d: Decl.Fn(decl: f), newtype:
+                        false), name: name, skip_self: true) {
+                          Some(p) => {
+                            if not labels.contains(p.first) {
+                              out = out.push(sig_json(p, ""))
+                              labels = labels.push(p.first)
+                            }
+                          },
+                          None => {},
+                        }
+                    },
+                    None => {},
+                  }
+                },
+                None => {},
+              }
+            },
+            None => {},
+          }
+        }
+      }
+    },
+    None => {},
+  }
+  if is_method {
+    var owners: List[Str] = []
+    for p in method_sigs() {
+      if not owners.contains(p.first) {
+        owners = owners.push(p.first)
+      }
+    }
+    for owner in owners {
+      match method_sig(owner: owner, name: name) {
+        Some(sg) => {
+          match from_text(sig: sg, name: name, skip_self: true) {
+            Some(p) => {
+              if not labels.contains(p.first) {
+                let labelled = Pair { first: owner + "." + p.first, second: p.second }
+                out = out.push(sig_json(labelled, ""))
+                labels = labels.push(labelled.first)
+              }
+            },
+            None => {},
+          }
+        },
+        None => {},
+      }
+    }
+  } else {
+    match builtin_sig(name) {
+      Some(sg) => {
+        match from_text(sig: sg, name: name, skip_self: false) {
+          Some(p) => {
+            out = out.push(sig_json(p, ""))
+          },
+          None => {},
+        }
+      },
+      None => {},
+    }
+  }
+  return out.take(6)
+}
+
+fn on_signature_help(s: LspServer, params: Json) -> J {
+  let uri = text_of(get(get(params, "textDocument"), "uri"))
+  let text = s.docs.get(uri).unwrap_or("")
+  let lines = text.split("\n")
+  let pos = from_pos(lines, get(params, "position"))
+  let all = text.chars()
+  let upto = all.take(offset(cs: all, line: pos.first, col: pos.second))
+  var stack: List[List[Int]] = []
+  var kinds: List[Str] = []
+  var in_str = false
+  var k = 0
+  while k < upto.len() {
+    let c = upto.get_or(k, "")
+    var step = 1
+    if in_str {
+      if c == "\\" {
+        step = 2
+      } else if c == "\"" {
+        in_str = false
+      }
+    } else if c == "\"" {
+      in_str = true
+    } else if c == "/" and upto.get_or(k + 1, "") == "/" {
+      var nl = k
+      while nl < upto.len() and upto.get_or(nl, "") != "\n" {
+        nl = nl + 1
+      }
+      step = nl - k
+      if nl >= upto.len() {
+        step = upto.len() - k
+      }
+      if step == 0 {
+        step = 1
+      }
+    } else if c == "(" or c == "[" or c == "\{" {
+      stack = stack.push([k, 0])
+      kinds = kinds.push(c)
+    } else if c == ")" or c == "]" or c == "\}" {
+      if not stack.is_empty() {
+        stack = stack.take(stack.len() - 1)
+        kinds = kinds.take(kinds.len() - 1)
+      }
+    } else if c == "," and not stack.is_empty() {
+      let top = stack.last().unwrap_or([0, 0])
+      stack = stack.set(stack.len() - 1, [top.get_or(0, 0), top.get_or(1, 0) + 1])
+    }
+    k = k + step
+  }
+  var call: Option[List[Int]] = None
+  var j = 0
+  for kd in kinds {
+    if kd == "(" {
+      call = stack.get(j)
+    }
+    j = j + 1
+  }
+  let found = match call {
+    Some(x) => x,
+    None => {
+      return J.JNull
+    },
+  }
+  let i = found.get_or(0, 0)
+  let commas = found.get_or(1, 0)
+  // `(\.)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*$` before the bracket
+  let before = upto.take(i)
+  var e = before.len()
+  while e > 0 and is_space_char(before.get_or(e - 1, "")) {
+    e = e - 1
+  }
+  var st = e
+  while st > 0 and is_ident_char(before.get_or(st - 1, "")) {
+    st = st - 1
+  }
+  while st < e and not is_ident_start(before.get_or(st, "")) {
+    st = st + 1
+  }
+  if st >= e {
+    return J.JNull
+  }
+  let name = before.slice(st, e).join("")
+  var d = st
+  while d > 0 and is_space_char(before.get_or(d - 1, "")) {
+    d = d - 1
+  }
+  let is_method = d > 0 and before.get_or(d - 1, "") == "."
+  let sigs = signatures(a: s.good.get(uri), name: name, is_method: is_method)
+  if sigs.is_empty() {
+    return J.JNull
+  }
+  return J.JObj([kv("signatures", J.JArr(sigs)), kv("activeSignature", ji(0)), kv("activeParameter", ji(commas))])
+}
+
+// ---- dispatch -----------------------------------------------------------------------------------------------------
+
+fn respond(id: J, result: J) uses io {
+  send([kv("id", id), kv("result", result)])
+}
+
+fn fail_request(id: J, code: Int, message: Str) uses io {
+  send([kv("id", id), kv("error", J.JObj([kv("code", ji(code)), kv("message", js(message))]))])
+}
+
+fn capabilities() -> J {
+  return J.JObj([kv("capabilities", J.JObj([kv("textDocumentSync", J.JObj([kv("openClose", J.JBool(true)), kv("change",
+    ji(1)), kv("save", J.JObj([kv("includeText", J.JBool(false))]))])), kv("hoverProvider", J.JBool(true)), kv(
+      "definitionProvider", J.JBool(true)), kv("referencesProvider", J.JBool(true)), kv("renameProvider", J.JObj([kv(
+        "prepareProvider", J.JBool(true))])), kv("documentSymbolProvider", J.JBool(true)), kv("documentFormattingProvider",
+          J.JBool(true)), kv("completionProvider", J.JObj([kv("triggerCharacters", J.JArr([js(".")]))])), kv(
+            "signatureHelpProvider", J.JObj([kv("triggerCharacters", J.JArr([js("("), js(",")]))])), kv("codeActionProvider",
+              J.JObj([kv("codeActionKinds", J.JArr([js("quickfix")]))]))])), kv("serverInfo", J.JObj([kv("name", js("klar")), kv(
+                "version", js(klar_version()))]))])
+}
+
+fn apply_change(text: Str, ch: Json) -> Str {
+  if not has(ch, "range") {
+    return text_of(get(ch, "text"))
+  }
+  let lines = text.split("\n")
+  let r = get(ch, "range")
+  let s = from_pos(lines, get(r, "start"))
+  let e = from_pos(lines, get(r, "end"))
+  let cs = text.chars()
+  let a = offset(cs: cs, line: s.first, col: s.second)
+  let b = offset(cs: cs, line: e.first, col: e.second)
+  return cs.take(a).join("") + text_of(get(ch, "text")) + cs.drop(b).join("")
+}
+
+fn handle(s0: LspServer, msg: Json) -> LspServer uses io, fs {
+  var s = s0
+  let method = text_of(get(msg, "method"))
+  let has_id = has(msg, "id") and get(msg, "id") != Json.Null
+  let id = to_j(get(msg, "id"))
+  let params = match get(msg, "params") {
+    Json.Null => Json.Obj(fields: Map {}),
+    p => p,
+  }
+  if s.log != "" {
+    var idt = ""
+    if has_id {
+      idt = spaced(id)
+    }
+    var shown = method
+    if shown == "" {
+      shown = "response"
+    }
+    let old = read_file(s.log).unwrap_or("")
+    let _ = write_file(s.log, old + "<- " + shown + " " + idt + "\n")
+  }
+  if method == "exit" {
+    return s with { running: false }
+  }
+  let uri = text_of(get(get(params, "textDocument"), "uri"))
+  var result = J.JNull
+  var handled = true
+  if method == "initialize" {
+    result = capabilities()
+  } else if method == "initialized" {
+    result = J.JNull
+  } else if method == "shutdown" {
+    s = s with { shutdown: true }
+  } else if method == "textDocument/didOpen" {
+    let doc = get(params, "textDocument")
+    s = reanalyse_all(s with { docs: s.docs.set(text_of(get(doc, "uri")), text_of(get(doc, "text"))) }, text_of(get(doc,
+      "uri")))
+  } else if method == "textDocument/didChange" {
+    var text = s.docs.get(uri).unwrap_or("")
+    for ch in items_of(get(params, "contentChanges")) {
+      text = apply_change(text, ch)
+    }
+    s = reanalyse_all(s with { docs: s.docs.set(uri, text) }, uri)
+  } else if method == "textDocument/didSave" {
+    s = reanalyse_all(s, uri)
+  } else if method == "textDocument/didClose" {
+    var docs: Map[Str, Str] = Map {}
+    for e in s.docs.entries() {
+      if e.key != uri {
+        docs = docs.set(e.key, e.value)
+      }
+    }
+    var analyses: Map[Str, LspAnalysis] = Map {}
+    for e in s.analyses.entries() {
+      if e.key != uri {
+        analyses = analyses.set(e.key, e.value)
+      }
+    }
+    var good: Map[Str, LspAnalysis] = Map {}
+    for e in s.good.entries() {
+      if e.key != uri {
+        good = good.set(e.key, e.value)
+      }
+    }
+    s = s with { docs: docs, analyses: analyses, good: good }
+    notify("textDocument/publishDiagnostics", J.JObj([kv("uri", js(uri)), kv("diagnostics", J.JArr([]))]))
+  } else if method == "textDocument/hover" {
+    let r = on_hover(s, params)
+    s = r.first
+    result = r.second
+  } else if method == "textDocument/definition" {
+    let r = on_definition(s, params)
+    s = r.first
+    result = r.second
+  } else if method == "textDocument/references" {
+    let r = on_references(s, params)
+    s = r.first
+    result = r.second
+  } else if method == "textDocument/prepareRename" {
+    let r = on_prepare_rename(s, params)
+    s = r.first
+    result = r.second
+  } else if method == "textDocument/rename" {
+    let r = on_rename(s, params)
+    s = r.first
+    match r.second {
+      Ok(x) => {
+        result = x
+      },
+      Err(e) => {
+        if has_id {
+          fail_request(id: id, code: -32603, message: "ValueError: " + e)
+        }
+        return s
+      },
+    }
+  } else if method == "textDocument/documentSymbol" {
+    let r = on_document_symbol(s, params)
+    s = r.first
+    result = r.second
+  } else if method == "textDocument/formatting" {
+    result = on_formatting(s, params)
+  } else if method == "textDocument/codeAction" {
+    result = on_code_action(params)
+  } else if method == "textDocument/completion" {
+    result = on_completion(s, params)
+  } else if method == "textDocument/signatureHelp" {
+    result = on_signature_help(s, params)
+  } else {
+    handled = false
+  }
+  if not handled {
+    if has_id and method != "" {
+      fail_request(id: id, code: -32601, message: "unsupported method " + method)
+    }
+    return s
+  }
+  if has_id {
+    respond(id, result)
+  }
+  return s
+}
+
+/// `klarc lsp [--stdio]`: serve until `exit` (0 after `shutdown`, else 1). Set KLAR_LSP_LOG=/path to log requests.
+pub fn lsp_command(lib: Str) -> Int uses io, fs {
+  var s = LspServer { lib: lib, docs: Map {}, analyses: Map {}, good: Map {}, running: true, shutdown: false, log: env_var(
+    "KLAR_LSP_LOG").unwrap_or("") }
+  while s.running {
+    match read_message() {
+      None => {
+        s = s with { running: false }
+      },
+      Some(msg) => {
+        s = handle(s, msg)
+      },
+    }
+  }
+  if s.shutdown {
+    return 0
+  }
+  return 1
+}
+
+fn is_alpha_char(c: Str) -> Bool {
+  return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z")
+}
+
+fn is_alnum_char(c: Str) -> Bool {
+  return is_alpha_char(c) or (c >= "0" and c <= "9")
+}

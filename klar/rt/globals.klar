@@ -80,6 +80,43 @@ fn b_random_int(lo: Int, hi: Int, sp: Word) -> Int {
   return lo + r % (hi - lo + 1)
 }
 
+// read_exact(n): the next n bytes of standard input (shares the buffer of read_line)
+fn b_read_exact(n: Word, rtd: Word) -> Word {
+  let gp = g()
+  let buf = static_addr("g_inbuf")
+  var want = w_sar(n, 1)
+  let b = sb_new()
+  var got: Word = 0
+  while got < want {
+    if peek(gp + G_INPOS) >= peek(gp + G_INLEN) {
+      if peek(gp + G_INEOF) == 1 {
+        want = got
+      } else {
+        flush_out()
+        let r = os_read(0, buf, 65536)
+        if r <= 0 {
+          poke(gp + G_INEOF, 1)
+          want = got
+        } else {
+          poke(gp + G_INPOS, 0)
+          poke(gp + G_INLEN, r)
+        }
+      }
+    }
+    if got < want {
+      let pos = peek(gp + G_INPOS)
+      sb_add_byte(b, peek8(buf + pos))
+      poke(gp + G_INPOS, pos + 1)
+      got = got + 1
+    }
+  }
+  if got == 0 and w_sar(n, 1) > 0 {
+    rc_dec(b)
+    return none()
+  }
+  return some_new(rtd, sb_finish(b))
+}
+
 fn b_read_line(rtd: Word) -> Word {
   let gp = g()
   let buf = static_addr("g_inbuf")
@@ -135,7 +172,7 @@ fn cstr_len(p: Word) -> Word {
 
 fn b_cli_args(rtd: Word) -> Word {
   var out = list_with_cap(rtd, 4)
-  if os_platform() == 0 {
+  if os_platform() != 1 {
     let argc = os_argc()
     var i: Word = 1
     while i < argc {
@@ -313,14 +350,15 @@ fn b_exit(code: Int) -> Word {
     c = 255
   }
   flush_out()
+  prof_finish()
   os_exit(c)
   return 0
 }
 
-// environment variable: Linux walks envp (after argv on the initial stack), Windows asks kernel32
+// environment variable: Linux and macOS walk envp (after argv on the initial stack), Windows asks kernel32
 fn b_env_var(name: Word, rtd: Word) -> Word {
   let n = peek(name + 16)
-  if os_platform() == 0 {
+  if os_platform() != 1 {
     var i = os_argc() + 1
     var p = os_argv(i)
     while p != 0 {
@@ -456,7 +494,7 @@ fn b_run_command(args: Word, rtd: Word) -> Word {
   }
   flush_out()
   let prog = list_at(args, 0)
-  if os_platform() == 0 {
+  if os_platform() != 1 {
     let path = find_program(prog)
     if path == 0 {
       return spawn_error(prog, -2, rtd)
@@ -500,7 +538,7 @@ fn b_run_command(args: Word, rtd: Word) -> Word {
 }
 
 fn b_set_executable(path: Word, rtd: Word) -> Word {
-  if os_platform() != 0 {
+  if os_platform() == 1 {
     return ok_new(rtd, 0)
   }
   let r = os_chmod(path + 32, 493)
@@ -569,6 +607,10 @@ fn b_list_dir(path: Word, rtd: Word) -> Word {
       return list_dir_error(path, fd, rtd)
     }
     let buf = alloc(32768)
+    var name_at: Word = 19
+    if os_platform() == 2 {
+      name_at = 21
+    }
     var failed: Word = 0
     var reading = true
     while reading {
@@ -577,10 +619,10 @@ fn b_list_dir(path: Word, rtd: Word) -> Word {
         failed = n
         reading = false
       } else {
-        // struct linux_dirent64: ino, off, reclen (16 bits), type (8 bits), name
+        // struct linux_dirent64: ino, off, reclen (16 bits), type (8 bits), name; macOS adds namlen (16 bits)
         var off: Word = 0
         while off < n {
-          names = add_entry(names, buf + off + 19)
+          names = add_entry(names, buf + off + name_at)
           off = off + w_and(peek32(buf + off + 16), 65535)
         }
       }
@@ -673,7 +715,7 @@ fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
   if peek(input + 16) > 65536 {
     return err_new(rtd, bits("run_capture: the input is limited to 64 KB"))
   }
-  if os_platform() != 0 {
+  if os_platform() == 1 {
     return err_new(rtd, bits("run_capture: not supported on Windows yet"))
   }
   flush_out()

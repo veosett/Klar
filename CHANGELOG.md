@@ -60,6 +60,24 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
 - `build.sh` / `build.bat`: build klarc without Python from a seed compiler (`seed/klarc-<target>`, `$KLARC`, or the
   release download), with the self-reproduction check; `.github/workflows/release.yml` builds the seeds for Linux
   x86-64, Linux arm64 and Windows, checks that they reproduce themselves and attaches them to a release.
+- `klarc view [-o OUT] [--json] [--run]` (compiler/view.klar): the same page and data as `klar view` (checked on
+  every example, native test, benchmark, std and compiler file); `--run` runs the program natively and shows its
+  output and error (call counts and times stay with `klar view --run`).
+- `klarc lsp` (compiler/lsp.klar): the language server without Python — the same responses as `klar lsp` to every
+  request (`tests/selfhost.py` replays sessions of hover, definition, references, rename, completion, signature help,
+  symbols, formatting and code actions on the examples, native tests and compiler files and compares every
+  message). The checker now records the types of `let` and pattern bindings; new built-in `read_exact(n)` (n bytes
+  of standard input). The VS Code extension runs it when `klar.klarcPath` is set.
+- `klarc repl [--plain]` (compiler/repl.klar): the interactive session without Python — the same checks, messages,
+  values and commands as `klar repl` (`tests/selfhost.py` compares a transcript); each input runs natively, with
+  the earlier statements replayed and their output hidden.
+- `klarc coverage [--main] [--runs N] [--min P] [--json]` (compiler/coverage.klar): the same report as
+  `klar coverage`, from native runs: in a coverage build (`lower_program_cov`) each statement of the file reports
+  its line the first time it runs (`klar/rt/cov.klar`, unbuffered on stderr, so forked property runs count too).
+- `klarc profile [args] [--json] [--top N]` (compiler/profile.klar): the report of `klar profile` from a native
+  profile build (`lower_program_mode`, klar/rt/profile.klar): calls, total and self time per user function, the hot
+  lines. Call counts and line counts equal the interpreter's; times are those of the machine code, and built-in
+  functions (machine code too) are not listed. With this every `klar` command has a `klarc` counterpart.
 - `klarc test` reports like `klar test`: each failure with its runtime error and the test's output, `-k`/`--filter`,
   `-q`, `--runs`, `--seed`, warnings first.
 - Property tests in native code: test executables run `property` blocks too (`exe RUNS SEED INDEX`). The runtime
@@ -68,8 +86,27 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   counterexample after the same number of runs; each run is a child process (fork), the failure comes back through a
   pipe and the inputs are shrunk like in the interpreter. Both lowerings emit it identically (`tests/selfhost.py`),
   and `tests/native_diff.py` compares the reports of `tests/native/properties.klar` character for character.
+  Where there is no fork (Windows) each run happens in the test process: `os_setjmp` / `os_longjmp` (new intrinsics,
+  x86-64) bring a failure back to the runner; `tests/native_diff.py --windows` checks the reports under wine.
+- macOS (experimental): `klar build --target macos` / `klarc build --target macos` write a static x86-64 Mach-O
+  executable (LC_UNIXTHREAD, no dyld, BSD system calls; `klar/native/link.py` and `compiler/link.klar`, byte for
+  byte the same). Untested on a real Mac: `tests/macho_run.py` runs such executables on Linux in the Unicorn CPU
+  emulator with the macOS system calls done by Python, `tests/native_diff.py --macos` checks every native test with
+  it, and `tests/bootstrap.py` checks that the macOS build of klarc builds programs byte for byte like klarc on Linux.
+  `par_map` uses worker processes there too (sysctl hw.ncpu). `klar run` on a Mac still uses the Python backend.
+- `docs/SPEC.md` is the Klar 1.0 specification, with the stability rules for 1.x.
 
 ### Fixed
+- The effects of `par_map`'s lambda could escape through function values: calling (or passing on) a captured function
+  or a parameter that holds one is now E0406 (the native run had silently lost the effects).
+- `==` on values that contain functions (`Some(f)`, records with function fields) is E0211, like `f == g`.
+- A property input of a newtype with `requires` is E0605: random values would break its invariant.
+- A path that ends in `exit(...)` counts as finished, like `fail(...)` (no more E0205 after it).
+- `klar explain R0013` (exit() in a test) was missing; Python's lexer read other scripts' digits (`٣`) as numbers
+  and crashed on `²` (only `0`-`9` now, like klarc).
+- `klarc profile`: lambdas are named after the line of the call that runs them (like `klar profile`), `par_map`
+  runs in-process under profiling (forked workers lost their counts), check errors use `klar`'s JSON, and `exit(n)`
+  ends a profiled program normally with its status in both profilers.
 - `klar ast` crashed on functions with trait bounds (a dict of spans was not converted to JSON).
 - Native test executables reported every test's call stack at the place of the first test.
 - `klarc run`/`build` showed the runtime's own warnings (the runtime reports as `rt`).
@@ -77,6 +114,8 @@ versions follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor versi
   interpreter (`s = "x"`).
 
 ### Changed
+- Map keys may be any values without functions (`Map[Point, Int]`, `Map[Float, Str]`): only the literal `Map { ... }`
+  had rejected them, while `set` and annotations accepted them and both backends handle them.
 - `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm
   algorithms with an exact reduction of huge arguments) on every target instead of x87 instructions: results are the
   same on x86-64 and arm64 and closer to correctly rounded.

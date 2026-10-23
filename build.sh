@@ -8,8 +8,9 @@
 # same bytes (the compiler reproduces itself), so the result does not depend on where the seed came from.
 set -e
 cd "$(dirname "$0")"
-case "$(uname -m)" in
-  aarch64|arm64) TARGET=linux-arm64 ;;
+case "$(uname -s)-$(uname -m)" in
+  Darwin-*) TARGET=macos ;;           # experimental: an x86-64 executable, not yet tested on a Mac
+  *-aarch64|*-arm64) TARGET=linux-arm64 ;;
   *) TARGET=linux ;;
 esac
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)

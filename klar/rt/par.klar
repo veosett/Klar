@@ -7,7 +7,7 @@
 // is the list `map` would give. A runtime error in a worker is reported exactly as `map` would report it: the
 // worker writes its report into the pipe instead of stderr, and the parent prints the report of the first failing
 // chunk, stops the other workers and exits with the worker's code. Where there are no worker processes (Windows,
-// one CPU, inside a worker, lists shorter than 2) par_map is map.
+// one CPU, inside a worker, in a profile build, lists shorter than 2) par_map is map; Linux and macOS have them.
 //
 // The checker guarantees that `f` is pure (no effects) and that the results contain no functions.
 
@@ -16,7 +16,7 @@ const PAR_MAX: Word = 64
 fn List_par_map(xs: Word, f: Word, rtd: Word) -> Word {
   let n = peek(xs + 16)
   var k: Word = 1
-  if n >= 2 and peek(g() + G_WORKER) == 0 and os_platform() == 0 {
+  if n >= 2 and peek(g() + G_WORKER) == 0 and peek(g() + G_PROF) == 0 and os_platform() != 1 {
     k = cpu_count()
   }
   if k > n {
@@ -195,6 +195,13 @@ fn append_owned(out: Word, v: Word) {
 fn cpu_count() -> Word {
   let buf = static_addr("g_scratch")
   let got = os_cpu_mask(buf, 128)
+  if os_platform() == 2 {
+    // macOS: os_cpu_mask is the number of CPUs
+    if got < 1 {
+      return 1
+    }
+    return got
+  }
   if got <= 0 {
     return 1
   }

@@ -1,0 +1,301 @@
+// `klarc coverage`: which statements the tests never run — the report of klar/tools/runtools.py (coverage), from
+// native runs. The tests (and with --main the program) are built in coverage mode: each statement of the file
+// reports its line once (on stderr, `\0cov:<line>`), and the lines no run reported are the ones never run.
+use ast.{Block, Body, Decl, Else, Expr, FnDecl, Stmt, StrPiece}
+use dev.{host_target, image_of, save_exe, temp_path, test_items}
+use jsonout.{J, compact}
+use loader.{Ld, load_program, load_runtime}
+use lower.{lower_program_cov}
+use report.{diag_json}
+
+fn native_cov_image(ld: Ld, main_path: Str, tests: Bool) -> Bytes uses io, proc {
+  return image_of(lower_program_cov(ld: ld, main_path: main_path, tests: tests, coverage: true), host_target())
+}
+
+// ---- the statements of a function (the lines of the statements of every block in it) --------------------------
+
+fn c_block(acc: List[Int], b: Block) -> List[Int] {
+  var out = acc
+  for s in b.stmts {
+    if not out.contains(stmt_line(s)) {
+      out = out.push(stmt_line(s))
+    }
+    out = c_stmt(out, s)
+  }
+  return out
+}
+
+fn stmt_line(s: Stmt) -> Int {
+  return match s {
+    Stmt.Let(sp, _, _, _, _, _, _) => sp.line,
+    Stmt.Assign(sp, _, _) => sp.line,
+    Stmt.Return(sp, _) => sp.line,
+    Stmt.If(sp, _, _, _) => sp.line,
+    Stmt.While(sp, _, _) => sp.line,
+    Stmt.For(sp, _, _, _, _) => sp.line,
+    Stmt.Break(sp) => sp.line,
+    Stmt.Continue(sp) => sp.line,
+    Stmt.Assert(sp, _, _) => sp.line,
+    Stmt.ExprStmt(sp, _) => sp.line,
+  }
+}
+
+fn c_opt(acc: List[Int], e: Option[Expr]) -> List[Int] {
+  return match e {
+    Some(x) => c_expr(acc, x),
+    None => acc,
+  }
+}
+
+fn c_body(acc: List[Int], b: Body) -> List[Int] {
+  return match b {
+    Body.ExprBody(e) => c_expr(acc, e),
+    Body.BlockBody(blk) => c_block(acc, blk),
+  }
+}
+
+fn c_stmt(acc: List[Int], s: Stmt) -> List[Int] {
+  return match s {
+    Stmt.Let(_, _, _, _, _, value, _) => c_expr(acc, value),
+    Stmt.Assign(_, _, value) => c_expr(acc, value),
+    Stmt.Return(_, value) => c_opt(acc, value),
+    Stmt.If(_, cond, then, else_) => {
+      let out = c_block(c_expr(acc, cond), then)
+      return match else_ {
+        Else.NoElse => out,
+        Else.ElseBlock(b) => c_block(out, b),
+        Else.ElseIf(x) => c_stmt(out, x),
+      }
+    },
+    Stmt.While(_, cond, body) => c_block(c_expr(acc, cond), body),
+    Stmt.For(_, _, _, iter, body) => c_block(c_expr(acc, iter), body),
+    Stmt.Assert(_, cond, message) => c_opt(c_expr(acc, cond), message),
+    Stmt.ExprStmt(_, e) => c_expr(acc, e),
+    _ => acc,
+  }
+}
+
+fn c_exprs(acc: List[Int], es: List[Expr]) -> List[Int] {
+  var out = acc
+  for e in es {
+    out = c_expr(out, e)
+  }
+  return out
+}
+
+fn c_expr(acc: List[Int], e: Expr) -> List[Int] {
+  return match e {
+    Expr.StrLit(_, parts) => c_exprs(acc, parts.map(fn(p) => match p {
+      StrPiece.Code(x) => Some(x),
+      _ => None,
+    }).filter(fn(x) => x != None).map(fn(x) => x.unwrap_or(e))),
+    Expr.ListLit(_, items) => c_exprs(acc, items),
+    Expr.MapLit(_, entries) => c_exprs(acc, entries.map(fn(m) => [m.key, m.value]).fold([], fn(a, b) => a.concat(b))),
+    Expr.Unary(_, _, operand) => c_expr(acc, operand),
+    Expr.Binary(_, _, left, right) => c_expr(c_expr(acc, left), right),
+    Expr.Call(_, callee, args) => c_exprs(c_expr(acc, callee), args.map(fn(a) => a.value)),
+    Expr.MethodCall(_, o, _, _, args) => c_exprs(c_expr(acc, o), args.map(fn(a) => a.value)),
+    Expr.FieldAccess(_, o, _, _) => c_expr(acc, o),
+    Expr.Try(_, x) => c_expr(acc, x),
+    Expr.RecordLit(_, _, fields) => c_exprs(acc, fields.map(fn(f) => f.value)),
+    Expr.WithExpr(_, base, fields) => c_exprs(c_expr(acc, base), fields.map(fn(f) => f.value)),
+    Expr.Match(_, subject, arms) => {
+      var out = c_expr(acc, subject)
+      for a in arms {
+        out = c_body(c_opt(out, a.guard), a.body)
+      }
+      return out
+    },
+    Expr.Lambda(_, _, _, body) => c_body(acc, body),
+    _ => acc,
+  }
+}
+
+fn statement_lines(f: FnDecl) -> List[Int] {
+  return match f.body {
+    Some(b) => c_block([], b),
+    None => [],
+  }
+}
+
+// ---- the report -----------------------------------------------------------------------------------------------
+
+/// The lines a run reported, and whether it failed.
+type CovRun { lines: List[Int], failed: Bool }
+
+fn run_cov(exe: Str, args: List[Str]) -> CovRun uses proc {
+  let res = run_capture(args: [exe].concat(args), dir: "", input: "").unwrap_or(["1", "", ""])
+  var lines: List[Int] = []
+  for part in res.get_or(2, "").split("\0cov:").drop(1) {
+    match part.split("\n").get_or(0, "").to_int() {
+      Some(n) => {
+        lines = lines.push(n)
+      },
+      None => {},
+    }
+  }
+  return CovRun { lines: lines, failed: res.get_or(0, "1") != "0" }
+}
+
+fn kv(k: Str, v: J) -> Pair[Str, J] {
+  return Pair { first: k, second: v }
+}
+
+fn opt_value(args: List[Str], name: Str) -> Str {
+  var i = 0
+  while i < args.len() {
+    if args.get_or(i, "") == name {
+      return args.get_or(i + 1, "")
+    }
+    i = i + 1
+  }
+  return ""
+}
+
+fn py_float(x: Float) -> Str {
+  return x.to_str()
+}
+
+/// `klarc coverage FILE [--main] [--runs N] [--min PERCENT] [--json]`
+pub fn coverage_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
+  var file = ""
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if ["--runs", "--min", "--lib"].contains(a) {
+      i = i + 2
+    } else {
+      if not a.starts_with("--") and file == "" {
+        file = a
+      }
+      i = i + 1
+    }
+  }
+  let with_main = args.contains("--main")
+  let runs = opt_value(args, "--runs").to_int().unwrap_or(20)
+  let json = args.contains("--json")
+  let ld = load_program(file, lib)
+  let errors = ld.diags.filter(fn(d) => d.severity == "error")
+  if not errors.is_empty() {
+    if json {
+      print(compact(J.JObj([kv("ok", J.JBool(false)), kv("diagnostics", J.JArr(errors.map(diag_json)))])))
+    } else {
+      print(errors.map(fn(d) => "error[" + d.code + "]: " + d.message).join("\n"))
+    }
+    return 1
+  }
+  let full = load_runtime(ld)
+  let display = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let items = test_items(full, file)
+  var executed: List[Int] = []
+  var failed: List[Str] = []
+  if not items.is_empty() {
+    let exe = temp_path(file, "coverage")
+    match save_exe(exe, native_cov_image(ld: full, main_path: file, tests: true)) {
+      Ok(_) => {},
+      Err(e) => {
+        eprint("klarc: " + e)
+        return 1
+      },
+    }
+    for t in items {
+      let r = run_cov(exe, [runs.to_str(), "0", t.index.to_str()])
+      executed = executed.concat(r.lines)
+      if r.failed {
+        failed = failed.push(t.name)
+      }
+    }
+  }
+  let decls = match full.by_path.get(file) {
+    Some(m) => match m.checker {
+      Some(c) => c.decls,
+      None => [],
+    },
+    None => [],
+  }
+  let has_main = decls.any(fn(d) => match d {
+    Decl.Fn(f) => f.name == "main",
+    _ => false,
+  })
+  if with_main and has_main {
+    let exe = temp_path(file, "coverage-main")
+    match save_exe(exe, native_cov_image(ld: full, main_path: file, tests: false)) {
+      Ok(_) => {},
+      Err(e) => {
+        eprint("klarc: " + e)
+        return 1
+      },
+    }
+    let r = run_cov(exe, [])
+    executed = executed.concat(r.lines)
+    if r.failed {
+      failed = failed.push("main")
+    }
+  }
+  var funcs: List[J] = []
+  var text_funcs: List[Str] = []
+  var total = 0
+  var covered = 0
+  let src_lines = full.sources.get(display).unwrap_or("").split("\n")
+  let ran = executed
+  for d in decls {
+    match d {
+      Decl.Fn(f) => {
+        if not (f.name == "main" and not with_main) {
+          let lines = statement_lines(f).sort()
+          if not lines.is_empty() {
+            let miss = lines.filter(fn(ln) => not ran.contains(ln))
+            total = total + lines.len()
+            covered = covered + lines.len() - miss.len()
+            funcs = funcs.push(J.JObj([kv("function", J.JStr(f.name)), kv("line", J.JInt(f.span.line)), kv("statements",
+              J.JInt(lines.len())), kv("covered", J.JInt(lines.len() - miss.len())), kv("missed_lines", J.JArr(miss.map(fn(
+                x) => J.JInt(x))))]))
+            let pct = 100 * (lines.len() - miss.len()) / lines.len()
+            var mark = "!!"
+            if miss.is_empty() {
+              mark = "  "
+            }
+            text_funcs = text_funcs.push(mark + " " + pct.to_str().pad_left(3, " ") + "%  " + f.name + " (line " +
+                f.span.line.to_str() + ")")
+            for ln in miss.take(8) {
+              let code = src_lines.get_or(ln - 1, "").trim()
+              text_funcs = text_funcs.push("         never run: " + ln.to_str() + ": " + code.slice(0, code.len().min(70)))
+            }
+            if miss.len() > 8 {
+              text_funcs = text_funcs.push("         ... " + (miss.len() - 8).to_str() + " more")
+            }
+          }
+        }
+      },
+      _ => {},
+    }
+  }
+  var percent = 100.0
+  if total > 0 {
+    percent = ((100 * covered).to_float() / total.to_float()).round_to(1)
+  }
+  if json {
+    print(compact(J.JObj([kv("ok", J.JBool(true)), kv("file", J.JStr(display)), kv("percent", J.JFloat(percent)), kv(
+      "statements", J.JInt(total)), kv("covered", J.JInt(covered)), kv("functions", J.JArr(funcs)), kv("tests_failed",
+        J.JArr(failed.map(fn(x) => J.JStr(x)))), kv("tests_run", J.JInt(items.len()))])))
+  } else {
+    var out = ["coverage of " + display + ": " + py_float(percent) + "% of statements (" + covered.to_str() + "/" +
+        total.to_str() + "), " + items.len().to_str() + " tests"]
+    if not failed.is_empty() {
+      out = out.push("failing tests (their remaining statements count as not covered): " + failed.join(", "))
+    }
+    print(out.concat(text_funcs).join("\n"))
+  }
+  let min = opt_value(args, "--min")
+  if min != "" {
+    match min.to_float() {
+      Some(m) => {
+        if percent < m {
+          return 1
+        }
+      },
+      None => {},
+    }
+  }
+  return 0
+}

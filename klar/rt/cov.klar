@@ -1,0 +1,15 @@
+// Klar runtime: statement coverage (`klarc coverage`). In a coverage build every statement of the main file marks
+// itself the first time it runs and reports its line on stderr (unbuffered, so that the forked runs of a property
+// report too): a line `\0cov:<line>`.
+
+fn cov_line(line: Word) -> Word {
+  let b = sb_new()
+  sb_add_byte(b, 0)
+  sb_add_cstr(b, "cov:")
+  sb_add_word(b, line)
+  sb_add_byte(b, 10)
+  let s = sb_finish(b)
+  write_all(2, s + 32, peek(s + 16))
+  rc_dec(s)
+  return 0
+}

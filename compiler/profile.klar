@@ -1,0 +1,165 @@
+// `klarc profile`: run `main` natively and report time per function and the hot lines, in the format of
+// `klar profile` (klar/cli.py). The program is built in profile mode (`lower_program_mode`): every user function
+// reports its calls and time, every statement its executions (klar/rt/profile.klar). Built-in functions run as
+// machine code and are not listed (`klar profile` lists them as `<builtin> ...`); the times are those of native code.
+use dev.{host_target, image_of, parse_rt, save_exe, temp_path}
+use jsonout.{J, compact, pretty}
+use loader.{Ld, load_program, load_runtime}
+use lower.{lower_program_mode}
+use report.{diag_json, render_report, user_diags}
+
+type PFn { key: Str, calls: Int, total: Int, self_ns: Int, seq: Int }
+
+type PLine { file: Str, line: Int, count: Int, seq: Int }
+
+fn kv(k: Str, v: J) -> Pair[Str, J] {
+  return Pair { first: k, second: v }
+}
+
+fn ms(ns: Int) -> Float {
+  return ns.to_float() / 1000000.0
+}
+
+fn num(s: Str) -> Int {
+  return s.to_int().unwrap_or(0)
+}
+
+/// `klarc profile FILE [args...] [--json] [--top N] [--show-output]`
+pub fn profile_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
+  var file = ""
+  var prog_args: List[Str] = []
+  var top = 15
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--top" {
+      top = args.get_or(i + 1, "15").to_int().unwrap_or(15)
+      i = i + 2
+    } else if a == "--lib" {
+      i = i + 2
+    } else if a == "--json" or a == "--show-output" {
+      i = i + 1
+    } else if file == "" {
+      file = a
+      i = i + 1
+    } else {
+      prog_args = prog_args.push(a)
+      i = i + 1
+    }
+  }
+  let json = args.contains("--json")
+  let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let ld = load_runtime(load_program(file, lib))
+  if ld.diags.any(fn(d) => d.severity == "error") {
+    if json {
+      print(pretty(J.JObj([kv("ok", J.JBool(false)), kv("stage", J.JStr("check")), kv("diagnostics",
+        J.JArr(user_diags(ld, shown).map(diag_json)))]), 0))
+      return 1
+    }
+    let text = render_report(ld, user_diags(ld, shown))
+    eprint(text.slice(0, (text.len() - 1).max(0)))
+    return 1
+  }
+  let w = lower_program_mode(ld: ld, main_path: file, tests: false, coverage: false, profile: true)
+  let image = image_of(w, host_target())
+  let exe = temp_path(file, "profile")
+  match save_exe(exe, image) {
+    Ok(_) => {},
+    Err(e) => {
+      eprint("klarc: " + e)
+      return 1
+    },
+  }
+  let res = match run_capture(args: [exe].concat(prog_args), dir: "", input: "") {
+    Ok(r) => r,
+    Err(e) => {
+      eprint("klarc: " + e)
+      return 1
+    },
+  }
+  if args.contains("--show-output") and not json {
+    print_raw(res.get_or(1, ""))
+  }
+  var total = 0
+  var fns: List[PFn] = []
+  var lines: List[PLine] = []
+  var own_err = ""
+  for chunk in res.get_or(2, "").split("\0") {
+    if chunk.starts_with("prof:T ") {
+      total = num(chunk.slice(7, chunk.len()).trim())
+    } else if chunk.starts_with("prof:F ") {
+      let p = chunk.slice(7, chunk.len()).trim_end().split(" ")
+      fns = fns.push(PFn { key: p.drop(4).join(" "), calls: num(p.get_or(0, "")), total: num(p.get_or(1, "")),
+        self_ns: num(p.get_or(2, "")), seq: num(p.get_or(3, "")) })
+    } else if chunk.starts_with("prof:L ") {
+      let p = chunk.slice(7, chunk.len()).trim_end().split(" ")
+      let loc = p.drop(2).join(" ")
+      let parts = loc.split(":")
+      lines = lines.push(PLine { file: parts.take(parts.len() - 1).join(":"), line: num(parts.last().unwrap_or("")),
+        count: num(p.get_or(0, "")), seq: num(p.get_or(1, "")) })
+    } else {
+      own_err = own_err + chunk
+    }
+  }
+  let total_ns = total
+  // functions by self time (ties: the order of their first exit), lines by count (ties: first run)
+  let by_self = fns.sort_by(fn(f) => f.seq).sort_by(fn(f) => 0 - f.self_ns)
+  let hot = lines.sort_by(fn(l) => l.seq).sort_by(fn(l) => 0 - l.count).take(top)
+  let err = parse_rt(own_err)
+  // exit(n) ends the program normally: its exit status is the profile's (like klar profile)
+  let exit_code = res.get_or(0, "0").to_int().unwrap_or(0)
+  let code_of = fn(l: PLine) => ld.sources.get(l.file).unwrap_or("").split("\n").get_or(l.line - 1, "").trim()
+  if json {
+    var fields = [kv("ok", J.JBool(err == None)), kv("total_ms", J.JFloat(ms(total).round_to(3))), kv("functions",
+      J.JArr(by_self.map(fn(f) => J.JObj([kv("function", J.JStr(f.key)), kv("calls", J.JInt(f.calls)), kv("total_ms",
+        J.JFloat(ms(f.total).round_to(3))), kv("self_ms", J.JFloat(ms(f.self_ns).round_to(3))), kv("self_percent",
+          J.JFloat(match total_ns > 0 {
+            true => (100.0 * f.self_ns.to_float() / total_ns.to_float()).round_to(2),
+            false => 0.0,
+    }))])))), kv("hot_lines", J.JArr(hot.map(fn(l) => J.JObj([kv("file", J.JStr(l.file)), kv("line", J.JInt(l.line)),
+      kv("executions", J.JInt(l.count)), kv("code", J.JStr(code_of(l)))]))))]
+    match err {
+      Some(e) => {
+        fields = fields.push(kv("runtime_error", J.JObj([kv("code", J.JStr(e.code)), kv("message", J.JStr(e.msg)), kv(
+          "at", J.JStr(e.at)), kv("values", J.JArr(e.values.map(fn(v) => J.JStr(v)))), kv("stack", J.JArr(e.stack.map(fn(
+            s) => J.JStr(s))))])))
+      },
+      None => {},
+    }
+    print(compact(J.JObj(fields)))
+    return match err {
+      Some(_) => 1,
+      None => exit_code,
+    }
+  }
+  print("Klar profile: " + file + " — total " + ms(total).fixed(1) + " ms (profiling adds overhead; compare functions " +
+      "relative to each other)\n")
+  print("self %".pad_left(7, " ") + " " + "self ms".pad_left(10, " ") + " " + "total ms".pad_left(10, " ") + " " +
+      "calls".pad_left(9, " ") + "  function")
+  print("-".repeat(72))
+  for f in by_self.take(top) {
+    var pct = 0.0
+    if total > 0 {
+      pct = 100.0 * f.self_ns.to_float() / total.to_float()
+    }
+    print(pct.fixed(1).pad_left(6, " ") + "% " + ms(f.self_ns).fixed(2).pad_left(10, " ") + " " + ms(f.total).fixed(2)
+        .pad_left(10, " ") + " " + f.calls.to_str().pad_left(9, " ") + "  " + f.key)
+  }
+  print("\nHot lines (statements executed):")
+  print("count".pad_left(10, " ") + "  location        code")
+  for l in hot {
+    let code = code_of(l)
+    print(l.count.to_str().pad_left(10, " ") + "  " + (l.file + ":" + l.line.to_str()).pad_right(15, " ") + " " +
+        code.slice(0, code.len().min(60)))
+  }
+  match err {
+    Some(_) => {
+      print("")
+      let k = own_err.index_of("runtime error[").unwrap_or(0)
+      eprint(own_err.slice(k, own_err.len()).trim_end())
+      return 1
+    },
+    None => {},
+  }
+  return exit_code
+}

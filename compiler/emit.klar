@@ -12,7 +12,7 @@
 use lower.{Img, Ins, KFn, KV, Lw, Reloc, add_bss, add_data, rt_names}
 use opt.{defs, inline_calls, optimize, used_regs}
 use regalloc.{Alloc, allocate, x64_regs}
-use x64.{AL, Asm, Fix, R10, R11, R15, R8, R9, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Site, XMM0, XMM1, alu_ri}
+use x64.{AL, Asm, Fix, R10, R11, R12, R13, R14, R15, R8, R9, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Site, XMM0, XMM1, alu_ri}
 use x64.{alu_rr, call, call_r, call_rip, cqo, cvtsi2sd, cvttsd2si, div, fresh, idiv, imul1, imul_rr}
 use x64.{imul_rri, jcc, jmp, label, lea, lea_rip, load, load32, load8, load_rip, mov_ri, mov_rr, movapd, movq_rx}
 use x64.{movq_xr, movsd_load, movsd_store, mul, neg, new_asm, new_label, pop, push, ret, setcc, shift_cl, shift_i}
@@ -27,7 +27,7 @@ pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
   "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir", "os_getdents", "os_find_first",
   "os_find_next", "os_find_close", "os_mkdir", "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink",
-  "os_getcwd"]
+  "os_getcwd", "os_setjmp", "os_longjmp"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
@@ -1492,6 +1492,32 @@ fn sys_stub(a0: Asm, name: Str, nr: Int, nargs: Int) -> Asm {
   return stub_end(syscall(mov_ri(a: a, dst: RAX, imm: nr)))
 }
 
+/// os_setjmp(buf) saves where its caller continues (rbp, rsp after the return, the return address) and the registers
+/// Klar code keeps across calls (rbx, r12-r14, r15 = call depth), returning 0; os_longjmp(buf, v) goes back there, so
+/// that os_setjmp returns v. Used for property runs where there is no fork (Windows; klar/native/emit.py).
+fn jump_stubs(a0: Asm) -> Asm {
+  let saved = [RBX, R12, R13, R14, R15]
+  var a = arg(a: stub_begin(a0, "os_setjmp"), reg: RCX, i: 0)
+  a = store(a: load(a: a, dst: RAX, base: RBP, disp: 0), base: RCX, disp: 0, src: RAX)
+  a = store(a: lea(a: a, dst: RAX, base: RBP, disp: 16), base: RCX, disp: 8, src: RAX)
+  a = store(a: load(a: a, dst: RAX, base: RBP, disp: 8), base: RCX, disp: 16, src: RAX)
+  var i = 0
+  for r in saved {
+    a = store(a: a, base: RCX, disp: 24 + 8 * i, src: r)
+    i = i + 1
+  }
+  a = stub_end(mov_ri(a: a, dst: RAX, imm: 0))
+  a = arg(a: arg(a: stub_begin(a, "os_longjmp"), reg: RCX, i: 0), reg: RAX, i: 1)
+  i = 0
+  for r in saved {
+    a = load(a: a, dst: r, base: RCX, disp: 24 + 8 * i)
+    i = i + 1
+  }
+  a = load(a: load(a: load(a: a, dst: RDX, base: RCX, disp: 16), dst: RBP, base: RCX, disp: 0), dst: RSP, base: RCX,
+    disp: 8)
+  return ret(push(a, RDX))
+}
+
 fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   var a = sys_stub(a0: a0, name: "os_write", nr: 1, nargs: 3)
   a = sys_stub(a0: a, name: "os_read", nr: 0, nargs: 3)
@@ -1602,6 +1628,191 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   a = mov_ri(a: a, dst: R15, imm: 0)                     // call depth
   a = mov_rr(a: call(a, main_entry), dst: RDI, src: RAX)
   return syscall(mov_ri(a: a, dst: RAX, imm: 231))
+}
+
+// ---- macOS x86-64 (experimental): BSD system calls 0x2000000 + n; on failure the carry flag is set and rax holds
+// the positive errno, which the stubs turn into -errno like on Linux (klar/native/emit.py, macos_layer)
+
+/// syscall 0x2000000 + nr; -errno on failure.
+fn mac_call(a0: Asm, nr: Int) -> Asm {
+  let a = syscall(mov_ri(a: a0, dst: RAX, imm: 33554432 + nr))
+  let ok = new_label(a, "mok")
+  return label(neg(jcc(a: ok.a, cc: "ae", target: ok.l), RAX), ok.l)
+}
+
+fn mac_stub(a0: Asm, name: Str, nr: Int, nargs: Int) -> Asm {
+  var a = stub_begin(a0, name)
+  let regs = [RDI, RSI, RDX, R10, R8, R9]
+  var i = 0
+  while i < nargs {
+    a = arg(a: a, reg: regs.get(i).unwrap_or(RDI), i: i)
+    i = i + 1
+  }
+  return stub_end(mac_call(a, nr))
+}
+
+/// mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0) in rax.
+fn mac_mmap(a0: Asm, size_from_arg: Bool, size: Int) -> Asm {
+  var a = mov_ri(a: a0, dst: RDI, imm: 0)
+  if size_from_arg {
+    a = arg(a: a, reg: RSI, i: 0)
+  } else {
+    a = mov_ri(a: a, dst: RSI, imm: size)
+  }
+  a = mov_ri(a: a, dst: RDX, imm: 3)
+  a = mov_ri(a: a, dst: R10, imm: 4098)
+  a = mov_ri(a: a, dst: R8, imm: -1)
+  a = mov_ri(a: a, dst: R9, imm: 0)
+  return mac_call(a, 197)
+}
+
+fn macos_layer(a0: Asm, main_entry: Str) -> Asm {
+  var a = mac_stub(a0: a0, name: "os_write", nr: 4, nargs: 3)
+  a = mac_stub(a0: a, name: "os_read", nr: 3, nargs: 3)
+  a = mac_stub(a0: a, name: "os_close", nr: 6, nargs: 1)
+  a = arg(a: stub_begin(a, "os_exit"), reg: RDI, i: 0)
+  a = ud2(syscall(mov_ri(a: a, dst: RAX, imm: 33554433)))
+  a = stub_end(mac_mmap(a0: stub_begin(a, "os_alloc"), size_from_arg: true, size: 0))
+  for name in ["os_time_ns", "os_wall_ns"] {          // gettimeofday (microseconds; no monotonic clock call)
+    a = alu_ri(a: stub_begin(a, name), op: "sub", dst: RSP, imm: 16)
+    a = mov_ri(a: a, dst: RAX, imm: 0)
+    a = store(a: store(a: a, base: RSP, disp: 0, src: RAX), base: RSP, disp: 8, src: RAX)
+    a = mov_ri(a: mov_ri(a: mov_rr(a: a, dst: RDI, src: RSP), dst: RSI, imm: 0), dst: RDX, imm: 0)
+    a = syscall(mov_ri(a: a, dst: RAX, imm: 33554548))
+    let filled = new_label(a, "tv")
+    a = load(a: filled.a, dst: RCX, base: RSP, disp: 0)
+    a = jcc(a: test_rr(a: a, x: RCX, y: RCX), cc: "ne", target: filled.l)
+    a = store(a: store(a: a, base: RSP, disp: 0, src: RAX), base: RSP, disp: 8, src: RDX)   // older kernels: rax:rdx
+    a = load(a: label(a, filled.l), dst: RAX, base: RSP, disp: 0)
+    a = imul_rr(a: mov_ri(a: a, dst: RCX, imm: 1000000000), dst: RAX, src: RCX)
+    a = load32(a: a, dst: RCX, base: RSP, disp: 8)     // tv_usec (32 bits)
+    a = imul_rr(a: mov_ri(a: a, dst: RDX, imm: 1000), dst: RCX, src: RDX)
+    a = stub_end(alu_rr(a: a, op: "add", dst: RAX, src: RCX))
+  }
+  a = arg(a: arg(a: stub_begin(a, "os_open"), reg: RDI, i: 0), reg: RSI, i: 1)
+  let skip = new_label(a, "om")
+  a = jcc(a: test_rr(a: skip.a, x: RSI, y: RSI), cc: "e", target: skip.l)
+  a = label(mov_ri(a: a, dst: RSI, imm: 1537), skip.l)    // O_WRONLY | O_CREAT | O_TRUNC
+  a = stub_end(mac_call(mov_ri(a: a, dst: RDX, imm: 420), 5))
+  for kind in [Pair { first: "os_file_exists", second: 32768 }, Pair { first: "os_is_dir", second: 16384 }] {
+    a = alu_ri(a: stub_begin(a, kind.first), op: "sub", dst: RSP, imm: 160)
+    a = mac_call(mov_rr(a: arg(a: a, reg: RDI, i: 0), dst: RSI, src: RSP), 338)     // stat64
+    let no = new_label(a, "fe")
+    a = jcc(a: test_rr(a: no.a, x: RAX, y: RAX), cc: "ne", target: no.l)
+    a = load32(a: a, dst: RAX, base: RSP, disp: 4)       // st_mode (16 bits)
+    a = alu_ri(a: a, op: "and", dst: RAX, imm: 61440)
+    a = alu_ri(a: a, op: "cmp", dst: RAX, imm: kind.second)
+    a = stub_end(setcc(a: a, cc: "e", r: RAX))
+    a = stub_end(mov_ri(a: label(a, no.l), dst: RAX, imm: 0))
+  }
+  a = load_rip(a: stub_begin(a, "os_argc"), dst: RAX, target: "g_argp")
+  a = stub_end(load(a: a, dst: RAX, base: RAX, disp: 0))
+  a = arg(a: load_rip(a: stub_begin(a, "os_argv"), dst: RCX, target: "g_argp"), reg: RAX, i: 0)
+  a = shift_i(a: a, kind: "shl", r: RAX, n: 3)
+  a = alu_rr(a: a, op: "add", dst: RCX, src: RAX)
+  a = stub_end(load(a: a, dst: RAX, base: RCX, disp: 8))
+  a = stub_end(mov_ri(a: stub_begin(a, "os_cmdline"), dst: RAX, imm: 0))
+  a = stub_end(mov_ri(a: stub_begin(a, "os_platform"), dst: RAX, imm: 2))
+  a = stub_end(mov_ri(a: stub_begin(a, "os_getenv"), dst: RAX, imm: 0))      // envp is read directly
+  // fork: rdx is 1 in the child (rax then holds the parent's pid) -> 0 in the child, the pid in the parent
+  a = mac_call(stub_begin(a, "os_fork"), 2)
+  let fp = new_label(a, "fp")
+  a = jcc(a: test_rr(a: fp.a, x: RDX, y: RDX), cc: "e", target: fp.l)
+  a = stub_end(label(mov_ri(a: a, dst: RAX, imm: 0), fp.l))
+  // os_spawn(argv): fork; the child execve(argv[0], argv, envp), the parent waits -> wait status (or -errno)
+  a = syscall(mov_ri(a: alu_ri(a: stub_begin(a, "os_spawn"), op: "sub", dst: RSP, imm: 16), dst: RAX, imm: 33554434))
+  let done = new_label(a, "sd")
+  let parent = new_label(done.a, "sp")
+  let forked = new_label(parent.a, "sf")
+  a = jmp(neg(jcc(a: forked.a, cc: "ae", target: forked.l), RAX), done.l)
+  a = jcc(a: test_rr(a: label(a, forked.l), x: RDX, y: RDX), cc: "e", target: parent.l)
+  a = load(a: arg(a: a, reg: RSI, i: 0), dst: RDI, base: RSI, disp: 0)
+  a = load(a: load_rip(a: a, dst: RCX, target: "g_argp"), dst: RAX, base: RCX, disp: 0)      // argc
+  a = alu_rr(a: shift_i(a: a, kind: "shl", r: RAX, n: 3), op: "add", dst: RCX, src: RAX)
+  a = mov_rr(a: alu_ri(a: a, op: "add", dst: RCX, imm: 16), dst: RDX, src: RCX)             // envp = &argv[argc + 1]
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 33554491))                                         // execve
+  a = syscall(mov_ri(a: mov_ri(a: a, dst: RDI, imm: 127), dst: RAX, imm: 33554433))          // could not run it
+  a = mov_rr(a: label(a, parent.l), dst: RDI, src: RAX)
+  a = mov_ri(a: mov_ri(a: mov_rr(a: a, dst: RSI, src: RSP), dst: RDX, imm: 0), dst: R10, imm: 0)
+  a = mac_call(a, 7)                                                                         // wait4
+  a = jcc(a: test_rr(a: a, x: RAX, y: RAX), cc: "l", target: done.l)
+  a = stub_end(label(load32(a: a, dst: RAX, base: RSP, disp: 0), done.l))
+  a = arg(a: arg(a: stub_begin(a, "os_chmod"), reg: RDI, i: 0), reg: RSI, i: 1)
+  a = stub_end(mac_call(a, 15))
+  // pipe(): the two descriptors come back in rax and rdx
+  a = mac_call(stub_begin(a, "os_pipe"), 42)
+  let pd = new_label(a, "pd")
+  a = jcc(a: test_rr(a: pd.a, x: RAX, y: RAX), cc: "l", target: pd.l)
+  a = store32(a: arg(a: a, reg: RCX, i: 0), base: RCX, disp: 0, src: RAX)
+  a = store32(a: a, base: RCX, disp: 4, src: RDX)
+  a = stub_end(label(mov_ri(a: a, dst: RAX, imm: 0), pd.l))
+  a = alu_ri(a: stub_begin(a, "os_wait"), op: "sub", dst: RSP, imm: 16)     // wait4(pid, &status, 0, 0)
+  a = mov_rr(a: arg(a: a, reg: RDI, i: 0), dst: RSI, src: RSP)
+  a = mac_call(mov_ri(a: mov_ri(a: a, dst: RDX, imm: 0), dst: R10, imm: 0), 7)
+  let wd = new_label(a, "wd")
+  a = jcc(a: test_rr(a: wd.a, x: RAX, y: RAX), cc: "l", target: wd.l)
+  a = stub_end(label(load32(a: a, dst: RAX, base: RSP, disp: 0), wd.l))
+  a = mac_stub(a0: a, name: "os_kill", nr: 37, nargs: 2)
+  // no CPU mask: the number of CPUs (sysctl hw.ncpu), which rt/par.klar takes as is
+  a = alu_ri(a: stub_begin(a, "os_cpu_mask"), op: "sub", dst: RSP, imm: 32)
+  a = store32(a: mov_ri(a: a, dst: RAX, imm: 6), base: RSP, disp: 0, src: RAX)               // CTL_HW
+  a = store32(a: mov_ri(a: a, dst: RAX, imm: 3), base: RSP, disp: 4, src: RAX)               // HW_NCPU
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 0), base: RSP, disp: 8, src: RAX)
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 4), base: RSP, disp: 16, src: RAX)
+  a = mov_ri(a: mov_rr(a: a, dst: RDI, src: RSP), dst: RSI, imm: 2)
+  a = alu_ri(a: mov_rr(a: a, dst: RDX, src: RSP), op: "add", dst: RDX, imm: 8)
+  a = alu_ri(a: mov_rr(a: a, dst: RCX, src: RSP), op: "add", dst: RCX, imm: 16)
+  a = mov_ri(a: mov_ri(a: mov_rr(a: a, dst: R10, src: RCX), dst: R8, imm: 0), dst: R9, imm: 0)
+  a = mac_call(a, 202)                                                                       // sysctl
+  let cd = new_label(a, "cd")
+  a = jcc(a: test_rr(a: cd.a, x: RAX, y: RAX), cc: "l", target: cd.l)
+  a = stub_end(label(load32(a: a, dst: RAX, base: RSP, disp: 8), cd.l))
+  // getdirentries64(fd, buf, n, &base): struct dirent (ino 8, seekoff 8, reclen 2, namlen 2, type 1, name)
+  a = alu_ri(a: stub_begin(a, "os_getdents"), op: "sub", dst: RSP, imm: 16)
+  a = arg(a: arg(a: arg(a: a, reg: RDI, i: 0), reg: RSI, i: 1), reg: RDX, i: 2)
+  a = stub_end(mac_call(mov_rr(a: a, dst: R10, src: RSP), 344))
+  a = arg(a: stub_begin(a, "os_mkdir"), reg: RDI, i: 0)                   // mkdir(path, 0755)
+  a = stub_end(mac_call(mov_ri(a: a, dst: RSI, imm: 493), 136))
+  // programs with captured output (run_capture)
+  a = mac_stub(a0: a, name: "os_dup2", nr: 90, nargs: 2)
+  a = mac_stub(a0: a, name: "os_chdir", nr: 12, nargs: 1)
+  a = mac_stub(a0: a, name: "os_execve", nr: 59, nargs: 3)
+  a = mac_stub(a0: a, name: "os_unlink", nr: 10, nargs: 1)
+  // getcwd: open(".") + fcntl(F_GETPATH) into the buffer (at least 1024 bytes) -> length without the NUL
+  a = alu_ri(a: stub_begin(a, "os_getcwd"), op: "sub", dst: RSP, imm: 16)
+  a = store(a: mov_ri(a: a, dst: RAX, imm: 46), base: RSP, disp: 0, src: RAX)               // "."
+  a = mac_call(mov_ri(a: mov_ri(a: mov_rr(a: a, dst: RDI, src: RSP), dst: RSI, imm: 0), dst: RDX, imm: 0), 5)
+  let gd = new_label(a, "gd")
+  a = jcc(a: test_rr(a: gd.a, x: RAX, y: RAX), cc: "l", target: gd.l)
+  a = mov_rr(a: store(a: a, base: RSP, disp: 8, src: RAX), dst: RDI, src: RAX)
+  a = arg(a: mov_ri(a: a, dst: RSI, imm: 50), reg: RDX, i: 0)                              // F_GETPATH
+  a = store(a: mac_call(a, 92), base: RSP, disp: 0, src: RAX)                                // fcntl
+  a = load(a: a, dst: RDI, base: RSP, disp: 8)
+  a = syscall(mov_ri(a: a, dst: RAX, imm: 33554438))                                         // close
+  a = load(a: a, dst: RAX, base: RSP, disp: 0)
+  a = jcc(a: test_rr(a: a, x: RAX, y: RAX), cc: "l", target: gd.l)
+  a = mov_ri(a: arg(a: a, reg: RCX, i: 0), dst: RAX, imm: 0)
+  let scan = new_label(a, "gs")
+  let end = new_label(scan.a, "ge")
+  a = load8(a: label(end.a, scan.l), dst: RDX, base: RCX, disp: 0)
+  a = jcc(a: test_rr(a: a, x: RDX, y: RDX), cc: "e", target: end.l)
+  a = alu_ri(a: alu_ri(a: a, op: "add", dst: RCX, imm: 1), op: "add", dst: RAX, imm: 1)
+  a = stub_end(label(label(jmp(a, scan.l), end.l), gd.l))
+  a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: RDI, i: 0), reg: RSI, i: 1)          // poll(fds, n, -1)
+  a = stub_end(mac_call(mov_ri(a: a, dst: RDX, imm: -1), 230))
+  for name in ["os_find_first", "os_find_next", "os_find_close"] {     // (Windows)
+    a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
+  }
+  a = test_index_stub(a, "macos")
+  // entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
+  a = store_rip(a: label(a, "_start"), target: "g_argp", src: RSP)
+  a = mac_mmap(a0: a, size_from_arg: false, size: 536870912)
+  a = mov_ri(a: a, dst: RCX, imm: 536870848)
+  a = alu_rr(a: a, op: "add", dst: RAX, src: RCX)
+  a = mov_rr(a: mov_rr(a: a, dst: RSP, src: RAX), dst: RBP, src: RSP)
+  a = mov_ri(a: a, dst: R15, imm: 0)                     // call depth
+  a = mov_rr(a: call(a, main_entry), dst: RDI, src: RAX)
+  return syscall(mov_ri(a: a, dst: RAX, imm: 33554433))
 }
 
 fn win_begin(a: Asm, name: Str, extra: Int) -> Asm {
@@ -1764,7 +1975,7 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
 /// test_index_arg(): decimal value of the last command-line word (test executables).
 fn test_index_stub(a0: Asm, target: Str) -> Asm {
   var a = mov_rr(a: push(label(a0, "test_index_arg"), RBP), dst: RBP, src: RSP)
-  if target == "linux" {
+  if target == "linux" or target == "macos" {
     a = load(a: load_rip(a: a, dst: RCX, target: "g_argp"), dst: RAX, base: RCX, disp: 0)    // argc
     a = alu_rr(a: shift_i(a: a, kind: "shl", r: RAX, n: 3), op: "add", dst: RCX, src: RAX)
     a = load(a: a, dst: RSI, base: RCX, disp: 0)                                           // argv[argc-1]
@@ -1812,9 +2023,11 @@ pub type Exe {
 
 fn os_part(target: Str, rt: Map[Str, Str]) -> Part {
   let main_entry = rt.get("main_entry").unwrap_or("main_entry")
-  var a = new_asm(0)
+  var a = jump_stubs(new_asm(0))
   if target == "linux" {
     a = linux_layer(a, main_entry)
+  } else if target == "macos" {
+    a = macos_layer(a, main_entry)
   } else {
     a = windows_layer(a, main_entry)
   }
@@ -1851,7 +2064,7 @@ fn le32(v: Int, k: Int) -> Int {
   return u.shift_right(8 * k).bit_and(255)
 }
 
-/// Lowers nothing itself: emits the machine code for the lowered program `w` ("linux" or "windows").
+/// Lowers nothing itself: emits the machine code for the lowered program `w` ("linux", "windows" or "macos").
 pub fn emit_program(w: Lw, target: Str) -> Exe {
   let rt = rt_names(w)
   var img = add_bss(img: w.img, name: "g_depth", size: 8)

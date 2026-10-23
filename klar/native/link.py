@@ -1,5 +1,5 @@
-"""Writes standalone executables: ELF64 (Linux x86-64 and arm64, no libc) and PE32+ (Windows, imports only
-kernel32.dll).
+"""Writes standalone executables: ELF64 (Linux x86-64 and arm64, no libc), PE32+ (Windows, imports only
+kernel32.dll) and Mach-O 64 (macOS x86-64, experimental: a static executable started by LC_UNIXTHREAD, no dyld).
 
 Input: one code blob (with fixups to data symbols / import slots: rel32 on x86-64, ADRP page / ADD low-12-bit
 fields on arm64) and one data blob (with absolute 64-bit pointer relocations), plus zero-initialised bss.
@@ -90,6 +90,49 @@ class Image:
         ph_text = struct.pack("<IIQQQQQQ", 1, 5, 0, base, base, text_off + len(code), text_off + len(code), page)
         ph_data = struct.pack("<IIQQQQQQ", 1, 6, data_off, data_vaddr, data_vaddr, len(data), max(memsz_data, 1), page)
         out = bytearray(ehdr + ph_text + ph_data)
+        out += b"\0" * (text_off - len(out))
+        out += code
+        out += b"\0" * (data_off - len(out))
+        out += data
+        with open(path, "wb") as f:
+            f.write(out)
+
+    # ---- Mach-O (macOS x86-64) ---------------------------------------------------------
+    def write_macho(self, path):
+        base = 0x100000000                          # above the 4 GB __PAGEZERO
+        page = 0x1000
+        text_off = page                             # the headers fill the start of __TEXT
+        text_vaddr = base + text_off
+        data_off = align(text_off + len(self.code), page)
+        data_vaddr = base + data_off
+        bss_vaddr = data_vaddr + align(len(self.data), 16)
+        addr = self._addresses(text_vaddr, data_vaddr, bss_vaddr, {})
+        code, data = self._patch(addr, text_vaddr, data_vaddr, lambda a: a)
+        data_vsize = align(max(align(len(data), 16) + self.bss_size, 1), page)
+
+        def segment(name, vmaddr, vmsize, fileoff, filesize, prot, sects):
+            head = struct.pack("<II16sQQQQiiII", 0x19, 72 + 80 * len(sects), name, vmaddr, vmsize, fileoff, filesize,
+                               prot, prot, len(sects), 0)
+            return head + b"".join(sects)
+
+        def section(name, seg, a, size, offset, align_log2, flags):
+            return struct.pack("<16s16sQQIIIIIIII", name, seg, a, size, offset, align_log2, 0, 0, flags, 0, 0, 0)
+
+        cmds = [
+            segment(b"__PAGEZERO", 0, base, 0, 0, 0, []),
+            segment(b"__TEXT", base, data_off, 0, text_off + len(code), 5,
+                    [section(b"__text", b"__TEXT", text_vaddr, len(code), text_off, 4, 0x80000400)]),
+            segment(b"__DATA", data_vaddr, data_vsize, data_off, len(data), 3,
+                    [section(b"__data", b"__DATA", data_vaddr, len(data), data_off, 4, 0)]),
+            # LC_UNIXTHREAD, x86_THREAD_STATE64: 21 registers, RIP = the entry point
+            struct.pack("<IIII", 0x5, 184, 4, 42) + struct.pack("<21Q", *([0] * 16 + [addr[self.entry]] + [0] * 4)),
+            # LC_BUILD_VERSION: macOS 10.15, no tools
+            struct.pack("<IIIIII", 0x32, 24, 1, 0x000A0F00, 0x000A0F00, 0),
+        ]
+        sizeofcmds = sum(len(c) for c in cmds)
+        hdr = struct.pack("<IiiIIIII", 0xFEEDFACF, 0x01000007, 3, 2, len(cmds), sizeofcmds, 0x1, 0)
+        out = bytearray(hdr + b"".join(cmds))
+        assert len(out) <= text_off
         out += b"\0" * (text_off - len(out))
         out += code
         out += b"\0" * (data_off - len(out))

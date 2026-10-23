@@ -7,6 +7,7 @@ pub fn global_sigs() -> List[Str] {
   return [
     "fn print[T](value: T) -> Unit uses io",
     "fn print_raw(text: Str) -> Unit uses io",
+    "fn read_exact(n: Int) -> Option[Str] uses io",
     "fn eprint[T](value: T) -> Unit uses io",
     "fn read_line() -> Option[Str] uses io",
     "fn fail(message: Str) -> Never",
@@ -257,6 +258,8 @@ pub fn sys_sigs() -> List[Str] {
     "fn os_poll(fds: Word, n: Word) -> Word",
     "fn os_unlink(path: Word) -> Word",
     "fn os_getcwd(buf: Word, n: Word) -> Word",
+    "fn os_setjmp(buf: Word) -> Word",
+    "fn os_longjmp(buf: Word, v: Word) -> Never",
   ]
 }
 
@@ -420,6 +423,7 @@ pub fn diag_codes() -> List[List[Str]] {
     ["R0010", "property falsified", "A `property` failed for some generated input. The report shows the minimal (shrunk) counterexample and the seed to reproduce it."],
     ["R0011", "index out of bounds", "`List.set`/`insert`/`remove_at` got an index outside the list."],
     ["R0012", "reached todo()", "The program executed a `todo(...)` placeholder."],
+    ["R0013", "exit() in a test", "A test called `exit(code)`, which would end the whole test run. Tests should check return values instead."],
     ["R0014", "par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was killed, e.g. by the system running out of memory)."],
   ]
 }
@@ -447,6 +451,7 @@ pub fn rt_files() -> List[Str] {
   return [
     "bytes.klar",
     "core.klar",
+    "cov.klar",
     "float.klar",
     "globals.klar",
     "int.klar",
@@ -454,6 +459,7 @@ pub fn rt_files() -> List[Str] {
     "map.klar",
     "misc.klar",
     "par.klar",
+    "profile.klar",
     "prop.klar",
     "show.klar",
     "softmath.klar",

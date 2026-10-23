@@ -1104,6 +1104,11 @@ class A64Emitter:
             self.stub_begin(name)
             a.mov_ri(X0, -1)
             self.stub_end()
+        self.stub_begin("os_setjmp")           # (Windows: property runs without fork)
+        a.mov_ri(X0, -1)
+        self.stub_end()
+        self.stub_begin("os_longjmp")
+        a.udf()
         self.test_index_stub()
         # entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
         a.label("_start")

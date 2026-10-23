@@ -1,7 +1,7 @@
 // klarc — the Klar compiler written in Klar (self-hosting, stage 5). It checks a program and builds a standalone
 // executable for Linux (ELF, x86-64 or arm64) or Windows (PE, x86-64) with no Python involved:
 //
-//     klarc build app.klar [-o app] [--target linux|windows|linux-arm64] [--lib <dir of klar/>] [--time]
+//     klarc build app.klar [-o app] [--target linux|windows|linux-arm64|macos] [--lib <dir of klar/>] [--time]
 //     klarc run app.klar [--lib <dir>] [-- args...]     build into a temporary file and run it
 //     klarc test app.klar [--lib <dir>]                 build the `test` blocks and run each one
 //     klarc check app.klar [--lib <dir of klar/>]
@@ -16,26 +16,36 @@ use commands.{ast_command, rename_command, spec_command}
 use patch.{patch_command}
 use pkg.{pkg_command}
 use evaluate.{eval_command}
+use view.{view_command}
+use lsp.{lsp_command}
+use repl.{repl_command}
+use coverage.{coverage_command}
+use profile.{profile_command}
 use dev.{dev_command, host_target, show_failure, test_items}
 use report.{check_json, render_report, user_diags}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
-use link.{write_elf, write_pe}
+use link.{write_elf, write_macho, write_pe}
 use loader.{Ld, Module, load_program, load_runtime}
 use lower.{fnv1a, lower_program}
 
-const TARGETS: List[Str] = ["linux", "windows", "linux-arm64"]
+const TARGETS: List[Str] = ["linux", "windows", "linux-arm64", "macos"]
 
 type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, quiet: Bool, filter: Str,
   runs: Int, seed: Int, args: List[Str] }
 
 fn usage() -> Never uses io {
-  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64] [--lib <dir>] [--time]")
+  print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64|macos] [--lib <dir>] [--time]")
   print("       klarc run <file.klar> [--lib <dir>] [-- <program arguments>]")
   print("       klarc test <file.klar> [-k <text>] [-q] [--runs <n>] [--seed <n>] [--lib <dir>]")
   print("       klarc patch <file.klar> <patch.json | - | json> [--dry-run] [--force] [--json]")
   print("       klarc add <name> (--path <dir> | --git <url> [--tag|--rev|--branch <x>]) [--no-fetch] [--json]")
   print("       klarc remove <name> | fetch | update [names] | deps   [--dir <project>] [--json]")
+  print("       klarc profile <file.klar> [args...] [--top <n>] [--show-output] [--json]")
+  print("       klarc coverage <file.klar> [--main] [--runs <n>] [--min <percent>] [--json]")
+  print("       klarc repl [--plain]                       an interactive session (--plain: no banner, no prompts)")
+  print("       klarc lsp                                  the language server (LSP over stdin/stdout)")
+  print("       klarc view <file.klar> [-o <out.html>] [--run] [--stdin <text>] [--json]")
   print("       klarc eval [statements...] <expression> [--in <file.klar>] [--json]")
   print("       klarc dev <file.klar> [--json] [--no-run] [--stdin <text>] [--max-output <n>] [--max-warnings <n>]")
   print("       klarc check <file.klar> [--lib <dir>] [--json]")
@@ -223,6 +233,21 @@ fn main() uses io, fs, time, proc {
   if ["add", "remove", "fetch", "update", "deps"].contains(tool) {
     exit(pkg_command(tool: tool, args: argv.drop(1)))
   }
+  if tool == "profile" {
+    exit(profile_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "coverage" {
+    exit(coverage_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "repl" {
+    exit(repl_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "lsp" {
+    exit(lsp_command(lib_dir(argv)))
+  }
+  if tool == "view" {
+    exit(view_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
   if tool == "eval" {
     exit(eval_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
@@ -296,11 +321,15 @@ fn main() uses io, fs, time, proc {
     x = emit_a64(w)
   } else if o.target == "windows" {
     x = emit_program(w, "windows")
+  } else if o.target == "macos" {
+    x = emit_program(w, "macos")
   }
   let t3 = lap(o: o, phase: "optimize + allocate + emit", start: t2)
   var image = bytes_of([])
   if o.target == "windows" {
     image = write_pe(x)
+  } else if o.target == "macos" {
+    image = write_macho(x)
   } else {
     image = write_elf(x)
   }

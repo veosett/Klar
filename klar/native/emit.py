@@ -12,7 +12,7 @@ live in machine registers where possible and in stack slots otherwise. Int slow 
 division-by-zero and freeing are emitted out of line after the function body.
 """
 from .regalloc import CALLER_SAVED
-from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R15, XMM0, XMM1)
+from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, XMM0, XMM1)
 
 MAX_DEPTH = 10000
 SOFT = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
@@ -21,7 +21,7 @@ OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
             "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir",
             "os_getdents", "os_find_first", "os_find_next", "os_find_close", "os_mkdir",
-            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd"]
+            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd", "os_setjmp", "os_longjmp"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
@@ -86,7 +86,7 @@ def align16(n):
 class Emitter:
     def __init__(self, image, target, rt):
         self.img = image
-        self.target = target       # "linux" | "windows"
+        self.target = target       # "linux" | "windows" | "macos"
         self.rt = rt               # name of runtime helper -> KIR function name
         self.a = Asm()
         self.user_fns = []         # (start label, end label, name symbol) of Klar functions with frames
@@ -996,14 +996,47 @@ class Emitter:
         a.ret()
 
     def os_layer(self):
+        self.jump_stubs()
         self.img.add_bss("g_depth", 8)
         self.img.add_bss("g_frames", 16 * (MAX_DEPTH + 2))
         self.img.add_bss("g_argp", 8)
         self.img.add_bss("g_scratch", 256)
         if self.target == "linux":
             self.linux_layer()
+        elif self.target == "macos":
+            self.macos_layer()
         else:
             self.windows_layer()
+
+    def jump_stubs(self):
+        """os_setjmp(buf) saves where its caller continues (RBP, RSP after the return, the return address) and the
+        registers Klar code keeps across calls (RBX, R12-R14, R15 = call depth), returning 0; os_longjmp(buf, v)
+        goes back there, so that os_setjmp returns v. The caller's other values are in its stack slots (calls spill
+        them). Used for property runs where there is no fork (Windows)."""
+        a = self.a
+        saved = (RBX, R12, R13, R14, R15)
+        self.stub_begin("os_setjmp")
+        self.arg(RCX, 0)
+        a.load(RAX, RBP, 0)
+        a.store(RCX, 0, RAX)
+        a.lea(RAX, RBP, 16)
+        a.store(RCX, 8, RAX)
+        a.load(RAX, RBP, 8)
+        a.store(RCX, 16, RAX)
+        for i, r in enumerate(saved):
+            a.store(RCX, 24 + 8 * i, r)
+        a.mov_ri(RAX, 0)
+        self.stub_end()
+        self.stub_begin("os_longjmp")
+        self.arg(RCX, 0)
+        self.arg(RAX, 1)
+        for i, r in enumerate(saved):
+            a.load(r, RCX, 24 + 8 * i)
+        a.load(RDX, RCX, 16)
+        a.load(RBP, RCX, 0)
+        a.load(RSP, RCX, 8)
+        a.push(RDX)
+        a.ret()
 
     def linux_layer(self):
         a = self.a
@@ -1226,6 +1259,307 @@ class Emitter:
         a.mov_ri(RAX, 231)
         a.syscall()
         img.entry = "_start"
+
+
+    def macos_layer(self):
+        """macOS x86-64 (experimental): BSD system calls (number 0x2000000 + n; on failure the carry flag is set and
+        RAX holds the positive errno, which the stubs turn into -errno like on Linux). Static executable: the kernel
+        starts at _start with argc/argv/envp on the stack, as on Linux."""
+        a = self.a
+
+        def call(nr):
+            a.mov_ri(RAX, 0x2000000 + nr)
+            a.syscall()
+            ok = a.new_label("mok")
+            a.jcc("ae", ok)
+            a.neg(RAX)
+            a.label(ok)
+
+        def sys(name, nr, nargs, regs=(RDI, RSI, RDX, R10, R8, R9)):
+            self.stub_begin(name)
+            for i in range(nargs):
+                self.arg(regs[i], i)
+            call(nr)
+            self.stub_end()
+
+        def mmap(size_reg_loader):
+            a.mov_ri(RDI, 0)
+            size_reg_loader()
+            a.mov_ri(RDX, 3)
+            a.mov_ri(R10, 0x1002)          # MAP_PRIVATE | MAP_ANON
+            a.mov_ri(R8, -1)
+            a.mov_ri(R9, 0)
+            call(197)
+
+        sys("os_write", 4, 3)
+        sys("os_read", 3, 3)
+        sys("os_close", 6, 1)
+        self.stub_begin("os_exit")
+        self.arg(RDI, 0)
+        a.mov_ri(RAX, 0x2000001)
+        a.syscall()
+        a.ud2()
+        self.stub_begin("os_alloc")
+        mmap(lambda: self.arg(RSI, 0))
+        self.stub_end()
+        for name in ("os_time_ns", "os_wall_ns"):    # gettimeofday (microseconds; no monotonic clock call)
+            self.stub_begin(name)
+            a.alu_ri("sub", RSP, 16)
+            a.mov_ri(RAX, 0)
+            a.store(RSP, 0, RAX)
+            a.store(RSP, 8, RAX)
+            a.mov_rr(RDI, RSP)
+            a.mov_ri(RSI, 0)
+            a.mov_ri(RDX, 0)
+            a.mov_ri(RAX, 0x2000000 + 116)
+            a.syscall()
+            filled = a.new_label("tv")
+            a.load(RCX, RSP, 0)
+            a.test_rr(RCX, RCX)
+            a.jcc("ne", filled)
+            a.store(RSP, 0, RAX)           # older kernels return the time in RAX:RDX
+            a.store(RSP, 8, RDX)
+            a.label(filled)
+            a.load(RAX, RSP, 0)
+            a.mov_ri(RCX, 1000000000)
+            a.imul_rr(RAX, RCX)
+            a.load32(RCX, RSP, 8)          # tv_usec (32 bits)
+            a.mov_ri(RDX, 1000)
+            a.imul_rr(RCX, RDX)
+            a.alu_rr("add", RAX, RCX)
+            self.stub_end()
+        self.stub_begin("os_open")
+        self.arg(RDI, 0)
+        self.arg(RSI, 1)
+        skip = a.new_label("om")
+        a.test_rr(RSI, RSI)
+        a.jcc("e", skip)
+        a.mov_ri(RSI, 0x601)          # O_WRONLY | O_CREAT | O_TRUNC
+        a.label(skip)
+        a.mov_ri(RDX, 0o644)
+        call(5)
+        self.stub_end()
+        for name, kind in (("os_file_exists", 0x8000), ("os_is_dir", 0x4000)):
+            self.stub_begin(name)
+            a.alu_ri("sub", RSP, 160)
+            self.arg(RDI, 0)
+            a.mov_rr(RSI, RSP)
+            call(338)                      # stat64
+            no = a.new_label("fe")
+            a.test_rr(RAX, RAX)
+            a.jcc("ne", no)
+            a.load32(RAX, RSP, 4)          # st_mode (16 bits)
+            a.alu_ri("and", RAX, 0xF000)
+            a.alu_ri("cmp", RAX, kind)
+            a.setcc("e", RAX)
+            self.stub_end()
+            a.label(no)
+            a.mov_ri(RAX, 0)
+            self.stub_end()
+        self.stub_begin("os_argc")
+        a.load_rip(RAX, "g_argp")
+        a.load(RAX, RAX, 0)
+        self.stub_end()
+        self.stub_begin("os_argv")
+        a.load_rip(RCX, "g_argp")
+        self.arg(RAX, 0)
+        a.shift_i("shl", RAX, 3)
+        a.alu_rr("add", RCX, RAX)
+        a.load(RAX, RCX, 8)
+        self.stub_end()
+        self.stub_begin("os_cmdline")
+        a.mov_ri(RAX, 0)
+        self.stub_end()
+        self.stub_begin("os_platform")
+        a.mov_ri(RAX, 2)
+        self.stub_end()
+        self.stub_begin("os_getenv")          # envp is read directly (rt/globals.klar)
+        a.mov_ri(RAX, 0)
+        self.stub_end()
+        # fork: RDX is 1 in the child (RAX then holds the parent's pid) -> 0 in the child, the pid in the parent
+        self.stub_begin("os_fork")
+        call(2)
+        parent = a.new_label("fp")
+        a.test_rr(RDX, RDX)
+        a.jcc("e", parent)
+        a.mov_ri(RAX, 0)
+        a.label(parent)
+        self.stub_end()
+        # os_spawn(argv): fork; the child execve(argv[0], argv, envp), the parent waits -> wait status (or -errno)
+        self.stub_begin("os_spawn")
+        a.alu_ri("sub", RSP, 16)
+        a.mov_ri(RAX, 0x2000002)       # fork
+        a.syscall()
+        done, parent, forked = a.new_label("sd"), a.new_label("sp"), a.new_label("sf")
+        a.jcc("ae", forked)
+        a.neg(RAX)
+        a.jmp(done)
+        a.label(forked)
+        a.test_rr(RDX, RDX)
+        a.jcc("e", parent)
+        self.arg(RSI, 0)
+        a.load(RDI, RSI, 0)
+        a.load_rip(RCX, "g_argp")
+        a.load(RAX, RCX, 0)            # argc
+        a.shift_i("shl", RAX, 3)
+        a.alu_rr("add", RCX, RAX)
+        a.alu_ri("add", RCX, 16)       # envp = &argv[argc + 1]
+        a.mov_rr(RDX, RCX)
+        a.mov_ri(RAX, 0x2000000 + 59)  # execve
+        a.syscall()
+        a.mov_ri(RDI, 127)             # could not run it
+        a.mov_ri(RAX, 0x2000001)
+        a.syscall()
+        a.label(parent)
+        a.mov_rr(RDI, RAX)
+        a.mov_rr(RSI, RSP)
+        a.mov_ri(RDX, 0)
+        a.mov_ri(R10, 0)
+        call(7)                        # wait4
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.load32(RAX, RSP, 0)
+        a.label(done)
+        self.stub_end()
+        self.stub_begin("os_chmod")
+        self.arg(RDI, 0)
+        self.arg(RSI, 1)
+        call(15)
+        self.stub_end()
+        # pipe(): the two descriptors come back in RAX and RDX
+        self.stub_begin("os_pipe")
+        call(42)
+        done = a.new_label("pd")
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        self.arg(RCX, 0)
+        a.store32(RCX, 0, RAX)
+        a.store32(RCX, 4, RDX)
+        a.mov_ri(RAX, 0)
+        a.label(done)
+        self.stub_end()
+        self.stub_begin("os_wait")             # wait4(pid, &status, 0, 0) -> wait status (or -errno)
+        a.alu_ri("sub", RSP, 16)
+        self.arg(RDI, 0)
+        a.mov_rr(RSI, RSP)
+        a.mov_ri(RDX, 0)
+        a.mov_ri(R10, 0)
+        call(7)
+        done = a.new_label("wd")
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.load32(RAX, RSP, 0)
+        a.label(done)
+        self.stub_end()
+        sys("os_kill", 37, 2)
+        # macOS: no CPU mask; returns the number of CPUs (sysctl hw.ncpu), which rt/par.klar takes as is
+        self.stub_begin("os_cpu_mask")
+        a.alu_ri("sub", RSP, 32)
+        a.mov_ri(RAX, 6)               # CTL_HW
+        a.store32(RSP, 0, RAX)
+        a.mov_ri(RAX, 3)               # HW_NCPU
+        a.store32(RSP, 4, RAX)
+        a.mov_ri(RAX, 0)
+        a.store(RSP, 8, RAX)
+        a.mov_ri(RAX, 4)
+        a.store(RSP, 16, RAX)
+        a.mov_rr(RDI, RSP)
+        a.mov_ri(RSI, 2)
+        a.mov_rr(RDX, RSP)
+        a.alu_ri("add", RDX, 8)
+        a.mov_rr(RCX, RSP)
+        a.alu_ri("add", RCX, 16)
+        a.mov_rr(R10, RCX)
+        a.mov_ri(R8, 0)
+        a.mov_ri(R9, 0)
+        call(202)                      # sysctl
+        done = a.new_label("cd")
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.load32(RAX, RSP, 8)
+        a.label(done)
+        self.stub_end()
+        # getdirentries64(fd, buf, n, &base): struct dirent (ino 8, seekoff 8, reclen 2, namlen 2, type 1, name)
+        self.stub_begin("os_getdents")
+        a.alu_ri("sub", RSP, 16)
+        self.arg(RDI, 0)
+        self.arg(RSI, 1)
+        self.arg(RDX, 2)
+        a.mov_rr(R10, RSP)
+        call(344)
+        self.stub_end()
+        self.stub_begin("os_mkdir")            # mkdir(path, 0755) -> 0 or -errno
+        self.arg(RDI, 0)
+        a.mov_ri(RSI, 0o755)
+        call(136)
+        self.stub_end()
+        # programs with captured output (run_capture)
+        sys("os_dup2", 90, 2)
+        sys("os_chdir", 12, 1)
+        sys("os_execve", 59, 3)
+        sys("os_unlink", 10, 1)
+        # getcwd: open(".") + fcntl(F_GETPATH) into the buffer (at least 1024 bytes) -> length without the NUL
+        self.stub_begin("os_getcwd")
+        a.alu_ri("sub", RSP, 16)
+        a.mov_ri(RAX, 0x2E)            # "."
+        a.store(RSP, 0, RAX)
+        a.mov_rr(RDI, RSP)
+        a.mov_ri(RSI, 0)
+        a.mov_ri(RDX, 0)
+        call(5)
+        done = a.new_label("gd")
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        a.store(RSP, 8, RAX)
+        a.mov_rr(RDI, RAX)
+        a.mov_ri(RSI, 50)              # F_GETPATH
+        self.arg(RDX, 0)
+        call(92)                       # fcntl
+        a.store(RSP, 0, RAX)
+        a.load(RDI, RSP, 8)
+        a.mov_ri(RAX, 0x2000006)       # close
+        a.syscall()
+        a.load(RAX, RSP, 0)
+        a.test_rr(RAX, RAX)
+        a.jcc("l", done)
+        self.arg(RCX, 0)
+        a.mov_ri(RAX, 0)
+        scan, end = a.new_label("gs"), a.new_label("ge")
+        a.label(scan)
+        a.load8(RDX, RCX, 0)
+        a.test_rr(RDX, RDX)
+        a.jcc("e", end)
+        a.alu_ri("add", RCX, 1)
+        a.alu_ri("add", RAX, 1)
+        a.jmp(scan)
+        a.label(end)
+        a.label(done)
+        self.stub_end()
+        self.stub_begin("os_poll")             # poll(fds, n, -1)
+        self.arg(RDI, 0)
+        self.arg(RSI, 1)
+        a.mov_ri(RDX, -1)
+        call(230)
+        self.stub_end()
+        for name in ("os_find_first", "os_find_next", "os_find_close"):     # (Windows)
+            self.stub_begin(name)
+            a.mov_ri(RAX, -1)
+            self.stub_end()
+        self.test_index_stub()
+        # entry: remember argc/argv, switch to a 512 MB lazily-committed stack, run, exit
+        a.label("_start")
+        a.store_rip("g_argp", RSP)
+        mmap(lambda: a.mov_ri(RSI, 512 * 1024 * 1024))
+        a.mov_ri(RCX, 512 * 1024 * 1024 - 64)
+        a.alu_rr("add", RAX, RCX)
+        a.mov_rr(RSP, RAX)
+        a.mov_rr(RBP, RSP)
+        a.mov_ri(R15, 0)                # call depth
+        a.call(self.rt["main_entry"])
+        a.mov_rr(RDI, RAX)
+        a.mov_ri(RAX, 0x2000001)
+        a.syscall()
+        self.img.entry = "_start"
 
     def windows_layer(self):
         a = self.a
@@ -1518,7 +1852,7 @@ class Emitter:
         a.label("test_index_arg")
         a.push(RBP)
         a.mov_rr(RBP, RSP)
-        if self.target == "linux":
+        if self.target in ("linux", "macos"):
             a.load_rip(RCX, "g_argp")
             a.load(RAX, RCX, 0)             # argc
             a.shift_i("shl", RAX, 3)

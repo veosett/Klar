@@ -681,7 +681,7 @@ fn option_value(args: List[Str], name: Str) -> Str {
 }
 
 /// The std modules: (name, (source lines, declarations)), in file order.
-fn std_modules(lib: Str) -> List[Pair[Str, Pair[List[Str], List[Decl]]]] uses fs {
+pub fn std_modules(lib: Str) -> List[Pair[Str, Pair[List[Str], List[Decl]]]] uses fs {
   var out: List[Pair[Str, Pair[List[Str], List[Decl]]]] = []
   for f in list_dir(lib + "/std").unwrap_or([]) {
     if f.ends_with(".klar") {

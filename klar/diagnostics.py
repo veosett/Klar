@@ -257,6 +257,8 @@ CODES = {
               "(shrunk) counterexample and the seed to reproduce it."),
     "R0011": ("index out of bounds", "`List.set`/`insert`/`remove_at` got an index outside the list."),
     "R0012": ("reached todo()", "The program executed a `todo(...)` placeholder."),
+    "R0013": ("exit() in a test", "A test called `exit(code)`, which would end the whole test run. Tests should "
+                                  "check return values instead."),
     "R0014": ("par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was "
                                      "killed, e.g. by the system running out of memory)."),
 }

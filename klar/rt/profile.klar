@@ -1,0 +1,203 @@
+// Klar runtime: the profiler of `klarc profile`. A profile build calls prof_start with its tables, prof_enter /
+// prof_exit around every user function, prof_line before every statement; at the end of the program (or at a
+// runtime error, or exit) prof_finish writes the counts on stderr for klarc:
+//   `\0prof:T <total ns>` / `\0prof:F <calls> <total ns> <self ns> <first exit> <key>` /
+//   `\0prof:L <count> <first run> <file>:<line>`
+// (state at g_rt + G_PROF: [keys table][lines table][fn stats][line stats][stack][depth][start][seq][call site])
+
+fn prof_state() -> Word {
+  return peek(g() + G_PROF)
+}
+
+fn prof_start(keys: Word, lines: Word) -> Word {
+  let st = alloc(72)
+  let nf = peek(keys)
+  let nl = peek(lines)
+  let fs = alloc(nf * 40 + 8)
+  var i: Word = 0
+  while i < nf * 5 {
+    poke(fs + i * 8, 0)
+    i = i + 1
+  }
+  let ls = alloc(nl * 16 + 8)
+  i = 0
+  while i < nl * 2 {
+    poke(ls + i * 8, 0)
+    i = i + 1
+  }
+  poke(st, keys)
+  poke(st + 8, lines)
+  poke(st + 16, fs)
+  poke(st + 24, ls)
+  poke(st + 32, alloc(24 * 10010))
+  poke(st + 40, 0)
+  poke(st + 48, os_time_ns())
+  poke(st + 56, 0)
+  poke(st + 64, 0)
+  poke(g() + G_PROF, st)
+  return 0
+}
+
+fn prof_next_seq(st: Word) -> Word {
+  let s = peek(st + 56) + 1
+  poke(st + 56, s)
+  return s
+}
+
+fn prof_line(idx: Word) -> Word {
+  let st = prof_state()
+  if st == 0 {
+    return 0
+  }
+  let row = peek(st + 24) + idx * 16
+  if peek(row) == 0 {
+    poke(row + 8, prof_next_seq(st))
+  }
+  poke(row, peek(row) + 1)
+  return 0
+}
+
+fn prof_enter(id: Word) -> Word {
+  let st = prof_state()
+  if st == 0 {
+    return 0
+  }
+  let d = peek(st + 40)
+  if d < 10000 {
+    let fr = peek(st + 32) + d * 24
+    poke(fr, id)
+    poke(fr + 8, os_time_ns())
+    poke(fr + 16, 0)
+  }
+  poke(st + 40, d + 1)
+  return 0
+}
+
+// a call expression of the program: the lambdas it calls (directly or through a built-in) are named after its line
+// (like klar profile); returns the site it replaces, which the caller puts back after the call
+fn prof_site(id: Word) -> Word {
+  let st = prof_state()
+  if st == 0 {
+    return 0
+  }
+  let old = peek(st + 64)
+  poke(st + 64, id)
+  return old
+}
+
+fn prof_enter_site() -> Word {
+  let st = prof_state()
+  if st == 0 {
+    return 0
+  }
+  return prof_enter(peek(st + 64))
+}
+
+fn prof_exit() -> Word {
+  let st = prof_state()
+  if st == 0 {
+    return 0
+  }
+  let d = peek(st + 40) - 1
+  if d < 0 {
+    return 0
+  }
+  poke(st + 40, d)
+  if d >= 10000 {
+    return 0
+  }
+  let fr = peek(st + 32) + d * 24
+  let id = peek(fr)
+  let elapsed = os_time_ns() - peek(fr + 8)
+  // [calls][total][self][first exit]
+  let rec = peek(st + 16) + id * 40
+  if peek(rec) == 0 {
+    poke(rec + 24, prof_next_seq(st))
+  }
+  poke(rec, peek(rec) + 1)
+  var outer = true
+  var k: Word = 0
+  while k < d {
+    if peek(peek(st + 32) + k * 24) == id {
+      outer = false
+    }
+    k = k + 1
+  }
+  if outer {
+    poke(rec + 8, peek(rec + 8) + elapsed)
+  }
+  poke(rec + 16, peek(rec + 16) + elapsed - peek(fr + 16))
+  if d > 0 {
+    let parent = peek(st + 32) + (d - 1) * 24
+    poke(parent + 16, peek(parent + 16) + elapsed)
+  }
+  return 0
+}
+
+fn prof_put(b: Word) {
+  let s = sb_finish(b)
+  write_all(2, s + 32, peek(s + 16))
+  rc_dec(s)
+}
+
+// the end of the program: the open calls end now, then the counts go to stderr
+fn prof_finish() -> Word {
+  let st = prof_state()
+  if st == 0 {
+    return 0
+  }
+  flush_out()
+  while peek(st + 40) > 0 {
+    prof_exit()
+  }
+  poke(g() + G_PROF, 0)
+  let b = sb_new()
+  sb_add_byte(b, 0)
+  sb_add_cstr(b, "prof:T ")
+  sb_add_word(b, os_time_ns() - peek(st + 48))
+  sb_add_byte(b, 10)
+  prof_put(b)
+  let keys = peek(st)
+  var i: Word = 0
+  while i < peek(keys) {
+    let rec = peek(st + 16) + i * 40
+    if peek(rec) > 0 {
+      let r = sb_new()
+      sb_add_byte(r, 0)
+      sb_add_cstr(r, "prof:F ")
+      sb_add_word(r, peek(rec))
+      sb_add_byte(r, 32)
+      sb_add_word(r, peek(rec + 8))
+      sb_add_byte(r, 32)
+      sb_add_word(r, peek(rec + 16))
+      sb_add_byte(r, 32)
+      sb_add_word(r, peek(rec + 24))
+      sb_add_byte(r, 32)
+      sb_add_str(r, peek(keys + 8 + i * 8))
+      sb_add_byte(r, 10)
+      prof_put(r)
+    }
+    i = i + 1
+  }
+  let lines = peek(st + 8)
+  i = 0
+  while i < peek(lines) {
+    let row = peek(st + 24) + i * 16
+    if peek(row) > 0 {
+      let r = sb_new()
+      sb_add_byte(r, 0)
+      sb_add_cstr(r, "prof:L ")
+      sb_add_word(r, peek(row))
+      sb_add_byte(r, 32)
+      sb_add_word(r, peek(row + 8))
+      sb_add_byte(r, 32)
+      sb_add_str(r, peek(lines + 8 + i * 16))
+      sb_add_byte(r, 58)
+      sb_add_word(r, peek(lines + 16 + i * 16))
+      sb_add_byte(r, 10)
+      prof_put(r)
+    }
+    i = i + 1
+  }
+  return 0
+}

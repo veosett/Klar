@@ -65,7 +65,15 @@ pub type Resolution { kind: Str, owner: Str, name: Str, sig: Option[Sig] }
 pub type CallInfo { sig: Sig, inst: Map[Str, Type] }
 
 /// `newtype`: declared `type X = new T`, built only by its constructor `X(value)`.
-pub type RecordInfo { name: Str, tparams: List[Str], mod_name: Str, fields: Map[Str, Type], newtype: Bool }
+/// `invariant`: a newtype with `requires` lines
+pub type RecordInfo {
+  name: Str,
+  tparams: List[Str],
+  mod_name: Str,
+  fields: Map[Str, Type],
+  newtype: Bool,
+  invariant: Bool,
+}
 
 pub type EnumInfo { name: Str, tparams: List[Str], mod_name: Str, variants: Map[Str, List[Pair[Str, Type]]] }
 
@@ -163,6 +171,8 @@ pub type Ck {
   lambda_bounds: List[Int],
   /// the lambda passed to `par_map` that is being checked (it may not use effects)
   pure_lambda: Option[Span],
+  /// inside that lambda: the index of its parameters' scope (-1 outside)
+  par_depth: Int,
   reported: Map[Str, Bool],
   resolving: List[Str],
   /// declaration index of an `impl` -> its key in `uni.impls` (impls that were registered)
@@ -183,6 +193,9 @@ pub type Ck {
   /// the element type of each `for` loop (by the span of the loop)
   raw_elems: Map[Str, Type],
   elem_types: Map[Str, Type],
+  /// the types of `let` and pattern bindings (by the span of the name), raw and settled like the types
+  raw_binds: Map[Str, Type],
+  bind_types: Map[Str, Type],
   /// the input types of each property (by name), for the native generator
   prop_types: Map[Str, List[Type]],
   /// the file of each declaration (a module made of several files: the runtime), and of the one being checked
@@ -214,7 +227,7 @@ fn record_call(c: Ck, span: Span, sig: Sig, inst: Map[Str, Type]) -> Ck {
 
 /// Moves the recorded types out of the current substitution (before it is dropped).
 fn settle_types(c: Ck) -> Ck {
-  if c.raw_types.is_empty() and c.raw_calls.is_empty() and c.raw_elems.is_empty() {
+  if c.raw_types.is_empty() and c.raw_calls.is_empty() and c.raw_elems.is_empty() and c.raw_binds.is_empty() {
     return c
   }
   var types = c.types
@@ -230,7 +243,12 @@ fn settle_types(c: Ck) -> Ck {
   for entry in c.raw_elems.entries() {
     elems = elems.set(entry.key, resolved(c.s, entry.value))
   }
-  return c with { types: types, raw_types: Map {}, calls: calls, raw_calls: Map {}, elem_types: elems, raw_elems: Map {} }
+  var binds = c.bind_types
+  for entry in c.raw_binds.entries() {
+    binds = binds.set(entry.key, resolved(c.s, entry.value))
+  }
+  return c with { types: types, raw_types: Map {}, calls: calls, raw_calls: Map {}, elem_types: elems, raw_elems: Map {},
+    bind_types: binds, raw_binds: Map {} }
 }
 
 /// A result together with the updated checker state.
@@ -528,6 +546,7 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       next_scope: 0,
       lambda_bounds: [],
       pure_lambda: None,
+      par_depth: -1,
       reported: Map {},
       resolving: [],
       impl_keys: Map {},
@@ -540,6 +559,8 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       calls: Map {},
       raw_elems: Map {},
       elem_types: Map {},
+      raw_binds: Map {},
+      bind_types: Map {},
       prop_types: Map {},
       decl_files: [],
       cur_file: file,
@@ -1012,7 +1033,7 @@ fn collect(ck: Ck) -> Ck {
           c = c with {
             uni: c.uni with {
               records: c.uni.records.set(name, RecordInfo { name: name, tparams: tparams, mod_name: c.mod_name, fields: Map {},
-                newtype: false }),
+                newtype: false, invariant: false }),
             },
             visible: c.visible.set(name, true),
           }
@@ -1083,7 +1104,8 @@ fn collect(ck: Ck) -> Ck {
                 match c.uni.records.get(tn) {
                   Some(info) => {
                     if info.mod_name == c.mod_name {
-                      c = c with { uni: c.uni with { records: c.uni.records.set(tn, info with { newtype: true }) } }
+                      c = c with { uni: c.uni with { records: c.uni.records.set(tn, info with { newtype: true,
+                        invariant: not f.pre.is_empty() }) } }
                     }
                   },
                   None => {},
@@ -1163,7 +1185,7 @@ fn resolve_type_decl(ck: Ck, d: Decl) -> Ck {
       let tps = tparam_map(tparams)
       for f in fields {
         let info = c.uni.records.get(name).unwrap_or(RecordInfo { name: name, tparams: [], mod_name: "", fields: Map {},
-          newtype: false })
+          newtype: false, invariant: false })
         if info.fields.has(f.name) {
           c = error(c: c, code: "E0101", msg: "duplicate field `{f.name}` in `{name}`", span: f.span, hint: None)
         }
@@ -1916,6 +1938,25 @@ fn captured_var(ck: Ck, name: Str, span: Span, assigning: Bool) -> Ck {
   return c
 }
 
+/// Inside the lambda given to `par_map`: a function value that comes from outside it (captured, or a parameter) may
+/// do effects that the checker cannot see, so it may not be used there.
+fn par_fn_value(ck: Ck, name: Str, span: Span, t: Type) -> Ck {
+  var i = ck.scopes.len() - 1
+  while i >= 0 {
+    let sc = ck.scopes.get_or(i, Scope { id: -1, vars: Map {} })
+    if sc.vars.has(name) {
+      if i <= ck.par_depth and holds_fn(c: ck, t: t, seen: []) {
+        return error(c: ck, code: "E0406", msg: "`par_map` runs this lambda in worker processes, so it must be pure, " +
+            "but `{name}` holds a function from outside it, whose effects are unknown", span: span,
+          hint: Some("call functions by name (declared without `uses`) or write the lambda inside"))
+      }
+      return ck
+    }
+    i = i - 1
+  }
+  return ck
+}
+
 fn declare(ck: Ck, name: Str, t: Type, mutable: Bool, span: Span, kind: Str, kw: Option[Span]) -> Ck {
   var c = ck
   if name == "_" {
@@ -2079,7 +2120,7 @@ fn check_property(ck: Ck, name: Str, params: List[Param], body: Block) -> Ck {
     if not generatable(c: c, t: r.v, seen: []) {
       c = error(c: c, code: "E0605", msg: "cannot generate random values of type `{sh(c, r.v)}` for property input " +
           "`{p.name}`", span: p.span, hint: Some("property inputs may be Int, Float, Bool, Str, Unit, List, Map, Option, " +
-            "Result and records/enums built from them"))
+            "Result and records/enums built from them (not newtypes with `requires`)"))
     }
     c = declare(ck: c, name: p.name, t: r.v, mutable: false, span: p.span, kind: "param", kw: None)
   }
@@ -2118,6 +2159,9 @@ fn generatable(c: Ck, t: Type, seen: List[Str]) -> Bool {
       let inner = seen.push(name)
       match c.uni.records.get(name) {
         Some(info) => {
+          if info.invariant {
+            return false        // random values would break the invariant
+          }
           let m = args_map(c: c, tparams: info.tparams, t: Type.Con(name: name, args: args))
           return info.fields.values().all(fn(ft) => generatable(c: c, t: sub(c: c, t: ft, m: m), seen: inner))
         },
@@ -2184,6 +2228,7 @@ fn stmt(ck: Ck, st: Stmt) -> Ck {
       if is_never(pr(c, t)) and name != "_" {
         t = Type.Any
       }
+      c = c with { raw_binds: c.raw_binds.set(key_of(c, name_span), t) }
       let kind = match mutable {
         true => "var",
         false => "let",
@@ -2380,7 +2425,7 @@ fn stmt_returns(s: Stmt) -> Bool {
 
 fn diverges(e: Expr) -> Bool {
   return match e {
-    Expr.Call(_, Expr.Name(_, name), _) => name == "fail" or name == "todo",
+    Expr.Call(_, Expr.Name(_, name), _) => name == "fail" or name == "todo" or name == "exit",
     Expr.Match(_, _, arms) => arms.all(fn(a) => match a.body {
       Body.BlockBody(b) => returns(b),
       Body.ExprBody(x) => diverges(x),
@@ -2619,10 +2664,9 @@ fn expr_kind(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
         let r = expr(ck: c, e: en.key, exp: Some(k))
         c = r.c
         let kt = pr(c, r.v)
-        let h = hd(c, kt)
-        if h != None and h != Some("Int") and h != Some("Str") and h != Some("Bool") and not is_var(kt) {
-          c = error(c: c, code: "E0202", msg: "map keys must be `Int`, `Str` or `Bool`, found `{sh(c, kt)}`",
-            span: expr_span(en.key), hint: None)
+        if holds_fn(c: c, t: kt, seen: []) {
+          c = error(c: c, code: "E0202", msg: "map keys cannot contain functions, found `{sh(c, kt)}`",
+            span: expr_span(en.key), hint: Some("keys are compared with `==`, which functions do not have"))
         }
         c = expr(ck: c, e: en.value, exp: Some(v)).c
       }
@@ -2674,6 +2718,9 @@ fn e_name(ck: Ck, span: Span, name: Str) -> Res[Type] {
       c = mark_used(c, name)
       if v.mutable {
         c = captured_var(ck: c, name: name, span: span, assigning: false)
+      }
+      if c.par_depth >= 0 {
+        c = par_fn_value(ck: c, name: name, span: span, t: v.ty)
       }
       return ok(c, v.ty)
     },
@@ -2838,8 +2885,12 @@ fn e_binary(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     c = u.c
     if not u.v {
       c = error(c: c, code: "E0211", msg: "cannot compare `{sh(c, lt)}` with `{sh(c, rt)}`", span: span, hint: num_hint)
-    } else if is_fn_type(pr(c, lt)) {
-      c = error(c: c, code: "E0211", msg: "functions cannot be compared", span: span, hint: None)
+    } else if holds_fn(c: c, t: lt, seen: []) {
+      let whole = pr(c, lt)
+      c = error(c: c, code: "E0211", msg: "functions cannot be compared", span: span, hint: match is_fn_type(whole) {
+        true => None,
+        false => Some("`{sh(c, whole)}` contains functions"),
+      })
     }
     return ok(c, con("Bool"))
   }
@@ -3275,6 +3326,9 @@ fn e_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
       match lookup(c, name) {
         Some(v) => {
           c = mark_used(c, name)
+          if c.par_depth >= 0 {
+            c = par_fn_value(ck: c, name: name, span: cspan, t: v.ty)
+          }
           return call_fn_type(ck: c, ft: v.ty, args: args, span: span)
         },
         None => {},
@@ -3967,10 +4021,11 @@ fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     false => "lambda",
   }
   var effects = outer.effects
+  let par_depth = c.par_depth
   if c.pure_lambda == Some(span) {
     purpose = "parallel"
     effects = []
-    c = c with { pure_lambda: None }
+    c = c with { pure_lambda: None, par_depth: c.scopes.len() }
   }
   c = c with { ctx: Ctx { name: outer.name, ret: ret, effects: effects, is_test: false, loop: 0, sig_end: outer.sig_end,
     purpose: purpose }, lambda_bounds: c.lambda_bounds.push(c.scopes.len()) }
@@ -3998,7 +4053,7 @@ fn e_lambda(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
     },
   }
   c = pop_scope(c)
-  c = c with { ctx: outer, lambda_bounds: c.lambda_bounds.take(c.lambda_bounds.len() - 1) }
+  c = c with { ctx: outer, lambda_bounds: c.lambda_bounds.take(c.lambda_bounds.len() - 1), par_depth: par_depth }
   return ok(c, Type.Fun(params: ptypes, ret: ret))
 }
 
@@ -4346,6 +4401,12 @@ fn patterns_any(ck: Ck, ps: List[Pattern]) -> Ck {
 fn pattern(ck: Ck, p: Pattern, t: Type) -> Ck {
   var c = ck
   let pt = pr(c, t)
+  match p {
+    Pattern.Bind(bsp, _) => {
+      c = c with { raw_binds: c.raw_binds.set(key_of(c, bsp), pt) }
+    },
+    _ => {},
+  }
   match p {
     Pattern.Wild(_) => {
       return c

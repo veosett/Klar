@@ -7,8 +7,9 @@
 All three must be the same bytes, the Windows build of klarc made by klarc2 must equal the one made by `klar build`,
 and klarc3 must build and run working programs (also a project with a dependency), run test blocks and report
 errors like `klar check`. The arm64 build of klarc made by klarc2 must equal the one made by `klar build`; with
-qemu-aarch64 installed it also runs: the arm64 compiler builds the same program bytes as klarc3. Linux x86-64 only
-(it runs the binaries).
+qemu-aarch64 installed it also runs: the arm64 compiler builds the same program bytes as klarc3. The same for the
+macOS build of klarc (experimental), run by tests/macho_run.py when the unicorn module is installed. Linux x86-64
+only (it runs the binaries).
 
     python tests/bootstrap.py
 """
@@ -87,6 +88,30 @@ def main():
                 print(f"DIFF the arm64 klarc (qemu) built {src} differently: exit {got.returncode} {got.stdout[:300]}")
             else:
                 print("bootstrap: the arm64 compiler (qemu) builds the same bytes")
+        # the macOS build of the compiler, and (emulated) the macOS compiler at work
+        mac_py, mac_k = os.path.join(d, "klarc_py.macho"), os.path.join(d, "klarc_k.macho")
+        build(KLARC, out=mac_py, target="macos")
+        if klarc(stage[1], ["build", KLARC, "--target", "macos", "-o", mac_k]).returncode != 0 or \
+                read(mac_k) != read(mac_py):
+            bad += 1
+            print("DIFF macOS klarc built by klarc2 != macOS klarc built by klar build")
+        else:
+            try:
+                import unicorn  # noqa: F401
+            except ImportError:
+                unicorn = None
+            if unicorn is not None:
+                src = os.path.join("examples", "hello.klar")
+                out_m, out_x = os.path.join(d, "hello_m"), os.path.join(d, "hello_x")
+                got = run([sys.executable, os.path.join("tests", "macho_run.py"), mac_k, "build", src, "-o", out_m,
+                           "--lib", LIB, "--target", "linux"])
+                if got.returncode != 0 or klarc(stage[2], ["build", src, "-o", out_x]).returncode != 0 or \
+                        read(out_m) != read(out_x):
+                    bad += 1
+                    print(f"DIFF the macOS klarc (emulated) built {src} differently: exit {got.returncode} "
+                          f"{got.stdout[:300]}{got.stderr[:300]}")
+                else:
+                    print("bootstrap: the macOS compiler (emulated) builds the same bytes")
         # klarc3 builds programs that behave like the Python compiler's
         for name in ("hello", "bank", "shapes"):
             src = os.path.join("examples", f"{name}.klar")

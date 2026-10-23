@@ -1,0 +1,961 @@
+// `klarc view`: an interactive picture of what a program does, for human reviewers — the counterpart of
+// klar/tools/view.py, with the same data and the same page (klar/tools/view_template.html). The page shows an
+// overview, the call graph, a plain-language summary and the control flow of each function, its source and tests,
+// and the data types. With `--run` the program runs natively; its output and error are shown (call counts and times
+// need the interpreter: `klar view --run`).
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, MatchArm, Pattern, Span, Stmt, StrPiece, TypeExpr}
+use ast.{expr_span, pattern_span}
+use checker.{CallInfo, Resolution, Sig, span_key}
+use commands.{absolute}
+use dev.{host_target, native_image, parse_rt, save_exe, temp_path}
+use inspect.{UMod, decl_span, doc_examples, sig_text, type_text, user_modules}
+use jsonout.{J, compact, spaced}
+use loader.{Ld, load_program, load_runtime}
+
+// ---- source text ------------------------------------------------------------------------------------------------
+
+fn is_space(c: Str) -> Bool {
+  return c == " " or c == "\t" or c == "\n" or c == "\r" or c == " "
+}
+
+/// Whitespace runs collapsed to one space, and trimmed (Python's `re.sub(r"\s+", " ", text).strip()`).
+fn collapse(text: Str) -> Str {
+  var out: List[Str] = []
+  var space = false
+  for c in text.chars() {
+    if is_space(c) {
+      space = true
+    } else {
+      if space and not out.is_empty() {
+        out = out.push(" ")
+      }
+      space = false
+      out = out.push(c)
+    }
+  }
+  return out.join("")
+}
+
+fn cut(line: Str, a: Int, b: Int) -> Str {
+  let n = line.len()
+  let lo = a.max(0).min(n)
+  let hi = b.max(0).min(n)
+  if hi <= lo {
+    return ""
+  }
+  return line.slice(lo, hi)
+}
+
+fn py_strip(s: Str) -> Str {
+  let cs = s.chars()
+  var a = 0
+  var b = cs.len()
+  while a < b and is_space(cs.get_or(a, "")) {
+    a = a + 1
+  }
+  while b > a and is_space(cs.get_or(b - 1, "")) {
+    b = b - 1
+  }
+  return cs.slice(a, b).join("")
+}
+
+/// The source text of a span, whitespace collapsed.
+fn seg(lines: List[Str], sp: Span) -> Str {
+  if sp.line == sp.end_line {
+    return collapse(cut(line: lines.get_or(sp.line - 1, ""), a: sp.col - 1, b: sp.end_col - 1))
+  }
+  var parts = [cut(line: lines.get_or(sp.line - 1, ""), a: sp.col - 1, b: lines.get_or(sp.line - 1, "").len())]
+  var ln = sp.line + 1
+  while ln < sp.end_line {
+    parts = parts.push(lines.get_or(ln - 1, ""))
+    ln = ln + 1
+  }
+  parts = parts.push(cut(line: lines.get_or(sp.end_line - 1, ""), a: 0, b: sp.end_col - 1))
+  return collapse(parts.map(fn(p) => py_strip(p)).join(" "))
+}
+
+fn short(text: Str, n: Int) -> Str {
+  if text.len() <= n {
+    return text
+  }
+  return text.slice(0, n - 1) + "…"
+}
+
+fn stmt_span(s: Stmt) -> Span {
+  return match s {
+    Stmt.Let(sp, _, _, _, _, _, _) => sp,
+    Stmt.Assign(sp, _, _) => sp,
+    Stmt.Return(sp, _) => sp,
+    Stmt.If(sp, _, _, _) => sp,
+    Stmt.While(sp, _, _) => sp,
+    Stmt.For(sp, _, _, _, _) => sp,
+    Stmt.Break(sp) => sp,
+    Stmt.Continue(sp) => sp,
+    Stmt.Assert(sp, _, _) => sp,
+    Stmt.ExprStmt(sp, _) => sp,
+  }
+}
+
+// ---- control flow as a tree of blocks -------------------------------------------------------------------------
+
+fn obj(fields: List[Pair[Str, J]]) -> J {
+  return J.JObj(fields)
+}
+
+fn kv(k: Str, v: J) -> Pair[Str, J] {
+  return Pair { first: k, second: v }
+}
+
+fn js(s: Str) -> J {
+  return J.JStr(s)
+}
+
+fn jlist(xs: List[Str]) -> J {
+  return J.JArr(xs.map(fn(x) => J.JStr(x)))
+}
+
+fn flow(stmts: List[Stmt], lines: List[Str]) -> J {
+  return J.JArr(stmts.map(fn(s) => flow_stmt(s, lines)))
+}
+
+fn body_flow(b: Body, lines: List[Str]) -> J {
+  return match b {
+    Body.BlockBody(blk) => flow(blk.stmts, lines),
+    Body.ExprBody(e) => J.JArr([flow_expr(e, lines)]),
+  }
+}
+
+/// Expressions with their own structure (match) become blocks; others become text.
+fn flow_expr(e: Expr, lines: List[Str]) -> J {
+  return match e {
+    Expr.Match(sp, subject, arms) => {
+      var out: List[J] = []
+      for a in arms {
+        var pat = seg(lines, pattern_span(a.pattern))
+        match a.guard {
+          Some(g) => {
+            pat = pat + " if " + seg(lines, expr_span(g))
+          },
+          None => {},
+        }
+        out = out.push(obj([kv("pattern", js(pat)), kv("body", body_flow(a.body, lines)), kv("line", J.JInt(a.span.line))]))
+      }
+      return obj([kv("kind", js("match")), kv("subject", js(seg(lines, expr_span(subject)))), kv("arms", J.JArr(out)),
+        kv("line", J.JInt(sp.line))])
+    },
+    _ => obj([kv("kind", js("expr")), kv("text", js(short(seg(lines, expr_span(e)), 140))), kv("line", J.JInt(expr_span(
+      e).line))]),
+  }
+}
+
+fn is_match(e: Expr) -> Bool {
+  return match e {
+    Expr.Match(_, _, _) => true,
+    _ => false,
+  }
+}
+
+fn flow_stmt(s: Stmt, lines: List[Str]) -> J {
+  let line = J.JInt(stmt_span(s).line)
+  return match s {
+    Stmt.Let(_, name, _, _, _, value, mutable) => {
+      var node = [kv("kind", js("let")), kv("name", js(name)), kv("mutable", J.JBool(mutable)), kv("line", line)]
+      if is_match(value) {
+        node = node.push(kv("value", flow_expr(value, lines)))
+      } else {
+        node = node.push(kv("text", js(short(seg(lines, expr_span(value)), 120))))
+      }
+      return obj(node)
+    },
+    Stmt.Assign(_, name, value) => {
+      var node = [kv("kind", js("assign")), kv("name", js(name)), kv("line", line)]
+      if is_match(value) {
+        node = node.push(kv("value", flow_expr(value, lines)))
+      } else {
+        node = node.push(kv("text", js(short(seg(lines, expr_span(value)), 120))))
+      }
+      return obj(node)
+    },
+    Stmt.Return(_, value) => match value {
+      None => obj([kv("kind", js("return")), kv("text", js("")), kv("line", line)]),
+      Some(v) => match is_match(v) {
+        true => obj([kv("kind", js("return")), kv("value", flow_expr(v, lines)), kv("line", line)]),
+        false => obj([kv("kind", js("return")), kv("text", js(short(seg(lines, expr_span(v)), 120))), kv("line", line)]),
+      },
+    },
+    Stmt.If(_, cond, then, else_) => {
+      var node = [kv("kind", js("if")), kv("cond", js(seg(lines, expr_span(cond)))), kv("then", flow(then.stmts, lines)),
+        kv("line", line)]
+      match else_ {
+        Else.ElseIf(x) => {
+          node = node.push(kv("else", J.JArr([flow_stmt(x, lines)])))
+        },
+        Else.ElseBlock(b) => {
+          node = node.push(kv("else", flow(b.stmts, lines)))
+        },
+        Else.NoElse => {},
+      }
+      return obj(node)
+    },
+    Stmt.While(_, cond, body) => obj([kv("kind", js("while")), kv("cond", js(seg(lines, expr_span(cond)))), kv("body",
+      flow(body.stmts, lines)), kv("line", line)]),
+    Stmt.For(_, var_name, _, iter, body) => obj([kv("kind", js("for")), kv("var", js(var_name)), kv("iter", js(seg(lines,
+      expr_span(iter)))), kv("body", flow(body.stmts, lines)), kv("line", line)]),
+    Stmt.Assert(_, cond, _) => obj([kv("kind", js("assert")), kv("text", js(seg(lines, expr_span(cond)))), kv("line", line)]),
+    Stmt.Break(_) => obj([kv("kind", js("break")), kv("line", line)]),
+    Stmt.Continue(_) => obj([kv("kind", js("continue")), kv("line", line)]),
+    Stmt.ExprStmt(_, e) => flow_expr(e, lines),
+  }
+}
+
+// ---- the nodes of a subtree, in the order of Python's iter_nodes ---------------------------------------------
+// (a stack: a node, then its children from the last to the first). Only what the facts below need is recorded.
+
+enum Ev {
+  ECall(name: Str),
+  EName(name: Str, span: Span),
+  EMethod(span: Span),
+  EReturn(value: Option[Expr]),
+  ETry(expr: Expr),
+  EBlock(stmts: Int),
+}
+
+fn v_block(acc: List[Ev], b: Block) -> List[Ev] {
+  var out = acc.push(Ev.EBlock(stmts: b.stmts.len()))
+  for s in b.stmts.reverse() {
+    out = v_stmt(out, s)
+  }
+  return out
+}
+
+fn v_opt(acc: List[Ev], e: Option[Expr]) -> List[Ev] {
+  return match e {
+    Some(x) => v_expr(acc, x),
+    None => acc,
+  }
+}
+
+fn v_body(acc: List[Ev], b: Body) -> List[Ev] {
+  return match b {
+    Body.ExprBody(e) => v_expr(acc, e),
+    Body.BlockBody(blk) => v_block(acc, blk),
+  }
+}
+
+fn v_stmt(acc: List[Ev], s: Stmt) -> List[Ev] {
+  return match s {
+    Stmt.Let(_, _, _, _, _, value, _) => v_expr(acc, value),
+    Stmt.Assign(_, _, value) => v_expr(acc, value),
+    Stmt.Return(_, value) => v_opt(acc.push(Ev.EReturn(value: value)), value),
+    Stmt.If(_, cond, then, else_) => {
+      let after_else = match else_ {
+        Else.NoElse => acc,
+        Else.ElseBlock(b) => v_block(acc, b),
+        Else.ElseIf(x) => v_stmt(acc, x),
+      }
+      return v_expr(v_block(after_else, then), cond)
+    },
+    Stmt.While(_, cond, body) => v_expr(v_block(acc, body), cond),
+    Stmt.For(_, _, _, iter, body) => v_expr(v_block(acc, body), iter),
+    Stmt.Assert(_, cond, message) => v_expr(v_opt(acc, message), cond),
+    Stmt.ExprStmt(_, e) => v_expr(acc, e),
+    _ => acc,
+  }
+}
+
+fn v_args(acc: List[Ev], args: List[Arg]) -> List[Ev] {
+  var out = acc
+  for a in args.reverse() {
+    out = v_expr(out, a.value)
+  }
+  return out
+}
+
+fn v_inits(acc: List[Ev], fields: List[FieldInit]) -> List[Ev] {
+  var out = acc
+  for f in fields.reverse() {
+    out = v_expr(out, f.value)
+  }
+  return out
+}
+
+fn v_expr(acc: List[Ev], e: Expr) -> List[Ev] {
+  return match e {
+    Expr.StrLit(_, parts) => {
+      var out = acc
+      for p in parts.reverse() {
+        out = match p {
+          StrPiece.Code(x) => v_expr(out, x),
+          _ => out,
+        }
+      }
+      return out
+    },
+    Expr.ListLit(_, items) => {
+      var out = acc
+      for x in items.reverse() {
+        out = v_expr(out, x)
+      }
+      return out
+    },
+    Expr.MapLit(_, entries) => {
+      var out = acc
+      for m in entries.reverse() {
+        out = v_expr(v_expr(out, m.value), m.key)
+      }
+      return out
+    },
+    Expr.Name(span, name) => acc.push(Ev.EName(name: name, span: span)),
+    Expr.Unary(_, _, operand) => v_expr(acc, operand),
+    Expr.Binary(_, _, left, right) => v_expr(v_expr(acc, right), left),
+    Expr.Call(_, callee, args) => {
+      let name = match callee {
+        Expr.Name(_, n) => n,
+        _ => "",
+      }
+      return v_expr(v_args(acc.push(Ev.ECall(name: name)), args), callee)
+    },
+    Expr.MethodCall(span, o, _, _, args) => v_expr(v_args(acc.push(Ev.EMethod(span: span)), args), o),
+    Expr.FieldAccess(_, o, _, _) => v_expr(acc, o),
+    Expr.Try(_, x) => v_expr(acc.push(Ev.ETry(expr: x)), x),
+    Expr.RecordLit(_, _, fields) => v_inits(acc, fields),
+    Expr.WithExpr(_, base, fields) => v_expr(v_inits(acc, fields), base),
+    Expr.Match(_, subject, arms) => {
+      var out = acc
+      for a in arms.reverse() {
+        out = v_opt(v_body(out, a.body), a.guard)
+      }
+      return v_expr(out, subject)
+    },
+    Expr.Lambda(_, _, _, body) => v_body(acc, body),
+    _ => acc,
+  }
+}
+
+// ---- facts about a function ------------------------------------------------------------------------------------
+
+/// What the checker recorded for a module: method resolutions and calls (by span).
+type VFacts { file: Str, res: Map[Str, Resolution], calls: Map[Str, CallInfo] }
+
+/// User functions called in these nodes. A call through a trait may reach every implementation of that method.
+fn calls_in(evs: List[Ev], user_fns: List[Str], targets: Map[Str, List[Str]], f: VFacts) -> List[Str] {
+  var found: List[Str] = []
+  for ev in evs {
+    var names: List[Str] = []
+    match ev {
+      Ev.ECall(name) => {
+        if name != "" and user_fns.contains(name) {
+          names = [name]
+        }
+      },
+      Ev.EName(name, span) => {
+        if user_fns.contains(name) and f.calls.has(span_key(f.file, span)) {
+          names = [name]
+        }
+      },
+      Ev.EMethod(span) => {
+        match f.res.get(span_key(f.file, span)) {
+          Some(r) => {
+            if r.kind == "ufcs" and user_fns.contains(r.name) {
+              names = [r.name]
+            } else if r.kind == "trait" {
+              names = targets.get(r.owner + "|" + r.name).unwrap_or([]).filter(fn(t) => user_fns.contains(t))
+            }
+          },
+          None => {},
+        }
+      },
+      _ => {},
+    }
+    for n in names {
+      if not found.contains(n) {
+        found = found.push(n)
+      }
+    }
+  }
+  return found
+}
+
+const BUILTINS_SHOWN: List[Str] = ["print", "read_line", "read_file", "write_file", "file_exists", "now_ms", "now_ns",
+  "random_int", "cli_args", "fail", "todo", "dbg"]
+
+fn builtins_used(evs: List[Ev]) -> List[Str] {
+  var names: List[Str] = []
+  for ev in evs {
+    match ev {
+      Ev.ECall(name) => {
+        if BUILTINS_SHOWN.contains(name) and not names.contains(name) {
+          names = names.push(name)
+        }
+      },
+      _ => {},
+    }
+  }
+  return names
+}
+
+/// `Err(x)` -> `Err(…)` when the text ends with a parenthesis (Python's `re.sub(r"\(.*\)$", "(…)", text)`).
+fn elide_args(text: Str) -> Str {
+  if not text.ends_with(")") {
+    return text
+  }
+  return match text.index_of("(") {
+    Some(i) => text.slice(0, i) + "(…)",
+    None => text,
+  }
+}
+
+/// The `Err(...)` / `None` values a function returns explicitly (what can go wrong).
+fn errors_returned(evs: List[Ev], lines: List[Str]) -> List[Str] {
+  var out: List[Str] = []
+  for ev in evs {
+    match ev {
+      Ev.EReturn(value) => {
+        match value {
+          Some(Expr.Call(_, Expr.Name(_, "Err"), args)) => {
+            match args.get(0) {
+              Some(a) => {
+                let text = elide_args(seg(lines, expr_span(a.value)))
+                if not out.contains(text) {
+                  out = out.push(text)
+                }
+              },
+              None => {},
+            }
+          },
+          Some(Expr.Name(_, "None")) => {
+            if not out.contains("None") {
+              out = out.push("None")
+            }
+          },
+          _ => {},
+        }
+      },
+      Ev.ETry(_) => {
+        if not out.contains("?") {
+          out = out.push("?")
+        }
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn tried_calls(evs: List[Ev]) -> List[Str] {
+  var out: List[Str] = []
+  for ev in evs {
+    match ev {
+      Ev.ETry(Expr.Call(_, Expr.Name(_, n), _)) => {
+        out = out.push(n)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn statements(evs: List[Ev]) -> Int {
+  var n = 0
+  for ev in evs {
+    match ev {
+      Ev.EBlock(k) => {
+        n = n + k
+      },
+      _ => {},
+    }
+  }
+  return n
+}
+
+fn param_type_text(lines: List[Str], d: FnDecl, name: Str, ty: Option[TypeExpr]) -> Str {
+  if name == "self" and d.owner_kind != None {
+    if d.owner_kind == Some("impl") {
+      return d.owner.unwrap_or("")
+    }
+    return "Self"
+  }
+  return match ty {
+    Some(t) => type_text(lines, t),
+    None => "",
+  }
+}
+
+fn effect_words(e: Str) -> Str {
+  return match e {
+    "io" => "console input/output",
+    "fs" => "files",
+    "time" => "the clock",
+    "rand" => "random numbers",
+    "net" => "the network",
+    _ => e,
+  }
+}
+
+fn summary(d: FnDecl, lines: List[Str], calls: List[Str], errs: List[Str], used: List[Str]) -> Str {
+  let ps = d.params.map(fn(p) => p.name + " (" + match p.ty {
+    Some(t) => type_text(lines, t),
+    None => "",
+  } + ")").join(", ")
+  let ret = match d.ret {
+    Some(t) => type_text(lines, t),
+    None => "nothing (Unit)",
+  }
+  var parts: List[Str] = []
+  let doc = py_strip(d.doc.unwrap_or(""))
+  if doc != "" {
+    parts = parts.push(doc.split("\n").get_or(0, ""))
+  }
+  if ps != "" {
+    parts = parts.push("Takes " + ps + ".")
+  } else {
+    parts = parts.push("Takes no arguments.")
+  }
+  parts = parts.push("Returns " + ret + ".")
+  for r in d.pre {
+    parts = parts.push("Requires " + seg(lines, expr_span(r)) + ".")
+  }
+  for e in d.post {
+    parts = parts.push("Guarantees " + seg(lines, expr_span(e)) + ".")
+  }
+  if not d.effects.is_empty() {
+    parts = parts.push("Side effects: " + d.effects.map(effect_words).join(", ") + ".")
+  } else {
+    parts = parts.push("Pure: no side effects (same input → same output).")
+  }
+  if not errs.is_empty() {
+    parts = parts.push("Can return: " + errs.map(fn(e) => match e == "?" {
+      true => "errors of the functions it calls (via ?)",
+      false => e,
+    }).join(", ") + ".")
+  }
+  if not calls.is_empty() {
+    parts = parts.push("Calls " + calls.join(", ") + ".")
+  }
+  if not used.is_empty() {
+    parts = parts.push("Uses built-ins " + used.join(", ") + ".")
+  }
+  return parts.join(" ")
+}
+
+// ---- the whole program -----------------------------------------------------------------------------------------
+
+/// A function of the program, with its facts (`fields`: what the page shows, in the order klar view writes them).
+type VFn { name: Str, own: Bool, calls: List[Str], called_by: List[Str], errors: List[Str], tried: List[Str],
+  tests: List[Str], doc: Str, fields: List[Pair[Str, J]] }
+
+type VTest { name: Str, kind: Str, line: Int, calls: List[Str] }
+
+fn fn_json(f: VFn) -> J {
+  var out: List[Pair[Str, J]] = []
+  for p in f.fields {
+    if p.first == "calls" {
+      out = out.push(kv("calls", jlist(f.calls)))
+    } else if p.first == "called_by" {
+      out = out.push(kv("called_by", jlist(f.called_by)))
+    } else if p.first == "errors" {
+      out = out.push(kv("errors", jlist(f.errors)))
+    } else if p.first == "tried" {
+      out = out.push(kv("tried", jlist(f.tried)))
+    } else if p.first == "tests" {
+      out = out.push(kv("tests", jlist(f.tests)))
+    } else {
+      out = out.push(p)
+    }
+  }
+  return J.JObj(out)
+}
+
+fn facts_of(ld: Ld, m: UMod) -> VFacts {
+  let calls = match ld.by_path.get(m.path) {
+    Some(md) => match md.checker {
+      Some(ck) => ck.calls,
+      None => Map {},
+    },
+    None => Map {},
+  }
+  return VFacts { file: m.display, res: m.res, calls: calls }
+}
+
+/// (trait|method) -> the functions implementing it, from the checker's method tables.
+fn trait_targets(ld: Ld) -> Map[Str, List[Str]] {
+  var out: Map[Str, List[Str]] = Map {}
+  for t in ld.uni.type_methods.values() {
+    for e in t.entries() {
+      let key = e.value.first + "|" + e.key
+      let lst = out.get(key).unwrap_or([])
+      if not lst.contains(e.value.second.name) {
+        out = out.set(key, lst.push(e.value.second.name))
+      }
+    }
+  }
+  return out
+}
+
+fn fn_evs(d: FnDecl) -> List[Ev] {
+  return match d.body {
+    Some(b) => v_block([], b),
+    None => [],
+  }
+}
+
+fn doc_of(doc: Option[Str]) -> Str {
+  return py_strip(doc.unwrap_or(""))
+}
+
+fn type_entry(kind: Str, name: Str, mod_name: Str, line: Int, doc: Option[Str], fields: List[Str]) -> J {
+  return obj([kv("kind", js(kind)), kv("name", js(name)), kv("module", js(mod_name)), kv("line", J.JInt(line)), kv("doc",
+    js(doc_of(doc))), kv("fields", jlist(fields))])
+}
+
+pub fn collect(ld: Ld, trace: J) -> J {
+  let mods = user_modules(ld)
+  var fns: Map[Str, VFn] = Map {}
+  var types: List[J] = []
+  var consts: List[J] = []
+  var tests: List[VTest] = []
+  var user_fns: List[Str] = []
+  let targets = trait_targets(ld)
+  for m in mods {
+    for d in m.decls {
+      match d {
+        Decl.Fn(f) => {
+          if f.constructs == None and not user_fns.contains(f.name) {
+            user_fns = user_fns.push(f.name)
+          }
+        },
+        _ => {},
+      }
+    }
+  }
+  let main_display = match ld.order.last() {
+    Some(p) => ld.by_path.get(p).map(fn(md) => md.display).unwrap_or(""),
+    None => "",
+  }
+  for m in mods {
+    let lines = m.lines
+    let own = m.display == main_display
+    let facts = facts_of(ld, m)
+    for d in m.decls {
+      match d {
+        Decl.Fn(f) => {
+          if f.constructs == None {
+            let body = match f.body {
+              Some(b) => b,
+              None => Block { span: f.span, stmts: [] },
+            }
+            let evs = fn_evs(f)
+            var calls = calls_in(evs: evs, user_fns: user_fns, targets: targets, f: facts)
+            for r in f.pre.concat(f.post) {
+              for c in calls_in(evs: v_expr([], r), user_fns: user_fns, targets: targets, f: facts) {
+                if not calls.contains(c) {
+                  calls = calls.push(c)
+                }
+              }
+            }
+            let errs = errors_returned(evs, lines)
+            let used = builtins_used(evs)
+            let params = f.params.map(fn(p) => obj([kv("name", js(p.name)), kv("type", js(param_type_text(lines: lines,
+              d: f, name: p.name, ty: p.ty)))]))
+            let source = lines.slice((f.span.line - 1).max(0), body.span.end_line.min(lines.len())).join("\n")
+            let fields = [kv("name", js(f.name)), kv("module", js(m.display)), kv("line", J.JInt(f.span.line)), kv(
+              "end_line", J.JInt(body.span.end_line)), kv("own", J.JBool(own)), kv("signature", js(sig_text(lines: lines, d: d,
+                newtype: false))), kv("doc", js(doc_of(f.doc))), kv("effects", jlist(f.effects)), kv("calls", J.JNull), kv(
+                  "called_by", J.JNull), kv("summary", js(summary(d: f, lines: lines, calls: calls, errs: errs, used: used))),
+              kv("params", J.JArr(params)), kv("returns", js(match f.ret {
+                Some(t) => type_text(lines, t),
+                None => "Unit",
+              })), kv("builtins", jlist(used)), kv("requires", jlist(f.pre.map(fn(r) => seg(lines, expr_span(r))))), kv(
+                "ensures", jlist(f.post.map(fn(r) => seg(lines, expr_span(r))))), kv("errors", J.JNull), kv("tried",
+                  J.JNull), kv("flow", flow(body.stmts, lines)), kv("source", js(source)), kv("examples", jlist(doc_examples(
+                    decls: m.decls, lines: lines, name: f.name))), kv("tests", J.JNull), kv("statements", J.JInt(statements(evs)))]
+            let tried = tried_calls(evs)
+            fns = fns.set(f.name, VFn { name: f.name, own: own, calls: calls, called_by: [], errors: errs,
+              tried: tried, tests: [], doc: doc_of(f.doc), fields: fields })
+          }
+        },
+        Decl.TypeD(sp, name, _, fields, doc, _) => {
+          types = types.push(type_entry(kind: "record", name: name, mod_name: m.display, line: sp.line, doc: doc,
+            fields: fields.map(fn(x) => x.name + ": " + type_text(lines, x.ty))))
+        },
+        Decl.EnumD(sp, name, _, variants, doc, _) => {
+          types = types.push(type_entry(kind: "enum", name: name, mod_name: m.display, line: sp.line, doc: doc,
+            fields: variants.map(fn(v) => match v.fields.is_empty() {
+              true => v.name,
+              false => v.name + "(" + v.fields.map(fn(x) => x.name + ": " + type_text(lines, x.ty)).join(", ") + ")",
+          })))
+        },
+        Decl.Trait(sp, name, _, methods, _, doc, _) => {
+          var sigs = methods.map(fn(x) => sig_text(lines: lines, d: Decl.Fn(decl: x), newtype: false))
+          for other in m.decls {
+            match other {
+              Decl.Fn(x) => {
+                if x.owner_kind == Some("default") and x.trait_name == Some(name) {
+                  sigs = sigs.push(sig_text(lines: lines, d: other, newtype: false) + "  (default)")
+                }
+              },
+              _ => {},
+            }
+          }
+          let impls = ld.uni.impls.values().filter(fn(i) => i.trait_name == name).map(fn(i) => i.type_name).sort()
+          let e = type_entry(kind: "trait", name: name, mod_name: m.display, line: sp.line, doc: doc, fields: sigs)
+          types = types.push(match e {
+            J.JObj(fs) => J.JObj(fs.push(kv("impls", jlist(impls)))),
+            _ => e,
+          })
+        },
+        Decl.Alias(sp, name, _, target, doc, _) => {
+          types = types.push(type_entry(kind: "alias", name: name, mod_name: m.display, line: sp.line, doc: doc,
+            fields: [type_text(lines, target)]))
+        },
+        Decl.Const(sp, name, _, _, value, _, _) => {
+          consts = consts.push(obj([kv("name", js(name)), kv("value", js(seg(lines, expr_span(value)))), kv("line",
+            J.JInt(sp.line))]))
+        },
+        Decl.Test(sp, name, body) => {
+          if own {
+            var kind = "test"
+            if name.starts_with("doc: ") {
+              kind = "doc-test"
+            }
+            tests = tests.push(VTest { name: name, kind: kind, line: sp.line, calls: calls_in(evs: v_block([], body),
+              user_fns: user_fns, targets: targets, f: facts) })
+          }
+        },
+        Decl.Property(sp, name, _, body) => {
+          if own {
+            tests = tests.push(VTest { name: name, kind: "property", line: sp.line, calls: calls_in(evs: v_block([],
+              body), user_fns: user_fns, targets: targets, f: facts) })
+          }
+        },
+        _ => {},
+      }
+    }
+  }
+  // errors passed on with `?` are the callee's errors: resolve them (a few rounds for chains)
+  var round = 0
+  while round < 4 {
+    for name in fns.keys() {
+      var f = fns.get(name).unwrap_or(VFn { name: "", own: false, calls: [], called_by: [], errors: [], tried: [],
+        tests: [], doc: "", fields: [] })
+      for c in f.tried {
+        for e in fns.get(c).map(fn(x) => x.errors).unwrap_or([]) {
+          if e != "?" and not f.errors.contains(e) {
+            f = f with { errors: f.errors.push(e) }
+            fns = fns.set(name, f)
+          }
+        }
+      }
+    }
+    round = round + 1
+  }
+  for name in fns.keys() {
+    let f = fns.get(name).unwrap_or(VFn { name: "", own: false, calls: [], called_by: [], errors: [], tried: [],
+      tests: [], doc: "", fields: [] })
+    let known = fns
+    if not f.tried.is_empty() and f.tried.all(fn(c) => known.has(c)) and f.errors.contains("?") {
+      // (Python's list.remove: the first one)
+      var removed = false
+      var errs: List[Str] = []
+      for e in f.errors {
+        if e == "?" and not removed {
+          removed = true
+        } else {
+          errs = errs.push(e)
+        }
+      }
+      fns = fns.set(name, f with { errors: errs })
+    }
+  }
+  // keep the program's own functions and the imported ones it actually reaches
+  var keep: List[Str] = []
+  var work: List[Str] = []
+  for f in fns.values() {
+    if f.own {
+      keep = keep.push(f.name)
+      work = work.push(f.name)
+    }
+  }
+  for t in tests {
+    work = work.concat(t.calls)
+  }
+  while not work.is_empty() {
+    let n = work.last().unwrap_or("")
+    work = work.take(work.len() - 1)
+    match fns.get(n) {
+      Some(f) => {
+        if not keep.contains(n) {
+          keep = keep.push(n)
+        }
+        let kept_now = keep
+        work = work.concat(f.calls.filter(fn(c) => not kept_now.contains(c)))
+      },
+      None => {},
+    }
+  }
+  var kept: Map[Str, VFn] = Map {}
+  for e in fns.entries() {
+    if keep.contains(e.key) {
+      kept = kept.set(e.key, e.value)
+    }
+  }
+  for t in tests {
+    for c in t.calls {
+      match kept.get(c) {
+        Some(f) => {
+          kept = kept.set(c, f with { tests: f.tests.push(t.name) })
+        },
+        None => {},
+      }
+    }
+  }
+  for name in kept.keys() {
+    let f = kept.get(name).unwrap_or(VFn { name: "", own: false, calls: [], called_by: [], errors: [], tried: [],
+      tests: [], doc: "", fields: [] })
+    for c in f.calls {
+      match kept.get(c) {
+        Some(g) => {
+          if not g.called_by.contains(f.name) {
+            kept = kept.set(c, g with { called_by: g.called_by.push(f.name) })
+          }
+        },
+        None => {},
+      }
+    }
+  }
+  let main_fn = kept.get("main")
+  var first_doc = ""
+  let src0 = ld.sources.get(main_display).unwrap_or("").split("\n")
+  var reading = true
+  for ln in src0 {
+    let s = py_strip(ln)
+    if reading {
+      if s.starts_with("//") and not s.starts_with("///") {
+        first_doc = first_doc + py_strip(s.slice(2, s.len())) + " "
+      } else if s != "" {
+        reading = false
+      }
+    }
+  }
+  var description = py_strip(first_doc)
+  match main_fn {
+    Some(f) => {
+      if f.doc != "" {
+        description = f.doc
+      }
+    },
+    None => {},
+  }
+  let entry = match main_fn {
+    Some(_) => js("main"),
+    None => J.JNull,
+  }
+  return obj([kv("file", js(main_display)), kv("modules", jlist(mods.map(fn(m) => m.display))), kv("description",
+    js(description)), kv("entry", entry), kv("functions", J.JObj(kept.entries().map(fn(e) => kv(e.key, fn_json(
+      e.value))))), kv("types", J.JArr(types)), kv("consts", J.JArr(consts)), kv("tests", J.JArr(tests.map(fn(t) => obj(
+        [kv("name", js(t.name)), kv("kind", js(t.kind)), kv("line", J.JInt(t.line)), kv("calls", jlist(t.calls))])))), kv(
+          "trace", trace)])
+}
+
+fn html_escape(s: Str) -> Str {
+  return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#x27;")
+}
+
+/// `klar view --run` without the interpreter: the output and the error of a native run (no call counts).
+fn run_trace(ld: Ld, file: Str, input: Str) -> J uses io, fs, proc, time {
+  let exe = temp_path(file, "view")
+  match save_exe(exe, native_image(ld: load_runtime(ld), main_path: file, target: host_target(), tests: false)) {
+    Ok(_) => {},
+    Err(e) => {
+      return obj([kv("calls", J.JObj([])), kv("output", js("")), kv("error", obj([kv("code", js("E0000")), kv("message",
+        js(e)), kv("line", J.JInt(0))])), kv("total_ms", J.JInt(0))])
+    },
+  }
+  let t0 = now_ms()
+  let res = run_capture(args: [exe], dir: "", input: input).unwrap_or(["1", "", ""])
+  let ms = now_ms() - t0
+  let error = match parse_rt(res.get_or(2, "")) {
+    Some(e) => obj([kv("code", js(e.code)), kv("message", js(e.msg)), kv("line", J.JInt(e.at.split(":").get_or(1, "0")
+        .to_int().unwrap_or(0)))]),
+    None => J.JNull,
+  }
+  let out = res.get_or(1, "")
+  return obj([kv("calls", J.JObj([])), kv("output", js(out.slice(0, out.len().min(4000)))), kv("error", error), kv(
+    "total_ms", J.JFloat(ms.to_float()))])
+}
+
+fn opt_arg(args: List[Str], names: List[Str]) -> Str {
+  var i = 0
+  while i < args.len() {
+    if names.contains(args.get_or(i, "")) {
+      return args.get_or(i + 1, "")
+    }
+    i = i + 1
+  }
+  return ""
+}
+
+/// `klarc view FILE [-o OUT] [--run] [--stdin TEXT] [--json]`
+pub fn view_command(args: List[Str], lib: Str) -> Int uses io, fs, proc, time {
+  var file = ""
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if ["-o", "--output", "--stdin", "--lib"].contains(a) {
+      i = i + 2
+    } else {
+      if not a.starts_with("-") and file == "" {
+        file = a
+      }
+      i = i + 1
+    }
+  }
+  let ld = load_program(file, lib)
+  if ld.diags.any(fn(d) => d.severity == "error") {
+    eprint("the program has errors; run `klar check` first")
+    return 1
+  }
+  var trace = J.JNull
+  if args.contains("--run") {
+    trace = run_trace(ld: ld, file: file, input: opt_arg(args, ["--stdin"]))
+  }
+  let data = collect(ld, trace)
+  if args.contains("--json") {
+    print(compact(data))
+    return 0
+  }
+  var out = opt_arg(args, ["-o", "--output"])
+  if out == "" {
+    var stem = file
+    let base = file.replace("\\", "/").split("/").last().unwrap_or(file)
+    if base.contains(".") and not base.starts_with(".") {
+      let parts = file.split(".")
+      stem = parts.take(parts.len() - 1).join(".")
+    }
+    out = stem + ".view.html"
+  }
+  let tpl = match read_file(lib + "/tools/view_template.html") {
+    Ok(t) => t,
+    Err(e) => {
+      eprint("klarc: {e}")
+      return 1
+    },
+  }
+  let payload = spaced(data).replace("</", "<\\/")
+  let name = match data {
+    J.JObj(fs) => fs.get(0).map(fn(p) => match p.second {
+      J.JStr(s) => s,
+      _ => "",
+    }).unwrap_or(""),
+    _ => "",
+  }
+  match write_file(out, tpl.replace("/*__DATA__*/null", payload).replace("__TITLE__", html_escape(name))) {
+    Ok(_) => {},
+    Err(e) => {
+      eprint("klarc: {e}")
+      return 1
+    },
+  }
+  print("wrote {out} — open it in a browser")
+  return 0
+}

@@ -886,14 +886,16 @@ fn shrink(v: Word, td: Word) -> Word {
 
 // ---- running a property ------------------------------------------------------------------------------------------
 // One run happens in a child process; a runtime error there (fail_with with G_PROP set) is sent back through a pipe as
-// [code][message][span][details...][stack note][hint] (strings as length + bytes) and the child exits.
+// [code][message][span][details...][stack note][hint] (strings as length + bytes) and the child exits. Without fork
+// (Windows) the run happens in this process: G_PROPJB holds the os_setjmp buffer, and the report goes back there by
+// os_longjmp (the memory the failed run held is not freed).
 
 fn put_str(b: Word, s: Word) {
   put_word(b, peek(s + 16))
   sb_add_bytes(b, s + 32, peek(s + 16))
 }
 
-// in the child: the report of a runtime error, written to the parent
+// in the child: the report of a runtime error, written to the parent (or kept for try_prop_here)
 fn prop_failure(code: Word, msg: Word, sp: Word, details: Word, hint: Word) {
   let b = sb_new()
   put_str(b, code)
@@ -915,6 +917,11 @@ fn prop_failure(code: Word, msg: Word, sp: Word, details: Word, hint: Word) {
   put_str(b, stack)
   put_str(b, hint)
   let s = sb_finish(b)
+  let jb = peek(g() + G_PROPJB)
+  if jb != 0 {
+    poke(jb + 64, s)
+    os_longjmp(jb, 1)
+  }
   write_all(peek(g() + G_PROP), s + 32, peek(s + 16))
   os_exit(1)
 }
@@ -947,8 +954,34 @@ fn read_failure(text: Word) -> Word {
   return f
 }
 
+// the run in this process (no fork): 0 when it holds, else its failure
+fn try_prop_here(clo: Word, args: Word) -> Word {
+  flush_out()
+  let gp = g()
+  let jb = alloc(72)
+  poke(jb + 64, 0)
+  poke(gp + G_PROP, 1)
+  poke(gp + G_PROPJB, jb)
+  if os_setjmp(jb) == 0 {
+    call1(clo, args)
+  }
+  // (back here after the run, or from prop_failure)
+  poke(gp + G_OUTLEN, 0)
+  poke(gp + G_PROP, 0)
+  poke(gp + G_PROPJB, 0)
+  let text = peek(jb + 64)
+  block_free(jb)
+  if text == 0 {
+    return 0
+  }
+  return read_failure(text)
+}
+
 // runs the property once with these arguments: 0 when it holds, else its failure
 fn try_prop(clo: Word, args: Word) -> Word {
+  if os_platform() == 1 {
+    return try_prop_here(clo, args)
+  }
   flush_out()
   let fds = alloc(8)
   os_pipe(fds)
@@ -996,11 +1029,50 @@ fn try_prop(clo: Word, args: Word) -> Word {
   return f
 }
 
+// Windows: the k-th word from the end of the command line (1 = the last), when it has 4 words or more; else 0
+fn cmdline_word(k: Word) -> Word {
+  let cl = os_cmdline()
+  let n = cstr_len(cl)
+  let starts = alloc(8 * 64)
+  var count: Word = 0
+  var quoted = false
+  var in_word = false
+  var i: Word = 0
+  while i < n {
+    let c = peek8(cl + i)
+    if c == 34 {
+      quoted = not quoted
+    }
+    if c == 32 and not quoted {
+      in_word = false
+    } else if not in_word {
+      in_word = true
+      if count < 64 {
+        poke(starts + count * 8, cl + i)
+      }
+      count = count + 1
+    }
+    i = i + 1
+  }
+  var p: Word = 0
+  if count >= 4 and count <= 64 and k <= count {
+    p = peek(starts + (count - k) * 8)
+  }
+  block_free(starts)
+  return p
+}
+
+// word i of `exe runs seed index` (Windows: counted from the end of the command line)
 fn arg_word(i: Word, default: Word) -> Word {
-  if os_platform() != 0 or os_argc() != 4 {
+  var p: Word = 0
+  if os_platform() == 1 {
+    p = cmdline_word(4 - i)
+  } else if os_argc() == 4 {
+    p = os_argv(i)
+  }
+  if p == 0 {
     return default
   }
-  let p = os_argv(i)
   var v: Word = 0
   var neg = false
   var j: Word = 0

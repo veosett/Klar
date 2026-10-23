@@ -1,4 +1,5 @@
-// Klar for VS Code: starts the Klar language server (`python -m klar lsp`) and adds a few commands.
+// Klar for VS Code: starts the Klar language server (`python -m klar lsp`, or `klarc lsp` without Python when
+// "klar.klarcPath" is set) and adds a few commands.
 const path = require("path");
 const fs = require("fs");
 const vscode = require("vscode");
@@ -23,12 +24,18 @@ function settings() {
   if (root) {
     env.PYTHONPATH = root + (env.PYTHONPATH ? path.delimiter + env.PYTHONPATH : "");
   }
-  return { python, env };
+  const klarc = cfg.get("klarcPath") || "";
+  if (klarc && root) {
+    env.KLAR_LIB = path.join(root, "klar");
+  }
+  // the command that runs a Klar tool: klarc (the compiler written in Klar) or the Python package
+  const tool = klarc ? { command: klarc, prefix: [] } : { command: python, prefix: ["-m", "klar"] };
+  return { python, env, tool };
 }
 
 function startClient(context) {
-  const { python, env } = settings();
-  const run = { command: python, args: ["-m", "klar", "lsp"], transport: TransportKind.stdio, options: { env } };
+  const { env, tool } = settings();
+  const run = { command: tool.command, args: tool.prefix.concat(["lsp"]), transport: TransportKind.stdio, options: { env } };
   client = new LanguageClient(
     "klar",
     "Klar language server",
@@ -40,8 +47,9 @@ function startClient(context) {
   );
   client.start().catch((err) => {
     vscode.window.showErrorMessage(
-      `Klar: could not start the language server with "${python} -m klar lsp" (${err.message}). ` +
-        `Set "klar.pythonPath" and, if Klar is not installed with pip, "klar.compilerPath".`
+      `Klar: could not start the language server with "${[tool.command].concat(tool.prefix).join(" ")} lsp" ` +
+        `(${err.message}). Set "klar.klarcPath" (klarc, no Python needed) or "klar.pythonPath" and, if Klar is not ` +
+        `installed with pip, "klar.compilerPath".`
     );
   });
   context.subscriptions.push(client);
@@ -54,11 +62,11 @@ function runInTerminal(args) {
     return;
   }
   editor.document.save().then(() => {
-    const { python, env } = settings();
+    const { env, tool } = settings();
     const term = vscode.window.createTerminal({ name: "Klar", env });
     term.show();
     const file = JSON.stringify(editor.document.uri.fsPath);
-    term.sendText(`${python} -m klar ${args} ${file}`);
+    term.sendText(`${[JSON.stringify(tool.command)].concat(tool.prefix).join(" ")} ${args} ${file}`);
   });
 }
 

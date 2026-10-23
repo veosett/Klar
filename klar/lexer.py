@@ -17,6 +17,11 @@ KEYWORDS = {
     "const", "property", "trait", "impl", "pub",
 }
 
+def is_digit(c):
+    """An ASCII digit: only 0-9 make numbers (str.isdigit also accepts other scripts' digits and `²`)."""
+    return "0" <= c <= "9" and len(c) == 1
+
+
 TWO_CHAR = {"->", "=>", "==", "!=", "<=", ">="}
 ONE_CHAR = set("+-*/%<>=()[]{},:.?")
 
@@ -131,7 +136,7 @@ class Lexer:
                     text.append(self.adv())
                 if is_doc and not self.stack:
                     self.add("DOC", "".join(text)[3:], sl, sc)  # raw text after ///
-            elif c.isdigit():
+            elif is_digit(c):
                 self.number(sl, sc)
             elif c == '"':
                 self.string(sl, sc)
@@ -150,13 +155,13 @@ class Lexer:
 
     def number(self, sl, sc):
         buf = []
-        while self.ch().isdigit() or self.ch() == "_":
+        while is_digit(self.ch()) or self.ch() == "_":
             buf.append(self.adv())
         is_float = False
-        if self.ch() == "." and self.ch(1).isdigit():
+        if self.ch() == "." and is_digit(self.ch(1)):
             is_float = True
             buf.append(self.adv())
-            while self.ch().isdigit() or self.ch() == "_":
+            while is_digit(self.ch()) or self.ch() == "_":
                 buf.append(self.adv())
         text = "".join(buf).replace("_", "")
         if self.ch().isalpha() or self.ch() == "_":

@@ -53,6 +53,18 @@ def _print_raw(it, a, sp):
     return UNIT
 
 
+@glob("fn read_exact(n: Int) -> Option[Str] uses io")
+def _read_exact(it, a, sp):
+    """The next `n` bytes of standard input as text (UTF-8); None at the end of the input."""
+    out = ""
+    while len(out.encode("utf-8")) < a[0]:
+        c = it.inp.read(1)
+        if not c:
+            break
+        out += c
+    return NONE if not out and a[0] > 0 else some(out)
+
+
 @glob("fn eprint[T](value: T) -> Unit uses io")
 def _eprint(it, a, sp):
     it.err.write(show(a[0], True) + "\n")

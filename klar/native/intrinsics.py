@@ -76,6 +76,8 @@ SYS_SIGNATURES = [
     "fn os_poll(fds: Word, n: Word) -> Word",
     "fn os_unlink(path: Word) -> Word",
     "fn os_getcwd(buf: Word, n: Word) -> Word",
+    "fn os_setjmp(buf: Word) -> Word",
+    "fn os_longjmp(buf: Word, v: Word) -> Never",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

@@ -21,6 +21,7 @@ the Python implementation, on every .klar file of the repository and on error sn
 """
 import io
 import json
+import re
 import struct
 import os
 import subprocess
@@ -537,7 +538,7 @@ def check_lowering(interp, tests=False):
     return bad
 
 
-TARGETS = (("linux", "elf"), ("windows", "exe"), ("linux-arm64", "a64"))
+TARGETS = (("linux", "elf"), ("windows", "exe"), ("linux-arm64", "a64"), ("macos", "macho"))
 
 
 def check_emit(interp):
@@ -961,6 +962,197 @@ def check_eval(klarc, d):
     return bad
 
 
+def check_view(klarc, d):
+    """`klarc view` == `klar view`: the --json data and the HTML page, on the examples, native tests, benchmarks, std
+    and compiler files."""
+    import glob
+    files = sorted(glob.glob(os.path.join(ROOT, "examples", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "tests", "native", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "bench", "programs", "*", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "klar", "std", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "compiler", "*.klar")))
+    bad = runs = 0
+    lib = os.path.join(ROOT, "klar")
+    for k, path in enumerate(files):
+        runs += 1
+        want = cli_output(["view", path, "--json"])
+        proc = subprocess.run([klarc, "view", path, "--json", "--lib", lib], capture_output=True, text=True,
+                              encoding="utf-8")
+        same = (proc.stdout, proc.returncode) == (want[0], want[2])
+        if same and k % 8 == 0:
+            pages = [os.path.join(d, f"view_{side}.html") for side in ("py", "k")]
+            cli_output(["view", path, "-o", pages[0]])
+            subprocess.run([klarc, "view", path, "-o", pages[1], "--lib", lib], capture_output=True)
+            same = tree_file(pages[0]) == tree_file(pages[1])
+        if not same:
+            bad += 1
+            print(f"DIFF view {short(path)}: exit {want[2]}/{proc.returncode}")
+    print(f"view: {runs - bad}/{runs} outputs identical")
+    return bad
+
+
+def tree_file(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def lsp_frame(msg):
+    data = json.dumps(msg).encode()
+    return b"Content-Length: %d\r\n\r\n" % len(data) + data
+
+
+def lsp_messages(out):
+    msgs, i = [], 0
+    while i < len(out):
+        j = out.index(b"\r\n\r\n", i)
+        n = int(re.search(rb"Content-Length: (\d+)", out[i:j]).group(1))
+        msgs.append(json.loads(out[j + 4:j + 4 + n]))
+        i = j + 4 + n
+    return msgs
+
+
+def lsp_session(path, limit):
+    """Requests at the identifiers of a file (hover, definition, references, rename, signature help, completion),
+    then symbols, formatting, a rename, a broken edit and the shutdown."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    uri = "file://" + os.path.abspath(path).replace(os.sep, "/")
+    td = {"uri": uri}
+    reqs = [{"id": 1, "method": "initialize", "params": {}}, {"method": "initialized", "params": {}},
+            {"method": "textDocument/didOpen", "params": {"textDocument": {"uri": uri, "text": text}}}]
+    positions = []
+    for ln, line in enumerate(text.split("\n")):
+        for m in re.finditer(r"[A-Za-z_][A-Za-z0-9_]*", line):
+            positions += [(ln, m.start()), (ln, m.end() - 1)]
+        for c in "(.":
+            if c in line:
+                positions.append((ln, line.index(c) + 1))
+    positions = positions[::max(1, len(positions) // limit)][:limit]
+    k = 2
+    for ln, col in positions:
+        for meth in ("hover", "definition", "references", "prepareRename", "signatureHelp", "completion"):
+            reqs.append({"id": k, "method": "textDocument/" + meth, "params": {"textDocument": td, "position": {
+                "line": ln, "character": col}, "context": {"includeDeclaration": True}}})
+            k += 1
+    for meth in ("documentSymbol", "formatting"):
+        reqs.append({"id": k, "method": "textDocument/" + meth, "params": {"textDocument": td, "options": {}}})
+        k += 1
+    if positions:
+        ln, col = positions[len(positions) // 2]
+        reqs.append({"id": k, "method": "textDocument/rename", "params": {"textDocument": td, "position": {
+            "line": ln, "character": col}, "newName": "zz_renamed"}})
+        k += 1
+    reqs.append({"method": "textDocument/didChange", "params": {"textDocument": td, "contentChanges": [
+        {"text": text + "\nfn broken( {\n"}]}})
+    reqs += [{"id": k, "method": "shutdown"}, {"method": "exit"}]
+    return b"".join(lsp_frame(r) for r in reqs)
+
+
+def check_lsp(klarc):
+    """`klarc lsp` == `klar lsp`: the same messages for sessions on the examples, native tests and a few compiler
+    files (and the code actions of the diagnostics of examples/mistakes.klar)."""
+    import glob
+    files = sorted(glob.glob(os.path.join(ROOT, "examples", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "tests", "native", "*.klar"))) + [
+        os.path.join(ROOT, "compiler", "fmt.klar"), os.path.join(ROOT, "klar", "std", "json.klar")]
+    bad = total = 0
+    lib = os.path.join(ROOT, "klar")
+    for path in files:
+        data = lsp_session(path, 40)
+        if path.endswith("mistakes.klar"):
+            first = subprocess.run([sys.executable, "-m", "klar", "lsp"], input=data, capture_output=True, cwd=ROOT)
+            diags = [m for m in lsp_messages(first.stdout) if m.get("method") == "textDocument/publishDiagnostics"]
+            uri = "file://" + os.path.abspath(path).replace(os.sep, "/")
+            data = data.replace(lsp_frame({"method": "exit"}), b"") + lsp_frame(
+                {"id": 99999, "method": "textDocument/codeAction", "params": {"textDocument": {"uri": uri},
+                 "context": {"diagnostics": diags[0]["params"]["diagnostics"]}}}) + lsp_frame({"method": "exit"})
+        want = subprocess.run([sys.executable, "-m", "klar", "lsp"], input=data, capture_output=True, cwd=ROOT)
+        got = subprocess.run([klarc, "lsp", "--lib", lib], input=data, capture_output=True, cwd=ROOT)
+        a, b = lsp_messages(want.stdout), lsp_messages(got.stdout)
+        total += len(a)
+        if (a, want.returncode) != (b, got.returncode):
+            k = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+            bad += sum(1 for x, y in zip(a, b) if x != y) + abs(len(a) - len(b))
+            print(f"DIFF lsp {short(path)}: message {k} of {len(a)}/{len(b)}\n"
+                  f"  python: {str(a[k] if k < len(a) else None)[:300]}\n  klar:   {str(b[k] if k < len(b) else None)[:300]}")
+    print(f"lsp: {total - bad}/{total} messages identical")
+    return bad
+
+
+REPL_SESSION = 'let xs = [3, 1, 2]\nxs.sort()\nfn double(n: Int) -> Int {\n  return n * 2\n}\nxs.map(double)\n"hello".upper()\nlet n = 5\nn + 1\nprint("side effect")\nn * 1.5\nlet n = 3\nnope(2)\n:type xs.len()\n:t "a" + "b"\ntype P { x: Int, y: Int }\nlet p = P { x: 1, y: 2 }\np\np.x + p.y\n[1, 2].get_or(5, 0) / ([1].len() - 1)\nlet d = 0\nvar z = 10\nz = z + n\nz\nassert z == 99\nSome("x")\nMap {}.set("k", [1.5])\n:defs\n:doc split\n:help\n:foo\nenum Color {\n  Red,\n  Green,\n}\nColor.Red\nlet total = xs.fold(0, fn(acc, v) => acc + v)\ntotal\n:reset\nxs\n1 +\n  2\n:quit\n'
+
+
+def check_repl(klarc, d):
+    """`klarc repl --plain` == `klar repl` on a scripted session (expressions, statements, declarations, errors,
+    a runtime error, commands)."""
+    from contextlib import redirect_stdout
+    from klar.tools.repl import Repl
+    out = io.StringIO()
+    with redirect_stdout(out):
+        Repl(cwd=d, out=out, inp=io.StringIO(REPL_SESSION)).loop()
+    proc = subprocess.run([klarc, "repl", "--plain", "--lib", os.path.join(ROOT, "klar")], input=REPL_SESSION,
+                          capture_output=True, text=True, encoding="utf-8", cwd=d)
+    same = proc.stdout == out.getvalue()
+    if not same:
+        wl, hl = out.getvalue().split("\n"), proc.stdout.split("\n")
+        i = next((i for i, (x, y) in enumerate(zip(wl, hl)) if x != y), min(len(wl), len(hl)))
+        print(f"DIFF repl line {i + 1}: python {wl[i] if i < len(wl) else None!r}, klar {hl[i] if i < len(hl) else None!r}")
+    print(f"repl: {'identical' if same else 'DIFFERENT'}")
+    return 0 if same else 1
+
+
+def check_coverage(klarc):
+    """`klarc coverage` == `klar coverage` (text, --json, --main) on the examples and native test programs."""
+    import glob
+    files = sorted(glob.glob(os.path.join(ROOT, "examples", "*.klar")) +
+                   glob.glob(os.path.join(ROOT, "tests", "native", "*.klar")))
+    bad = runs = 0
+    for path in files:
+        for flags in ([], ["--json", "--main"]):
+            runs += 1
+            job = ["coverage", path] + flags
+            want = cli_output(job)
+            proc = subprocess.run([klarc] + job + ["--lib", os.path.join(ROOT, "klar")], capture_output=True, text=True,
+                                  encoding="utf-8", stdin=subprocess.DEVNULL)
+            if (proc.stdout, proc.returncode) != (want[0], want[2]):
+                bad += 1
+                print(f"DIFF coverage {short(path)} {flags}:\n  python: {want[0][:300]!r}\n  klar:   {proc.stdout[:300]!r}")
+    print(f"coverage: {runs - bad}/{runs} reports identical")
+    return bad
+
+
+def check_profile(klarc):
+    """`klarc profile --json` and `klar profile --json` count the same calls of the user functions and the same
+    executions of each line (times differ: native code; built-ins are listed only by klar)."""
+    bad = runs = 0
+    for path in lowering_files():
+        if os.sep + "compiler" + os.sep in path or os.sep + "bench" + os.sep in path:
+            continue
+        runs += 1
+        want = cli_output(["profile", path, "--json", "--top", "1000"])
+        proc = subprocess.run([klarc, "profile", path, "--json", "--top", "1000", "--lib", os.path.join(ROOT, "klar")],
+                              capture_output=True, text=True, encoding="utf-8", stdin=subprocess.DEVNULL)
+        try:
+            a, b = json.loads(want[0]), json.loads(proc.stdout)
+        except ValueError:
+            bad += 1
+            print(f"DIFF profile {short(path)}: {want[0][:200]!r} / {proc.stdout[:200]!r} {proc.stderr[:200]!r}")
+            continue
+        if "stage" in a or "stage" in b:
+            if a != b:
+                bad += 1
+                print(f"DIFF profile {short(path)}: {want[0][:300]!r} / {proc.stdout[:300]!r}")
+            continue
+        calls = [{f["function"]: f["calls"] for f in x["functions"] if not f["function"].startswith("<builtin>")}
+                 for x in (a, b)]
+        lines = [[(h["file"], h["line"], h["executions"]) for h in x["hot_lines"]] for x in (a, b)]
+        if calls[0] != calls[1] or sorted(lines[0]) != sorted(lines[1]) or a["ok"] != b["ok"]:
+            bad += 1
+            print(f"DIFF profile {short(path)}: calls {calls[0] == calls[1]}, lines {sorted(lines[0]) == sorted(lines[1])}")
+    print(f"profile: {runs - bad}/{runs} programs with the same counts")
+    return bad
+
+
 def check_fix(cases):
     """`klarc fix` (compiler/commands.klar) == `klar fix` on every checker case: the same output and exit code and the
     same files afterwards, with the default fixes, with `--all --warnings`, and with `--json`."""
@@ -975,6 +1167,11 @@ def check_fix(cases):
         bad += check_new(klarc, d)
         bad += check_fmt_cli(klarc, d)
         bad += check_dev(klarc)
+        bad += check_profile(klarc)
+        bad += check_coverage(klarc)
+        bad += check_repl(klarc, d)
+        bad += check_lsp(klarc)
+        bad += check_view(klarc, d)
         bad += check_eval(klarc, d)
         bad += check_pkg(klarc, d)
         bad += check_patch(klarc, [p for p in klar_files() if os.sep + "rt" + os.sep not in p

@@ -77,6 +77,11 @@
           "default": "",
           "description": "Python used to run the Klar compiler (default: python3, or python on Windows)."
         },
+        "klar.klarcPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path of `klarc`, the Klar compiler written in Klar: when set, the language server and the commands run it instead of Python (`klarc lsp`). Build it with build.sh / build.bat."
+        },
         "klar.compilerPath": {
           "type": "string",
           "default": "",

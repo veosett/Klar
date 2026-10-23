@@ -258,6 +258,9 @@ def cmd_profile(args):
     interp.prof = prof = Profiler()
     _, err = runtime_guard(interp.run_main, interp)
     prof.finish()
+    exit_code = 0
+    if isinstance(err, KlarExit):  # exit(n) ends the program normally: its exit status is the profile's
+        exit_code, err = err.exit_code, None
     total = prof.total()
     funcs = sorted(prof.funcs.items(), key=lambda kv: -kv[1][2])
     lines = sorted(prof.lines.items(), key=lambda kv: -kv[1])[:args.top]
@@ -270,7 +273,7 @@ def cmd_profile(args):
                            "code": (loaded.sources.get(f, "").split("\n")[ln - 1].strip()
                                     if f in loaded.sources else "")} for (f, ln), n in lines],
             **({"runtime_error": err.to_dict()} if err else {})})
-        return 1 if err else 0
+        return 1 if err else exit_code
     print(f"Klar profile: {args.file} — total {total * 1000:.1f} ms "
           f"(profiling adds overhead; compare functions relative to each other)\n")
     print(f"{'self %':>7} {'self ms':>10} {'total ms':>10} {'calls':>9}  function")
@@ -286,7 +289,7 @@ def cmd_profile(args):
     if err:
         print()
         print(err.to_diag().format(loaded.sources.get(err.span.file)), file=sys.stderr)
-    return 1 if err else 0
+    return 1 if err else exit_code
 
 
 # ---------------------------------------------------------------------------
@@ -562,7 +565,8 @@ def main(argv=None):
     p = sub.add_parser("build", help="compile to a standalone native executable (x86-64 Linux ELF / Windows PE)")
     p.add_argument("file")
     p.add_argument("-o", "--output", help="output path (default: next to the source)")
-    p.add_argument("--target", choices=["linux", "windows", "linux-arm64"], help="default: this machine")
+    p.add_argument("--target", choices=["linux", "windows", "linux-arm64", "macos"],
+                   help="default: this machine (macos: x86-64, experimental)")
     p.add_argument("--json", action="store_true")
     p.add_argument("-q", "--quiet", action="store_true", help="print nothing on success")
     p.set_defaults(fn=cmd_build)

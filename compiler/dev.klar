@@ -7,9 +7,9 @@ use commands.{compact_diag}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
 use jsonout.{J, compact}
-use link.{write_elf, write_pe}
+use link.{write_elf, write_macho, write_pe}
 use loader.{Ld, load_program, load_runtime}
-use lower.{fnv1a, lower_program}
+use lower.{Lw, fnv1a, lower_program}
 use report.{user_diags}
 
 /// A test of the main file (a `test` block, a doc test or a property): its name, whether it is a property, and its
@@ -57,10 +57,19 @@ fn has_main(ld: Ld, file: Str) -> Bool {
   })
 }
 
-/// The target of this machine: Windows (by its temp directory), else Linux on the CPU `uname -m` names.
+/// The target of this machine: Windows (by its temp directory), macOS (`uname -s`), else Linux on the CPU `uname -m`
+/// names.
 pub fn host_target() -> Str uses io, proc {
   if env_var("TEMP").unwrap_or("").contains("\\") {
     return "windows"
+  }
+  match run_capture(args: ["uname", "-s"], dir: "", input: "") {
+    Ok(r) => {
+      if r.get_or(1, "").trim() == "Darwin" {
+        return "macos"
+      }
+    },
+    Err(_) => {},
   }
   return match run_capture(args: ["uname", "-m"], dir: "", input: "") {
     Ok(r) => match ["aarch64", "arm64"].contains(r.get_or(1, "").trim()) {
@@ -71,16 +80,23 @@ pub fn host_target() -> Str uses io, proc {
   }
 }
 
-/// The executable of a checked program (`tests`: the one that runs test #argv[1]).
-pub fn native_image(ld: Ld, main_path: Str, target: Str, tests: Bool) -> Bytes {
-  let w = lower_program(ld: ld, main_path: main_path, tests: tests)
+/// The executable of a lowered program for `target`.
+pub fn image_of(w: Lw, target: Str) -> Bytes {
   if target == "linux-arm64" {
     return write_elf(emit_a64(w))
   }
   if target == "windows" {
     return write_pe(emit_program(w, "windows"))
   }
+  if target == "macos" {
+    return write_macho(emit_program(w, "macos"))
+  }
   return write_elf(emit_program(w, "linux"))
+}
+
+/// The executable of a checked program (`tests`: the one that runs test #argv[1]).
+pub fn native_image(ld: Ld, main_path: Str, target: Str, tests: Bool) -> Bytes {
+  return image_of(lower_program(ld: ld, main_path: main_path, tests: tests), target)
 }
 
 /// A temporary executable for this program.

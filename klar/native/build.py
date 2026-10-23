@@ -13,7 +13,7 @@ from ..loader import load_path
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".klar-cache")
 
 
-TARGETS = ("linux", "windows", "linux-arm64")
+TARGETS = ("linux", "windows", "linux-arm64", "macos")
 
 
 def host_target():
@@ -85,11 +85,14 @@ def build(path, out=None, target=None, loaded=None, tests=None):
         out = os.path.join(os.path.dirname(os.path.abspath(path)), stem + (".exe" if target == "windows" else ""))
     if target == "windows":
         img.write_pe(out)
+    elif target == "macos":
+        img.write_macho(out)
+        os.chmod(out, 0o755)
     else:
         img.write_elf(out)
         os.chmod(out, 0o755)
     if os.environ.get("KLAR_MAP"):
-        base = {"linux": 0x401000, "linux-arm64": 0x410000}.get(target, 0x140001000)
+        base = {"linux": 0x401000, "linux-arm64": 0x410000, "macos": 0x100001000}.get(target, 0x140001000)
         with open(out + ".map", "w") as f:
             for name, off in sorted(img.code_labels.items(), key=lambda kv: kv[1]):
                 if not name.startswith("."):
