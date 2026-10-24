@@ -31,6 +31,10 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   test crashed the process).
 
 ### Added
+- **Contracts are tested**: `klar test`, `klar dev` and `klarc test/dev` run every pure, non-generic top-level function
+  with `ensures` on random inputs that satisfy its `requires` (a generated property `contract: name`), so a contract
+  finds a wrong result without a single `test`. It found one in `examples/shapes.klar`: `area` of an impossible
+  triangle broke `heron`'s precondition (`area` now `requires valid(s)`).
 - **Effects in function types**: `fn(Int) -> Unit uses io`. Calling a function value needs the effects of its type,
   a named function or a lambda passed as a value carries its effects, and a function with fewer effects fits where
   more are allowed. Built-ins that take a function (`map`, `filter`, `fold`, ...) need the effects of that function.

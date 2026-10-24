@@ -28,6 +28,7 @@ use report.{check_json, render_report, user_diags}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
 use link.{write_elf, write_macho, write_pe}
+use contracts.{with_contracts}
 use loader.{Ld, Module, load_program, load_runtime}
 use lower.{fnv1a, lower_program, lower_program_allow}
 
@@ -346,7 +347,12 @@ fn main() uses io, fs, time, proc {
     show_report(text: render_report(ld, warnings), to_stderr: true)
   }
   let tests = o.cmd == "test"
-  let all_tests = test_items(ld, o.file)
+  // `klarc test` also checks the contracts of the functions on random inputs (compiler/contracts.klar)
+  let tld = match tests {
+    true => with_contracts(ld: ld, path: o.file, lib: o.lib),
+    false => ld,
+  }
+  let all_tests = test_items(tld, o.file)
   let items = all_tests.filter(fn(t) => t.name.contains(o.filter))
   if tests {
     let warnings = diags.filter(fn(d) => d.severity == "warning")
@@ -359,7 +365,7 @@ fn main() uses io, fs, time, proc {
     print("\n0 passed, 0 failed")
     return
   }
-  let w = lower_program_allow(ld: ld, main_path: o.file, tests: tests, allow: rights)
+  let w = lower_program_allow(ld: tld, main_path: o.file, tests: tests, allow: rights)
   let t2 = lap(o: o, phase: "lower", start: t1)
   var x = emit_program(w, "linux")
   if o.target == "linux-arm64" {

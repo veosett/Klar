@@ -291,9 +291,10 @@ def _finish(loader, main):
     return lp
 
 
-def load_path(path, with_runtime=False):
+def load_path(path, with_runtime=False, overlay=None):
     path = os.path.abspath(path)
     loader = Loader(os.path.dirname(path))
+    loader.overlay = {os.path.abspath(k): v for k, v in (overlay or {}).items()}
     loader.load_prelude()
     name = os.path.splitext(os.path.basename(path))[0]
     main = loader.load(path, name, os.path.basename(path), pkg=loader.project)

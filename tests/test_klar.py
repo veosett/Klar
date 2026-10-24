@@ -1850,6 +1850,45 @@ class LlmBenchmark(unittest.TestCase):
         self.assertEqual(bench.extract_code("text\n```klar\nfn f() {}\n```\nmore"), "fn f() {}\n")
 
 
+class ContractProperties(unittest.TestCase):
+    """`klar test` checks every pure function with `ensures` on random inputs that satisfy its `requires`."""
+    ISQRT = ("fn isqrt(n: Int) -> Int\n  requires n >= 0\n  ensures result * result <= n and (result + 1) * (result + 1) > n\n"
+             "{\n  var r = 0\n  while r * r < n {\n    r = r + 1\n  }\n  return r\n}\n")
+
+    def klar_test(self, src):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
+            return cli("test", path)
+
+    def test_a_contract_without_tests_finds_the_bug(self):
+        code, out, _ = self.klar_test(self.ISQRT)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  contract: isqrt [property x100]", out)
+        self.assertIn("postcondition", out)
+        self.assertIn("minimal counterexample: n = 2", out)
+        fixed = self.ISQRT.replace("while r * r < n", "while (r + 1) * (r + 1) <= n")
+        code, out, _ = self.klar_test(fixed)
+        self.assertEqual(code, 0, out)
+        self.assertIn("PASS  contract: isqrt", out)
+
+    def test_which_functions_are_checked(self):
+        from klar.contracts import contract_text
+        src = (self.ISQRT + "fn noisy(x: Int) -> Int uses io\n  ensures result == x\n{\n  print(x)\n  return x\n}\n"
+               "fn first[T](xs: List[T], d: T) -> T\n  ensures true\n{\n  return xs.first().unwrap_or(d)\n}\n"
+               "fn plain(x: Int) -> Int {\n  return x\n}\n"
+               "fn sum3(a: Int, b: Int, c: Int) -> Int\n  ensures result == a + b + c\n{\n  return a + b + c\n}\n")
+        text = contract_text(load_source(src, "t.klar"))
+        self.assertIn('property "contract: isqrt" (n: Int) {\n  if (n >= 0) {\n    let _ = isqrt(n)\n  }\n}', text)
+        self.assertIn('property "contract: sum3" (a: Int, b: Int, c: Int) {\n  let _ = sum3(a: a, b: b, c: c)\n}', text)
+        for name in ("noisy", "first", "plain"):
+            self.assertNotIn(f"contract: {name}", text)
+        # a property of the same name written by hand wins
+        self.assertNotIn("contract: sum3", contract_text(load_source(src + 'property "contract: sum3" (a: Int) {\n}\n',
+                                                                     "t.klar")))
+
+
 class Sandbox(unittest.TestCase):
     """`klar run --allow RIGHTS`: effects become rights at run time (R0016 outside them) — the same answers in the
     interpreter, the Python backend and native code for every target that can run here."""

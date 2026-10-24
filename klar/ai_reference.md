@@ -191,6 +191,8 @@ it type-checks anywhere, warns (W0404) and fails at runtime (R0012) — use it t
 - Calls with constant arguments are checked against `requires` (E0703) and built-in domains (E0704); simple contracts
   (`n > 0`, `x != 0.0`, `not xs.is_empty()`) also against the signs the conditions prove (`if n <= 0 { f(n) }` → E0703),
   and `return`s against simple `ensures` (`ensures result >= 0` + `return -1` → E0706).
+- `klar test` also runs every pure, non-generic function with `ensures` on random inputs that satisfy its `requires`
+  (shown as `contract: name`, with a minimal counterexample): write `ensures` and the contract is tested.
 - `sort`/`min`/`max` need Int/Float/Str elements (E0215); for records use `sort_by(fn(p) => p.field)`.
 - No null, no exceptions, no indexing, no overflow, no shared mutation — those failures cannot be written.
 

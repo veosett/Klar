@@ -228,10 +228,11 @@ def cmd_run(args):
 
 
 def cmd_test(args):
-    loaded = load_path(args.file)
+    from .contracts import load_with_contracts
+    loaded, full = load_with_contracts(args.file)
     if loaded.has_errors() or loaded.program is None:
         return fail_check(args, loaded)
-    interp = Interpreter(loaded, err_stream=io.StringIO())
+    interp = Interpreter(full, err_stream=io.StringIO())
     results = []
     for t in interp.tests:
         if args.filter and args.filter not in t.name:
@@ -261,7 +262,7 @@ def cmd_test(args):
                 print(f"  PASS  {t.name}{label}")
             else:
                 print(f"  FAIL  {t.name}{label}")
-                for line in e.to_diag().format(loaded.sources.get(e.span.file)).split("\n"):
+                for line in e.to_diag().format(full.sources.get(e.span.file)).split("\n"):
                     print("        " + line)
                 if o:
                     print("        output:")
@@ -422,7 +423,8 @@ def compact_rt(e):
 
 
 def cmd_dev(args):
-    loaded = load_path(args.file)
+    from .contracts import load_with_contracts
+    loaded, full = load_with_contracts(args.file)
     diags = user_diags(loaded)
     errors = [d for d in diags if d.severity == "error"]
     warnings = [d for d in diags if d.severity == "warning"]
@@ -432,7 +434,7 @@ def cmd_dev(args):
         auto = sum(1 for d in errors if d.fix and d.fix.get("safe", True))
         report["next"] = (f"fix {len(errors)} error(s)" + (f"; {auto} can be fixed by `klar fix`" if auto else ""))
         return dev_out(args, report, loaded)
-    interp = Interpreter(loaded, err_stream=io.StringIO())
+    interp = Interpreter(full, err_stream=io.StringIO())
     failed, passed = [], 0
     for t in interp.tests:
         buf = io.StringIO()

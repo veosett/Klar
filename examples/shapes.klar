@@ -10,7 +10,18 @@ fn pi() -> Float {
   return 3.141592653589793
 }
 
+/// Whether a shape can exist: positive sizes, and a triangle's sides fit together.
+fn valid(s: Shape) -> Bool {
+  return match s {
+    Shape.Circle(r) => r > 0.0,
+    Shape.Rect(w, h) => w > 0.0 and h > 0.0,
+    Shape.Triangle(a, b, c) => a > 0.0 and b > 0.0 and c > 0.0 and a + b > c and a + c > b and b + c > a,
+  }
+}
+
+// `klar test` checks this contract on random shapes (the valid ones), even without a test
 fn area(s: Shape) -> Float
+  requires valid(s)
   ensures result >= 0.0
 {
   return match s {

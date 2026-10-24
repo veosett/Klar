@@ -2186,6 +2186,31 @@ fn args_map(c: Ck, tparams: List[Str], t: Type) -> Map[Str, Type] {
   return m
 }
 
+/// The functions `klar test` checks against their contracts on random inputs: top-level, not generic, pure, with
+/// `ensures`, and inputs that can be generated (compiler/contracts.klar).
+pub fn contract_candidates(c: Ck) -> List[FnDecl] {
+  var out: List[FnDecl] = []
+  for d in c.decls {
+    match d {
+      Decl.Fn(f) => {
+        if f.owner_kind == None and f.constructs == None and f.type_params.is_empty() and not f.post.is_empty() and
+          f.effects.is_empty() and f.name != "main" and f.body != None {
+          match c.fns.get(f.name) {
+            Some(Some(sig)) => {
+              if sig.params.all(fn(p) => generatable(c: c, t: p.second, seen: [])) {
+                out = out.push(f)
+              }
+            },
+            _ => {},
+          }
+        }
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
 fn generatable(c: Ck, t: Type, seen: List[Str]) -> Bool {
   return match pr(c, t) {
     Type.Con(name, args) => {

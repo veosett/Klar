@@ -134,7 +134,7 @@ def main():
             bad += 1
             print(f"DIFF klarc3 run {src}: {got.stdout[:200]!r} / interpreter {want.stdout[:200]!r}")
         got = run([stage[2], "test", os.path.join("examples", "bank.klar"), "--lib", LIB])
-        if got.returncode != 0 or "4 passed, 0 failed" not in got.stdout:
+        if got.returncode != 0 or "6 passed, 0 failed" not in got.stdout or "contract: deposit" not in got.stdout:
             bad += 1
             print(f"DIFF klarc3 test examples/bank.klar: exit {got.returncode}\n{got.stdout[-500:]}")
         # a project with a dependency (klar.toml)

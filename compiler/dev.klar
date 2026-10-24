@@ -8,6 +8,7 @@ use emit.{emit_program}
 use emit_a64.{emit_a64}
 use jsonout.{J, compact}
 use link.{write_elf, write_macho, write_pe}
+use contracts.{with_contracts}
 use loader.{Ld, load_program, load_runtime}
 use lower.{Lw, fnv1a, lower_program}
 use report.{user_diags}
@@ -394,14 +395,15 @@ pub fn dev_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
     }
     return finish(report: report.push(Pair { first: "next", second: J.JStr(next) }), json: json)
   }
-  // the tests
-  let items = test_items(ld, file)
+  // the tests (with the contracts of the functions as properties: compiler/contracts.klar)
+  let tld = with_contracts(ld: ld, path: file, lib: lib)
+  let items = test_items(tld, file)
   var passed = 0
   var failed: List[J] = []
   let runs = int_flag(args: args, name: "--runs", default: 50)
   if not items.is_empty() {
     let exe = temp_path(file, "dev-test")
-    match save_exe(exe, native_image(ld: ld, main_path: file, target: host_target(), tests: true)) {
+    match save_exe(exe, native_image(ld: tld, main_path: file, target: host_target(), tests: true)) {
       Ok(_) => {},
       Err(e) => {
         eprint("klarc: {e}")

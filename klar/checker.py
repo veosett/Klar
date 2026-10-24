@@ -927,6 +927,18 @@ class Checker:
         self.pop()
         self.ctx = None
 
+    def contract_candidates(self):
+        """The functions `klar test` checks against their contracts on random inputs: top-level, not generic, pure,
+        with `ensures`, and inputs that can be generated (klar/contracts.py)."""
+        out = []
+        for d in self.program.decls:
+            if isinstance(d, N.FnDecl) and not d.owner_kind and not d.constructs and not d.type_params and d.ensures \
+                    and not d.effects and d.name != "main" and d.body is not None:
+                sig = self.fns.get(d.name)
+                if sig is not None and all(self.generatable(t, set()) for _, t in sig.params):
+                    out.append(d)
+        return out
+
     def generatable(self, t, seen):
         t = prune(t)
         if isinstance(t, TFn) or t is ANY or isinstance(t, (TVar, TParam)) or t is NEVER:
