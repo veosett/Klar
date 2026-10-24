@@ -1,0 +1,519 @@
+// AI-ergonomics benchmark, written in Klar: how early does each language catch the mistakes AI models typically make?
+//
+//     klarc run bench/ai/run_ai_bench.klar -- [-l klar rust] [-c 01 02] [--name my-pc]
+//
+// Run it from the repository root. Every case in bench/ai/cases/<id>/ is the SAME small program with the SAME typical
+// mistake, written idiomatically in Klar, Python (plain and with mypy), TypeScript (tsc --strict), Java, Go (+ go vet),
+// Rust and C++ (-Wall -Wextra). The line with the mistake is marked `BUG`. For each program the language's normal
+// developer loop runs (type-check / compile with warnings, then run) and the outcome is recorded:
+//
+//   compile   the compiler / type checker rejected the program        (best: the AI fixes it before running)
+//   design    the mistake cannot happen in this language (correct output)
+//   warning   it compiled, but a warning pointed at the mistake
+//   runtime   it compiled and crashed with an error at run time      (found only if that path is executed)
+//   silent    it ran and printed a WRONG result with no error         (worst: the AI believes it works)
+//
+// plus whether the message points at the right line, whether it suggests a fix, and its size in tokens. No language
+// model is called: the benchmark is deterministic and reproducible.
+use std.json.{Json, as_text, field, json_object, json_pretty, parse_json}
+
+/// How a language checks, builds and runs a case (`@d`: the case's work directory).
+type Lang {
+  name: Str,
+  file: Str,
+  label: Str,
+  check: List[Str],
+  check_is_warning: Bool,
+  build: List[Str],
+  run: List[Str],
+}
+
+type Outcome { outcome: Str, points_to_line: Bool, hint: Bool, tokens: Int, output: Str }
+
+type Case { id: Str, title: Str, mistake: Str, expected: Str }
+
+fn exe_suffix() -> Str uses io {
+  return match env_var("OS") == Some("Windows_NT") {
+    true => ".exe",
+    false => "",
+  }
+}
+
+/// The command `name` if it runs (`flag` is a harmless option such as `--version`).
+fn tool(names: List[Str], flag: Str) -> Option[Str] uses io, proc {
+  let home = env_var("HOME").unwrap_or(env_var("USERPROFILE").unwrap_or(""))
+  for n in names {
+    for candidate in [n, home + "/.cargo/bin/" + n, home + "/go/bin/" + n, "/usr/local/go/bin/" + n] {
+      match run_capture([candidate, flag], "", "") {
+        Ok(_) => {
+          return Some(candidate)
+        },
+        Err(_) => {},
+      }
+    }
+  }
+  return None
+}
+
+fn languages(klar: List[Str], python: Str) -> List[Lang] uses io, fs, proc {
+  let exe = "@d/prog" + exe_suffix()
+  // klarc finds the runtime and std through `--lib` (the case runs in its own directory)
+  let lib = match klar.get_or(0, "").ends_with("klarc") {
+    true => ["--lib", current_dir() + "/klar"],
+    false => [],
+  }
+  var out = [Lang { name: "klar", file: "prog.klar", label: "Klar", check: klar.concat(["check", "prog.klar"])
+      .concat(lib), check_is_warning: false, build: klar.concat(["build", "-q", "prog.klar", "-o", exe]).concat(lib),
+    run: [exe] }, Lang {
+      name: "python", file: "prog.py", label: "Python", check: [], check_is_warning: false, build: [], run: [python,
+        "prog.py"] }]
+  match tool(names: ["mypy"], flag: "--version") {
+    Some(mypy) => {
+      out = out.push(Lang { name: "python+mypy", file: "prog.py", label: "Python + mypy", check: [mypy,
+        "--no-error-summary", "--hide-error-context", "--cache-dir", "@d/mypy", "prog.py"], check_is_warning: false,
+        build: [], run: [python, "prog.py"] })
+    },
+    None => {},
+  }
+  match tool(names: ["tsc"], flag: "--version") {
+    Some(tsc) => {
+      match tool(names: ["node"], flag: "--version") {
+        Some(node) => {
+          out = out.push(Lang { name: "typescript", file: "prog.ts", label: "TypeScript (strict)", check: [tsc,
+            "--strict", "--target", "es2022", "--module", "commonjs", "--outDir", "@d", "prog.ts"],
+            check_is_warning: false, build: [], run: [node, "@d/prog.js"] })
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  match tool(names: ["javac"], flag: "-version") {
+    Some(javac) => {
+      match tool(names: ["java"], flag: "-version") {
+        Some(java) => {
+          out = out.push(Lang { name: "java", file: "Main.java", label: "Java", check: [], check_is_warning: false,
+            build: [javac, "-Xlint:all", "-d", "@d", "Main.java"], run: [java, "-cp", "@d", "Main"] })
+        },
+        None => {},
+      }
+    },
+    None => {},
+  }
+  match tool(names: ["go"], flag: "version") {
+    Some(go) => {
+      out = out.push(Lang { name: "go", file: "prog.go", label: "Go (+ vet)", check: [go, "vet", "prog.go"],
+        check_is_warning: true, build: [go, "build", "-o", exe, "prog.go"], run: [exe] })
+    },
+    None => {},
+  }
+  match tool(names: ["rustc"], flag: "--version") {
+    Some(rustc) => {
+      out = out.push(Lang { name: "rust", file: "prog.rs", label: "Rust", check: [], check_is_warning: false,
+        build: [rustc, "--edition", "2021", "-o", exe, "prog.rs"], run: [exe] })
+    },
+    None => {},
+  }
+  match tool(names: ["g++", "clang++"], flag: "--version") {
+    Some(gxx) => {
+      out = out.push(Lang { name: "cpp", file: "prog.cpp", label: "C++ (-Wall -Wextra)", check: [],
+        check_is_warning: false, build: [gxx, "-std=c++17", "-Wall", "-Wextra", "-O0", "-o", exe, "prog.cpp"],
+        run: [exe] })
+    },
+    None => {},
+  }
+  return out
+}
+
+// ---- reading compiler messages --------------------------------------------------------------------------------
+
+fn is_digit(c: Str) -> Bool {
+  return c.len() == 1 and c >= "0" and c <= "9"
+}
+
+/// Whether `text` holds `prefix` directly followed by the number `n` (and not by more digits).
+pub fn has_number(text: Str, prefix: Str, n: Int) -> Bool {
+  let needle = prefix + n.to_str()
+  var rest = text
+  while true {
+    let at = match rest.index_of(needle) {
+      Some(k) => k,
+      None => {
+        return false
+      },
+    }
+    let after = at + needle.len()
+    if not is_digit(rest.slice(after, after + 1)) {
+      return true
+    }
+    rest = rest.slice(after, rest.len())
+  }
+  return false
+}
+
+/// Whether a message points at line `line` of `fname` (in one of the usual formats of the compilers).
+pub fn mentions_line(text: Str, fname: Str, line: Int) -> Bool {
+  return has_number(text: text, prefix: fname + ":", n: line) or text.contains("{fname}({line},") or has_number(
+    text: text, prefix: fname + "\", line ", n: line) or has_number(text: text, prefix: "\"line\": ", n: line)
+}
+
+fn leading_number(s: Str) -> Option[Int] {
+  let digits = s.chars().fold(Pair { first: "", second: true }, fn(acc, c) => match acc.second and is_digit(c) {
+    true => Pair { first: acc.first + c, second: true },
+    false => Pair { first: acc.first, second: false },
+  }).first
+  return digits.to_int()
+}
+
+/// The lines that compiler warnings point at (gcc/clang `file:LINE: warning`, and rustc/Klar blocks
+/// `warning ... --> file:LINE` with their `LINE | code` snippets).
+pub fn warning_lines(text: Str, fname: Str) -> List[Int] {
+  var out: List[Int] = []
+  for l in text.lines() {
+    match l.index_of(fname + ":") {
+      Some(k) => {
+        let rest = l.slice(k + fname.len() + 1, l.len())
+        match leading_number(rest) {
+          Some(n) => {
+            let after = rest.slice(n.to_str().len(), rest.len())
+            let tail = match after.starts_with(":") and leading_number(after.slice(1, after.len())) != None {
+              true => after.slice(1 + leading_number(after.slice(1, after.len())).unwrap_or(0).to_str().len(),
+                after.len()),
+              false => after,
+            }
+            if tail.starts_with(": warning") {
+              out = out.push(n)
+            }
+          },
+          None => {},
+        }
+      },
+      None => {},
+    }
+  }
+  var in_warning = false
+  for l in text.lines() {
+    if l.starts_with("warning") {
+      in_warning = true
+    } else if l.starts_with("error") {
+      in_warning = false
+    }
+    if in_warning {
+      let t = l.trim()
+      if t.starts_with("--> " + fname + ":") {
+        match leading_number(t.slice(fname.len() + 5, t.len())) {
+          Some(n) => {
+            out = out.push(n)
+          },
+          None => {},
+        }
+      }
+      match leading_number(t) {
+        Some(n) => {
+          if t.slice(n.to_str().len(), t.len()).trim_start().starts_with("|") {
+            out = out.push(n)
+          }
+        },
+        None => {},
+      }
+    }
+  }
+  return out.unique()
+}
+
+fn word_at(text: Str, word: Str) -> Bool {
+  var rest = text
+  while true {
+    let at = match rest.index_of(word) {
+      Some(k) => k,
+      None => {
+        return false
+      },
+    }
+    let before = rest.slice((at - 1).max(0), at)
+    let after = rest.slice(at + word.len(), at + word.len() + 1)
+    let letter = fn(c: Str) => (c >= "a" and c <= "z") or is_digit(c) or c == "_"
+    if (at == 0 or not letter(before)) and not letter(after) {
+      return true
+    }
+    rest = rest.slice(at + word.len(), rest.len())
+  }
+  return false
+}
+
+/// Whether a message suggests a fix.
+pub fn suggests_fix(text: Str) -> Bool {
+  let t = text.lower()
+  return ["help:", "did you mean", "\"fix\"", "consider ", "perhaps", "suggestion", "maybe you meant"].any(fn(p) => t
+      .contains(p)) or word_at(text: t, word: "hint")
+}
+
+fn result(outcome: Str, text: Str, fname: Str, line: Option[Int]) -> Outcome {
+  let points = match line {
+    Some(n) => not text.is_empty() and mentions_line(text: text, fname: fname, line: n),
+    None => false,
+  }
+  return Outcome { outcome: outcome, points_to_line: points, hint: not text.is_empty() and suggests_fix(text),
+    tokens: (text.len().to_float() / 4.0).round(), output: "" }
+}
+
+// ---- running a case -------------------------------------------------------------------------------------------
+
+/// (exit code, stdout + stderr) of a command in `dir`; a program that cannot start counts as failing.
+fn run(cmd: List[Str], dir: Str) -> Pair[Int, Pair[Str, Str]] uses proc {
+  return match run_capture(cmd, dir, "") {
+    Ok(r) => Pair { first: r.get_or(0, "1").to_int().unwrap_or(1), second: Pair { first: r.get_or(1, ""),
+      second: r.get_or(2, "") } },
+    Err(e) => Pair { first: 127, second: Pair { first: "", second: e } },
+  }
+}
+
+fn fill(cmd: List[Str], d: Str) -> List[Str] {
+  return cmd.map(fn(a) => a.replace("@d", d))
+}
+
+fn bug_line(src: Str) -> Option[Int] {
+  return src.lines().enumerate().find(fn(x) => x.value.contains("BUG")).map(fn(x) => x.index + 1)
+}
+
+fn evaluate(lang: Lang, c: Case, d: Str) -> Result[Outcome, Str] uses fs, proc {
+  let src = read_file("bench/ai/cases/{c.id}/{lang.file}")?
+  make_dir(d)?
+  write_file("{d}/{lang.file}", src)?
+  let line = bug_line(src)
+  var diag = ""
+  if not lang.check.is_empty() {
+    let r = run(fill(cmd: lang.check, d: d), d)
+    let text = r.second.first + r.second.second
+    if lang.name == "klar" {
+      if r.first != 0 {
+        return Ok(result(outcome: "compile", text: text, fname: lang.file, line: line))
+      }
+      if line != None and warning_lines(text: text, fname: lang.file).contains(line.unwrap_or(0)) {
+        diag = text
+      }
+    } else if r.first != 0 {
+      if lang.check_is_warning {
+        diag = text
+      } else {
+        return Ok(result(outcome: "compile", text: text, fname: lang.file, line: line))
+      }
+    }
+  }
+  if not lang.build.is_empty() {
+    let r = run(fill(cmd: lang.build, d: d), d)
+    let text = r.second.first + r.second.second
+    if r.first != 0 {
+      return Ok(result(outcome: "compile", text: text, fname: lang.file, line: line))
+    }
+    if diag.is_empty() and line != None and warning_lines(text: text, fname: lang.file).contains(line.unwrap_or(0)) {
+      diag = text
+    }
+  }
+  let r = run(fill(cmd: lang.run, d: d), d)
+  let got = r.second.first.trim()
+  var o = Outcome { outcome: "silent", points_to_line: false, hint: false, tokens: 0, output: "" }
+  if not diag.is_empty() {
+    o = result(outcome: "warning", text: diag, fname: lang.file, line: line)
+  } else if r.first != 0 {
+    let err = match r.second.second.is_empty() {
+      true => match r.second.first.is_empty() {
+        true => "exit code {r.first}",
+        false => r.second.first,
+      },
+      false => r.second.second,
+    }
+    o = result(outcome: "runtime", text: err, fname: lang.file, line: line)
+  } else if got == c.expected {
+    o = result(outcome: "design", text: "", fname: lang.file, line: line)
+  } else {
+    o = result(outcome: "silent", text: "", fname: lang.file, line: line)
+  }
+  return Ok(o with { output: got.slice(0, got.len().min(120)) })
+}
+
+// ---- the report -----------------------------------------------------------------------------------------------
+
+fn icon(outcome: Str) -> Str {
+  return match outcome {
+    "compile" => "✅ compile",
+    "design" => "🛡️ by design",
+    "warning" => "⚠️ warning",
+    "runtime" => "💥 runtime",
+    "silent" => "❌ silent",
+    _ => "—",
+  }
+}
+
+fn weight(outcome: Str) -> Float {
+  return match outcome {
+    "compile" => 1.0,
+    "design" => 1.0,
+    "warning" => 0.5,
+    "runtime" => 0.25,
+    _ => 0.0,
+  }
+}
+
+fn yes(b: Bool) -> Str {
+  return match b {
+    true => "y",
+    false => "n",
+  }
+}
+
+fn render(cases: List[Case], langs: List[Lang], results: Map[Str, Map[Str, Outcome]], machine: Str) -> Str {
+  var lines = ["# AI-ergonomics benchmark: when is a typical AI mistake caught?", "", "| mistake | " + langs.map(fn(l) =>
+    l.label).join(" | ") + " |", "|---|" + "---|".repeat(langs.len())]
+  for c in cases {
+    let row = results.get(c.id).unwrap_or(Map {})
+    lines = lines.push("| " + [c.title + " — *" + c.mistake + "*"].concat(langs.map(fn(l) => match row.get(l.name) {
+      Some(r) => icon(r.outcome),
+      None => "n/a",
+    })).join(" | ") + " |")
+  }
+  var stats: List[Map[Str, Str]] = []
+  for l in langs {
+    let rs = cases.flat_map(fn(c) => match results.get(c.id).unwrap_or(Map {}).get(l.name) {
+      Some(r) => [r],
+      None => [],
+    })
+    let n = rs.len()
+    let count = fn(k: Str) => rs.count(fn(r) => r.outcome == k)
+    let reported = rs.filter(fn(r) => ["compile", "warning", "runtime"].contains(r.outcome))
+    let score = match n > 0 {
+      true => (100.0 * rs.map(fn(r) => weight(r.outcome)).sum_float() / n.to_float()).round(),
+      false => 0,
+    }
+    let tokens = match reported.is_empty() {
+      true => 0,
+      false => (reported.map(fn(r) => r.tokens).sum().to_float() / reported.len().to_float()).round(),
+    }
+    let before = count("compile") + count("design")
+    let warned = count("warning")
+    let crashed = count("runtime")
+    let silent = count("silent")
+    let pointed = reported.count(fn(r) => r.points_to_line)
+    let hinted = reported.count(fn(r) => r.hint)
+    let shown = reported.len()
+    stats = stats.push(Map { "score": "**{score}**", "before": "{before}/{n}", "warning": "{warned}/{n}",
+      "runtime": "{crashed}/{n}", "silent": "**{silent}/{n}**", "line": "{pointed}/{shown}", "hint": "{hinted}/{shown}",
+      "tokens": tokens.to_str() })
+  }
+  lines = lines.concat(["", "| summary | " + langs.map(fn(l) => l.label).join(" | ") + " |", "|---|" +
+      "---:|".repeat(langs.len())])
+  let rows = [Pair { first: "**safety score** (compile/design = 1, warning = ½, runtime = ¼, silent = 0)",
+    second: "score" }, Pair { first: "stopped before running (compile error or impossible by design)",
+      second: "before" }, Pair { first: "only a warning", second: "warning" }, Pair { first: "crash at run time",
+        second: "runtime" }, Pair { first: "**silently wrong result**", second: "silent" }, Pair {
+          first: "message points at the mistaken line", second: "line" }, Pair { first: "message suggests a fix",
+            second: "hint" }, Pair { first: "average message size, tokens", second: "tokens" }]
+  for r in rows {
+    lines = lines.push("| " + r.first + " | " + stats.map(fn(s) => s.get(r.second).unwrap_or("")).join(" | ") + " |")
+  }
+  lines = lines.concat(["", "✅ rejected by the compiler / type checker · 🛡️ the mistake cannot happen (correct result) " +
+      "· ⚠️ compiled with a warning at the mistake · 💥 crashed at run time · ❌ wrong result, no error", "",
+    "Machine: {machine}."])
+  return lines.join("\n")
+}
+
+fn outcome_json(o: Outcome) -> Json {
+  return json_object([Pair { first: "outcome", second: Json.Text(value: o.outcome) }, Pair { first: "points_to_line",
+    second: Json.Bool(value: o.points_to_line) }, Pair { first: "hint", second: Json.Bool(value: o.hint) }, Pair {
+      first: "tokens", second: Json.Int(value: o.tokens) }, Pair { first: "output", second: Json.Text(value: o.output) }])
+}
+
+fn load_case(id: Str) -> Result[Case, Str] uses fs {
+  let j = parse_json(read_file("bench/ai/cases/{id}/case.json")?)?
+  let text = fn(k: Str) => field(j, k).and_then(as_text).unwrap_or("")
+  return Ok(Case { id: id, title: text("title"), mistake: text("mistake"), expected: text("expected") })
+}
+
+fn main() -> Result[Unit, Str] uses io, fs, proc {
+  let args = cli_args()
+  var only_langs: List[Str] = []
+  var only_cases: List[Str] = []
+  var name = env_var("HOSTNAME").unwrap_or("host").split(".").first().unwrap_or("host")
+  var klar = ["klarc"]
+  var python = match env_var("OS") == Some("Windows_NT") {
+    true => "python",
+    false => "python3",
+  }
+  var mode = ""
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "-l" or a == "--lang" or a == "-c" or a == "--case" {
+      mode = a
+    } else if a == "--name" or a == "--klar" or a == "--python" {
+      let v = args.get_or(i + 1, "")
+      if a == "--name" {
+        name = v
+      } else if a == "--klar" {
+        klar = v.split(" ")
+      } else {
+        python = v
+      }
+      i = i + 1
+      mode = ""
+    } else if mode == "-l" or mode == "--lang" {
+      only_langs = only_langs.push(a)
+    } else if mode == "-c" or mode == "--case" {
+      only_cases = only_cases.push(a)
+    }
+    i = i + 1
+  }
+  if tool(names: [klar.get_or(0, "klarc")], flag: "--version") == None {
+    klar = [python, "-m", "klar"]
+  }
+  let wanted_langs = only_langs
+  let wanted_cases = only_cases
+  let langs = languages(klar: klar, python: python).filter(fn(l) => wanted_langs.is_empty() or wanted_langs.contains(
+    l.name))
+  let ids = list_dir("bench/ai/cases")?.filter(fn(c) => is_dir("bench/ai/cases/" + c)).filter(fn(c) => wanted_cases
+      .is_empty() or wanted_cases.any(fn(x) => c.starts_with(x)))
+  let tmp = env_var("TEMP").unwrap_or(env_var("TMPDIR").unwrap_or("/tmp")) + "/klar-ai-bench"
+  make_dir(tmp)?
+  var cases: List[Case] = []
+  var results: Map[Str, Map[Str, Outcome]] = Map {}
+  var json_cases: List[Pair[Str, Json]] = []
+  for id in ids {
+    let c = load_case(id)?
+    cases = cases.push(c)
+    var row: Map[Str, Outcome] = Map {}
+    for l in langs {
+      if file_exists("bench/ai/cases/{id}/{l.file}") {
+        let r = evaluate(lang: l, c: c, d: "{tmp}/{id}_{l.name}")?
+        row = row.set(l.name, r)
+        print("  " + id.pad_right(24, " ") + " " + l.name.pad_right(12, " ") + " " + r.outcome.pad_right(8, " ") +
+            " line={yes(r.points_to_line)} hint={yes(r.hint)} tokens={r.tokens}")
+      }
+    }
+    results = results.set(id, row)
+    json_cases = json_cases.push(Pair { first: id, second: json_object([Pair { first: "meta", second: json_object([
+      Pair { first: "title", second: Json.Text(value: c.title) }, Pair { first: "mistake", second: Json.Text(
+        value: c.mistake) }, Pair { first: "expected", second: Json.Text(value: c.expected) }]) }, Pair { first: "langs",
+          second: json_object(row.entries().map(fn(e) => Pair { first: e.key, second: outcome_json(e.value) })) }]) })
+  }
+  let machine = match run_capture(["uname", "-srm"], "", "") {
+    Ok(r) => r.get_or(1, "?").trim(),
+    Err(_) => env_var("PROCESSOR_IDENTIFIER").unwrap_or("?"),
+  }
+  let report = render(cases: cases, langs: langs, results: results, machine: machine)
+  print("")
+  print(report)
+  write_file("bench/ai/results/{name}.md", report + "\n")?
+  write_file("bench/ai/results/{name}.json", json_pretty(json_object(json_cases)) + "\n")?
+  return Ok(())
+}
+
+test "reading compiler messages" {
+  assert mentions_line(text: "prog.klar:12:5: error", fname: "prog.klar", line: 12)
+  assert not mentions_line(text: "prog.klar:123", fname: "prog.klar", line: 12)
+  assert warning_lines(text: "prog.c:7:3: warning: unused", fname: "prog.c") == [7]
+  assert warning_lines(text: "warning: x\n  --> prog.rs:4:9\n  |\n4 |  let y = 1;\n", fname: "prog.rs") == [4]
+  assert suggests_fix("help: try `x.unwrap_or(0)`")
+  assert suggests_fix("  hint: write `Some(x)`")
+  assert not suggests_fix("panicked at thinking")
+  assert bug_line("a\nb // BUG\n") == Some(2)
+}

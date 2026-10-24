@@ -27,7 +27,7 @@ ruff check klar tests bench                 # lint
    function in `klar/rt/` (`Owner_method` / `b_name`), plus a test in `tests/stdlib/builtins_test.klar`.
 2. New errors get a stable code with `explain` text, a precise span, a hint, and a fix when mechanical.
 3. Prefer rejecting mistakes at compile time over run-time errors.
-4. Performance changes come with `bench/run_bench.py` numbers.
+4. Performance changes come with `bench/run_bench.klar` numbers (`klarc run bench/run_bench.klar`).
 5. Commit in small steps with imperative messages; update `CHANGELOG.md` (Unreleased).
 
 ## Writing Klar code (examples, std, tests)

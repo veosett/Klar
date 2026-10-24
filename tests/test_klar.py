@@ -85,7 +85,9 @@ KLAR_TEST_FILES = [
     os.path.join(ROOT, "examples", f) for f in ("hello.klar", "bank.klar", "collections.klar", "shapes.klar",
                                                   "features.klar", "effects.klar")
 ] + [os.path.join(ROOT, "klar", "std", f) for f in sorted(os.listdir(os.path.join(ROOT, "klar", "std")))
-     if f.endswith(".klar")] + [os.path.join(ROOT, "tests", "stdlib", "builtins_test.klar")]
+     if f.endswith(".klar")] + [os.path.join(ROOT, "tests", "stdlib", "builtins_test.klar"),
+                                os.path.join(ROOT, "bench", "run_bench.klar"),
+                                os.path.join(ROOT, "bench", "ai", "run_ai_bench.klar")]
 
 
 class KlarTestFiles(unittest.TestCase):

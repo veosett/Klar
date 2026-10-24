@@ -19,9 +19,10 @@ Klar измеряется в трёх вариантах:
 * Компилируемые языки: `gcc -O2`, `g++ -O2 -std=c++17` (идиоматичный C++: `std::vector`, `std::string`, алгоритмы STL), `rustc -O`, `go build`; Klar — `klar build` (с оптимизатором).
 
 ```
-python bench/run_bench.py                       # все задачи, все найденные языки
-python bench/run_bench.py -b fib loop -l klar c # выборочно
-python bench/run_bench.py --repeat 5 --name my-pc
+klarc run bench/run_bench.klar                              # все задачи, все найденные языки
+klarc run bench/run_bench.klar -- -b fib loop -l klar c     # выборочно
+klarc run bench/run_bench.klar -- --repeat 5 --name my-pc
+klar run bench/run_bench.klar -- ...                        # то же через Python-версию klar
 ```
 Отчёт пишется в `bench/results/<имя>.md` и `.json`.
 

@@ -31,6 +31,9 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   test crashed the process).
 
 ### Added
+- The benchmark runners are written in Klar: `bench/run_bench.klar` (speed against C, C++, Rust, Go, Java, JavaScript
+  and Python) and `bench/ai/run_ai_bench.klar` (when each language catches typical AI mistakes) replace the Python
+  scripts; run them with `klarc run` (no Python needed) or `klar run`.
 - Standard library: `std.regex` (classes, groups, alternatives, `* + ? {n,m}`, anchors: `is_match`, `find`,
   `find_all`, `replace_all`, `split_by`), `std.csv` (RFC 4180 parsing and formatting, `records`), `std.path` (`join`,
   `normalize`, `dirname`, `basename`, `extension`, `relative_to`, ...), `std.hash` (`crc32`, `fnv1a`, `sha256`),

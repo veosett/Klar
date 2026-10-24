@@ -49,7 +49,7 @@ python -m klar fmt --check .                  # Klar code in canonical layout
 2. **Diagnostics are an API.** New errors get a stable code in `klar/diagnostics.py` (`klar explain` text included),
    a precise span, a `hint`, and a `fix` when one is mechanical (`"safe": false` if it changes meaning).
 3. **Prefer compile time.** If a run-time error can be ruled out statically, do it in `safety.py` or the checker.
-4. **Performance changes come with numbers** from `bench/run_bench.py` (before/after, same machine).
+4. **Performance changes come with numbers** from `bench/run_bench.klar` (`klarc run bench/run_bench.klar`) (before/after, same machine).
 5. Keep the AI reference (`klar/ai_reference.md`, printed by `klar spec`) short and up to date.
 
 ## Commits and pull requests

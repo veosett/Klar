@@ -1,0 +1,390 @@
+// Klar benchmark runner, written in Klar: the same algorithms in Klar (native, Python backend, interpreter), Python,
+// JavaScript, C, C++, Java, Go and Rust.
+//
+//     klarc run bench/run_bench.klar -- [-b fib loop] [-l klar c] [--repeat 3] [--name my-pc]
+//     klar run bench/run_bench.klar -- ...
+//
+// Run it from the repository root. Each program measures its own compute time (printed as `time_ms=`), so process
+// start-up, JIT/JVM boot and Klar's parse + type-check are excluded from the main number; the full wall-clock time is
+// reported separately. The results of all languages are cross-checked. Writes bench/results/<name>.md and .json.
+use std.json.{Json, json_object, json_pretty}
+use std.numfmt.{group_digits}
+
+/// A language: how to build and run one program (`@src`, `@exe` are replaced by the paths).
+type Lang { name: Str, ext: Str, build: List[Str], run: List[Str], version: Str }
+
+/// The outcome of one program: its result line and the best times, or what went wrong.
+type Outcome { ok: Bool, result: Str, compute_ms: Float, wall_ms: Float, error: Str }
+
+type Options { benches: List[Str], langs: List[Str], repeat: Int, name: Str, klar: List[Str], python: Str }
+
+const ORDER: List[Str] = ["c", "cpp", "rust", "go", "java", "javascript", "python", "klar", "klar-py", "klar-interp"]
+
+fn is_windows() -> Bool uses io {
+  return env_var("OS") == Some("Windows_NT")
+}
+
+/// The first line of `cmd`'s output (None when it cannot run).
+fn version(cmd: List[Str]) -> Option[Str] uses proc {
+  return match run_capture(cmd, "", "") {
+    Ok(r) => {
+      let text = (r.get_or(1, "") + "\n" + r.get_or(2, "")).lines().map(fn(l) => l.trim())
+        .filter(fn(l) => not l.is_empty() and not l.starts_with("Picked up"))
+      return Some(text.first().unwrap_or("?"))
+    },
+    Err(_) => None,
+  }
+}
+
+fn found(cmd: List[Str]) -> Bool uses proc {
+  return version(cmd) != None
+}
+
+fn first_found(names: List[Str], flag: Str) -> Option[Str] uses proc {
+  for n in names {
+    if found([n, flag]) {
+      return Some(n)
+    }
+  }
+  return None
+}
+
+fn detect(o: Options) -> List[Lang] uses io, proc {
+  var langs: List[Lang] = []
+  let klar_v = version(o.klar.push("--version")).unwrap_or("Klar")
+  langs = langs.push(Lang { name: "klar", ext: "klar", build: o.klar.concat(["build", "-q", "@src", "-o", "@exe"]),
+    run: ["@exe"], version: "{klar_v}, native compiler (own codegen + linker, no libc)" })
+  match version([o.python, "--version"]) {
+    Some(pv) => {
+      langs = langs.concat([Lang { name: "klar-py", ext: "klar", build: [], run: [o.python, "-m", "klar", "run", "-q",
+        "--py", "@src"], version: "Klar, Python-bytecode backend (on {pv})" }, Lang { name: "klar-interp",
+          ext: "klar", build: [], run: [o.python, "-m", "klar", "run", "-q", "--interp", "@src"],
+          version: "Klar, tree-walking interpreter (on {pv})" }, Lang { name: "python", ext: "py", build: [],
+            run: [o.python, "@src"], version: pv }])
+    },
+    None => {},
+  }
+  match version(["node", "--version"]) {
+    Some(v) => {
+      langs = langs.push(Lang { name: "javascript", ext: "js", build: [], run: ["node", "@src"], version: "Node.js {v}" })
+    },
+    None => {},
+  }
+  match first_found(names: ["gcc", "clang", "cc"], flag: "--version") {
+    Some(cc) => {
+      langs = langs.push(Lang { name: "c", ext: "c", build: [cc, "-O2", "-o", "@exe", "@src"], run: ["@exe"],
+        version: version([cc, "--version"]).unwrap_or(cc) + " -O2" })
+    },
+    None => {},
+  }
+  match first_found(names: ["g++", "clang++"], flag: "--version") {
+    Some(cxx) => {
+      langs = langs.push(Lang { name: "cpp", ext: "cpp", build: [cxx, "-O2", "-std=c++17", "-o", "@exe", "@src"],
+        run: ["@exe"], version: version([cxx, "--version"]).unwrap_or(cxx) + " -O2" })
+    },
+    None => {},
+  }
+  match version(["java", "-version"]) {
+    Some(v) => {
+      langs = langs.push(Lang { name: "java", ext: "java", build: [], run: ["java", "@src"], version: v })
+    },
+    None => {},
+  }
+  match version(["go", "version"]) {
+    Some(v) => {
+      langs = langs.push(Lang { name: "go", ext: "go", build: ["go", "build", "-o", "@exe", "@src"], run: ["@exe"],
+        version: v })
+    },
+    None => {},
+  }
+  match version(["rustc", "--version"]) {
+    Some(v) => {
+      langs = langs.push(Lang { name: "rust", ext: "rs", build: ["rustc", "-O", "-o", "@exe", "@src"], run: ["@exe"],
+        version: v + " -O" })
+    },
+    None => {},
+  }
+  if o.langs.is_empty() {
+    return langs
+  }
+  return langs.filter(fn(l) => o.langs.contains(l.name))
+}
+
+fn fill(cmd: List[Str], src: Str, exe: Str) -> List[Str] {
+  return cmd.map(fn(a) => a.replace("@src", src).replace("@exe", exe))
+}
+
+fn failure(msg: Str) -> Outcome {
+  return Outcome { ok: false, result: "", compute_ms: 0.0, wall_ms: 0.0, error: msg.slice((msg.len() - 300).max(0),
+    msg.len()) }
+}
+
+/// `result=` and `time_ms=` of a program's output.
+fn parse_output(text: Str) -> Pair[Option[Str], Option[Float]] {
+  var result: Option[Str] = None
+  var ms: Option[Float] = None
+  for line in text.lines() {
+    if line.starts_with("result=") {
+      result = Some(line.slice(7, line.len()).trim())
+    } else if line.starts_with("time_ms=") {
+      ms = line.slice(8, line.len()).trim().to_float()
+    }
+  }
+  return Pair { first: result, second: ms }
+}
+
+fn run_one(lang: Lang, src: Str, exe: Str, repeat: Int) -> Outcome uses proc, time {
+  if not lang.build.is_empty() {
+    match run_capture(fill(cmd: lang.build, src: src, exe: exe), "", "") {
+      Ok(r) => {
+        if r.get_or(0, "") != "0" {
+          return failure("build failed: " + r.get_or(2, "") + r.get_or(1, ""))
+        }
+      },
+      Err(e) => {
+        return failure("build failed: " + e)
+      },
+    }
+  }
+  var best = -1.0
+  var wall_best = -1.0
+  var result = ""
+  var k = 0
+  while k < repeat {
+    let t0 = now_ns()
+    let r = match run_capture(fill(cmd: lang.run, src: src, exe: exe), "", "") {
+      Ok(x) => x,
+      Err(e) => {
+        return failure(e)
+      },
+    }
+    let wall = (now_ns() - t0).to_float() / 1000000.0
+    if r.get_or(0, "") != "0" {
+      return failure(r.get_or(2, "") + r.get_or(1, ""))
+    }
+    let parsed = parse_output(r.get_or(1, ""))
+    let ms = match parsed.second {
+      Some(v) => v,
+      None => {
+        return failure("no time_ms in output")
+      },
+    }
+    result = parsed.first.unwrap_or("")
+    if best < 0.0 or ms < best {
+      best = ms
+    }
+    if wall_best < 0.0 or wall < wall_best {
+      wall_best = wall
+    }
+    k = k + 1
+  }
+  return Outcome { ok: true, result: result, compute_ms: best, wall_ms: wall_best, error: "" }
+}
+
+/// Milliseconds for the table: 3 decimals below 1, 1 below 100, else whole with spaces between the digit groups.
+pub fn fmt_ms(ms: Float) -> Str {
+  if ms < 1.0 {
+    return ms.fixed(3)
+  }
+  if ms < 100.0 {
+    return ms.fixed(1)
+  }
+  return group_digits(n: ms.round(), sep: " ")
+}
+
+fn ratio(x: Float) -> Str {
+  return match x >= 1.0 {
+    true => x.fixed(1) + "×",
+    false => x.fixed(2) + "× (slower)",
+  }
+}
+
+fn parse_args(args: List[Str]) -> Options uses io {
+  var o = Options { benches: [], langs: [], repeat: 3, name: env_var("HOSTNAME").or_else_name(), klar: ["klarc"],
+    python: "python3" }
+  var mode = ""
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "-b" or a == "--bench" or a == "-l" or a == "--lang" {
+      mode = a
+    } else if a == "--repeat" {
+      o = o with { repeat: args.get_or(i + 1, "3").to_int().unwrap_or(3).max(1) }
+      i = i + 1
+      mode = ""
+    } else if a == "--name" {
+      o = o with { name: args.get_or(i + 1, o.name) }
+      i = i + 1
+      mode = ""
+    } else if a == "--klar" {
+      o = o with { klar: args.get_or(i + 1, "klarc").split(" ") }
+      i = i + 1
+      mode = ""
+    } else if a == "--python" {
+      o = o with { python: args.get_or(i + 1, "python3") }
+      i = i + 1
+      mode = ""
+    } else if mode == "-b" or mode == "--bench" {
+      o = o with { benches: o.benches.push(a) }
+    } else if mode == "-l" or mode == "--lang" {
+      o = o with { langs: o.langs.push(a) }
+    }
+    i = i + 1
+  }
+  return o
+}
+
+fn or_else_name(v: Option[Str]) -> Str {
+  return v.unwrap_or("host").split(".").first().unwrap_or("host")
+}
+
+fn machine() -> Str uses io, proc {
+  return match env_var("PROCESSOR_IDENTIFIER") {
+    Some(p) => "Windows, " + p,
+    None => version(["uname", "-srm"]).unwrap_or("?"),
+  }
+}
+
+fn main() -> Result[Unit, Str] uses io, fs, time, proc {
+  var o = parse_args(cli_args())
+  if is_windows() and o.python == "python3" {
+    o = o with { python: "python" }
+  }
+  if not found(o.klar.push("--version")) {
+    o = o with { klar: [o.python, "-m", "klar"] }
+  }
+  let langs = detect(o)
+  let ext = match is_windows() {
+    true => ".exe",
+    false => "",
+  }
+  var benches = list_dir("bench/programs")?.filter(fn(d) => is_dir("bench/programs/" + d))
+  let wanted = o.benches
+  if not wanted.is_empty() {
+    benches = benches.filter(fn(b) => wanted.contains(b))
+  }
+  print("Machine: {machine()}")
+  for l in langs {
+    print("  " + l.name.pad_right(11, " ") + " " + l.version)
+  }
+  print("")
+  // the executables go to the temporary directory (an absolute path: `run_capture` looks a bare name up in PATH)
+  let tmp = env_var("TEMP").unwrap_or(env_var("TMPDIR").unwrap_or("/tmp"))
+  let work = tmp + "/klar-bench"
+  make_dir(work)?
+  var results: Map[Str, Map[Str, Outcome]] = Map {}
+  for bench in benches {
+    var row: Map[Str, Outcome] = Map {}
+    for lang in langs {
+      let src = "bench/programs/{bench}/{bench}.{lang.ext}"
+      if file_exists(src) {
+        print_raw("  " + bench.pad_right(12, " ") + " " + lang.name.pad_right(11, " ") + " ... ")
+        let r = run_one(lang: lang, src: src, exe: "{work}/{bench}_{lang.name}{ext}", repeat: o.repeat)
+        row = row.set(lang.name, r)
+        print(match r.ok {
+          true => fmt_ms(r.compute_ms) + " ms (wall " + fmt_ms(r.wall_ms) + " ms)",
+          false => r.error,
+        })
+      }
+    }
+    results = results.set(bench, row)
+  }
+  // cross-check the results
+  var mismatches: List[Str] = []
+  for bench in benches {
+    let row = results.get(bench).unwrap_or(Map {})
+    let values = row.entries().filter(fn(e) => e.value.ok)
+    if values.map(fn(e) => e.value.result).unique().len() > 1 {
+      mismatches = mismatches.push(bench + ": " + values.map(fn(e) => e.key + "=" + e.value.result).join(", "))
+    }
+  }
+  let names = langs.map(fn(l) => l.name)
+  let order = ORDER.filter(fn(l) => names.contains(l))
+  var lines = ["# Klar benchmarks", "", "Machine: `{machine()}`. Best of {o.repeat} runs. Compute time in " +
+      "milliseconds (measured inside each program, start-up excluded).", "", "| benchmark | " + order.join(" | ") +
+      " | Klar speed-up vs Python | Klar time ÷ C |", "|---|" + "---:|".repeat(order.len() + 2)]
+  for bench in benches {
+    let row = results.get(bench).unwrap_or(Map {})
+    var cells = [bench]
+    for l in order {
+      cells = cells.push(match row.get(l) {
+        Some(r) => match r.ok {
+          true => fmt_ms(r.compute_ms),
+          false => "error",
+        },
+        None => "—",
+      })
+    }
+    let k = row.get("klar").filter_ok()
+    let p = row.get("python").filter_ok()
+    let c = row.get("c").filter_ok()
+    cells = cells.push(match k > 0.0 and p > 0.0 {
+      true => ratio(p / k),
+      false => "—",
+    })
+    cells = cells.push(match k > 0.0 and c > 0.0 {
+      true => (k / c.max(0.001)).fixed(1) + "×",
+      false => "—",
+    })
+    lines = lines.push("| " + cells.join(" | ") + " |")
+  }
+  lines = lines.concat(["", "Wall-clock time including process start-up (ms):", "", "| benchmark | " +
+      order.join(" | ") + " |", "|---|" + "---:|".repeat(order.len())])
+  for bench in benches {
+    let row = results.get(bench).unwrap_or(Map {})
+    lines = lines.push("| " + [bench].concat(order.map(fn(l) => match row.get(l) {
+      Some(r) => match r.ok {
+        true => fmt_ms(r.wall_ms),
+        false => "—",
+      },
+      None => "—",
+    })).join(" | ") + " |")
+  }
+  lines = lines.concat(["", "Versions:", ""]).concat(langs.map(fn(l) => "- **{l.name}**: {l.version}"))
+  lines = lines.concat(["", "Result check: " + match mismatches.is_empty() {
+    true => "all languages produced identical results ✅",
+    false => "MISMATCH ❌ " + mismatches.join("; "),
+  }])
+  let report = lines.join("\n")
+  let all = results
+  print("")
+  print(report)
+  write_file("bench/results/{o.name}.md", report + "\n")?
+  let json = json_object([Pair { first: "machine", second: Json.Text(value: machine()) }, Pair { first: "repeat",
+    second: Json.Int(value: o.repeat) }, Pair { first: "versions", second: json_object(langs.map(fn(l) => Pair {
+      first: l.name, second: Json.Text(value: l.version) })) }, Pair { first: "results",
+        second: json_object(benches.map(fn(b) => Pair { first: b, second: json_object(all.get(b).unwrap_or(Map {})
+            .entries().map(fn(e) => Pair { first: e.key, second: outcome_json(e.value) })) })) }])
+  write_file("bench/results/{o.name}.json", json_pretty(json) + "\n")?
+  if not mismatches.is_empty() {
+    exit(1)
+  }
+  return Ok(())
+}
+
+fn outcome_json(r: Outcome) -> Json {
+  if not r.ok {
+    return json_object([Pair { first: "error", second: Json.Text(value: r.error) }])
+  }
+  return json_object([Pair { first: "result", second: Json.Text(value: r.result) }, Pair { first: "compute_ms",
+    second: Json.Num(value: r.compute_ms) }, Pair { first: "wall_ms", second: Json.Num(value: r.wall_ms) }])
+}
+
+/// The compute time of an outcome that worked (0 otherwise).
+fn filter_ok(r: Option[Outcome]) -> Float {
+  return match r {
+    Some(x) => match x.ok {
+      true => x.compute_ms,
+      false => 0.0,
+    },
+    None => 0.0,
+  }
+}
+
+test "milliseconds are formatted for the table" {
+  assert fmt_ms(0.1234) == "0.123"
+  assert fmt_ms(12.34) == "12.3"
+  assert fmt_ms(123456.0) == "123 456"
+  assert parse_output("result=42\ntime_ms=1.5\n") == Pair { first: Some("42"), second: Some(1.5) }
+  assert fill(cmd: ["cc", "-o", "@exe", "@src"], src: "a.c", exe: "a") == ["cc", "-o", "a", "a.c"]
+}
