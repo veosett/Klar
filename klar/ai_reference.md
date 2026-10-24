@@ -23,6 +23,8 @@ exactly; the compiler rejects everything else with a coded error (`klar explain 
 4. Failures show values, both sides of `assert`, the Klar call stack, minimal property counterexamples.
 5. `klar run --allow fs:./data,proc:git,time file.klar` runs with only these rights (`io` always; R0016 outside;
    `fs`/`proc` alone allow everything of that kind); `klar build --allow ...` builds them into the executable.
+   `klar run --record t.json file.klar` records input, clock, random numbers, files read and results of writes;
+   `klar replay t.json` reruns it byte for byte without them (R0017 if the program changed).
    `klar run` compiles to a native executable (cached); `klar build file.klar` writes a standalone
    `.exe`/ELF (`--target windows|linux|linux-arm64`, experimental `macos`); `klar profile file.klar` shows where time goes.
 

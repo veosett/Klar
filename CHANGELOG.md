@@ -31,6 +31,10 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   test crashed the process).
 
 ### Added
+- **Record and replay**: `klar run --record run.json prog.klar` writes everything the run got from outside (input,
+  arguments, environment, clock, random numbers, files read, results of programs run and of writes); `klar replay
+  run.json` runs it again on exactly that — the same output, error and exit code byte for byte, without the files or
+  the clock, and without writing anything. A replay of a changed program stops with R0017. (Python backends.)
 - **Contracts are tested**: `klar test`, `klar dev` and `klarc test/dev` run every pure, non-generic top-level function
   with `ensures` on random inputs that satisfy its `requires` (a generated property `contract: name`), so a contract
   finds a wrong result without a single `test`. It found one in `examples/shapes.klar`: `area` of an impossible

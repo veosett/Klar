@@ -1850,6 +1850,55 @@ class LlmBenchmark(unittest.TestCase):
         self.assertEqual(bench.extract_code("text\n```klar\nfn f() {}\n```\nmore"), "fn f() {}\n")
 
 
+class RecordReplay(unittest.TestCase):
+    """`klar run --record T` / `klar replay T`: a run happens again byte for byte without its files, clock or input."""
+    SRC = """fn main() uses io, fs, time, rand {
+  let name = read_line().unwrap_or("?")
+  let dice = random_int(1, 1000000)
+  let cfg = read_file("cfg.txt").unwrap_or("none")
+  print("hello {name}, dice {dice}, cfg {cfg}, args {cli_args()}, late {now_ms() > 0}")
+  print(write_file("out.txt", "x"))
+  print(read_bytes("cfg.txt").map(fn(b) => b.len()))
+  fail("stop {dice}")
+}
+"""
+
+    def test_a_failure_happens_again(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                with open("p.klar", "w", encoding="utf-8") as f:
+                    f.write(self.SRC)
+                with open("cfg.txt", "w", encoding="utf-8") as f:
+                    f.write("blue")
+                env = dict(os.environ, PYTHONPATH=ROOT)
+                rec = subprocess.run([sys.executable, "-m", "klar", "run", "-q", "--record", "t.json", "p.klar", "x"],
+                                     input="ann\n", capture_output=True, text=True, env=env)
+                self.assertEqual(rec.returncode, 1)
+                self.assertIn("hello ann", rec.stdout)
+                os.remove("cfg.txt")
+                os.remove("out.txt")
+                rep = subprocess.run([sys.executable, "-m", "klar", "replay", "t.json"], input="", capture_output=True,
+                                     text=True, env=env)
+                self.assertEqual((rep.stdout, rep.stderr, rep.returncode), (rec.stdout, rec.stderr, rec.returncode))
+                self.assertFalse(os.path.exists("out.txt"))           # the replay does not write again
+                with open("p.klar", "w", encoding="utf-8") as f:
+                    f.write(self.SRC.replace("let dice", "let _t = now_ns()\n  let dice"))
+                rep = subprocess.run([sys.executable, "-m", "klar", "replay", "t.json"], capture_output=True, text=True,
+                                     env=env)
+                self.assertIn("R0017", rep.stderr)
+                self.assertIn("calls `now_ns`, but the recording has `random_int` next", rep.stderr)
+            finally:
+                os.chdir(old)
+
+    def test_values_survive_the_recording(self):
+        from klar.trace import decode, encode
+        from klar.values import NONE, UNIT, err, ok, some
+        for v in (1, "é", True, UNIT, NONE, some(("a", "b")), ok(UNIT), err("x"), b"\x00\xff", 1.5, (ok(3),)):
+            self.assertEqual(decode(json.loads(json.dumps(encode(v)))), v)
+
+
 class ContractProperties(unittest.TestCase):
     """`klar test` checks every pure function with `ensures` on random inputs that satisfy its `requires`."""
     ISQRT = ("fn isqrt(n: Int) -> Int\n  requires n >= 0\n  ensures result * result <= n and (result + 1) * (result + 1) > n\n"

@@ -1198,3 +1198,14 @@ FOREIGN_NOTES = {
     "expect": "Klar has no `expect`: use `?`, `match`, or `.unwrap_or(default)`",
     "pop": "lists are immutable: use `.last()` and `.take(xs.len() - 1)`",
 }
+
+
+# ---- `klar run --record` / `klar replay` (klar/trace.py): what comes from outside goes through the trace -----
+def _trace_globals():
+    from .trace import TRACED, traced
+    for name in TRACED:
+        sig, impl = GLOBALS[name]
+        GLOBALS[name] = (sig, traced(name, impl))
+
+
+_trace_globals()

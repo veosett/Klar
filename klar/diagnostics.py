@@ -267,6 +267,9 @@ CODES = {
     "R0016": ("effect not allowed", "The program runs with `--allow` rights (`klar run --allow fs:./data,proc:git`) and "
                                     "called something outside them: a file outside the allowed directories, another "
                                     "program, the clock or random numbers. Add the right, or change the program."),
+    "R0017": ("replay diverged", "`klar replay` ran the program on a recording (`klar run --record`), and the program "
+                                 "asked for something the recording does not have next — the program or its source "
+                                 "changed since it was recorded. Record the run again."),
     "R0014": ("par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was "
                                      "killed, e.g. by the system running out of memory)."),
 }

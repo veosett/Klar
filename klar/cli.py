@@ -175,6 +175,8 @@ def cmd_run(args):
     loaded, code = prepare_run(args)
     if code is not None:
         return code
+    if args.record:
+        args.py = args.py or not args.interp    # a recording runs in the Python backends (klar/trace.py)
     if not args.interp and not args.py and not args.emit_python:
         warnings = [d for d in user_diags(loaded) if d.severity == "warning"]
         if warnings and not args.json and not args.quiet:
@@ -194,24 +196,14 @@ def cmd_run(args):
         print_diags(loaded, warnings)
     out = io.StringIO() if args.json else sys.stdout
     errs = io.StringIO() if args.json else sys.stderr
-    interp = Interpreter(loaded, out=out, err_stream=errs, cli_args=args.args)
-    interp.sandbox = sandbox
-    runner = interp
-    backend = "interpreter"
-    if not args.interp:
-        try:
-            runner = CompiledProgram(loaded, out=out, err_stream=errs, cli_args=args.args)
-            runner.ctx.sandbox = sandbox
-            backend = "compiled"
-        except Unsupported as why:
-            if args.verbose:
-                print(f"note: using the interpreter ({why})", file=sys.stderr)
-    if args.verbose and not args.json:
-        print(f"note: backend = {backend}", file=sys.stderr)
-    _, err = runtime_guard(runner.run_main, interp)
-    exit_code = None
-    if isinstance(err, KlarExit):
-        exit_code, err = err.exit_code, None
+    trace = None
+    if args.record:
+        from .trace import Tee, Trace
+        trace = Trace("record")
+        out, errs = Tee(out), Tee(errs)
+    err, exit_code, backend = run_python(args, loaded, out, errs, args.args, sandbox, trace)
+    if args.record:
+        record_run(args, loaded, trace, out, errs, err, exit_code)
     if args.json:
         res = {"ok": err is None, **({"exit_code": exit_code} if exit_code is not None else {}), "stage": "run", "backend": backend, "stdout": out.getvalue(), "stderr": errs.getvalue(),
                "diagnostics": [d.to_dict() for d in warnings]}
@@ -225,6 +217,78 @@ def cmd_run(args):
         sys.stdout.flush()
         return exit_code
     return 1 if err else 0
+
+
+def run_python(args, loaded, out, errs, cli_args, sandbox=None, trace=None, inp=None):
+    """Runs main in the Python backends: (runtime error or None, exit code of `exit()` or None, backend)."""
+    interp = Interpreter(loaded, out=out, err_stream=errs, cli_args=cli_args, inp=inp)
+    interp.sandbox = sandbox
+    interp.trace = trace
+    runner = interp
+    backend = "interpreter"
+    if not args.interp:
+        try:
+            runner = CompiledProgram(loaded, out=out, err_stream=errs, cli_args=cli_args, inp=inp)
+            runner.ctx.sandbox = sandbox
+            runner.ctx.trace = trace
+            backend = "compiled"
+        except Unsupported as why:
+            if getattr(args, "verbose", False):
+                print(f"note: using the interpreter ({why})", file=sys.stderr)
+    if getattr(args, "verbose", False) and not getattr(args, "json", False):
+        print(f"note: backend = {backend}", file=sys.stderr)
+    _, err = runtime_guard(runner.run_main, interp)
+    exit_code = None
+    if isinstance(err, KlarExit):
+        exit_code, err = err.exit_code, None
+    return err, exit_code, backend
+
+
+def error_text(loaded, err):
+    return err.to_diag().format(loaded.sources.get(err.span.file)) if err else ""
+
+
+def record_run(args, loaded, trace, out, errs, err, exit_code):
+    from .trace import FORMAT, save, source_hash
+    from . import __version__
+    save(args.record, {"format": FORMAT, "klar": __version__, "file": os.path.abspath(args.file),
+                       "sources": source_hash(loaded), "args": list(args.args), "events": trace.events,
+                       "stdout": out.getvalue(), "stderr": errs.getvalue(), "error": error_text(loaded, err),
+                       "exit": exit_code if exit_code is not None else (1 if err else 0)})
+    if not args.quiet:
+        print(f"recorded {len(trace.events)} event(s) to {args.record}; `klar replay {args.record}` runs it again",
+              file=sys.stderr)
+
+
+def cmd_replay(args):
+    from .trace import Trace, load, source_hash
+    try:
+        data = load(args.trace)
+    except (OSError, ValueError) as ex:
+        print(f"error: {ex}", file=sys.stderr)
+        return 2
+    path = args.file or data["file"]
+    loaded = load_path(path)
+    if loaded.has_errors() or loaded.program is None:
+        return fail_check(args, loaded)
+    if source_hash(loaded) != data["sources"] and not args.quiet:
+        print("note: the program changed since the recording; the replay may diverge (R0017)", file=sys.stderr)
+    out, errs = io.StringIO(), io.StringIO()
+    args.interp = args.interp
+    err, exit_code, _ = run_python(args, loaded, out, errs, data["args"], trace=Trace("replay", data["events"]),
+                                   inp=io.StringIO(""))
+    sys.stdout.write(out.getvalue())
+    sys.stdout.flush()
+    sys.stderr.write(errs.getvalue())
+    text = error_text(loaded, err)
+    if text:
+        print(text, file=sys.stderr)
+    code = exit_code if exit_code is not None else (1 if err else 0)
+    same = (out.getvalue(), errs.getvalue(), text, code) == (data["stdout"], data["stderr"], data["error"],
+                                                               data["exit"])
+    if not same and not args.quiet:
+        print("note: the replay differs from the recording (output, error or exit code)", file=sys.stderr)
+    return code
 
 
 def cmd_test(args):
@@ -578,6 +642,14 @@ def main(argv=None):
         pass
     ap = argparse.ArgumentParser(prog="klar", description=f"Klar {__version__} — a language designed for AI authors")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("replay", help="run a recording again (`klar run --record TRACE`): the same input, clock, "
+                                      "random numbers and files, so a failure happens again byte for byte")
+    p.add_argument("trace")
+    p.add_argument("file", nargs="?", help="the program (default: the one recorded)")
+    p.add_argument("--interp", action="store_true", help="use the tree-walking reference interpreter")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("-q", "--quiet", action="store_true", help="no notes")
+    p.set_defaults(fn=cmd_replay)
     p = sub.add_parser("run", help="check and run fn main()")
     p.add_argument("file")
     p.add_argument("args", nargs="*", help="arguments for cli_args() (put them after --)")
@@ -587,6 +659,8 @@ def main(argv=None):
     p.add_argument("--py", action="store_true", help="use the Klar -> Python backend instead of native code")
     p.add_argument("-v", "--verbose", action="store_true", help="report which backend runs the program")
     p.add_argument("--emit-python", action="store_true", help="print the generated Python code and exit")
+    p.add_argument("--record", metavar="TRACE", help="write everything the run gets from outside to TRACE (JSON), "
+                                                     "for `klar replay TRACE`")
     p.add_argument("--allow", metavar="RIGHTS", help="run with only these rights, e.g. fs:./data,proc:git,time "
                                                      "(io is always allowed; anything else is R0016)")
     p.set_defaults(fn=cmd_run)

@@ -428,6 +428,7 @@ pub fn diag_codes() -> List[List[Str]] {
     ["R0013", "exit() in a test", "A test called `exit(code)`, which would end the whole test run. Tests should check return values instead."],
     ["R0015", "out of memory", "A value (a string, a list, a number) would need more memory than a computer has — usually a count that is far too large, such as `\"x\".repeat(1_000_000_000_000_000)`. Check the size before building the value."],
     ["R0016", "effect not allowed", "The program runs with `--allow` rights (`klar run --allow fs:./data,proc:git`) and called something outside them: a file outside the allowed directories, another program, the clock or random numbers. Add the right, or change the program."],
+    ["R0017", "replay diverged", "`klar replay` ran the program on a recording (`klar run --record`), and the program asked for something the recording does not have next — the program or its source changed since it was recorded. Record the run again."],
     ["R0014", "par_map worker lost", "A worker process of `par_map` stopped without sending its results (it was killed, e.g. by the system running out of memory)."],
   ]
 }
