@@ -1,0 +1,130 @@
+// std.hash — checksums and hashes of text (of its UTF-8 bytes): CRC-32, FNV-1a and SHA-256.
+// use std.hash.{crc32, fnv1a, sha256}
+
+const MASK32: Int = 4294967295
+
+/// The 8 hex digits of a 32-bit number.
+/// >>> assert hex32(255) == "000000ff"
+pub fn hex32(n: Int) -> Str {
+  let digits = "0123456789abcdef"
+  var out = ""
+  var shift = 28
+  while shift >= 0 {
+    let d = n.shift_right(shift).bit_and(15)
+    out = out + digits.slice(d, d + 1)
+    shift = shift - 4
+  }
+  return out
+}
+
+fn crc_table() -> List[Int] {
+  return range(0, 256).map(fn(n) => range(0, 8).fold(n, fn(c, _k) => match c.bit_and(1) == 1 {
+    true => c.shift_right(1).bit_xor(3988292384),
+    false => c.shift_right(1),
+  }))
+}
+
+/// The CRC-32 checksum (as in zip, PNG and Ethernet).
+/// >>> assert hex32(crc32("The quick brown fox jumps over the lazy dog")) == "414fa339"
+/// >>> assert crc32("") == 0
+pub fn crc32(s: Str) -> Int {
+  let table = crc_table()
+  let c = s.to_bytes().to_list().fold(MASK32, fn(acc, b) => table.get_or(acc.bit_xor(b).bit_and(255), 0)
+      .bit_xor(acc.shift_right(8)))
+  return c.bit_xor(MASK32)
+}
+
+/// The 32-bit FNV-1a hash: fast, for hash tables and sharding (not for security).
+/// >>> assert hex32(fnv1a("hello")) == "4f9f2cab"
+/// >>> assert fnv1a("") == 2166136261
+pub fn fnv1a(s: Str) -> Int {
+  return s.to_bytes().to_list().fold(2166136261, fn(h, b) => (h.bit_xor(b) * 16777619).bit_and(MASK32))
+}
+
+const K256: List[Int] = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221,
+  3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774,
+  264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671,
+  3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051,
+  2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344,
+  430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815,
+  2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298]
+
+fn rotr(x: Int, n: Int) -> Int {
+  return x.shift_right(n).bit_or(x.shift_left(32 - n)).bit_and(MASK32)
+}
+
+fn add32(a: Int, b: Int) -> Int {
+  return (a + b).bit_and(MASK32)
+}
+
+fn word_at(bytes: List[Int], at: Int) -> Int {
+  return bytes.get_or(at, 0).shift_left(24).bit_or(bytes.get_or(at + 1, 0).shift_left(16))
+    .bit_or(bytes.get_or(at + 2, 0).shift_left(8)).bit_or(bytes.get_or(at + 3, 0))
+}
+
+fn sha_block(h: List[Int], block: List[Int]) -> List[Int] {
+  var w = range(0, 16).map(fn(i) => word_at(block, i * 4))
+  var t = 16
+  while t < 64 {
+    let w15 = w.get_or(t - 15, 0)
+    let w2 = w.get_or(t - 2, 0)
+    let s0 = rotr(w15, 7).bit_xor(rotr(w15, 18)).bit_xor(w15.shift_right(3))
+    let s1 = rotr(w2, 17).bit_xor(rotr(w2, 19)).bit_xor(w2.shift_right(10))
+    w = w.push(add32(add32(w.get_or(t - 16, 0), s0), add32(w.get_or(t - 7, 0), s1)))
+    t = t + 1
+  }
+  var a = h.get_or(0, 0)
+  var b = h.get_or(1, 0)
+  var c = h.get_or(2, 0)
+  var d = h.get_or(3, 0)
+  var e = h.get_or(4, 0)
+  var f = h.get_or(5, 0)
+  var g = h.get_or(6, 0)
+  var hh = h.get_or(7, 0)
+  var i = 0
+  while i < 64 {
+    let s1 = rotr(e, 6).bit_xor(rotr(e, 11)).bit_xor(rotr(e, 25))
+    let ch = e.bit_and(f).bit_xor(e.bit_not().bit_and(MASK32).bit_and(g))
+    let t1 = add32(add32(add32(hh, s1), add32(ch, K256.get_or(i, 0))), w.get_or(i, 0))
+    let s0 = rotr(a, 2).bit_xor(rotr(a, 13)).bit_xor(rotr(a, 22))
+    let maj = a.bit_and(b).bit_xor(a.bit_and(c)).bit_xor(b.bit_and(c))
+    let t2 = add32(s0, maj)
+    hh = g
+    g = f
+    f = e
+    e = add32(d, t1)
+    d = c
+    c = b
+    b = a
+    a = add32(t1, t2)
+    i = i + 1
+  }
+  let now = [a, b, c, d, e, f, g, hh]
+  return range(0, 8).map(fn(k) => add32(h.get_or(k, 0), now.get_or(k, 0)))
+}
+
+/// The SHA-256 hash as 64 hex digits.
+/// >>> assert sha256("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+/// >>> assert sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+pub fn sha256(s: Str) -> Str {
+  let data = s.to_bytes().to_list()
+  let bits = data.len() * 8
+  var msg = data.push(128)
+  while msg.len() % 64 != 56 {
+    msg = msg.push(0)
+  }
+  msg = msg.concat(range(0, 8).map(fn(k) => bits.shift_right(56 - k * 8).bit_and(255)))
+  var h = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]
+  for block in msg.chunks(64) {
+    h = sha_block(h, block)
+  }
+  return h.map(fn(x) => hex32(x)).join("")
+}
+
+test "longer inputs" {
+  assert sha256("The quick brown fox jumps over the lazy dog") ==
+    "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
+  assert sha256("a".repeat(1000)) == "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
+  assert sha256("é") == "4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c"
+  assert crc32("123456789") == 3421780262
+}

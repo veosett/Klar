@@ -195,6 +195,73 @@ pub fn parse_iso(text: Str) -> Result[DateTime, Str] {
   return Ok(t)
 }
 
+// ---- time zones (fixed offsets from UTC) ---------------------------------------------------------------
+
+/// The wall-clock time at an offset of `minutes` from UTC (Omsk: 360, New York in winter: -300).
+/// >>> assert format_iso(at_offset(t: from_unix_ms(0), minutes: 360)) == "1970-01-01T06:00:00Z"
+pub fn at_offset(t: DateTime, minutes: Int) -> DateTime {
+  return from_unix_ms(to_unix_ms(t) + minutes * 60000)
+}
+
+/// `+06:00`, `-05:30` or `Z` for an offset in minutes.
+/// >>> assert offset_text(360) == "+06:00"
+/// >>> assert offset_text(-330) == "-05:30"
+/// >>> assert offset_text(0) == "Z"
+pub fn offset_text(minutes: Int) -> Str {
+  if minutes == 0 {
+    return "Z"
+  }
+  let sign = match minutes < 0 {
+    true => "-",
+    false => "+",
+  }
+  let m = minutes.abs()
+  return sign + two(m / 60) + ":" + two(m % 60)
+}
+
+/// The moment as local ISO text at an offset: `2026-10-25T06:00:00+06:00`.
+/// >>> assert format_iso_offset(t: from_unix_ms(0), minutes: 360) == "1970-01-01T06:00:00+06:00"
+pub fn format_iso_offset(t: DateTime, minutes: Int) -> Str {
+  let local = format_iso(at_offset(t: t, minutes: minutes))
+  return local.slice(0, local.len() - 1) + offset_text(minutes)
+}
+
+/// Parses ISO text that may end with an offset (`+06:00`, `-0530`, `Z`): the moment in UTC.
+/// >>> assert parse_iso_offset("1970-01-01T06:00:00+06:00").map(format_iso) == Ok("1970-01-01T00:00:00Z")
+/// >>> assert parse_iso_offset("2026-10-25T10:00-05:30").map(format_iso) == Ok("2026-10-25T15:30:00Z")
+/// >>> assert parse_iso_offset("2026-10-25T10:00+25:00").is_err()
+pub fn parse_iso_offset(text: Str) -> Result[DateTime, Str] {
+  let s = text.trim()
+  let n = s.len()
+  if n <= 16 or s.ends_with("Z") {
+    return parse_iso(s)
+  }
+  var cut = -1
+  if s.slice(n - 6, n - 5) == "+" or s.slice(n - 6, n - 5) == "-" {
+    cut = n - 6
+  } else if s.slice(n - 5, n - 4) == "+" or s.slice(n - 5, n - 4) == "-" {
+    cut = n - 5
+  }
+  if cut < 0 {
+    return parse_iso(s)
+  }
+  let off = s.slice(cut + 1, n).replace(":", "")
+  if off.len() != 4 or not off.is_numeric() {
+    return Err("expected an offset like +06:00 at the end of \"{text}\"")
+  }
+  let hours = off.slice(0, 2).to_int().unwrap_or(0)
+  let mins = off.slice(2, 4).to_int().unwrap_or(0)
+  if hours > 23 or mins > 59 {
+    return Err("the offset {s.slice(cut, n)} is out of range")
+  }
+  let sign = match s.slice(cut, cut + 1) == "-" {
+    true => -1,
+    false => 1,
+  }
+  let local = parse_iso(s.slice(0, cut))?
+  return Ok(at_offset(t: local, minutes: -sign * (hours * 60 + mins)))
+}
+
 /// ISO weekday: 1 = Monday ... 7 = Sunday.
 /// >>> assert weekday(from_unix_ms(0)) == 4
 pub fn weekday(t: DateTime) -> Int {
@@ -255,6 +322,12 @@ property "unix milliseconds round trip" (ms: Int) {
   assert to_unix_ms(t) == ms
   assert t.month >= 1 and t.month <= 12
   assert t.day >= 1 and t.day <= days_in_month(t.year, t.month)
+}
+
+property "ISO text with an offset round trip" (ms: Int, offset: Int) {
+  let t = from_unix_ms(ms.abs() % 250000000000000)
+  let minutes = offset % (14 * 60)
+  assert parse_iso_offset(format_iso_offset(t: t, minutes: minutes)) == Ok(t)
 }
 
 property "ISO text round trip" (ms: Int) {

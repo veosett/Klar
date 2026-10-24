@@ -31,6 +31,12 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   test crashed the process).
 
 ### Added
+- Standard library: `std.regex` (classes, groups, alternatives, `* + ? {n,m}`, anchors: `is_match`, `find`,
+  `find_all`, `replace_all`, `split_by`), `std.csv` (RFC 4180 parsing and formatting, `records`), `std.path` (`join`,
+  `normalize`, `dirname`, `basename`, `extension`, `relative_to`, ...), `std.hash` (`crc32`, `fnv1a`, `sha256`),
+  `std.numfmt` (`group_digits`, `percent`, `human_bytes`, `ordinal`, Roman numerals) and time-zone offsets in
+  `std.time` (`at_offset`, `format_iso_offset`, `parse_iso_offset`). Every function has a doc-test; the same results in
+  native code.
 - **Record and replay**: `klar run --record run.json prog.klar` writes everything the run got from outside (input,
   arguments, environment, clock, random numbers, files read, results of programs run and of writes); `klar replay
   run.json` runs it again on exactly that — the same output, error and exit code byte for byte, without the files or

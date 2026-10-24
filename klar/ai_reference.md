@@ -52,7 +52,7 @@ test "div works" { assert div(7, 2) == 3 }          // tests sit next to code
 ```klar
 use geometry.{Point, area}                          // first lines of a file; loads geometry.klar next to it
 pub fn area(p: Point) -> Float { ... }              // only `pub` fn/type/enum/const/trait can be imported (E0606)
-use std.math.{gcd, mean}                            // standard modules: std.math std.text std.list std.result std.set std.json std.time
+use std.math.{gcd, mean}                            // standard modules: std.math std.text std.list std.result std.set std.json std.time std.path std.csv std.regex std.hash std.numfmt
 use geometry.shapes.{Circle}                        // a dependency from klar.toml: <geometry>/shapes.klar (`use geometry.{x}`: lib.klar)
 type Pair2[A, B] { left: A, right: B }              // generic record (prelude already has Pair/Entry/Indexed)
 enum Tree[T] { Leaf, Node(left: Tree[T], value: T, right: Tree[T]) }   // generic, recursive enum

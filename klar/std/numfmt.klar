@@ -1,0 +1,142 @@
+// std.numfmt — numbers as text for people: digit groups, percentages, sizes, ordinals, Roman numerals.
+// use std.numfmt.{group_digits, percent, human_bytes, ordinal}
+
+/// Digits in groups of three with `sep` between them.
+/// >>> assert group_digits(n: 1234567, sep: ",") == "1,234,567"
+/// >>> assert group_digits(n: -1000, sep: " ") == "-1 000"
+/// >>> assert group_digits(n: 999, sep: ",") == "999"
+pub fn group_digits(n: Int, sep: Str) -> Str {
+  let digits = n.abs().to_str()
+  var out = ""
+  var i = 0
+  let len = digits.len()
+  for c in digits.chars() {
+    if i > 0 and (len - i) % 3 == 0 {
+      out = out + sep
+    }
+    out = out + c
+    i = i + 1
+  }
+  return match n < 0 {
+    true => "-" + out,
+    false => out,
+  }
+}
+
+/// A fraction as a percentage with `digits` decimals.
+/// >>> assert percent(x: 0.125, digits: 1) == "12.5%"
+/// >>> assert percent(x: 1.0, digits: 0) == "100%"
+pub fn percent(x: Float, digits: Int) -> Str
+  requires digits >= 0
+{
+  return (x * 100.0).fixed(digits) + "%"
+}
+
+/// The integer with leading zeros up to `width` digits (the sign before them).
+/// >>> assert zero_pad(n: 7, width: 3) == "007"
+/// >>> assert zero_pad(n: -42, width: 4) == "-0042"
+/// >>> assert zero_pad(n: 12345, width: 3) == "12345"
+pub fn zero_pad(n: Int, width: Int) -> Str {
+  let digits = n.abs().to_str().pad_left(width, "0")
+  return match n < 0 {
+    true => "-" + digits,
+    false => digits,
+  }
+}
+
+/// A size in bytes with the largest unit (of 1024) that keeps it at least 1, one decimal above bytes.
+/// >>> assert human_bytes(512) == "512 B"
+/// >>> assert human_bytes(1536) == "1.5 KB"
+/// >>> assert human_bytes(5 * 1024 * 1024 * 1024) == "5.0 GB"
+pub fn human_bytes(n: Int) -> Str {
+  let units = ["B", "KB", "MB", "GB", "TB", "PB"]
+  var size = n.to_float()
+  var u = 0
+  while size.abs() >= 1024.0 and u < units.len() - 1 {
+    size = size / 1024.0
+    u = u + 1
+  }
+  if u == 0 {
+    return "{n} B"
+  }
+  return size.fixed(1) + " " + units.get_or(u, "?")
+}
+
+/// The English ordinal: 1st, 2nd, 3rd, 4th, 11th, 21st, ...
+/// >>> assert ordinal(1) == "1st"
+/// >>> assert ordinal(12) == "12th"
+/// >>> assert ordinal(23) == "23rd"
+/// >>> assert ordinal(111) == "111th"
+pub fn ordinal(n: Int) -> Str {
+  let last2 = n.abs() % 100
+  let last = n.abs() % 10
+  let suffix = match last2 >= 11 and last2 <= 13 {
+    true => "th",
+    false => match last {
+      1 => "st",
+      2 => "nd",
+      3 => "rd",
+      _ => "th",
+    },
+  }
+  return "{n}{suffix}"
+}
+
+/// The Roman numeral of 1..3999.
+/// >>> assert to_roman(1994) == "MCMXCIV"
+/// >>> assert to_roman(4) == "IV"
+pub fn to_roman(n: Int) -> Str
+  requires n >= 1 and n <= 3999
+{
+  let values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
+  let symbols = ["M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"]
+  var rest = n
+  var out = ""
+  var i = 0
+  while rest > 0 {
+    let v = values.get_or(i, 1)
+    if rest >= v {
+      out = out + symbols.get_or(i, "I")
+      rest = rest - v
+    } else {
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/// The number of a Roman numeral (`None` for anything else).
+/// >>> assert from_roman("MCMXCIV") == Some(1994)
+/// >>> assert from_roman("hello") == None
+pub fn from_roman(s: Str) -> Option[Int] {
+  let value = Map { "I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000 }
+  var total = 0
+  var prev = 0
+  for c in s.upper().chars().reverse() {
+    let v = match value.get(c) {
+      Some(x) => x,
+      None => {
+        return None
+      },
+    }
+    if v < prev {
+      total = total - v
+    } else {
+      total = total + v
+      prev = v
+    }
+  }
+  if total < 1 or total > 3999 or to_roman(total) != s.upper() {
+    return None
+  }
+  return Some(total)
+}
+
+property "roman numerals round trip" (n: Int) {
+  let k = n.abs() % 3999 + 1
+  assert from_roman(to_roman(k)) == Some(k)
+}
+
+property "grouping keeps the digits" (n: Int) {
+  assert group_digits(n: n, sep: ",").replace(",", "") == n.to_str()
+}

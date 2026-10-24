@@ -322,9 +322,12 @@ Doc-тесты (`/// >>>`, в том числе у методов трейтов
 * **Глобальные функции:** `print`, `print_raw`, `eprint`, `read_line`, `read_exact`, `cli_args`, `dbg`, `fail`, `todo`,
   `exit`, `range`, `bytes_of`, `float_from_bits`, `now_ms`, `now_ns`, `random_int`, `env_var`, `read_file`,
   `write_file`, `read_bytes`, `write_bytes`, `file_exists`, `is_dir`, `list_dir`, `make_dir`, `remove_file`,
-  `current_dir`, `set_executable`, `run_command`, `run_capture`, `Some`, `Ok`, `Err`.
+  `current_dir`, `set_executable`, `run_command`, `run_capture`, `set_clock` (только в тестах), `Some`, `Ok`, `Err`.
 * **Методы** есть у `Int`, `Float`, `Str`, `Bytes`, `List`, `Map`, `Option`, `Result`; `.to_str()` есть у всех значений.
-* **Модули на Klar:** `std.math`, `std.text`, `std.list`, `std.result`, `std.set`, `std.json`, `std.time`.
+* **Модули на Klar:** `std.math`, `std.text`, `std.list`, `std.result`, `std.set`, `std.json`, `std.time` (даты, ISO 8601,
+  смещения часовых поясов), `std.path` (пути как текст), `std.csv` (RFC 4180), `std.regex` (регулярные выражения),
+  `std.hash` (CRC-32, FNV-1a, SHA-256), `std.numfmt` (разряды, проценты, размеры, порядковые и римские числа). У каждой
+  функции есть пример-тест (`klar doc имя`).
 
 Ошибки внешнего мира — значения, а не аварии: файлы, каталоги и запуск программ возвращают `Result`, `read_line` и
 `env_var` — `Option`. Аварийно завершают программу только `fail`, `todo` и `exit`.

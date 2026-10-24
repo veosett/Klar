@@ -1,0 +1,399 @@
+// std.regex — regular expressions: literals, `.`, classes `[a-z]` `[^0-9]`, `\d \w \s` (and `\D \W \S`), groups
+// `( )`, alternatives `|`, repetition `* + ?` and `{n}` `{n,}` `{n,m}`, anchors `^ $`. Matching is greedy and
+// backtracking; a pattern that is not valid is `Err` with the reason.
+// use std.regex.{is_match, find, find_all, replace_all}
+
+/// A parsed regular expression.
+pub enum Rx {
+  Lit(c: Str),
+  AnyChar,
+  Class(ranges: List[Pair[Str, Str]], negated: Bool),
+  Start,
+  Finish,
+  Seq(items: List[Rx]),
+  Alt(options: List[Rx]),
+  Rep(item: Rx, min: Int, max: Int),
+}
+
+/// A parsed piece and the position after it.
+type Parsed { rx: Rx, next: Int }
+
+fn digit_ranges() -> List[Pair[Str, Str]] {
+  return [Pair { first: "0", second: "9" }]
+}
+
+fn word_ranges() -> List[Pair[Str, Str]] {
+  return [Pair { first: "a", second: "z" }, Pair { first: "A", second: "Z" }, Pair { first: "0", second: "9" },
+    Pair { first: "_", second: "_" }]
+}
+
+fn space_ranges() -> List[Pair[Str, Str]] {
+  return [" ", "\t", "\n", "\r"].map(fn(c) => Pair { first: c, second: c })
+}
+
+/// The class of an escape (`\d`, `\W`, ...), or None for an escaped literal.
+fn escape_class(c: Str) -> Option[Rx] {
+  return match c {
+    "d" => Some(Rx.Class(ranges: digit_ranges(), negated: false)),
+    "D" => Some(Rx.Class(ranges: digit_ranges(), negated: true)),
+    "w" => Some(Rx.Class(ranges: word_ranges(), negated: false)),
+    "W" => Some(Rx.Class(ranges: word_ranges(), negated: true)),
+    "s" => Some(Rx.Class(ranges: space_ranges(), negated: false)),
+    "S" => Some(Rx.Class(ranges: space_ranges(), negated: true)),
+    _ => None,
+  }
+}
+
+fn escaped(c: Str) -> Str {
+  return match c {
+    "n" => "\n",
+    "t" => "\t",
+    "r" => "\r",
+    _ => c,
+  }
+}
+
+fn parse_alt(cs: List[Str], at: Int) -> Result[Parsed, Str] {
+  let first = parse_seq(cs, at)?
+  var options = [first.rx]
+  var i = first.next
+  while cs.get(i) == Some("|") {
+    let more = parse_seq(cs, i + 1)?
+    options = options.push(more.rx)
+    i = more.next
+  }
+  if options.len() == 1 {
+    return Ok(Parsed { rx: first.rx, next: i })
+  }
+  return Ok(Parsed { rx: Rx.Alt(options: options), next: i })
+}
+
+fn parse_seq(cs: List[Str], at: Int) -> Result[Parsed, Str] {
+  var items: List[Rx] = []
+  var i = at
+  while i < cs.len() and cs.get(i) != Some("|") and cs.get(i) != Some(")") {
+    let atom = parse_atom(cs, i)?
+    let q = parse_quantifier(cs: cs, at: atom.next, item: atom.rx)?
+    items = items.push(q.rx)
+    i = q.next
+  }
+  return Ok(Parsed { rx: Rx.Seq(items: items), next: i })
+}
+
+fn parse_atom(cs: List[Str], i: Int) -> Result[Parsed, Str] {
+  let c = cs.get_or(i, "")
+  if c == "(" {
+    let inner = parse_alt(cs, i + 1)?
+    if cs.get(inner.next) != Some(")") {
+      return Err("missing `)` for the group at {i}")
+    }
+    return Ok(Parsed { rx: inner.rx, next: inner.next + 1 })
+  }
+  if c == "[" {
+    return parse_class(cs, i + 1)
+  }
+  if c == "." {
+    return Ok(Parsed { rx: Rx.AnyChar, next: i + 1 })
+  }
+  if c == "^" {
+    return Ok(Parsed { rx: Rx.Start, next: i + 1 })
+  }
+  if c == "$" {
+    return Ok(Parsed { rx: Rx.Finish, next: i + 1 })
+  }
+  if c == "*" or c == "+" or c == "?" or c == "\{" {
+    return Err("`{c}` at {i} has nothing to repeat")
+  }
+  if c == "\\" {
+    if i + 1 >= cs.len() {
+      return Err("the pattern ends with `\\`")
+    }
+    let e = cs.get_or(i + 1, "")
+    return Ok(Parsed { rx: escape_class(e).unwrap_or(Rx.Lit(c: escaped(e))), next: i + 2 })
+  }
+  return Ok(Parsed { rx: Rx.Lit(c: c), next: i + 1 })
+}
+
+fn parse_class(cs: List[Str], at: Int) -> Result[Parsed, Str] {
+  var i = at
+  var negated = false
+  if cs.get(i) == Some("^") {
+    negated = true
+    i = i + 1
+  }
+  var ranges: List[Pair[Str, Str]] = []
+  var first = true
+  while i < cs.len() and (cs.get(i) != Some("]") or first) {
+    first = false
+    var c = cs.get_or(i, "")
+    if c == "\\" {
+      let e = cs.get_or(i + 1, "")
+      match escape_class(e) {
+        Some(Rx.Class(rs, false)) => {
+          ranges = ranges.concat(rs)
+          i = i + 2
+          continue
+        },
+        _ => {},
+      }
+      c = escaped(e)
+      i = i + 1
+    }
+    if cs.get(i + 1) == Some("-") and i + 2 < cs.len() and cs.get(i + 2) != Some("]") {
+      let hi = cs.get_or(i + 2, "")
+      if hi < c {
+        return Err("the range `{c}-{hi}` goes backwards")
+      }
+      ranges = ranges.push(Pair { first: c, second: hi })
+      i = i + 3
+    } else {
+      ranges = ranges.push(Pair { first: c, second: c })
+      i = i + 1
+    }
+  }
+  if i >= cs.len() {
+    return Err("missing `]` for the class at {at - 1}")
+  }
+  return Ok(Parsed { rx: Rx.Class(ranges: ranges, negated: negated), next: i + 1 })
+}
+
+fn digits_at(cs: List[Str], at: Int) -> Pair[Option[Int], Int] {
+  var i = at
+  var text = ""
+  while i < cs.len() and cs.get_or(i, "").is_numeric() {
+    text = text + cs.get_or(i, "")
+    i = i + 1
+  }
+  return Pair { first: text.to_int(), second: i }
+}
+
+fn parse_quantifier(cs: List[Str], at: Int, item: Rx) -> Result[Parsed, Str] {
+  let c = cs.get_or(at, "")
+  if c == "*" {
+    return Ok(Parsed { rx: Rx.Rep(item: item, min: 0, max: -1), next: at + 1 })
+  }
+  if c == "+" {
+    return Ok(Parsed { rx: Rx.Rep(item: item, min: 1, max: -1), next: at + 1 })
+  }
+  if c == "?" {
+    return Ok(Parsed { rx: Rx.Rep(item: item, min: 0, max: 1), next: at + 1 })
+  }
+  if c != "\{" {
+    return Ok(Parsed { rx: item, next: at })
+  }
+  let lo = digits_at(cs, at + 1)
+  let min = match lo.first {
+    Some(n) => n,
+    None => {
+      return Err("`\{` at {at} needs a number")
+    },
+  }
+  var max = min
+  var i = lo.second
+  if cs.get(i) == Some(",") {
+    let hi = digits_at(cs, i + 1)
+    max = hi.first.unwrap_or(-1)
+    i = hi.second
+  }
+  if cs.get(i) != Some("\}") {
+    return Err("missing `\}` for the repetition at {at}")
+  }
+  if max != -1 and max < min {
+    return Err("the repetition at {at} has a maximum below its minimum")
+  }
+  return Ok(Parsed { rx: Rx.Rep(item: item, min: min, max: max), next: i + 1 })
+}
+
+/// The parsed pattern, or why it is not valid.
+/// >>> assert parse_regex("a(b").is_err()
+/// >>> assert parse_regex("[a-z]+\\d?").is_ok()
+pub fn parse_regex(pattern: Str) -> Result[Rx, Str] {
+  let cs = pattern.chars()
+  let p = parse_alt(cs, 0)?
+  if p.next < cs.len() {
+    return Err("unexpected `)` at {p.next}")
+  }
+  return Ok(p.rx)
+}
+
+// ---- matching ------------------------------------------------------------------------------------------------
+
+fn in_class(c: Str, ranges: List[Pair[Str, Str]]) -> Bool {
+  return ranges.any(fn(r) => c >= r.first and c <= r.second)
+}
+
+/// Every position where `rx` can end when it starts at `i`, the preferred (greedy) one first.
+fn ends(rx: Rx, cs: List[Str], i: Int) -> List[Int] {
+  return match rx {
+    Rx.Lit(c) => match cs.get(i) == Some(c) {
+      true => [i + 1],
+      false => [],
+    },
+    Rx.AnyChar => match i < cs.len() and cs.get(i) != Some("\n") {
+      true => [i + 1],
+      false => [],
+    },
+    Rx.Class(ranges, negated) => match cs.get(i) {
+      Some(c) => match in_class(c, ranges) != negated {
+        true => [i + 1],
+        false => [],
+      },
+      None => [],
+    },
+    Rx.Start => match i == 0 {
+      true => [i],
+      false => [],
+    },
+    Rx.Finish => match i == cs.len() {
+      true => [i],
+      false => [],
+    },
+    Rx.Seq(items) => items.fold([i], fn(ps, item) => ps.flat_map(fn(p) => ends(rx: item, cs: cs, i: p)).unique()),
+    Rx.Alt(options) => options.flat_map(fn(o) => ends(rx: o, cs: cs, i: i)).unique(),
+    Rx.Rep(item, min, max) => repeat_ends(rx: item, cs: cs, i: i, bounds: Pair { first: min, second: max }, count: 0),
+  }
+}
+
+fn repeat_ends(rx: Rx, cs: List[Str], i: Int, bounds: Pair[Int, Int], count: Int) -> List[Int] {
+  var out: List[Int] = []
+  if bounds.second == -1 or count < bounds.second {
+    for p in ends(rx: rx, cs: cs, i: i) {
+      if p != i {
+        out = out.concat(repeat_ends(rx: rx, cs: cs, i: p, bounds: bounds, count: count + 1))
+      }
+    }
+  }
+  if count >= bounds.first {
+    out = out.push(i)
+  }
+  return out.unique()
+}
+
+/// The first match at or after position `from`: (start, end), or None.
+fn search(rx: Rx, cs: List[Str], from: Int) -> Option[Pair[Int, Int]] {
+  var start = from
+  while start <= cs.len() {
+    match ends(rx: rx, cs: cs, i: start).first() {
+      Some(e) => {
+        return Some(Pair { first: start, second: e })
+      },
+      None => {},
+    }
+    start = start + 1
+  }
+  return None
+}
+
+/// The non-overlapping matches, left to right.
+fn all_matches(rx: Rx, cs: List[Str]) -> List[Pair[Int, Int]] {
+  var out: List[Pair[Int, Int]] = []
+  var at = 0
+  while at <= cs.len() {
+    match search(rx: rx, cs: cs, from: at) {
+      Some(m) => {
+        out = out.push(m)
+        at = match m.second > m.first {
+          true => m.second,
+          false => m.second + 1,
+        }
+      },
+      None => {
+        at = cs.len() + 1
+      },
+    }
+  }
+  return out
+}
+
+fn piece(cs: List[Str], m: Pair[Int, Int]) -> Str {
+  return cs.drop(m.first).take(m.second - m.first).join("")
+}
+
+/// Whether the whole text matches the pattern.
+/// >>> assert is_match("\\d\{4\}-\\d\{2\}-\\d\{2\}", "2026-10-25") == Ok(true)
+/// >>> assert is_match("a|b", "ab") == Ok(false)
+/// >>> assert is_match("(", "x").is_err()
+pub fn is_match(pattern: Str, text: Str) -> Result[Bool, Str] {
+  let rx = parse_regex(pattern)?
+  let cs = text.chars()
+  return Ok(ends(rx: rx, cs: cs, i: 0).contains(cs.len()))
+}
+
+/// Whether some part of the text matches.
+/// >>> assert contains_match("[0-9]+", "room 42") == Ok(true)
+pub fn contains_match(pattern: Str, text: Str) -> Result[Bool, Str] {
+  let rx = parse_regex(pattern)?
+  return Ok(search(rx: rx, cs: text.chars(), from: 0) != None)
+}
+
+/// The first part of the text that matches.
+/// >>> assert find("\\w+@\\w+\\.com", "mail ann@site.com now") == Ok(Some("ann@site.com"))
+/// >>> assert find("x+", "abc") == Ok(None)
+pub fn find(pattern: Str, text: Str) -> Result[Option[Str], Str] {
+  let rx = parse_regex(pattern)?
+  let cs = text.chars()
+  return Ok(search(rx: rx, cs: cs, from: 0).map(fn(m) => piece(cs, m)))
+}
+
+/// Every non-overlapping part of the text that matches, left to right.
+/// >>> assert find_all("\\d+", "a1 b22 c333") == Ok(["1", "22", "333"])
+pub fn find_all(pattern: Str, text: Str) -> Result[List[Str], Str] {
+  let rx = parse_regex(pattern)?
+  let cs = text.chars()
+  return Ok(all_matches(rx, cs).map(fn(m) => piece(cs, m)))
+}
+
+/// The text with every match replaced by `by`.
+/// >>> assert replace_all(pattern: "\\s+", text: "a   b \t c", by: " ") == Ok("a b c")
+pub fn replace_all(pattern: Str, text: Str, by: Str) -> Result[Str, Str] {
+  let rx = parse_regex(pattern)?
+  let cs = text.chars()
+  var out = ""
+  var at = 0
+  for m in all_matches(rx, cs) {
+    out = out + piece(cs, Pair { first: at, second: m.first }) + by
+    at = m.second
+  }
+  return Ok(out + piece(cs, Pair { first: at, second: cs.len() }))
+}
+
+/// The parts of the text between the matches.
+/// >>> assert split_by("[,;] *", "a, b;c") == Ok(["a", "b", "c"])
+pub fn split_by(pattern: Str, text: Str) -> Result[List[Str], Str] {
+  let rx = parse_regex(pattern)?
+  let cs = text.chars()
+  var out: List[Str] = []
+  var at = 0
+  for m in all_matches(rx, cs) {
+    if m.second > m.first {
+      out = out.push(piece(cs, Pair { first: at, second: m.first }))
+      at = m.second
+    }
+  }
+  return Ok(out.push(piece(cs, Pair { first: at, second: cs.len() })))
+}
+
+test "regular expressions" {
+  assert is_match("colou?r", "color") == Ok(true)
+  assert is_match("colou?r", "colour") == Ok(true)
+  assert is_match("^[A-Z][a-z]*$", "Klar") == Ok(true)
+  assert is_match("[^0-9]+", "abc") == Ok(true)
+  assert is_match("[^0-9]+", "ab1") == Ok(false)
+  assert is_match("(ab)+", "ababab") == Ok(true)
+  assert is_match("a\{2,3\}", "aaaa") == Ok(false)
+  assert is_match("a\{2,\}", "aaaa") == Ok(true)
+  assert is_match("\\.", ".") == Ok(true)
+  assert is_match(".*x", "a\nx") == Ok(false)
+  assert find("a.*b", "xaxbxb") == Ok(Some("axbxb"))
+  assert find_all("", "ab") == Ok(["", "", ""])
+  assert find_all("(cat|dog)s?", "cats and a dog") == Ok(["cats", "dog"])
+  assert replace_all(pattern: "(\\d+)", text: "x1y22", by: "#") == Ok("x#y#")
+  assert parse_regex("a\{3,1\}") == Err("the repetition at 1 has a maximum below its minimum")
+  assert parse_regex("[z-a]") == Err("the range `z-a` goes backwards")
+  assert parse_regex("*a") == Err("`*` at 0 has nothing to repeat")
+}
+
+property "a literal text matches itself" (s: Str) {
+  let safe = s.chars().filter(fn(c) => c.is_numeric() or (c >= "a" and c <= "z")).join("")
+  assert is_match(safe, safe) == Ok(true)
+}

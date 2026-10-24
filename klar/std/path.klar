@@ -1,0 +1,186 @@
+// std.path — file paths as text (separator `/`; nothing touches the disk).
+// use std.path.{join, normalize, dirname, basename, extension}
+
+/// Whether a path starts at the root.
+/// >>> assert is_absolute("/etc/hosts")
+/// >>> assert not is_absolute("notes/a.txt")
+pub fn is_absolute(p: Str) -> Bool {
+  return p.starts_with("/")
+}
+
+/// `b` after `a` (just `b` when it is absolute or `a` is empty).
+/// >>> assert join("notes", "a.txt") == "notes/a.txt"
+/// >>> assert join("notes/", "a.txt") == "notes/a.txt"
+/// >>> assert join("notes", "/etc") == "/etc"
+pub fn join(a: Str, b: Str) -> Str {
+  if is_absolute(b) or a.is_empty() {
+    return b
+  }
+  if b.is_empty() or a.ends_with("/") {
+    return a + b
+  }
+  return a + "/" + b
+}
+
+/// Joins all parts in order (`join` of each next one).
+/// >>> assert join_all(["a", "b", "c.txt"]) == "a/b/c.txt"
+pub fn join_all(pieces: List[Str]) -> Str {
+  return pieces.fold("", fn(acc, p) => join(acc, p))
+}
+
+/// The non-empty parts between the separators.
+/// >>> assert parts("/usr//local/bin/") == ["usr", "local", "bin"]
+pub fn parts(p: Str) -> List[Str] {
+  return p.split("/").filter(fn(s) => not s.is_empty())
+}
+
+/// The path without `.`, `..` (where it can go up) and repeated separators; "." for an empty relative path.
+/// >>> assert normalize("a/./b/../c//d") == "a/c/d"
+/// >>> assert normalize("/../x") == "/x"
+/// >>> assert normalize("../a/..") == ".."
+/// >>> assert normalize("a/..") == "."
+pub fn normalize(p: Str) -> Str {
+  var out: List[Str] = []
+  for s in parts(p) {
+    if s == "." {
+      continue
+    }
+    if s == ".." {
+      if not out.is_empty() and out.last() != Some("..") {
+        out = out.take(out.len() - 1)
+      } else if not is_absolute(p) {
+        out = out.push("..")
+      }
+      continue
+    }
+    out = out.push(s)
+  }
+  let body = out.join("/")
+  if is_absolute(p) {
+    return "/" + body
+  }
+  return match body.is_empty() {
+    true => ".",
+    false => body,
+  }
+}
+
+fn last_slash(p: Str) -> Option[Int] {
+  var found: Option[Int] = None
+  var i = 0
+  for c in p.chars() {
+    if c == "/" {
+      found = Some(i)
+    }
+    i = i + 1
+  }
+  return found
+}
+
+/// The last part of a path (after the last `/`).
+/// >>> assert basename("/home/ann/notes.txt") == "notes.txt"
+/// >>> assert basename("notes.txt") == "notes.txt"
+pub fn basename(p: Str) -> Str {
+  return match last_slash(p) {
+    Some(i) => p.slice(i + 1, p.len()),
+    None => p,
+  }
+}
+
+/// Everything before the last part ("." when there is none, "/" for a file in the root).
+/// >>> assert dirname("/home/ann/notes.txt") == "/home/ann"
+/// >>> assert dirname("notes.txt") == "."
+/// >>> assert dirname("/notes.txt") == "/"
+pub fn dirname(p: Str) -> Str {
+  return match last_slash(p) {
+    Some(0) => "/",
+    Some(i) => p.slice(0, i),
+    None => ".",
+  }
+}
+
+fn last_dot(s: Str) -> Option[Int] {
+  var found: Option[Int] = None
+  var i = 0
+  for c in s.chars() {
+    if c == "." and i > 0 {
+      found = Some(i)
+    }
+    i = i + 1
+  }
+  return found
+}
+
+/// The extension of the last part without the dot ("" when there is none; a leading dot is not one).
+/// >>> assert extension("photos/cat.JPG") == "JPG"
+/// >>> assert extension("archive.tar.gz") == "gz"
+/// >>> assert extension(".bashrc") == ""
+pub fn extension(p: Str) -> Str {
+  let b = basename(p)
+  return match last_dot(b) {
+    Some(i) => b.slice(i + 1, b.len()),
+    None => "",
+  }
+}
+
+/// The last part without its extension.
+/// >>> assert stem("photos/cat.jpg") == "cat"
+/// >>> assert stem("archive.tar.gz") == "archive.tar"
+pub fn stem(p: Str) -> Str {
+  let b = basename(p)
+  return match last_dot(b) {
+    Some(i) => b.slice(0, i),
+    None => b,
+  }
+}
+
+/// The path with another extension (`ext` without the dot; "" removes it).
+/// >>> assert with_extension("a/b.txt", "md") == "a/b.md"
+/// >>> assert with_extension("a/b", "md") == "a/b.md"
+/// >>> assert with_extension("a/b.txt", "") == "a/b"
+pub fn with_extension(p: Str, ext: Str) -> Str {
+  let dir = match last_slash(p) {
+    Some(i) => p.slice(0, i + 1),
+    None => "",
+  }
+  return match ext.is_empty() {
+    true => dir + stem(p),
+    false => dir + stem(p) + "." + ext,
+  }
+}
+
+/// `p` relative to the directory `base` (both normalized; `..` where `p` is outside it).
+/// >>> assert relative_to("/a/b/c.txt", "/a") == "b/c.txt"
+/// >>> assert relative_to("/a/x", "/a/b") == "../x"
+/// >>> assert relative_to("/a", "/a") == "."
+pub fn relative_to(p: Str, base: Str) -> Str {
+  let ps = parts(normalize(p))
+  let bs = parts(normalize(base))
+  var common = 0
+  while common < ps.len() and common < bs.len() and ps.get(common) == bs.get(common) {
+    common = common + 1
+  }
+  let up = range(0, bs.len() - common).map(fn(_i) => "..")
+  let rest = up.concat(ps.drop(common))
+  return match rest.is_empty() {
+    true => ".",
+    false => rest.join("/"),
+  }
+}
+
+test "paths round trip" {
+  let p = "/data/2026/report.final.csv"
+  assert join(dirname(p), basename(p)) == p
+  assert with_extension(p, extension(p)) == p
+  assert normalize(join("/data", "../data/./2026")) == "/data/2026"
+}
+
+property "normalize is idempotent" (xs: List[Int]) {
+  let p = xs.map(fn(x) => match x.abs() % 4 {
+    0 => "..",
+    1 => ".",
+    2 => "a",
+    _ => "",
+  }).join("/")
+  assert normalize(normalize(p)) == normalize(p)
+}

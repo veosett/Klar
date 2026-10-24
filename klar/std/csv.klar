@@ -1,0 +1,123 @@
+// std.csv — comma-separated values (RFC 4180: quoted fields may hold commas, quotes `""` and line breaks).
+// use std.csv.{parse_csv, format_csv, records}
+
+/// The rows of a CSV text; `sep` is the field separator (usually ",", or ";" / "\t").
+/// `Err` for a quote that is never closed or text right after a closing quote.
+/// >>> assert parse_csv_sep("a;b\n1;2\n", ";") == Ok([["a", "b"], ["1", "2"]])
+pub fn parse_csv_sep(text: Str, sep: Str) -> Result[List[List[Str]], Str] {
+  var rows: List[List[Str]] = []
+  var row: List[Str] = []
+  var field = ""
+  var quoted = false
+  var after_quote = false
+  var started = false
+  var line = 1
+  let cs = text.chars()
+  var i = 0
+  while i < cs.len() {
+    let c = cs.get_or(i, "")
+    if quoted {
+      if c == "\"" {
+        if cs.get(i + 1) == Some("\"") {
+          field = field + "\""
+          i = i + 1
+        } else {
+          quoted = false
+          after_quote = true
+        }
+      } else {
+        if c == "\n" {
+          line = line + 1
+        }
+        field = field + c
+      }
+    } else if c == sep {
+      row = row.push(field)
+      field = ""
+      after_quote = false
+      started = true
+    } else if c == "\n" or c == "\r" {
+      if c == "\r" and cs.get(i + 1) == Some("\n") {
+        i = i + 1
+      }
+      rows = rows.push(row.push(field))
+      row = []
+      field = ""
+      after_quote = false
+      started = false
+      line = line + 1
+    } else if c == "\"" and field.is_empty() and not after_quote {
+      quoted = true
+      started = true
+    } else if after_quote {
+      return Err("line {line}: text after a closing quote")
+    } else {
+      field = field + c
+      started = true
+    }
+    i = i + 1
+  }
+  if quoted {
+    return Err("line {line}: a quoted field is not closed")
+  }
+  if started or not field.is_empty() or not row.is_empty() {
+    rows = rows.push(row.push(field))
+  }
+  return Ok(rows)
+}
+
+/// The rows of a CSV text with `,` between the fields.
+/// >>> assert parse_csv("name,city\nAnn,\"Paris, FR\"\n") == Ok([["name", "city"], ["Ann", "Paris, FR"]])
+/// >>> assert parse_csv("q\n\"say \"\"hi\"\"\"") == Ok([["q"], ["say \"hi\""]])
+/// >>> assert parse_csv("\"open") == Err("line 1: a quoted field is not closed")
+pub fn parse_csv(text: Str) -> Result[List[List[Str]], Str] {
+  return parse_csv_sep(text, ",")
+}
+
+fn needs_quotes(field: Str, sep: Str) -> Bool {
+  return field.contains(sep) or field.contains("\"") or field.contains("\n") or field.contains("\r") or
+    field.starts_with(" ") or field.ends_with(" ")
+}
+
+/// One field as CSV: quoted when it holds the separator, a quote, a line break or edge spaces.
+/// >>> assert format_field(field: "Paris, FR", sep: ",") == "\"Paris, FR\""
+/// >>> assert format_field(field: "plain", sep: ",") == "plain"
+pub fn format_field(field: Str, sep: Str) -> Str {
+  if needs_quotes(field, sep) {
+    return "\"" + field.replace("\"", "\"\"") + "\""
+  }
+  return field
+}
+
+/// Rows as CSV text with `sep` between the fields (every row ends with "\n").
+/// >>> assert format_csv_sep([["a", "b;c"]], ";") == "a;\"b;c\"\n"
+pub fn format_csv_sep(rows: List[List[Str]], sep: Str) -> Str {
+  return rows.map(fn(r) => r.map(fn(f) => format_field(field: f, sep: sep)).join(sep) + "\n").join("")
+}
+
+/// Rows as CSV text with `,` between the fields.
+/// >>> assert format_csv([["name", "note"], ["Ann", "says \"hi\""]]) == "name,note\nAnn,\"says \"\"hi\"\"\"\n"
+pub fn format_csv(rows: List[List[Str]]) -> Str {
+  return format_csv_sep(rows, ",")
+}
+
+/// The rows after the first as maps from the names in the first row (missing fields are left out).
+/// >>> assert records([["name", "age"], ["Ann", "31"]]) == [Map { "name": "Ann", "age": "31" }]
+pub fn records(rows: List[List[Str]]) -> List[Map[Str, Str]] {
+  let header = rows.first().unwrap_or([])
+  return rows.drop(1).map(fn(r) => r.zip(header).fold(Map {}, fn(acc, p) => acc.set(p.second, p.first)))
+}
+
+test "a table survives formatting and parsing" {
+  let rows = [["id", "text"], ["1", "a, b"], ["2", "line\nbreak"], ["3", "\"quoted\""], ["4", ""]]
+  assert parse_csv(format_csv(rows)) == Ok(rows)
+  assert parse_csv("a,b\r\n1,2\r\n") == Ok([["a", "b"], ["1", "2"]])
+  assert parse_csv("") == Ok([])
+  assert parse_csv("a,\"b\"x") == Err("line 1: text after a closing quote")
+}
+
+property "format and parse are inverse" (rows: List[List[Str]]) {
+  // rows of a CSV have at least one field; a lone empty field is an empty line
+  let usable = rows.filter(fn(r) => not r.is_empty() and r != [""])
+  assert parse_csv(format_csv(usable)) == Ok(usable)
+}
