@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{factorial, product}\n\npub fn special_factorial(n: Int) -> Int {\n  return product(range(1, n + 1).map(fn(k) => factorial(k)))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

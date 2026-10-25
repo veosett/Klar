@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def remove_duplicates(numbers: list[int]) -> list[int]:\n    counts = {}\n    for n in numbers:\n        counts[n] = counts.get(n, 0) + 1\n    return [n for n in numbers if counts[n] == 1]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

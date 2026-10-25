@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def caesar(text: str, shift: int) -> str:\n    out = []\n    for ch in text:\n        if \"a\" <= ch <= \"z\":\n            out.append(chr((ord(ch) - ord(\"a\") + shift) % 26 + ord(\"a\")))\n        elif \"A\" <= ch <= \"Z\":\n            out.append(chr((ord(ch) - ord(\"A\") + shift) % 26 + ord(\"A\")))\n        else:\n            out.append(ch)\n    return \"\".join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

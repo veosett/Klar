@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def next_smallest(lst: list[int]) -> int | None:\n    uniq = sorted(set(lst))\n    if len(uniq) < 2:\n        return None\n    return uniq[1]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

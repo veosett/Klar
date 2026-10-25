@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn minSubArraySum(nums: List[Int]) -> Int {\n  let n = nums.len()\n  if n == 0 {\n    return 0\n  }\n  var cur = nums.get_or(0, 0)\n  var best = cur\n  for i in range(1, n) {\n    let x = nums.get_or(i, 0)\n    cur = (cur + x).min(x)\n    best = best.min(cur)\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

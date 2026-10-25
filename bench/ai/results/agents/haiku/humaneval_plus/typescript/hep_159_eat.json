@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function eat(number: number, need: number, remaining: number): number[] {\n  if (remaining >= need) {\n    return [number + need, remaining - need];\n  }\n  return [number + remaining, 0];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

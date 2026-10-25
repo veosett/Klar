@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_third(l: list[int]) -> list[int]:\n    result = list(l)\n    indices = [i for i in range(len(l)) if i % 3 == 0]\n    values = sorted(l[i] for i in indices)\n    for i, v in zip(indices, values):\n        result[i] = v\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

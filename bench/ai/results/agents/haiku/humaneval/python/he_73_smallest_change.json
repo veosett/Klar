@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def smallest_change(arr: list[int]) -> int:\n    n = len(arr)\n    count = 0\n    for i in range(n // 2):\n        if arr[i] != arr[n - 1 - i]:\n            count += 1\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

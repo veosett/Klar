@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function f(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 2 === 0) {\n      let fact = 1;\n      for (let k = 2; k <= i; k++) {\n        fact *= k;\n      }\n      result.push(fact);\n    } else {\n      result.push((i * (i + 1)) / 2);\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

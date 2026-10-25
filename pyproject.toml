@@ -37,6 +37,8 @@ klar = ["*.klar", "*.md", "std/*.klar", "rt/*.klar", "tools/*.html"]
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+# the canonical solutions of HumanEval and MBPP, as the datasets ship them (bench/ai/build_suites.py)
+extend-exclude = ["bench/ai/suites"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]

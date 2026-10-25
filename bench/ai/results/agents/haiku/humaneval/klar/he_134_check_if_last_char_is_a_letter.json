@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn check_if_last_char_is_a_letter(txt: Str) -> Bool {\n  let n = txt.len()\n  if n == 0 {\n    return false\n  }\n  let last = txt.slice(n - 1, n)\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  if not letters.contains(last) {\n    return false\n  }\n  if n == 1 {\n    return true\n  }\n  let prev = txt.slice(n - 2, n - 1)\n  return prev == \" \"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

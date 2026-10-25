@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function dedupe(xs: number[]): number[] {\n  const seen = new Set<number>();\n  const out: number[] = [];\n  for (const x of xs) {\n    if (!seen.has(x)) {\n      seen.add(x);\n      out.push(x);\n    }\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

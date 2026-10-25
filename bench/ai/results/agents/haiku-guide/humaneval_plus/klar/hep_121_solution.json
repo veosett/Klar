@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn solution(lst: List[Int]) -> Int {\n  return lst.enumerate().filter(fn(x) => x.index % 2 == 0 and x.value % 2 != 0).map(fn(x) => x.value).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

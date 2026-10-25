@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert triangle_area(5, 3) == 7.5\npub fn triangle_area(a: Int, h: Int) -> Float {\n  return a.to_float() * h.to_float() / 2.0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn even_odd_count(num: Int) -> Pair[Int, Int] {\n  let ds = num.abs().to_str().codes().map(fn(c) => c - 48)\n  let e = ds.count(fn(d) => d.is_even())\n  return Pair { first: e, second: ds.len() - e }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

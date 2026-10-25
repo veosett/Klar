@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function right_angle_triangle(a: number, b: number, c: number): boolean {\n  return a * a + b * b === c * c || a * a + c * c === b * b || b * b + c * c === a * a;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

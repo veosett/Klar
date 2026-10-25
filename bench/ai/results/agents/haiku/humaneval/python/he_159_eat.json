@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def eat(number: int, need: int, remaining: int) -> list[int]:\n    eaten = min(need, remaining)\n    return [number + eaten, remaining - eaten]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

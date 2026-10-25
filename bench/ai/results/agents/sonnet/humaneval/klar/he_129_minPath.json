@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(grid: List[List[Int]], r: Int, c: Int) -> Int {\n  if r < 0 or c < 0 {\n    return 1000000000\n  }\n  return grid.get(r).unwrap_or([]).get(c).unwrap_or(1000000000)\n}\n\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  var best = 1000000000\n  for r in range(0, grid.len()) {\n    let row = grid.get_or(r, [])\n    for c in range(0, row.len()) {\n      if row.get_or(c, 0) == 1 {\n        best = best.min(cell(grid, r - 1, c))\n        best = best.min(cell(grid, r + 1, c))\n        best = best.min(cell(grid, r, c - 1))\n        best = best.min(cell(grid, r, c + 1))\n      }\n    }\n  }\n  return range(0, k).map(fn(i) => match i % 2 == 0 {\n    true => 1,\n    false => best,\n  })\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn cell(grid: List[List[Int]], r: Int, c: Int) -> Int {\n  if r < 0 or c < 0 {\n    return 1000000000\n  }\n  return grid.get(r).unwrap_or([]).get(c).unwrap_or(1000000000)\n}\n\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  var best = 1000000000\n  for r in range(0, grid.len()) {\n    let row = grid.get_or(r, [])\n    for c in range(0, row.len()) {\n      if row.get_or(c, 0) == 1 {\n        best = best.min(cell(grid: grid, r: r - 1, c: c))\n        best = best.min(cell(grid: grid, r: r + 1, c: c))\n        best = best.min(cell(grid: grid, r: r, c: c - 1))\n        best = best.min(cell(grid: grid, r: r, c: c + 1))\n      }\n    }\n  }\n  let best_now = best\n  return range(0, k).map(fn(i) => match i % 2 == 0 {\n    true => 1,\n    false => best_now,\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

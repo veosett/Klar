@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn choose_num(x: Int, y: Int) -> Int {\n  if x > y {\n    return -1\n  }\n  var candidate: Int = y\n  if candidate % 2 != 0 {\n    candidate = y - 1\n  }\n  if candidate < x {\n    return -1\n  }\n  return candidate\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

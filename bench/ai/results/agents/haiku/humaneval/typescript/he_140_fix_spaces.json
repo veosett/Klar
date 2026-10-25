@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fix_spaces(text: string): string {\n  return text.replace(/ {3,}/g, \"-\").replace(/ /g, \"_\").replace(/ {2}/g, \"__\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

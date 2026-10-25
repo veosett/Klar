@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_equal_to_sum_even(n: int) -> bool:\n    return n >= 8 and n % 2 == 0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

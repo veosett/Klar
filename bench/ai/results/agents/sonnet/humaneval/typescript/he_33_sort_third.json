@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sort_third(l: number[]): number[] {\n  const v: number[] = [];\n  for (let i = 0; i < l.length; i += 3) v.push(l[i]);\n  v.sort((a, b) => a - b);\n  const r = l.slice();\n  for (let i = 0, j = 0; i < l.length; i += 3, j++) r[i] = v[j];\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

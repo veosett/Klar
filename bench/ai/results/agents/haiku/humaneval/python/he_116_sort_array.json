@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_array(arr: list[int]) -> list[int]:\n    return sorted(arr, key=lambda x: (bin(x).count('1'), x))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

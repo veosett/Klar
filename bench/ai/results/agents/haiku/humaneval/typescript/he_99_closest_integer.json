@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function closest_integer(value: string): number {\n  const x = parseFloat(value);\n  const floor = Math.floor(x);\n  const diff = x - floor;\n  if (diff > 0.5) return floor + 1;\n  if (diff < 0.5) return floor;\n  // exactly halfway: round away from zero\n  return x >= 0 ? floor + 1 : floor;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

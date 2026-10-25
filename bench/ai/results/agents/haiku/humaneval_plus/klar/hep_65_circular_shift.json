@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn circular_shift(x: Int, shift: Int) -> Str {\n  let s = x.to_str()\n  let d = s.len()\n  if shift > d {\n    return s.reverse()\n  }\n  let cut = d - shift\n  return s.slice(cut, d) + s.slice(0, cut)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

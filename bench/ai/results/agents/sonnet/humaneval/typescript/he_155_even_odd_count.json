@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function even_odd_count(num: number): [number, number] {\n  let e = 0;\n  let o = 0;\n  for (const c of String(Math.abs(num))) {\n    if (Number(c) % 2 === 0) e++;\n    else o++;\n  }\n  return [e, o];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

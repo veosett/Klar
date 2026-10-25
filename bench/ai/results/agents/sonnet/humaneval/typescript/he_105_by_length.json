@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function by_length(arr: number[]): string[] {\n  const names = [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", \"Six\", \"Seven\", \"Eight\", \"Nine\"];\n  return arr\n    .filter((x) => x >= 1 && x <= 9)\n    .sort((a, b) => b - a)\n    .map((x) => names[x - 1]);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

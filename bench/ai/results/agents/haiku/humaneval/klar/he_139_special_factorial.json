@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn special_factorial(n: Int) -> Int {\n  var fact = 1\n  var result = 1\n  for k in range(1, n + 1) {\n    fact = fact * k\n    result = result * fact\n  }\n  return result\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

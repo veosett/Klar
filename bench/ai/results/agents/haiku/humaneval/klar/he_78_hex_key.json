@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert hex_key(\"AB\") == 1\npub fn hex_key(num: Str) -> Int {\n  return num.chars().count(fn(c: Str) => c == \"2\" or c == \"3\" or c == \"5\" or c == \"7\" or c == \"B\" or c == \"D\")\n}\n\ntest \"hex_key\" {\n  assert hex_key(\"AB\") == 1\n  assert hex_key(\"1077E\") == 2\n  assert hex_key(\"ABED1A33\") == 4\n  assert hex_key(\"123456789ABCDEF0\") == 6\n  assert hex_key(\"2020\") == 2\n  assert hex_key(\"\") == 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

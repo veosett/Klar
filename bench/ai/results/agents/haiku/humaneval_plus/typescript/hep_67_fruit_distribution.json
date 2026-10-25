@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fruit_distribution(s: string, n: number): number {\n  const matches = s.match(/\\d+/g) ?? [];\n  let total = 0;\n  for (const m of matches) {\n    total += parseInt(m, 10);\n  }\n  return n - total;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

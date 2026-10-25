@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fruit_distribution(s: str, n: int) -> int:\n    parts = s.split()\n    apples = int(parts[0])\n    oranges = int(parts[3])\n    return n - apples - oranges\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

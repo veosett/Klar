@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Whether the text is a valid date in the format mm-dd-yyyy.\n/// >>> assert valid_date(\"03-11-2000\") == true\n/// >>> assert valid_date(\"15-01-2012\") == false\n/// >>> assert valid_date(\"06/04/2020\") == false\npub fn valid_date(date: Str) -> Bool {\n  if date.is_empty() {\n    return false\n  }\n  let parts = date.split(\"-\")\n  if parts.len() != 3 {\n    return false\n  }\n  let mm = parts.get_or(0, \"\")\n  let dd = parts.get_or(1, \"\")\n  let yy = parts.get_or(2, \"\")\n  if mm.len() != 2 or dd.len() != 2 or yy.len() != 4 {\n    return false\n  }\n  if not (mm.is_numeric() and dd.is_numeric() and yy.is_numeric()) {\n    return false\n  }\n  let m = mm.to_int().unwrap_or(0)\n  let d = dd.to_int().unwrap_or(0)\n  if m < 1 or m > 12 {\n    return false\n  }\n  if d < 1 {\n    return false\n  }\n  if [1, 3, 5, 7, 8, 10, 12].contains(m) {\n    return d <= 31\n  }\n  if m == 2 {\n    return d <= 29\n  }\n  return d <= 30\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

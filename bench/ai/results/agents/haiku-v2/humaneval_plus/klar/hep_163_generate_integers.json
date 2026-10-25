@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  return range(lo, hi + 1).filter(fn(x) => x % 2 == 0 and x < 10)\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "pub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  return [2, 4, 6, 8].filter(fn(x) => x >= lo and x <= hi)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

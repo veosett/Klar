@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function triangle_area(a: number, h: number): number {\n  return a * h / 2;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

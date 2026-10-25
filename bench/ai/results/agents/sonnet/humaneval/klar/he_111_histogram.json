@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn histogram(test_value: Str) -> Map[Str, Int] {\n  var m: Map[Str, Int] = Map {}\n  for w in test_value.split(\" \") {\n    if not w.is_empty() {\n      m = m.update(w, 0, fn(v) => v + 1)\n    }\n  }\n  let best = m.values().max().unwrap_or(0)\n  return m.filter(fn(k, v) => v == best)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

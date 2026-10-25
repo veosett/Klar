@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function cycpattern_check(a: string, b: string): boolean {\n  if (b.length === 0) {\n    return true;\n  }\n  for (let i = 0; i < b.length; i++) {\n    const rotation = b.slice(i) + b.slice(0, i);\n    if (a.includes(rotation)) {\n      return true;\n    }\n  }\n  return false;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn gcd_helper(x: Int, y: Int) -> Int {\n  if y == 0 {\n    return x\n  }\n  return gcd_helper(y, x % y)\n}\n\npub fn greatest_common_divisor(a: Int, b: Int) -> Int {\n  return gcd_helper(a.abs(), b.abs())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

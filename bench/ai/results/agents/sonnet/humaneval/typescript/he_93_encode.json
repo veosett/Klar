@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function encode(message: string): string {\n  let r = \"\";\n  for (const c of message) {\n    const lo = c.toLowerCase();\n    const up = c.toUpperCase();\n    if (lo === up) { r += c; continue; }\n    let sw = c === lo ? up : lo;\n    if (\"aeiou\".includes(lo)) {\n      sw = String.fromCharCode(sw.charCodeAt(0) + 2);\n    }\n    r += sw;\n  }\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

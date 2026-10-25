@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sum_squares(lst: List[Float]) -> Int {\n  return lst.map(fn(x) => x.ceil() * x.ceil()).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

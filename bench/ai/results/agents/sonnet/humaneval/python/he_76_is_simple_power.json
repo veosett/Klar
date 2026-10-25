@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_simple_power(x: int, n: int) -> bool:\n    if x == 1:\n        return True\n    if n == 1 or n == 0:\n        return False\n    p = 1\n    while p < x:\n        p *= n\n    return p == x\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

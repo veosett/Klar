@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_nested(string: string): boolean {\n  const open: number[] = [];\n  const close: number[] = [];\n  for (let i = 0; i < string.length; i++) {\n    if (string[i] === \"[\") open.push(i);\n    else if (string[i] === \"]\") close.push(i);\n  }\n  close.reverse();\n  let cnt = 0;\n  let j = 0;\n  for (const o of open) {\n    if (j < close.length && o < close[j]) {\n      cnt++;\n      j++;\n    }\n  }\n  return cnt >= 2;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add(lst: List[Int]) -> Int {\n  var s: Int = 0\n  for p in lst.enumerate() {\n    if not p.index.is_even() and p.value.is_even() {\n      s = s + p.value\n    }\n  }\n  return s\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

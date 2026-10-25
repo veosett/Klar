@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def special_factorial(n: int) -> int:\n    f = 1\n    res = 1\n    for i in range(1, n + 1):\n        f *= i\n        res *= f\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

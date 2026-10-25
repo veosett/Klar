@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function transpose(m: number[][]): number[][] {\n  if (m.length === 0) return [];\n  const cols = m[0].length;\n  const out: number[][] = [];\n  for (let c = 0; c < cols; c++) {\n    const col: number[] = [];\n    for (const row of m) col.push(row[c]);\n    out.push(col);\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def circular_shift(x: int, shift: int) -> str:\n    s = str(x)\n    n = len(s)\n    if shift > n:\n        return s[::-1]\n    if shift == 0:\n        return s\n    return s[-shift:] + s[:-shift]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

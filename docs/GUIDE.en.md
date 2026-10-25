@@ -148,7 +148,8 @@ fn main() uses io {
 ```
 
 * Parameter and result types are always written: a function can be understood from one line.
-* With 3+ parameters, calls must name the arguments — arguments cannot be swapped by accident.
+* With 3+ parameters, arguments that could be swapped unnoticed must be named — `f(200, 20, 10)` is an error,
+  `cell(grid, r, c)` is fine (each argument carries its parameter's name).
 * `/// >>>` is an example in the documentation that `klar test` runs as a test.
 * `total / people` compiles only because `requires people > 0` proves the divisor is not zero (section 11).
 

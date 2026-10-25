@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def unique_digits(x: list[int]) -> list[int]:\n    return sorted(n for n in x if all(int(d) % 2 == 1 for d in str(n)))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def run_ops(ops: list[str]) -> int:\n    balance = 0\n    for i, op in enumerate(ops, start=1):\n        parts = op.split()\n        if len(parts) != 2 or not parts[1].isdigit():\n            raise ValueError(f\"bad op at op {i}\")\n        verb, amount = parts[0], int(parts[1])\n        if verb == \"deposit\":\n            balance += amount\n        elif verb == \"withdraw\":\n            if balance - amount < 0:\n                raise ValueError(f\"insufficient funds at op {i}\")\n            balance -= amount\n        else:\n            raise ValueError(f\"bad op at op {i}\")\n    return balance\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

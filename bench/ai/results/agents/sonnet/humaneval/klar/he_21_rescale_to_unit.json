@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rescale_to_unit(numbers: List[Float]) -> List[Float] {\n  let lo = numbers.min().unwrap_or(0.0)\n  let hi = numbers.max().unwrap_or(0.0)\n  let span = hi - lo\n  return numbers.map(fn(x) => (x - lo) / span)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn solve(s: Str) -> Str {\n  let cs = s.chars()\n  let has_letter = cs.any(fn(c) => c.upper() != c.lower())\n  if not has_letter {\n    return s.reverse()\n  }\n  return cs.map(fn(c) => match c == c.upper() { true => c.lower(), false => c.upper() }).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

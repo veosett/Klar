@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def truncate_number(number: float) -> float:\n    return number - int(number)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

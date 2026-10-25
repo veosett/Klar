@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function flip_case(string: string): string {\n  let out = \"\";\n  for (const ch of string) {\n    const lower = ch.toLowerCase();\n    const upper = ch.toUpperCase();\n    if (ch === lower && ch !== upper) {\n      out += upper;\n    } else if (ch === upper && ch !== lower) {\n      out += lower;\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

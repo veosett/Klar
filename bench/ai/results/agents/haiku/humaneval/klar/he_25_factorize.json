@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn factorize(n: Int) -> List[Int] {\n  var m: Int = n\n  var d: Int = 2\n  var out: List[Int] = []\n  while d * d <= m {\n    if d == 0 {\n      return out\n    }\n    if m % d == 0 {\n      out = out.push(d)\n      m = m / d\n    } else {\n      d = d + 1\n    }\n  }\n  if m > 1 {\n    out = out.push(m)\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

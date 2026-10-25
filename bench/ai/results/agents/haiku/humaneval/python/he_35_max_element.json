@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def max_element(l: list[int]) -> int:\n    m = l[0]\n    for x in l[1:]:\n        if x > m:\n            m = x\n    return m\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

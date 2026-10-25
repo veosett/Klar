@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn right_angle_triangle(a: Int, b: Int, c: Int) -> Bool {\n  if a <= 0 or b <= 0 or c <= 0 {\n    return false\n  }\n  let aa = a * a\n  let bb = b * b\n  let cc = c * c\n  return aa + bb == cc or aa + cc == bb or bb + cc == aa\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

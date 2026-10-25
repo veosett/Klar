@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function isBalancedFrom(s: string, startDepth: number): boolean {\n  let depth = startDepth;\n  for (const ch of s) {\n    if (ch === \"(\") {\n      depth++;\n    } else if (ch === \")\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n\nexport function match_parens(lst: string[]): string {\n  const [a, b] = lst;\n  const ab = isBalancedFrom(a + b, 0);\n  const ba = isBalancedFrom(b + a, 0);\n  return ab || ba ? \"Yes\" : \"No\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

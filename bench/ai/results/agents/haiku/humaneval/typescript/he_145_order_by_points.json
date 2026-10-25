@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function signedDigitSum(n: number): number {\n  const s = String(Math.abs(n));\n  let sum = 0;\n  for (const ch of s) {\n    sum += Number(ch);\n  }\n  // The leading digit of a negative number carries the minus sign.\n  return n < 0 ? sum - 2 * Number(s[0]) : sum;\n}\n\nexport function order_by_points(nums: number[]): number[] {\n  return nums\n    .map((value, index) => ({ value, index, key: signedDigitSum(value) }))\n    .sort((a, b) => a.key - b.key || a.index - b.index)\n    .map((e) => e.value);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

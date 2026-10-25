@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def anti_shuffle(s: str) -> str:\n    return ' '.join(''.join(sorted(w)) for w in s.split(' '))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

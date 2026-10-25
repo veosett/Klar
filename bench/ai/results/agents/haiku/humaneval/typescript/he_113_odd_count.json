@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function odd_count(lst: string[]): string[] {\n  return lst.map((s) => {\n    let odd = 0;\n    for (const ch of s) {\n      if ((ch.charCodeAt(0) - 48) % 2 === 1) {\n        odd++;\n      }\n    }\n    const d = String(odd);\n    return `the number of odd elements ${d}n the str${d}ng ${d} of the ${d}nput.`;\n  });\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

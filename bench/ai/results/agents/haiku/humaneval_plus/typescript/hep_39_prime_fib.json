@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function modPow(base: bigint, exp: bigint, mod: bigint): bigint {\n  let result = 1n;\n  base %= mod;\n  while (exp > 0n) {\n    if (exp & 1n) {\n      result = (result * base) % mod;\n    }\n    base = (base * base) % mod;\n    exp >>= 1n;\n  }\n  return result;\n}\n\nfunction isPrimeBig(n: bigint): boolean {\n  if (n < 2n) {\n    return false;\n  }\n  const smallPrimes = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n];\n  for (const p of smallPrimes) {\n    if (n === p) {\n      return true;\n    }\n    if (n % p === 0n) {\n      return false;\n    }\n  }\n  let d = n - 1n;\n  let r = 0;\n  while (d % 2n === 0n) {\n    d /= 2n;\n    r++;\n  }\n  for (const a of smallPrimes) {\n    let x = modPow(a, d, n);\n    if (x === 1n || x === n - 1n) {\n      continue;\n    }\n    let composite = true;\n    for (let i = 1; i < r; i++) {\n      x = (x * x) % n;\n      if (x === n - 1n) {\n        composite = false;\n        break;\n      }\n    }\n    if (composite) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function prime_fib(n: number): number {\n  if (!Number.isInteger(n) || n < 1) {\n    throw new Error(\"n must be a positive integer\");\n  }\n  let a = 0n;\n  let b = 1n;\n  let count = 0;\n  while (true) {\n    const next = a + b;\n    a = b;\n    b = next;\n    // a is the next Fibonacci number in sequence (1, 1, 2, 3, ...)\n    if (isPrimeBig(a)) {\n      count++;\n      if (count === n) {\n        return Number(a);\n      }\n    }\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

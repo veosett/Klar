@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def digitSum(s: str) -> int:\n    return sum(ord(c) for c in s if c.isupper())\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

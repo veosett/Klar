@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn merge_intervals(xs: List[List[Int]]) -> List[List[Int]] {\n  let sorted = xs.sort_by(fn(iv: List[Int]) => iv.get_or(0, 0))\n  let start: List[List[Int]] = []\n  return sorted.fold(start, fn(acc: List[List[Int]], iv: List[Int]) -> List[List[Int]] {\n    let s = iv.get_or(0, 0)\n    let e = iv.get_or(1, 0)\n    match acc.last() {\n      None => { return acc.push([s, e]) },\n      Some(last) => {\n        let ls = last.get_or(0, 0)\n        let le = last.get_or(1, 0)\n        if s <= le {\n          return acc.set(acc.len() - 1, [ls, le.max(e)])\n        }\n        return acc.push([s, e])\n      },\n    }\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

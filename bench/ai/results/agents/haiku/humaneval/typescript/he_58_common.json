@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function common(l1: number[], l2: number[]): number[] {\n  const set2 = new Set(l2);\n  const seen = new Set<number>();\n  for (const x of l1) {\n    if (set2.has(x)) seen.add(x);\n  }\n  return Array.from(seen).sort((a, b) => a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

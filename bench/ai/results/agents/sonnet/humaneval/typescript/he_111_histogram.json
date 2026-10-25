@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function histogram(test_value: string): Record<string, number> {\n  const c: Record<string, number> = {};\n  for (const w of test_value.split(\" \")) {\n    if (w === \"\") continue;\n    c[w] = (c[w] ?? 0) + 1;\n  }\n  let mx = 0;\n  for (const k of Object.keys(c)) if (c[k] > mx) mx = c[k];\n  const r: Record<string, number> = {};\n  for (const k of Object.keys(c)) if (c[k] === mx) r[k] = mx;\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

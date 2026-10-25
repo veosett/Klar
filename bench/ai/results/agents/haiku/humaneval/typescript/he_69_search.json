@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function search(lst: number[]): number {\n  const counts = new Map<number, number>();\n  for (const n of lst) {\n    counts.set(n, (counts.get(n) ?? 0) + 1);\n  }\n  let best = -1;\n  for (const [value, freq] of counts) {\n    if (value > 0 && freq >= value && value > best) {\n      best = value;\n    }\n  }\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

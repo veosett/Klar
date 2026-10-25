@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// True when every key is lower-case letters only, or every key is upper-case letters only.\n/// An empty dictionary gives false.\n/// >>> assert check_dict_case(Map { \"a\": \"apple\", \"b\": \"banana\" }) == true\n/// >>> assert check_dict_case(Map { \"a\": \"apple\", \"A\": \"banana\" }) == false\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let ks = dict.keys()\n  if ks.is_empty() {\n    return false\n  }\n  let all_lower = ks.all(fn(k) => k == k.lower() and k != k.upper())\n  let all_upper = ks.all(fn(k) => k == k.upper() and k != k.lower())\n  return all_lower or all_upper\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

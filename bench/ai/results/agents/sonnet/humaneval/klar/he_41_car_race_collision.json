@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn car_race_collision(n: Int) -> Int {\n  return n * n\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

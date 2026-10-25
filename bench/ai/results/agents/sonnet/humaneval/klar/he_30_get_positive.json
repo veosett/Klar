@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_positive(l: List[Int]) -> List[Int] {\n  return l.filter(fn(x) => x > 0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

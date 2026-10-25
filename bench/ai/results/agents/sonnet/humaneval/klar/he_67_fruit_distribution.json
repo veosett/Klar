@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fruit_distribution(s: Str, n: Int) -> Int {\n  var total = 0\n  for w in s.split(\" \") {\n    match w.to_int() {\n      Some(v) => { total = total + v },\n      None => { total = total },\n    }\n  }\n  return n - total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

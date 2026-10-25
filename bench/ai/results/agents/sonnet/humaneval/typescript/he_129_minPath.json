@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function minPath(grid: number[][], k: number): number[] {\n  const n = grid.length;\n  let best = Infinity;\n  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {\n    if (grid[i][j] === 1) {\n      const nb: [number, number][] = [[i - 1, j], [i + 1, j], [i, j - 1], [i, j + 1]];\n      for (const [a, b] of nb) {\n        if (a >= 0 && a < n && b >= 0 && b < n && grid[a][b] < best) best = grid[a][b];\n      }\n    }\n  }\n  const r: number[] = [];\n  for (let i = 0; i < k; i++) r.push(i % 2 === 0 ? 1 : best);\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

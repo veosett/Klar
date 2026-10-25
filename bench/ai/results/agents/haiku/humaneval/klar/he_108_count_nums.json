@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn signed_digit_sum(n: Int) -> Int {\n  let digits = n.abs().to_str().chars().map(fn(c: Str) => c.to_int().unwrap_or(0))\n  let total = digits.sum()\n  if n < 0 {\n    return total - 2 * digits.first().unwrap_or(0)\n  }\n  return total\n}\n\n/// >>> assert count_nums([-1, 11, -11]) == 1\npub fn count_nums(arr: List[Int]) -> Int {\n  return arr.count(fn(n: Int) => signed_digit_sum(n) > 0)\n}\n\ntest \"count_nums\" {\n  assert count_nums([]) == 0\n  assert count_nums([-1, 11, -11]) == 1\n  assert count_nums([1, 1, 2]) == 3\n  assert count_nums([-1, -2, 0]) == 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

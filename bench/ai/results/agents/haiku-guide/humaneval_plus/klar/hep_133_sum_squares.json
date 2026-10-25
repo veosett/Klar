@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Sum of the squares of each element rounded up (ceiling) to an integer.\n/// >>> assert sum_squares([1.4, 4.2, 0.0]) == 29\n/// >>> assert sum_squares([-2.4, 1.0, 1.0]) == 6\npub fn sum_squares(lst: List[Float]) -> Int {\n  return lst.map(fn(x) => x.ceil()).map(fn(c) => c * c).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

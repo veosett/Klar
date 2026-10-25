@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function string_sequence(n: number): string {\n  const r: number[] = [];\n  for (let i = 0; i <= n; i++) r.push(i);\n  return r.join(\" \");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

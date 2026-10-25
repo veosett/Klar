@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def valid_date(date: str) -> bool:\n    try:\n        date = date.strip()\n        m, d, y = date.split('-')\n        m, d, y = int(m), int(d), int(y)\n    except Exception:\n        return False\n    if m < 1 or m > 12:\n        return False\n    if m in (1, 3, 5, 7, 8, 10, 12):\n        return 1 <= d <= 31\n    if m in (4, 6, 9, 11):\n        return 1 <= d <= 30\n    return 1 <= d <= 29\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

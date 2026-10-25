@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn max_fill(grid: List[List[Int]], capacity: Int) -> Int {\n  if capacity == 0 {\n    return 0\n  }\n  var lowerings: Int = 0\n  for row in grid {\n    let filled = row.sum()\n    lowerings = lowerings + (filled + capacity - 1) / capacity\n  }\n  return lowerings\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

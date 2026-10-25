@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fib4(n: number): number {\n  const base = [0, 0, 2, 0];\n  if (n < 4) {\n    return base[n];\n  }\n  let a = 0;\n  let b = 0;\n  let c = 2;\n  let d = 0;\n  for (let i = 4; i <= n; i++) {\n    const next = a + b + c + d;\n    a = b;\n    b = c;\n    c = d;\n    d = next;\n  }\n  return d;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

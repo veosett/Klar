@@ -22,7 +22,7 @@ VALUE = "klar_eval_value"
 
 
 # ---- eval ------------------------------------------------------------------------------------------------
-def evaluate(parts, context_file=None):
+def evaluate(parts, context_file=None, sandbox=None):
     """Returns a dict: {ok, value, type, output} or {ok: False, diagnostics | error}."""
     *stmts, expr = parts
     base, root, fname = "", None, "eval.klar"
@@ -47,6 +47,7 @@ def evaluate(parts, context_file=None):
     typ = show(prune(let.value.kt)) if getattr(let.value, "kt", None) is not None else "?"
     out, err = io.StringIO(), io.StringIO()
     interp = Interpreter(loaded, out=out, err_stream=err)
+    interp.sandbox = sandbox
     try:
         def go():
             interp.initialize()

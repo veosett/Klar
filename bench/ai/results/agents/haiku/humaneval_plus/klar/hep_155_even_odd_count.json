@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn even_odd_count(num: Int) -> Pair[Int, Int] {\n  var m: Int = num.abs()\n  if m == 0 {\n    return Pair { first: 1, second: 0 }\n  }\n  var evens: Int = 0\n  var odds: Int = 0\n  while m > 0 {\n    let d = m % 10\n    if d % 2 == 0 {\n      evens = evens + 1\n    } else {\n      odds = odds + 1\n    }\n    m = m / 10\n  }\n  return Pair { first: evens, second: odds }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

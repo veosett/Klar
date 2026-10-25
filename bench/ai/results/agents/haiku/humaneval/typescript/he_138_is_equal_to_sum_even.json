@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_equal_to_sum_even(n: number): boolean {\n  // sum of 4 positive even numbers: even, and at least 2+2+2+2 = 8\n  return n % 2 === 0 && n >= 8;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn encode(message: Str) -> Str {\n  var out: Str = \"\"\n  for c in message.chars() {\n    let is_upper = c.upper() == c and c.lower() != c\n    var sw: Str = c\n    if is_upper {\n      sw = c.lower()\n    } else {\n      sw = c.upper()\n    }\n    let l = c.lower()\n    if l == \"a\" or l == \"e\" or l == \"i\" or l == \"o\" or l == \"u\" {\n      let code = sw.codes().get_or(0, 0) + 2\n      out = out + code.to_char().unwrap_or(sw)\n    } else {\n      out = out + sw\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

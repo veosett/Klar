@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_balanced(s: Str) -> Bool {\n  var stack: List[Str] = []\n  for c in s.chars() {\n    if c == \"(\" or c == \"[\" or c == \"{\" {\n      stack = stack.push(c)\n    } else if c == \")\" or c == \"]\" or c == \"}\" {\n      let expected = match c {\n        \")\" => \"(\",\n        \"]\" => \"[\",\n        _ => \"{\",\n      }\n      match stack.last() {\n        None => { return false },\n        Some(top) => {\n          if top != expected {\n            return false\n          }\n          stack = stack.remove_at(stack.len() - 1)\n        },\n      }\n    }\n  }\n  return stack.is_empty()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

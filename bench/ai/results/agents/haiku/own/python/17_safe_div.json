@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def divide_all(xs: list[int], ys: list[int]) -> list[int]:\n    result: list[int] = []\n    for i, (a, b) in enumerate(zip(xs, ys)):\n        if b == 0:\n            raise ValueError(f\"division by zero at index {i}\")\n        q = abs(a) // abs(b)\n        result.append(q if (a < 0) == (b < 0) else -q)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

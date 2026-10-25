@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def correct_bracketing(brackets: str) -> bool:\n    depth = 0\n    for ch in brackets:\n        if ch == \"<\":\n            depth += 1\n        elif ch == \">\":\n            depth -= 1\n            if depth < 0:\n                return False\n    return depth == 0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

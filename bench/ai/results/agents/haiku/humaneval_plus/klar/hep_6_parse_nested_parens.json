@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn group_depth(group: Str) -> Int {\n  var depth = 0\n  var best = 0\n  for c in group.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n      if depth > best {\n        best = depth\n      }\n    }\n    if c == \")\" {\n      depth = depth - 1\n    }\n  }\n  return best\n}\n\n/// >>> assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  let groups = paren_string.split(\" \").filter(fn(g) => not g.is_empty())\n  return groups.map(fn(g) => group_depth(g))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

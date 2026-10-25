@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn run_ops(ops: List[Str]) -> Result[Int, Str] {\n  var bal = 0\n  var i = 0\n  for op in ops {\n    i = i + 1\n    let parts = op.split(\" \")\n    if parts.len() != 2 {\n      return Err(\"bad op at op {i}\")\n    }\n    let verb = parts.get_or(0, \"\")\n    let amount = match parts.get_or(1, \"\").to_int() {\n      Some(n) => n,\n      None => -1,\n    }\n    if amount < 0 {\n      return Err(\"bad op at op {i}\")\n    }\n    if verb == \"deposit\" {\n      bal = bal + amount\n    } else if verb == \"withdraw\" {\n      if bal - amount < 0 {\n        return Err(\"insufficient funds at op {i}\")\n      }\n      bal = bal - amount\n    } else {\n      return Err(\"bad op at op {i}\")\n    }\n  }\n  return Ok(bal)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

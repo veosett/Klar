@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function minPath(grid: number[][], k: number): number[] {\n  const n = grid.length;\n  // locate the cell holding value 1\n  let r = 0;\n  let c = 0;\n  for (let i = 0; i < n; i++) {\n    for (let j = 0; j < n; j++) {\n      if (grid[i][j] === 1) {\n        r = i;\n        c = j;\n      }\n    }\n  }\n  const path: number[] = [grid[r][c]];\n  const dirs: [number, number][] = [\n    [-1, 0],\n    [1, 0],\n    [0, -1],\n    [0, 1],\n  ];\n  while (path.length < k) {\n    let bestR = -1;\n    let bestC = -1;\n    let bestVal = Infinity;\n    for (const [dr, dc] of dirs) {\n      const nr = r + dr;\n      const nc = c + dc;\n      if (nr >= 0 && nr < n && nc >= 0 && nc < n && grid[nr][nc] < bestVal) {\n        bestVal = grid[nr][nc];\n        bestR = nr;\n        bestC = nc;\n      }\n    }\n    r = bestR;\n    c = bestC;\n    path.push(bestVal);\n  }\n  return path;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

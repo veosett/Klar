@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function unique_digits(x: number[]): number[] {\n  const result = x.filter((n) => {\n    const s = String(Math.abs(n));\n    for (let i = 0; i < s.length; i++) {\n      const d = s.charCodeAt(i) - 48;\n      if (d % 2 === 0) return false;\n    }\n    return true;\n  });\n  result.sort((a, b) => a - b);\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

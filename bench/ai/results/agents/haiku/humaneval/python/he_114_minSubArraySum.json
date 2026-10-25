@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def minSubArraySum(nums: list[int]) -> int:\n    best = nums[0]\n    cur = nums[0]\n    for x in nums[1:]:\n        cur = min(x, cur + x)\n        best = min(best, cur)\n    return best\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

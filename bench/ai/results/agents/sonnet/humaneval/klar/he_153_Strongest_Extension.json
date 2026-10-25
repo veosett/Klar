@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn Strongest_Extension(class_name: Str, extensions: List[Str]) -> Str {\n  var best = \"\"\n  var best_s = 0\n  var first = true\n  for e in extensions {\n    let cap = e.chars().count(fn(c) => c == c.upper() and c != c.lower())\n    let sm = e.chars().count(fn(c) => c == c.lower() and c != c.upper())\n    let s = cap - sm\n    if first or s > best_s {\n      best = e\n      best_s = s\n      first = false\n    }\n  }\n  return class_name + \".\" + best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

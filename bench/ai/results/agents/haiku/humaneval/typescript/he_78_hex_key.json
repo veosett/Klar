@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function hex_key(num: string): number {\n  const primes = new Set([\"2\", \"3\", \"5\", \"7\", \"B\", \"D\"]);\n  let count = 0;\n  for (const ch of num) {\n    if (primes.has(ch)) count++;\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def can_arrange(arr: list[int]) -> int:\n    for i in range(len(arr) - 1, 0, -1):\n        if arr[i] < arr[i - 1]:\n            return i\n    return -1\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

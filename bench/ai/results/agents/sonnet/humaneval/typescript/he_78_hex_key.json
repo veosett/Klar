@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function hex_key(num: string): number {\n  let c = 0;\n  for (const ch of num) if (\"2357BD\".includes(ch)) c++;\n  return c;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

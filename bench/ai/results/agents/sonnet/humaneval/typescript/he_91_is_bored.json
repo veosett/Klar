@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_bored(S: string): number {\n  const parts = S.split(/[.?!]\\s*/);\n  let c = 0;\n  for (const p of parts) if (p.startsWith(\"I \")) c++;\n  return c;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

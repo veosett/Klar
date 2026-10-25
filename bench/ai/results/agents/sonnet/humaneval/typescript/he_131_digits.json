@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function digits(n: number): number {\n  let p = 1;\n  let any = false;\n  for (const c of String(n)) {\n    const d = Number(c);\n    if (d % 2 === 1) { p *= d; any = true; }\n  }\n  return any ? p : 0;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

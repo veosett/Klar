@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function specialFilter(nums: number[]): number {\n  let count = 0;\n  for (const n of nums) {\n    if (n <= 10) continue;\n    const s = String(Math.abs(n));\n    const first = s.charCodeAt(0) - 48;\n    const last = s.charCodeAt(s.length - 1) - 48;\n    if (first % 2 === 1 && last % 2 === 1) {\n      count++;\n    }\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

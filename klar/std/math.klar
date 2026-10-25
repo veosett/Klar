@@ -1,4 +1,4 @@
-// std.math — integer and floating point helpers.  use std.math.{gcd, is_prime, mean}
+// std.math — integer and floating point helpers.  use std.math.{gcd, is_prime, mean, floor_div}
 
 /// Greatest common divisor (always >= 0).
 /// >>> assert gcd(12, 18) == 6
@@ -24,6 +24,31 @@ pub fn lcm(a: Int, b: Int) -> Int {
     return 0
   }
   return (a / g * b).abs()
+}
+
+/// Floor division: rounds towards minus infinity like Python's `//` (Klar's `/` truncates towards zero).
+/// >>> assert floor_div(7, 2) == 3
+/// >>> assert floor_div(-7, 2) == -4
+/// >>> assert floor_div(7, -2) == -4
+pub fn floor_div(a: Int, b: Int) -> Int
+  requires b != 0
+{
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) {
+    return q - 1
+  }
+  return q
+}
+
+/// The remainder that goes with `floor_div`: it has the sign of `b`, like Python's `%` (Klar's `%` has the sign
+/// of `a`).
+/// >>> assert floor_mod(7, 3) == 1
+/// >>> assert floor_mod(-7, 3) == 2
+/// >>> assert floor_mod(7, -3) == -2
+pub fn floor_mod(a: Int, b: Int) -> Int
+  requires b != 0
+{
+  return a - floor_div(a, b) * b
 }
 
 /// Primality test by trial division.

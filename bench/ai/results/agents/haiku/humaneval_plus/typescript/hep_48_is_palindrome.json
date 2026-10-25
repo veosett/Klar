@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_palindrome(text: string): boolean {\n  let i = 0;\n  let j = text.length - 1;\n  while (i < j) {\n    if (text[i] !== text[j]) {\n      return false;\n    }\n    i++;\n    j--;\n  }\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

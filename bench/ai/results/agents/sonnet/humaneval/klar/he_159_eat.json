@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn eat(number: Int, need: Int, remaining: Int) -> List[Int] {\n  if need <= remaining {\n    return [number + need, remaining - need]\n  }\n  return [number + remaining, 0]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

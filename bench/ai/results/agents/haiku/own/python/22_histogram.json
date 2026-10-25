@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def histogram(counts: dict[str, int]) -> list[str]:\n    return [f\"{key}: {'*' * counts[key]}\" for key in sorted(counts)]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

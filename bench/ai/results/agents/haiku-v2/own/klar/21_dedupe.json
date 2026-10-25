@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn dedupe(xs: List[Int]) -> List[Int] {\n  let start: List[Int] = []\n  return xs.fold(start, fn(acc: List[Int], x: Int) -> List[Int] {\n    if acc.contains(x) {\n      return acc\n    }\n    return acc.push(x)\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

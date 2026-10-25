@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def find_closest_elements(numbers: list[float]) -> tuple[float, float]:\n    s = sorted(numbers)\n    best = (s[0], s[1])\n    best_diff = s[1] - s[0]\n    for i in range(1, len(s) - 1):\n        d = s[i + 1] - s[i]\n        if d < best_diff:\n            best_diff = d\n            best = (s[i], s[i + 1])\n    return best\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

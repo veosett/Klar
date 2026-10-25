@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def strange_sort_list(lst: list[int]) -> list[int]:\n    s = sorted(lst)\n    res = []\n    i, j = 0, len(s) - 1\n    while i <= j:\n        res.append(s[i])\n        i += 1\n        if i <= j:\n            res.append(s[j])\n            j -= 1\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

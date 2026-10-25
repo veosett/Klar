@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function even_odd_palindrome(n: number): [number, number] {\n  let e = 0;\n  let o = 0;\n  for (let i = 1; i <= n; i++) {\n    const s = String(i);\n    if (s === s.split(\"\").reverse().join(\"\")) {\n      if (i % 2 === 0) e++;\n      else o++;\n    }\n  }\n  return [e, o];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function do_algebra(operator: string[], operand: number[]): number {\n  // Apply operators with standard precedence: ** first (right-assoc),\n  // then * and // (left-assoc), then + and - (left-assoc).\n  const nums: number[] = [operand[0]];\n  const ops: string[] = [];\n  for (let i = 0; i < operator.length; i++) {\n    ops.push(operator[i]);\n    nums.push(operand[i + 1]);\n  }\n\n  // pass 1: exponentiation, right to left\n  for (let i = ops.length - 1; i >= 0; i--) {\n    if (ops[i] === \"**\") {\n      nums[i] = Math.pow(nums[i], nums[i + 1]);\n      nums.splice(i + 1, 1);\n      ops.splice(i, 1);\n    }\n  }\n\n  // pass 2: multiplication and floor division, left to right\n  for (let i = 0; i < ops.length; ) {\n    if (ops[i] === \"*\" || ops[i] === \"//\") {\n      const a = nums[i];\n      const b = nums[i + 1];\n      nums[i] = ops[i] === \"*\" ? a * b : Math.floor(a / b);\n      nums.splice(i + 1, 1);\n      ops.splice(i, 1);\n    } else {\n      i++;\n    }\n  }\n\n  // pass 3: addition and subtraction, left to right\n  let result = nums[0];\n  for (let i = 0; i < ops.length; i++) {\n    if (ops[i] === \"+\") {\n      result += nums[i + 1];\n    } else {\n      result -= nums[i + 1];\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

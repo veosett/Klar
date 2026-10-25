@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn closest_integer(value: Str) -> Int {\n  let x = value.to_float().unwrap_or(0.0)\n  let t = x.floor()\n  let frac = x - t.to_float()\n  if x < 0.0 {\n    if frac > 0.5 {\n      return t + 1\n    }\n    return t\n  }\n  if frac >= 0.5 {\n    return t + 1\n  }\n  return t\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

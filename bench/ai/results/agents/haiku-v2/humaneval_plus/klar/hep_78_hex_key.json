@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn hex_key(num: Str) -> Int {\n  let primes = [\"2\", \"3\", \"5\", \"7\", \"B\", \"D\"]\n  return num.chars().filter(fn(c) => primes.contains(c)).len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn strange_sort_list(lst: List[Int]) -> List[Int] {\n  let s = lst.sort()\n  let n = s.len()\n  return range(0, n).map(fn(k) => if_pick(s, n, k))\n}\n\nfn if_pick(s: List[Int], n: Int, k: Int) -> Int {\n  if k % 2 == 0 {\n    return s.get_or(k / 2, 0)\n  }\n  return s.get_or(n - 1 - k / 2, 0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

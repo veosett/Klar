@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def largest_smallest_integers(lst: list[int]) -> tuple[int | None, int | None]:\n    negs = [x for x in lst if x < 0]\n    poss = [x for x in lst if x > 0]\n    a = max(negs) if negs else None\n    b = min(poss) if poss else None\n    return (a, b)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

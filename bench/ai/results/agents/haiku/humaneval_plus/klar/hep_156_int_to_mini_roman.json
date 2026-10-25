@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.numfmt.{to_roman}\n\n/// >>> assert int_to_mini_roman(19) == \"xix\"\npub fn int_to_mini_roman(number: Int) -> Str {\n  return to_roman(number).lower()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

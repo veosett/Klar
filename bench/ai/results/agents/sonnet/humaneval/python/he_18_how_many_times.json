@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def how_many_times(string: str, substring: str) -> int:\n    n = len(substring)\n    return sum(1 for i in range(len(string) - n + 1) if string[i:i + n] == substring)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

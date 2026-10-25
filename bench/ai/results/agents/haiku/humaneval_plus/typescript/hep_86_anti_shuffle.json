@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function anti_shuffle(s: string): string {\n  return s\n    .split(\" \")\n    .map((word) => word.split(\"\").sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0)).join(\"\"))\n    .join(\" \");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

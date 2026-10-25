@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn file_name_check(file_name: Str) -> Str {\n  let parts = file_name.split(\".\")\n  if parts.len() != 2 {\n    return \"No\"\n  }\n  let name = parts.get_or(0, \"\")\n  let ext = parts.get_or(1, \"\")\n  if not (ext == \"txt\" or ext == \"exe\" or ext == \"dll\") {\n    return \"No\"\n  }\n  let cs = name.codes()\n  if cs.is_empty() {\n    return \"No\"\n  }\n  let f = cs.get_or(0, 0)\n  let letter = (f >= 65 and f <= 90) or (f >= 97 and f <= 122)\n  if not letter {\n    return \"No\"\n  }\n  let digits = file_name.codes().count(fn(c) => c >= 48 and c <= 57)\n  if digits > 3 {\n    return \"No\"\n  }\n  return \"Yes\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

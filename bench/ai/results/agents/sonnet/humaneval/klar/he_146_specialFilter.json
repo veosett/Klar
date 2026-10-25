@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn specialFilter(nums: List[Int]) -> Int {\n  return nums.count(fn(n) => n > 10 and n % 2 == 1 and \"13579\".contains(n.to_str().slice(0, 1)))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

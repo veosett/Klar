@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn eat(number: Int, need: Int, remaining: Int) -> List[Int] {\n  let eaten = need.min(remaining)\n  return [number + eaten, remaining - eaten]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

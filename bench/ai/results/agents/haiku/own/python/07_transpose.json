@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def transpose(m: list[list[int]]) -> list[list[int]]:\n    if not m:\n        return []\n    return [list(col) for col in zip(*m)]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

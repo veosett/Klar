@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function histogram(test_value: string): Record<string, number> {\n  const counts: Record<string, number> = {};\n  for (const token of test_value.split(\" \")) {\n    if (token === \"\") {\n      continue;\n    }\n    counts[token] = (counts[token] ?? 0) + 1;\n  }\n  let best = 0;\n  for (const key of Object.keys(counts)) {\n    if (counts[key] > best) {\n      best = counts[key];\n    }\n  }\n  const result: Record<string, number> = {};\n  for (const key of Object.keys(counts)) {\n    if (counts[key] === best) {\n      result[key] = best;\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

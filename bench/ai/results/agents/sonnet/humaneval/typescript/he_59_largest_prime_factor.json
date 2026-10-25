@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function largest_prime_factor(n: number): number {\n  let best = 1;\n  let p = 2;\n  while (p * p <= n) {\n    while (n % p === 0) { best = p; n = n / p; }\n    p++;\n  }\n  if (n > 1) best = Math.max(best, n);\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

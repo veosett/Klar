@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Counts how often each word occurs in `text` (case-insensitive keys).\npub fn word_freq(text: Str) -> Map[Str, Int] {\n  var counts: Map[Str, Int] = Map {}\n  for w in text.split(\" \") {\n    if not w.is_empty() {\n      let k = w.lower()\n      let n = match counts.get(k) {\n        Some(c) => c + 1,\n        None => 1,\n      }\n      counts = counts.set(k, n)\n    }\n  }\n  return counts\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

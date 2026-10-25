@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn make_a_pile(n: Int) -> List[Int] {\n  return range(0, n).map(fn(i) => n + 2 * i)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

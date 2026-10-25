@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def starts_one_ends(n: int) -> int:\n    if n == 1:\n        return 1\n    return 10 ** (n - 1) + 8 * 10 ** (n - 2)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

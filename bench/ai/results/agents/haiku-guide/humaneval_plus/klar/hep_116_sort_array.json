@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Number of ones in the binary representation of |n|.\n/// >>> assert ones(7) == 3\nfn ones(n: Int) -> Int {\n  var x = n.abs()\n  var count = 0\n  while x > 0 {\n    if x % 2 == 1 {\n      count = count + 1\n    }\n    x = x / 2\n  }\n  return count\n}\n\n/// Order used by sort_array: fewer ones first, then the smaller value.\nfn before(a: Int, b: Int) -> Bool {\n  let ca = ones(a)\n  let cb = ones(b)\n  if ca != cb {\n    return ca < cb\n  }\n  return a < b\n}\n\n/// Sorts by the number of ones in binary, then by decimal value.\n/// >>> assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 3, 4, 5]\n/// >>> assert sort_array([-2, -3, -4, -5, -6]) == [-4, -2, -6, -5, -3]\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  for v in arr {\n    var placed: List[Int] = []\n    var inserted = false\n    for x in out {\n      if (not inserted) and before(v, x) {\n        placed = placed.push(v)\n        inserted = true\n      }\n      placed = placed.push(x)\n    }\n    if not inserted {\n      placed = placed.push(v)\n    }\n    out = placed\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

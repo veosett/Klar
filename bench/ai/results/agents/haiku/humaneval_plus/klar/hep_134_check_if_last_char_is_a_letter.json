@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn check_if_last_char_is_a_letter(txt: Str) -> Bool {\n  let last = txt.split(\" \").last().unwrap_or(\"\")\n  if last.len() != 1 {\n    return false\n  }\n  let code = last.lower().codes().first().unwrap_or(0)\n  return (code >= 97) and (code <= 122)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

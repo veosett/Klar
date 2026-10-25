@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def select_words(s: str, n: int) -> list[str]:\n    return [w for w in s.split() if sum(1 for c in w if c.lower() not in 'aeiou') == n]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

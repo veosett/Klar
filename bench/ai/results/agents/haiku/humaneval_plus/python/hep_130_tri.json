@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def tri(n: int) -> list[int]:\n    def t(k: int) -> int:\n        if k == 0:\n            return 1\n        if k == 1:\n            return 3\n        if k % 2 == 0:\n            return 1 + k // 2\n        # odd k: tri(k+1) is even, so it can be computed directly\n        return t(k - 1) + t(k - 2) + (1 + (k + 1) // 2)\n\n    seq = [0] * (n + 1)\n    for k in range(n + 1):\n        seq[k] = t(k)\n    return seq\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function total_match(lst1: string[], lst2: string[]): string[] {\n  let c1 = 0;\n  for (const s of lst1) c1 += s.length;\n  let c2 = 0;\n  for (const s of lst2) c2 += s.length;\n  return c1 <= c2 ? lst1 : lst2;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

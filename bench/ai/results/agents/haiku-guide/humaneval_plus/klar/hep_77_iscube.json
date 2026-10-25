@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn iscube(a: Int) -> Bool {\n  let m = a.abs()\n  let r = m.to_float().pow(1.0 / 3.0).round()\n  for k in range(r - 1, r + 2) {\n    if k >= 0 and k * k * k == m {\n      return true\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

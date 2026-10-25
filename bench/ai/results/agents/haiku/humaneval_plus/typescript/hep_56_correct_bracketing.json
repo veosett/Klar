@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function correct_bracketing(brackets: string): boolean {\n  let depth = 0;\n  for (const c of brackets) {\n    if (c === \"<\") {\n      depth++;\n    } else if (c === \">\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

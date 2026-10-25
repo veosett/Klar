@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_valid_email(s: str) -> bool:\n    if \" \" in s:\n        return False\n    if s.count(\"@\") != 1:\n        return False\n    local, domain = s.split(\"@\")\n    if local == \"\":\n        return False\n    if \".\" not in domain:\n        return False\n    if domain.startswith(\".\") or domain.endswith(\".\"):\n        return False\n    if \"..\" in domain:\n        return False\n    return True\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

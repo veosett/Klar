@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function choose3(m: bigint): bigint {\n  if (m < BigInt(3)) {\n    return BigInt(0);\n  }\n  return (m * (m - BigInt(1)) * (m - BigInt(2))) / BigInt(6);\n}\n\nexport function get_max_triples(n: number): number {\n  // a[i] = i*i - i + 1 (1-based). Modulo 3 it is 1 when i % 3 is 0 or 1, and 0 when i % 3 is 2.\n  // Only residues 0 and 1 occur, so a valid triple is three values with residue 0\n  // or three values with residue 1.\n  let c0 = BigInt(0);\n  let c1 = BigInt(0);\n  for (let i = 1; i <= n; i++) {\n    const r = i % 3;\n    if (r === 2) {\n      c0 += BigInt(1);\n    } else {\n      c1 += BigInt(1);\n    }\n  }\n  return Number(choose3(c0) + choose3(c1));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

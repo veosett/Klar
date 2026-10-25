@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function add(lst: number[]): number {\n  let total = 0;\n  for (let i = 1; i < lst.length; i += 2) {\n    if (lst[i] % 2 === 0) {\n      total += lst[i];\n    }\n  }\n  return total;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

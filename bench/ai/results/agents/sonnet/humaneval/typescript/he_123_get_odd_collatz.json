@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function get_odd_collatz(n: number): number[] {\n  const r: number[] = [];\n  while (true) {\n    if (n % 2 === 1) r.push(n);\n    if (n === 1) break;\n    n = n % 2 === 0 ? n / 2 : 3 * n + 1;\n  }\n  return r.sort((a, b) => a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

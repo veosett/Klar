@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fibfib(n: number): number {\n  const a = [0, 0, 1];\n  if (n < 3) return a[n];\n  for (let i = 3; i <= n; i++) a.push(a[i - 1] + a[i - 2] + a[i - 3]);\n  return a[n];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

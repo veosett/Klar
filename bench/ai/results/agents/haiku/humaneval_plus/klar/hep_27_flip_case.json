@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn flip_char(c: Str) -> Str {\n  let up = c.upper()\n  if c == up {\n    return c.lower()\n  }\n  return up\n}\n\n/// >>> assert flip_case(\"Hello\") == \"hELLO\"\npub fn flip_case(string: Str) -> Str {\n  return string.chars().map(fn(c) => flip_char(c)).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

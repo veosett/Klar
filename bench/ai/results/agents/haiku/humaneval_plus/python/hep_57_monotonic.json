@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def monotonic(l: list[int]) -> bool:\n    inc = all(a <= b for a, b in zip(l, l[1:]))\n    dec = all(a >= b for a, b in zip(l, l[1:]))\n    return inc or dec\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

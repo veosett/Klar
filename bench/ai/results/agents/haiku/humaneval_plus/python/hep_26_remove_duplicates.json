@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from collections import Counter\n\n\ndef remove_duplicates(numbers: list[int]) -> list[int]:\n    counts = Counter(numbers)\n    return [n for n in numbers if counts[n] == 1]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

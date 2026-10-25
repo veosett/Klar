@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function file_name_check(file_name: string): string {\n  const digits = file_name.replace(/[^0-9]/g, \"\");\n  if (digits.length > 3) {\n    return \"No\";\n  }\n  const parts = file_name.split(\".\");\n  if (parts.length !== 2) {\n    return \"No\";\n  }\n  const [before, after] = parts;\n  if (before.length === 0 || !/^[a-zA-Z]/.test(before)) {\n    return \"No\";\n  }\n  if (![\"txt\", \"exe\", \"dll\"].includes(after)) {\n    return \"No\";\n  }\n  return \"Yes\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

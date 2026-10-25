@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert int_to_mini_roman(19) == \"xix\"\npub fn int_to_mini_roman(number: Int) -> Str {\n  let vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]\n  let syms = [\"m\", \"cm\", \"d\", \"cd\", \"c\", \"xc\", \"l\", \"xl\", \"x\", \"ix\", \"v\", \"iv\", \"i\"]\n  var n = number\n  var out = \"\"\n  var i = 0\n  while i < vals.len() {\n    let v = vals.get_or(i, 1)\n    while n >= v {\n      out = out + syms.get_or(i, \"\")\n      n = n - v\n    }\n    i = i + 1\n  }\n  return out\n}\n\ntest \"int_to_mini_roman\" {\n  assert int_to_mini_roman(19) == \"xix\"\n  assert int_to_mini_roman(152) == \"clii\"\n  assert int_to_mini_roman(426) == \"cdxxvi\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

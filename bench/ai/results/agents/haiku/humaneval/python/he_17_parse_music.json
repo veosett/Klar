@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def parse_music(music_string: str) -> list[int]:\n    result = []\n    for token in music_string.split():\n        if token == 'o':\n            result.append(4)\n        elif token == 'o|':\n            result.append(2)\n        elif token == '.|':\n            result.append(1)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

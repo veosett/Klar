@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn separate_paren_groups(paren_string: Str) -> List[Str] {\n  var depth: Int = 0\n  var cur: Str = \"\"\n  var out: List[Str] = []\n  for c in paren_string.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n      cur = cur + c\n    } else if c == \")\" {\n      depth = depth - 1\n      cur = cur + c\n      if depth == 0 {\n        out = out.push(cur)\n        cur = \"\"\n      }\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn tri(n: Int) -> List[Int] {\n  var vals: List[Int] = []\n  var k = 0\n  while k <= n {\n    var v = 0\n    if k % 2 == 0 {\n      v = 1 + k / 2\n    } else {\n      if k == 1 {\n        v = 3\n      } else {\n        v = vals.get_or(k - 1, 0) + vals.get_or(k - 2, 0) + 1 + (k + 1) / 2\n      }\n    }\n    vals = vals.push(v)\n    k = k + 1\n  }\n  return vals\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

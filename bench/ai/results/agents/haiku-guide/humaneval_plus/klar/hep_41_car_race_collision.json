@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Every left-to-right car meets every right-to-left car once: n * n collisions.\n/// >>> assert car_race_collision(3) == 9\npub fn car_race_collision(n: Int) -> Int {\n  return n * n\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

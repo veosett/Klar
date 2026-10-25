@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The k most frequent words, most frequent first, ties in alphabetical order.\npub fn top_k(words: List[Str], k: Int) -> List[Str] {\n  var counts: Map[Str, Int] = Map {}\n  for w in words {\n    let n = match counts.get(w) {\n      Some(c) => c + 1,\n      None => 1,\n    }\n    counts = counts.set(w, n)\n  }\n  var left: List[Str] = words.unique().sort()\n  var out: List[Str] = []\n  var taken = 0\n  while taken < k and not left.is_empty() {\n    var best_word = \"\"\n    var best_count = 0\n    for w in left {\n      let c = counts.get(w).unwrap_or(0)\n      if c > best_count {\n        best_word = w\n        best_count = c\n      }\n    }\n    let chosen = best_word\n    out = out.push(chosen)\n    left = left.filter(fn(w) => w != chosen)\n    taken = taken + 1\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

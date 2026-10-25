@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def minPath(grid: list[list[int]], k: int) -> list[int]:\n    n = len(grid)\n    m = None\n    for i in range(n):\n        for j in range(n):\n            if grid[i][j] == 1:\n                for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                    a, b = i + di, j + dj\n                    if 0 <= a < n and 0 <= b < n:\n                        if m is None or grid[a][b] < m:\n                            m = grid[a][b]\n    return [1 if i % 2 == 0 else m for i in range(k)]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

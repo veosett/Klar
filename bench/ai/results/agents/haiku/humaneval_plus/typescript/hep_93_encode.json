@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function encode(message: string): string {\n  const vowelShift: Record<string, string> = {\n    a: \"c\",\n    e: \"g\",\n    i: \"k\",\n    o: \"q\",\n    u: \"w\",\n  };\n  let out = \"\";\n  for (const ch of message) {\n    const lower = ch.toLowerCase();\n    let replaced = ch;\n    if (lower in vowelShift) {\n      const shifted = vowelShift[lower];\n      replaced = ch === lower ? shifted : shifted.toUpperCase();\n    }\n    const isUpper = replaced === replaced.toUpperCase() && replaced !== replaced.toLowerCase();\n    out += isUpper ? replaced.toLowerCase() : replaced.toUpperCase().length === 1 && replaced !== replaced.toUpperCase() ? replaced.toUpperCase() : replaced;\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

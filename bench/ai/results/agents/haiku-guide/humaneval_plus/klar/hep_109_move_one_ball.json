@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn move_one_ball(arr: List[Int]) -> Bool {\n  if arr.is_empty() {\n    return true\n  }\n  let target = arr.sort()\n  for k in range(0, arr.len()) {\n    if arr.drop(k).concat(arr.take(k)) == target {\n      return true\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

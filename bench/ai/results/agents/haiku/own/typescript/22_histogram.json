@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function histogram(counts: Record<string, number>): string[] {\n  const keys = Object.keys(counts).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));\n  return keys.map((k) => `${k}: ${\"*\".repeat(counts[k])}`);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

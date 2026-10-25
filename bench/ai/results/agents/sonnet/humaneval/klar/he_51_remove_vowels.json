@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn remove_vowels(text: Str) -> Str {\n  let v = [\"a\", \"e\", \"i\", \"o\", \"u\"]\n  return text.chars().filter(fn(c) => not v.contains(c.lower())).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

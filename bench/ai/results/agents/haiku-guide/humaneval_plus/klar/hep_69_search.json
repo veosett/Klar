@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn search(lst: List[Int]) -> Int {\n  var counts: Map[Int, Int] = Map {}\n  for x in lst {\n    counts = counts.set(x, counts.get(x).unwrap_or(0) + 1)\n  }\n  let final_counts = counts\n  let good = lst.filter(fn(x) => x > 0 and final_counts.get(x).unwrap_or(0) >= x)\n  return match good.max() {\n    Some(v) => v,\n    None => -1,\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

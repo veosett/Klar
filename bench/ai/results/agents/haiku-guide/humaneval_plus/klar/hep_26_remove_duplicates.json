@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn remove_duplicates(numbers: List[Int]) -> List[Int] {\n  var counts: Map[Int, Int] = Map {}\n  for n in numbers {\n    counts = counts.set(n, counts.get(n).unwrap_or(0) + 1)\n  }\n  let final_counts = counts\n  return numbers.filter(fn(x) => final_counts.get(x).unwrap_or(0) == 1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

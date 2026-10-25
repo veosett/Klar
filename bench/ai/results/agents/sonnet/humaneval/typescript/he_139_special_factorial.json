@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function special_factorial(n: number): number {\n  let f = 1, r = 1;\n  for (let i = 1; i <= n; i++) { f *= i; r *= f; }\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

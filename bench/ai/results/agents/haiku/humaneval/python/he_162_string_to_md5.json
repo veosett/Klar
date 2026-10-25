@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import hashlib\n\n\ndef string_to_md5(text: str) -> str | None:\n    if text == \"\":\n        return None\n    return hashlib.md5(text.encode(\"utf-8\")).hexdigest()\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

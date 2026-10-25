@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var ops = operator\n  var nums = operand\n  var i = ops.len() - 1\n  while i >= 0 {\n    if ops.get_or(i, \"\") == \"**\" {\n      let v = nums.get_or(i, 0).pow(nums.get_or(i + 1, 0))\n      nums = nums.set(i, v).remove_at(i + 1)\n      ops = ops.remove_at(i)\n    }\n    i = i - 1\n  }\n  i = 0\n  while i < ops.len() {\n    let o = ops.get_or(i, \"\")\n    if o == \"*\" or o == \"//\" {\n      let a = nums.get_or(i, 0)\n      let b = nums.get_or(i + 1, 0)\n      var v = a * b\n      if o == \"//\" {\n        if b == 0 {\n          return 0\n        }\n        v = a / b\n      }\n      nums = nums.set(i, v).remove_at(i + 1)\n      ops = ops.remove_at(i)\n    } else {\n      i = i + 1\n    }\n  }\n  var acc = nums.get_or(0, 0)\n  for j in range(0, ops.len()) {\n    let b = nums.get_or(j + 1, 0)\n    if ops.get_or(j, \"\") == \"+\" {\n      acc = acc + b\n    } else {\n      acc = acc - b\n    }\n  }\n  return acc\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

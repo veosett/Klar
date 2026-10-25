@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function next_smallest(lst: number[]): number | null {\n  const u = Array.from(new Set(lst)).sort((a, b) => a - b);\n  return u.length < 2 ? null : u[1];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn parse_csv_line(line: Str) -> Result[List[Str], Str] {\n  let cs = line.chars()\n  let n = cs.len()\n  var fields: List[Str] = []\n  var cur = \"\"\n  var inq = false\n  var i = 0\n  while i < n {\n    let c = cs.get_or(i, \"\")\n    if inq {\n      if c == \"\\\"\" {\n        if cs.get_or(i + 1, \"\") == \"\\\"\" {\n          cur = cur + \"\\\"\"\n          i = i + 1\n        } else {\n          inq = false\n        }\n      } else {\n        cur = cur + c\n      }\n    } else {\n      if c == \"\\\"\" {\n        inq = true\n      } else if c == \",\" {\n        fields = fields.push(cur)\n        cur = \"\"\n      } else {\n        cur = cur + c\n      }\n    }\n    i = i + 1\n  }\n  if inq {\n    return Err(\"unterminated quote\")\n  }\n  fields = fields.push(cur)\n  return Ok(fields)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

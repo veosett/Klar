@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function encode(message: string): string {\n  const vowels = \"aeiouAEIOU\";\n  let result = \"\";\n  for (const ch of message) {\n    let c = ch;\n    if (vowels.includes(ch)) {\n      c = String.fromCharCode(ch.charCodeAt(0) + 2);\n    }\n    if (c === c.toUpperCase() && c !== c.toLowerCase()) {\n      result += c.toLowerCase();\n    } else if (c === c.toLowerCase() && c !== c.toUpperCase()) {\n      result += c.toUpperCase();\n    } else {\n      result += c;\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

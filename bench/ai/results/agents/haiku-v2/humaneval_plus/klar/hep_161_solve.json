@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn flip_case(c: Str) -> Str {\n  if \"abcdefghijklmnopqrstuvwxyz\".contains(c) {\n    return c.upper()\n  }\n  if \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c) {\n    return c.lower()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c))\n  if has_letter {\n    return s.chars().map(fn(c) => flip_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "fn flip_case(c: Str) -> Str {\n  if c.upper() != c {\n    return c.upper()\n  }\n  if c.lower() != c {\n    return c.lower()\n  }\n  return c\n}\n\nfn is_letter(c: Str) -> Bool {\n  if c.upper() != c or c.lower() != c {\n    return true\n  }\n  let code = c.codes().get_or(0, 0)\n  if code < 192 {\n    return false\n  }\n  if code == 215 or code == 247 {\n    return false\n  }\n  if code >= 768 and code <= 879 {\n    return false\n  }\n  if code >= 1611 and code <= 1631 {\n    return false\n  }\n  if code >= 8192 and code <= 11263 {\n    return false\n  }\n  if code >= 12288 and code <= 12351 {\n    return false\n  }\n  if code >= 65024 and code <= 65039 {\n    return false\n  }\n  if code >= 126976 {\n    return false\n  }\n  return true\n}\n\npub fn solve(s: Str) -> Str {\n  if s.chars().any(fn(c) => is_letter(c)) {\n    return s.chars().map(fn(c) => flip_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

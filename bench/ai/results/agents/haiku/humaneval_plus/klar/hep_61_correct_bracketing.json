@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn correct_bracketing(brackets: Str) -> Bool {\n  var depth: Int = 0\n  for c in brackets.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n    } else if c == \")\" {\n      depth = depth - 1\n      if depth < 0 {\n        return false\n      }\n    }\n  }\n  return depth == 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

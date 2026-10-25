@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn smallest_change(arr: List[Int]) -> Int {\n  let r = arr.reverse()\n  var c: Int = 0\n  for p in arr.enumerate() {\n    if p.value != r.get_or(p.index, 0) {\n      c = c + 1\n    }\n  }\n  return c / 2\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

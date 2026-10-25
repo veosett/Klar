@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import math\n\n\ndef max_fill(grid: list[list[int]], capacity: int) -> int:\n    total = 0\n    for row in grid:\n        water = sum(row)\n        total += math.ceil(water / capacity)\n    return total\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Transposes a rectangular matrix: rows become columns.\npub fn transpose(m: List[List[Int]]) -> List[List[Int]] {\n  let width = match m.first() {\n    Some(row) => row.len(),\n    None => 0,\n  }\n  var out: List[List[Int]] = []\n  for j in range(0, width) {\n    let col = j\n    let column = m.map(fn(row) => row.get_or(col, 0))\n    out = out.push(column)\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

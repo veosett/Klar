@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sum_product(numbers: list[int]) -> tuple[int, int]:\n    p = 1\n    for x in numbers:\n        p *= x\n    return (sum(numbers), p)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

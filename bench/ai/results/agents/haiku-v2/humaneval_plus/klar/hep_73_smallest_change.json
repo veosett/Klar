@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn smallest_change(arr: List[Int]) -> Int {\n  let n = arr.len()\n  var count: Int = 0\n  var i: Int = 0\n  while i < n / 2 {\n    let left = arr.get_or(i, 0)\n    let right = arr.get_or(n - 1 - i, 0)\n    if left != right {\n      count = count + 1\n    }\n    i = i + 1\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

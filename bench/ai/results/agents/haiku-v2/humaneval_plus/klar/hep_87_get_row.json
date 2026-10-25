@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_row(lst: List[List[Int]], x: Int) -> List[Pair[Int, Int]] {\n  var out: List[Pair[Int, Int]] = []\n  for row in lst.enumerate() {\n    var cols: List[Int] = []\n    for cell in row.value.enumerate() {\n      if cell.value == x {\n        cols = cols.push(cell.index)\n      }\n    }\n    for c in cols.sort().reverse() {\n      out = out.push(Pair { first: row.index, second: c })\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

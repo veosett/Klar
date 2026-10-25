@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def tri(n: int) -> list[int]:\n    def even_val(k: int) -> int:\n        return 1 + k // 2\n\n    result = [even_val(0)]\n    if n >= 1:\n        result.append(3)\n    for k in range(2, n + 1):\n        if k % 2 == 0:\n            result.append(even_val(k))\n        else:\n            # tri(k+1) is even, so it can be computed directly\n            result.append(result[k - 1] + result[k - 2] + even_val(k + 1))\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

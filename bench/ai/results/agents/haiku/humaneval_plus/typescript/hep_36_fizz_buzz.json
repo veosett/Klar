@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fizz_buzz(n: number): number {\n  let count = 0;\n  for (let i = 1; i < n; i++) {\n    if (i % 11 === 0 || i % 13 === 0) {\n      for (const ch of String(i)) {\n        if (ch === \"7\") count++;\n      }\n    }\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

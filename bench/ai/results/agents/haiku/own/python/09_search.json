@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def find_index(sorted: list[int], target: int) -> int | None:\n    lo, hi = 0, len(sorted) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if sorted[mid] == target:\n            return mid\n        if sorted[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return None\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

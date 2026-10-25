@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function reverse_delete(s: string, c: string): [string, boolean] {\n  const remove = new Set(c.split(\"\"));\n  const result = s\n    .split(\"\")\n    .filter((ch) => !remove.has(ch))\n    .join(\"\");\n  const isPalindrome = result === result.split(\"\").reverse().join(\"\");\n  return [result, isPalindrome];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

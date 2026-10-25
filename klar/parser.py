@@ -924,6 +924,8 @@ class Parser:
                 self.fail(f"Klar has no `{tok.value}`", tok=tok, hint="use `Option[T]`: `None` / `Some(value)`",
                           code="E0201", fix={"span": tok.span, "text": "None"})
             return N.Name(span=start, name=tok.value)
+        if tok.kind == "OP" and tok.value == "{" and not self.no_struct:
+            return self.parse_map_lit(tok)      # `{"a": 1}`: a map, as `Map {"a": 1}` (Python and JSON write it so)
         hint = None
         if tok.kind == "OP" and tok.value in ("+", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "and", "or", "."):
             hint = (f"a line cannot start with `{tok.value}`: to continue an expression on the next line, "
@@ -1058,14 +1060,9 @@ class Parser:
         old = self.no_struct
         self.no_struct = False
         if self.at_op("=>"):
-            arrow = self.advance()
-            if self.at_op("{"):
-                self.fail("a lambda with a block body has no `=>`", tok=arrow,
-                          hint="write `fn(x) { return value }` (statements on their own lines), or keep `=>` with one expression: "
-                               "`fn(x) => x * 2`",
-                          fix={"span": Span(arrow.span.file, arrow.span.line, arrow.span.col,
-                                            self.cur.span.line, self.cur.span.col), "text": ""})
-            body = self.parse_expr()
+            self.advance()
+            # `fn(x) => { ... }` is a block body too (as in JavaScript and Rust): the `=>` is not needed but harmless
+            body = self.parse_block() if self.at_op("{") else self.parse_expr()
         elif self.at_op("{"):
             body = self.parse_block()
         else:

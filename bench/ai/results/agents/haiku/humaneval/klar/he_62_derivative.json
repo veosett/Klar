@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert derivative([1, 2, 3]) == [2, 6]\npub fn derivative(xs: List[Int]) -> List[Int] {\n  return range(1, xs.len()).map(fn(i: Int) => xs.get_or(i, 0) * i)\n}\n\ntest \"derivative\" {\n  assert derivative([3, 1, 2, 4, 5]) == [1, 4, 12, 20]\n  assert derivative([1, 2, 3]) == [2, 6]\n  assert derivative([]) == []\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

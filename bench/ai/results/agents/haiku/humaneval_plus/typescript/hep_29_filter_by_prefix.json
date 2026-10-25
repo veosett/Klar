@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function filter_by_prefix(strings: string[], prefix: string): string[] {\n  return strings.filter((s) => s.startsWith(prefix));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

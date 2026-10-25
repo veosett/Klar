@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def total_match(lst1: list[str], lst2: list[str]) -> list[str]:\n    len1 = sum(len(s) for s in lst1)\n    len2 = sum(len(s) for s in lst2)\n    if len1 <= len2:\n        return lst1\n    return lst2\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

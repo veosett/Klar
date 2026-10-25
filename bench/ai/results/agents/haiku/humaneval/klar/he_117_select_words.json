@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn consonant_count(w: Str) -> Int {\n  return w.chars().filter(fn(c) => \"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ\".contains(c)).len()\n}\n\npub fn select_words(s: Str, n: Int) -> List[Str] {\n  let words = s.split(\" \").filter(fn(w) => not w.is_empty())\n  return words.filter(fn(w) => consonant_count(w) == n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

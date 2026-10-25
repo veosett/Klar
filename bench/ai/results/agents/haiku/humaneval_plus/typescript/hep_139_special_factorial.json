@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function special_factorial(n: number): number {\n  let result = BigInt(1);\n  let f = BigInt(1);\n  for (let k = 1; k <= n; k++) {\n    f = f * BigInt(k);\n    result = result * f;\n  }\n  return Number(result);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

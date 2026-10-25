@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def specialFilter(nums: list[int]) -> int:\n    c = 0\n    for n in nums:\n        if n > 10:\n            s = str(n)\n            if s[0] in \"13579\" and s[-1] in \"13579\":\n                c += 1\n    return c\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

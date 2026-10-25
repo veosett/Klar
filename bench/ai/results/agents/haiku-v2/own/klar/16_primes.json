@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn primes_up_to(n: Int) -> List[Int] {\n  return range(2, n + 1).filter(fn(k: Int) -> Bool {\n    var d = 2\n    var prime = true\n    while d * d <= k {\n      if k % d == 0 {\n        prime = false\n        break\n      }\n      d = d + 1\n    }\n    return prime\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

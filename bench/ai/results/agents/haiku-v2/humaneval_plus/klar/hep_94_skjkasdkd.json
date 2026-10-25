@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_prime_number(n: Int) -> Bool {\n  if n < 2 {\n    return false\n  }\n  var d: Int = 2\n  while d * d <= n {\n    if n % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\nfn digit_total(n: Int) -> Int {\n  var m: Int = n.abs()\n  var total: Int = 0\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  return total\n}\n\npub fn skjkasdkd(lst: List[Int]) -> Int {\n  var best: Int = -1\n  for x in lst {\n    if is_prime_number(x) and x > best {\n      best = x\n    }\n  }\n  if best < 0 {\n    return 0\n  }\n  return digit_total(best)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

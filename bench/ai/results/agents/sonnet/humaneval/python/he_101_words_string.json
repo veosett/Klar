@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def words_string(s: str) -> list[str]:\n    return s.replace(\",\", \" \").split()\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

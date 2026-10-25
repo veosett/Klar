@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn concatenate(strings: List[Str]) -> Str {\n  return strings.join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

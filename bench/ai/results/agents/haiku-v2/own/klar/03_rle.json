@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rle(s: Str) -> Str {\n  var out = \"\"\n  var prev = \"\"\n  var count = 0\n  for c in s.chars() {\n    if c == prev {\n      count = count + 1\n    } else {\n      if count > 0 {\n        out = out + prev + count.to_str()\n      }\n      prev = c\n      count = 1\n    }\n  }\n  if count > 0 {\n    out = out + prev + count.to_str()\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

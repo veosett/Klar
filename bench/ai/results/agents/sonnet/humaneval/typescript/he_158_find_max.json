@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function find_max(words: string[]): string {\n  let best = \"\";\n  let bc = -1;\n  for (const w of words) {\n    const c = new Set(Array.from(w)).size;\n    if (c > bc || (c === bc && w < best)) {\n      best = w;\n      bc = c;\n    }\n  }\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn find_index(sorted: List[Int], target: Int) -> Option[Int] {\n  var lo = 0\n  var hi = sorted.len() - 1\n  while lo <= hi {\n    let mid = (lo + hi) / 2\n    let v = sorted.get_or(mid, 0)\n    if v == target {\n      return Some(mid)\n    }\n    if v < target {\n      lo = mid + 1\n    } else {\n      hi = mid - 1\n    }\n  }\n  return None\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

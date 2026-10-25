@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_nested(string: str) -> bool:\n    opening = [i for i, c in enumerate(string) if c == '[']\n    closing = [i for i, c in enumerate(string) if c == ']'][::-1]\n    cnt = 0\n    for o, c in zip(opening, closing):\n        if o < c:\n            cnt += 1\n        else:\n            break\n    return cnt >= 2\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

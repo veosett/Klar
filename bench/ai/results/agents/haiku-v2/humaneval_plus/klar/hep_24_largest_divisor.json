@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn largest_divisor(n: Int) -> Int {\n  let divs = range(1, n).filter(fn(d) => match d {\n    0 => false,\n    _ => n % d == 0,\n  })\n  return match divs.max() {\n    Some(v) => v,\n    None => 1,\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

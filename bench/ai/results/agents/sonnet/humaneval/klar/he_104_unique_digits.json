@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn unique_digits(x: List[Int]) -> List[Int] {\n  return x.filter(fn(n) => n.to_str().chars().all(fn(c) => \"13579\".contains(c))).sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

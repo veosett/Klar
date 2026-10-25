@@ -2,7 +2,8 @@
 `--allow`, a call outside the rights is runtime error R0016 (printing and reading input — `io` — stay allowed):
 
 * `fs` — every file; `fs:DIR` — files and directories inside DIR (relative to the working directory at the start;
-  paths are compared as written, after resolving `.` and `..`, without following symbolic links);
+  paths are compared the way the system opens them: `.`, `..` and symbolic links resolved, so a link that leads
+  out of DIR does not give access to where it leads; on Windows links are not resolved);
 * `proc` — every program; `proc:NAME` — only `run_command([NAME, ...])` / `run_capture([NAME, ...], ...)`;
 * `time`, `rand`, `net`.
 
@@ -37,10 +38,17 @@ def parse_allow(spec):
 
 
 def segments(path, cwd):
-    """The parts of the absolute form of a path: `\\` is a separator too, `.` and `..` are resolved."""
+    """The parts of the absolute form of a path the way the system opens it: `\\` is a separator too; `.`, `..` and
+    symbolic links are resolved part by part (os.path.realpath), so a link inside an allowed directory that points
+    outside of it is outside, and `link/..` is the parent of the link's target."""
     p = path.replace("\\", "/")
     if not (p.startswith("/") or (len(p) >= 2 and p[1] == ":")):
         p = cwd.replace("\\", "/") + "/" + p
+    if os.name != "nt":             # (klar/rt/sandbox.klar resolves links on Linux and macOS, not on Windows)
+        try:
+            p = os.path.realpath(p)
+        except (OSError, ValueError):
+            pass
     out = []
     for s in p.split("/"):
         if s in ("", "."):

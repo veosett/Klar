@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import re\n\n\ndef fix_spaces(text: str) -> str:\n    text = re.sub(r\" {3,}\", \"-\", text)\n    return text.replace(\" \", \"_\")\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

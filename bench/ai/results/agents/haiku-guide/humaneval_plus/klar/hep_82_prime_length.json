@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Whether n is a prime number (trial division).\nfn is_prime_number(n: Int) -> Bool {\n  if n < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= n {\n    if n % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\n/// Whether the length of the string is a prime number.\n/// >>> assert prime_length(\"Hello\") == true\n/// >>> assert prime_length(\"orange\") == false\npub fn prime_length(string: Str) -> Bool {\n  return is_prime_number(string.len())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

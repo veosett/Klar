@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def string_sequence(n: int) -> str:\n    return ' '.join(str(i) for i in range(n + 1))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

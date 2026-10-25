@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function mulmod(a: number, b: number, p: number): number {\n  // Computes (a * b) mod p without losing precision for large values.\n  let result = 0;\n  let x = a % p;\n  let y = b % p;\n  while (y > 0) {\n    if (y % 2 === 1) {\n      result = (result + x) % p;\n    }\n    x = (x * 2) % p;\n    y = Math.floor(y / 2);\n  }\n  return result;\n}\n\nexport function modp(n: number, p: number): number {\n  if (p === 1) return 0;\n  let result = 1 % p;\n  let base = 2 % p;\n  let e = n;\n  while (e > 0) {\n    if (e % 2 === 1) {\n      result = mulmod(result, base, p);\n    }\n    base = mulmod(base, base, p);\n    e = Math.floor(e / 2);\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -3630,3 +3630,19 @@ property "p" (x: Int) uses rand {
 property "q" (x: Int) {
   assert save("{x}") == Ok(())
 }
+=== e0208 positional
+type P { r: Int, c: Int }
+
+fn cell(g: List[Int], r: Int, c: Int) -> Int {
+  return g.len() + r + c
+}
+
+fn h(ops: List[Str], nums: List[Int], k: Int) -> Int {
+  return ops.len() + nums.len() + k
+}
+
+fn f(g: List[Int], r: Int, c: Int, nr: Int, i: Int, j: Int, p: P) -> Int {
+  let a = cell(g, r, c) + cell(g, nr, c - 1) + cell(g, p.r, p.c) + h([], [], 0) + cell(g, r, 0)
+  let b = cell(g, 0, 1) + cell(g, i, j) + cell(g, c, r) + cell(g, _r, c_)
+  return a + b
+}

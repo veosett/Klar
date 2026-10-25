@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_pal(t: Str) -> Bool {\n  return t == t.reverse()\n}\n\npub fn make_palindrome(string: Str) -> Str {\n  let n = string.len()\n  for i in range(0, n + 1) {\n    let suffix = string.slice(i, n)\n    if is_pal(suffix) {\n      let prefix = string.slice(0, i)\n      return string + prefix.reverse()\n    }\n  }\n  return string\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

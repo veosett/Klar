@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn prod_signs(arr: List[Int]) -> Option[Int] {\n  if arr.is_empty() {\n    return None\n  }\n  var sign_product = 1\n  var magnitudes = 0\n  for x in arr {\n    sign_product = sign_product * x.sign()\n    magnitudes = magnitudes + x.abs()\n  }\n  return Some(sign_product * magnitudes)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

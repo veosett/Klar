@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn encode(message: Str) -> Str {\n  var out = \"\"\n  for c in message.chars() {\n    let lo = c.lower()\n    var base = c\n    if lo == \"a\" or lo == \"e\" or lo == \"i\" or lo == \"o\" or lo == \"u\" {\n      var m = \"c\"\n      if lo == \"e\" {\n        m = \"g\"\n      }\n      if lo == \"i\" {\n        m = \"k\"\n      }\n      if lo == \"o\" {\n        m = \"q\"\n      }\n      if lo == \"u\" {\n        m = \"w\"\n      }\n      if c != lo {\n        m = m.upper()\n      }\n      base = m\n    }\n    if base == base.upper() {\n      out = out + base.lower()\n    } else {\n      out = out + base.upper()\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

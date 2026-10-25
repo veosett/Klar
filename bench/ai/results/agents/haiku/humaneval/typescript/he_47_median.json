@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function median(l: number[]): number {\n  const sorted = [...l].sort((a, b) => a - b);\n  const mid = Math.floor(sorted.length / 2);\n  if (sorted.length % 2 === 1) {\n    return sorted[mid];\n  }\n  return (sorted[mid - 1] + sorted[mid]) / 2;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

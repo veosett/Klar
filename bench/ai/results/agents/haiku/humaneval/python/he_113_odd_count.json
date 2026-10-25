@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def odd_count(lst: list[str]) -> list[str]:\n    result = []\n    for s in lst:\n        k = sum(1 for ch in s if int(ch) % 2 == 1)\n        ks = str(k)\n        result.append(\n            f\"the number of odd elements {ks}n the str{ks}ng {ks} of the {ks}nput.\"\n        )\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

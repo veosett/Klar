@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def cycpattern_check(a: str, b: str) -> bool:\n    if not b:\n        return True\n    n = len(b)\n    for i in range(n):\n        rot = b[i:] + b[:i]\n        if rot in a:\n            return True\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

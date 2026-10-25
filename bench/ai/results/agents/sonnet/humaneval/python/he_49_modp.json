@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def modp(n: int, p: int) -> int:\n    return pow(2, n, p)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

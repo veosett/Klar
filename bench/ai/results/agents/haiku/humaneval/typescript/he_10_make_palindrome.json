@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function isPalindrome(s: string): boolean {\n  let i = 0;\n  let j = s.length - 1;\n  while (i < j) {\n    if (s[i] !== s[j]) return false;\n    i++;\n    j--;\n  }\n  return true;\n}\n\nexport function make_palindrome(string: string): string {\n  for (let i = 0; i <= string.length; i++) {\n    if (isPalindrome(string.slice(i))) {\n      const prefix = string.slice(0, i);\n      return string + prefix.split(\"\").reverse().join(\"\");\n    }\n  }\n  return string;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

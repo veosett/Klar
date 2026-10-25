@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add(lst: List[Int]) -> Int {\n  var total = 0\n  for i in range(0, lst.len()) {\n    if i % 2 == 1 {\n      let x = lst.get_or(i, 0)\n      if x % 2 == 0 {\n        total = total + x\n      }\n    }\n  }\n  return total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

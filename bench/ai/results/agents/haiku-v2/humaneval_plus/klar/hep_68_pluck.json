@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn pluck(arr: List[Int]) -> List[Int] {\n  var found = false\n  var best_v = 0\n  var best_i = 0\n  let n = arr.len()\n  for i in range(0, n) {\n    let v = arr.get_or(i, 0)\n    if v % 2 == 0 {\n      if not found or v < best_v {\n        found = true\n        best_v = v\n        best_i = i\n      }\n    }\n  }\n  if found {\n    return [best_v, best_i]\n  }\n  return []\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

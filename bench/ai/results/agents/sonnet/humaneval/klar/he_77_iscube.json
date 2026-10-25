@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn iscube(a: Int) -> Bool {\n  let m = a.abs()\n  var i: Int = 0\n  while i * i * i <= m {\n    if i * i * i == m {\n      return true\n    }\n    i = i + 1\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

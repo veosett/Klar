@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn common_prefix(words: List[Str]) -> Str {\n  if words.is_empty() {\n    return \"\"\n  }\n  let first = words.get_or(0, \"\")\n  var out = \"\"\n  for c in first.chars() {\n    let p = out + c\n    if words.all(fn(w: Str) => w.starts_with(p)) {\n      out = p\n    } else {\n      return out\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

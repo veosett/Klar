@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import re\n\n\ndef is_bored(S: str) -> int:\n    sentences = re.split(r'[.?!]\\s*', S)\n    return sum(1 for s in sentences if s[:2] == 'I ')\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

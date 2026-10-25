@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sorted_list_sum(lst: list[str]) -> list[str]:\n    kept = [s for s in lst if len(s) % 2 == 0]\n    return sorted(kept, key=lambda s: (len(s), s))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

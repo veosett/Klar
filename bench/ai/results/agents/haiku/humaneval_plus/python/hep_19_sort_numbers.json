@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_numbers(numbers: str) -> str:\n    order = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']\n    rank = {w: i for i, w in enumerate(order)}\n    words = numbers.split()\n    for w in words:\n        if w not in rank:\n            raise ValueError(f\"unknown number word: {w}\")\n    return ' '.join(sorted(words, key=lambda w: rank[w]))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

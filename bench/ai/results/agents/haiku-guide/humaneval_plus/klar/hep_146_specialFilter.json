@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Count of numbers greater than 10 whose first and last digits are both odd.\n/// >>> assert specialFilter([15, -73, 14, -15]) == 1\n/// >>> assert specialFilter([33, -2, -3, 45, 21, 109]) == 2\npub fn specialFilter(nums: List[Int]) -> Int {\n  let odd = [\"1\", \"3\", \"5\", \"7\", \"9\"]\n  return nums.filter(fn(n) => n > 10 and is_odd_end(n, odd)).len()\n}\n\n/// Whether the first and the last digit of |n| are odd.\nfn is_odd_end(n: Int, odd: List[Str]) -> Bool {\n  let s = n.abs().to_str()\n  let first = s.slice(0, 1)\n  let last = s.slice(s.len() - 1, s.len())\n  return odd.contains(first) and odd.contains(last)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

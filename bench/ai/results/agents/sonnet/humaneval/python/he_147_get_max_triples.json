@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def get_max_triples(n: int) -> int:\n    c = [0, 0, 0]\n    for i in range(1, n + 1):\n        c[(i * i - i + 1) % 3] += 1\n    def C3(k):\n        return k * (k - 1) * (k - 2) // 6\n    return C3(c[0]) + C3(c[1]) + C3(c[2]) + c[0] * c[1] * c[2]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

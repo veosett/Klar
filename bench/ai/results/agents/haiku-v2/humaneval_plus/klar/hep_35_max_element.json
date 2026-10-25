@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn max_element(l: List[Int]) -> Int {\n  return l.max().unwrap_or(0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

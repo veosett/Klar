@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Whether `s` is a valid e-mail address by the simple rules of the task.\npub fn is_valid_email(s: Str) -> Bool {\n  if s.count(\"@\") != 1 {\n    return false\n  }\n  if s.contains(\" \") {\n    return false\n  }\n  let parts = s.split(\"@\")\n  let local = parts.get_or(0, \"\")\n  let domain = parts.get_or(1, \"\")\n  if local.is_empty() {\n    return false\n  }\n  if not domain.contains(\".\") {\n    return false\n  }\n  if domain.starts_with(\".\") or domain.ends_with(\".\") {\n    return false\n  }\n  if domain.contains(\"..\") {\n    return false\n  }\n  return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

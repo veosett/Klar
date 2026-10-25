@@ -1,0 +1,341 @@
+// The Python code of the repository from its primary sources (ROADMAP item 27): `git ls-files`, the import graph of
+// the Python modules, the Klar counterpart of each one and how often the two change in the same commit (`git log`).
+//
+//     klarc run tools/inventory.klar -- [--out docs/PYTHON_INVENTORY.md] [--coverage cov.json]
+//     klar run tools/inventory.klar -- ...
+//
+// Run it from the repository root (git must be on PATH). `--coverage` takes the JSON report of coverage.py
+// (`coverage json`) and adds the share of each module's lines that the test suite runs.
+use std.json.{Json, as_int, as_items, field, parse_json}
+use std.numfmt.{percent}
+
+type Opts { out: Str, coverage: Str }
+
+/// Python modules whose Klar counterpart has another name (the rest are paired by file name: klar/x.py ~
+/// compiler/x.klar). An empty list: no counterpart on purpose (said in the reason).
+const PAIRS: List[Pair[Str, List[Str]]] = [
+  Pair { first: "klar/cli.py", second: ["compiler/klarc.klar"] },
+  Pair { first: "klar/__main__.py", second: ["compiler/klarc.klar"] },
+  Pair { first: "klar/nodes.py", second: ["compiler/ast.klar", "compiler/astjson.klar"] },
+  Pair { first: "klar/diagnostics.py", second: ["compiler/report.klar", "compiler/similar.klar"] },
+  Pair { first: "klar/errors.py", second: ["compiler/report.klar"] },
+  Pair { first: "klar/packages.py", second: ["compiler/pkg.klar", "compiler/manifest.klar"] },
+  Pair { first: "klar/builtins.py", second: ["compiler/builtin_sigs.klar", "klar/rt/str.klar", "klar/rt/list.klar"] },
+  Pair { first: "klar/fakes.py", second: ["klar/rt/fake.klar"] },
+  Pair { first: "klar/sandbox.py", second: ["klar/rt/sandbox.klar"] },
+  Pair { first: "klar/trace.py", second: ["compiler/trace.klar", "klar/rt/trace.klar"] },
+  Pair { first: "klar/native/build.py", second: ["compiler/klarc.klar"] },
+  Pair { first: "klar/native/kir.py", second: ["compiler/lower.klar"] },
+  Pair { first: "klar/native/intrinsics.py", second: ["compiler/lower.klar"] },
+  Pair { first: "klar/tools/runtools.py", second: ["compiler/dev.klar", "compiler/profile.klar", "compiler/coverage.klar",
+    "compiler/evaluate.klar"] },
+]
+
+/// Roles of files that are Python by design, by path prefix (the first match wins).
+const ROLES: List[Pair[Str, Str]] = [
+  Pair { first: "bench/programs/", second: "программа бенчмарка: Python — один из сравниваемых языков" },
+  Pair { first: "bench/ai/cases/", second: "программа бенчмарка: Python — один из сравниваемых языков" },
+  Pair { first: "bench/ai/tasks/", second: "программа бенчмарка: Python — один из сравниваемых языков" },
+  Pair { first: "bench/ai/suites/", second: "программа бенчмарка: эталоны HumanEval и MBPP" },
+  Pair { first: "bench/ai/build_suites.py", second: "инструмент бенчмарка: читает задачи на Python модулем ast" },
+  Pair { first: "bench/ai/llm_bench.py", second: "заблокирован: нужна сеть (ROADMAP 10)" },
+  Pair { first: "tests/", second: "тестовая обвязка: сверяет Python и Klar" },
+  Pair { first: "editors/", second: "интеграция с редактором" },
+]
+
+/// Python backends: no Klar counterpart, the native backend takes their place.
+const BACKENDS: List[Str] = ["klar/interpreter.py", "klar/codegen.py", "klar/values.py"]
+
+fn parse_opts(args: List[Str]) -> Opts {
+  var o = Opts { out: "docs/PYTHON_INVENTORY.md", coverage: "" }
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    let v = args.get_or(i + 1, "")
+    if a == "--out" {
+      o = o with { out: v }
+    } else if a == "--coverage" {
+      o = o with { coverage: v }
+    }
+    i = i + 2
+  }
+  return o
+}
+
+fn git(args: List[Str]) -> Result[Str, Str] uses proc {
+  let r = run_capture(["git"].concat(args), "", "")?
+  if r.get_or(0, "1") != "0" {
+    let cmd = args.join(" ")
+    let why = r.get_or(2, "")
+    return Err("git {cmd}: {why}")
+  }
+  return Ok(r.get_or(1, ""))
+}
+
+/// The directory part of a path ("klar/tools/x.py" -> "klar/tools").
+fn dir_of(path: Str) -> Str {
+  let parts = path.split("/")
+  return parts.take(parts.len() - 1).join("/")
+}
+
+fn base_name(path: Str) -> Str {
+  return path.split("/").last().unwrap_or(path)
+}
+
+/// The repository file a Python import names, if it is one of ours (`from .x import`, `from ..x import`,
+/// `from klar.x import`, `import klar.x`, `from . import x`).
+fn resolve(from_file: Str, line: Str, files: Map[Str, Bool]) -> List[Str] {
+  var spec = ""
+  var names: List[Str] = []
+  if line.starts_with("from ") {
+    let rest = line.slice(5, line.len()).trim()
+    let words = rest.split(" import ")
+    spec = words.get_or(0, "").trim()
+    names = words.get_or(1, "").replace("(", "").replace(")", "").split(",").map(fn(n) => n.trim().split(" ").get_or(0,
+      "")).filter(fn(n) => not n.is_empty())
+  } else if line.starts_with("import ") {
+    spec = line.slice(7, line.len()).trim().split(" ").get_or(0, "").split(",").get_or(0, "")
+  }
+  var base = ""
+  if spec.starts_with(".") {
+    var dots = 0
+    while spec.slice(dots, dots + 1) == "." {
+      dots = dots + 1
+    }
+    var d = dir_of(from_file)
+    for _k in range(1, dots) {
+      d = dir_of(d)
+    }
+    let tail = spec.slice(dots, spec.len()).replace(".", "/")
+    base = match tail.is_empty() {
+      true => d,
+      false => d + "/" + tail,
+    }
+  } else if spec == "klar" or spec.starts_with("klar.") {
+    base = spec.replace(".", "/")
+  } else {
+    return []
+  }
+  var out: List[Str] = []
+  for cand in [base + ".py", base + "/__init__.py"] {
+    if files.has(cand) {
+      out = out.push(cand)
+    }
+  }
+  // `from . import x` / `from .tools import fmt`: the names may be modules themselves
+  for n in names {
+    let m = base + "/" + n + ".py"
+    if files.has(m) {
+      out = out.push(m)
+    }
+  }
+  return out.unique()
+}
+
+fn imports_of(path: Str, text: Str, files: Map[Str, Bool]) -> List[Str] {
+  var out: List[Str] = []
+  for raw in text.lines() {
+    let l = raw.trim()
+    if l.starts_with("from ") or l.starts_with("import ") {
+      out = out.concat(resolve(from_file: path, line: l, files: files))
+    }
+  }
+  return out.unique().filter(fn(f) => f != path)
+}
+
+/// The Klar files paired with a Python module, and how the pairing was found.
+fn counterpart(path: Str, files: Map[Str, Bool]) -> Pair[List[Str], Str] {
+  for p in PAIRS {
+    if p.first == path {
+      return Pair { first: p.second.filter(fn(f) => files.has(f)), second: "PAIRS" }
+    }
+  }
+  let name = base_name(path).replace(".py", "")
+  let same = "compiler/" + name + ".klar"
+  if files.has(same) {
+    return Pair { first: [same], second: "имя файла" }
+  }
+  return Pair { first: [], second: "" }
+}
+
+fn role_of(path: Str, klar: List[Str], reach: Map[Str, Bool]) -> Str {
+  for r in ROLES {
+    if path.starts_with(r.first) {
+      return r.second
+    }
+  }
+  if base_name(path) == "__init__.py" {
+    return "маркер пакета"
+  }
+  if BACKENDS.contains(path) {
+    return "Python-бэкенд (`--py`, `--interp`): его место занимает native"
+  }
+  if not klar.is_empty() {
+    return "эталон (оракул): есть пара на Klar"
+  }
+  if reach.has(path) {
+    return "путь пользователя, только Python: переносить"
+  }
+  return "недостижим из CLI"
+}
+
+/// Every file reachable from `start` in the import graph.
+fn reachable(start: List[Str], graph: Map[Str, List[Str]]) -> Map[Str, Bool] {
+  var seen: Map[Str, Bool] = Map {}
+  var queue = start
+  while not queue.is_empty() {
+    let f = queue.first().unwrap_or("")
+    queue = queue.drop(1)
+    if not seen.has(f) {
+      seen = seen.set(f, true)
+      queue = queue.concat(graph.get(f).unwrap_or([]))
+    }
+  }
+  return seen
+}
+
+/// The files of each commit in `git log --name-only --format=@%h` output.
+fn commits(log: Str) -> List[List[Str]] {
+  var out: List[List[Str]] = []
+  var cur: List[Str] = []
+  var started = false
+  for raw in log.lines() {
+    let l = raw.trim()
+    if l.starts_with("@") {
+      if started {
+        out = out.push(cur)
+      }
+      cur = []
+      started = true
+    } else if not l.is_empty() {
+      cur = cur.push(l)
+    }
+  }
+  if started {
+    out = out.push(cur)
+  }
+  return out
+}
+
+/// The share of a module's statements that the tests run, from coverage.py's JSON report (keys are absolute paths).
+fn covered(report: Json, path: Str) -> Option[Float] {
+  return match field(report, "files") {
+    Some(Json.Obj(fs)) => {
+      for e in fs.entries() {
+        if e.key.replace("\\", "/").ends_with("/" + path) {
+          let s = field(e.value, "summary")
+          let n = s.and_then(fn(x) => field(x, "num_statements")).and_then(as_int).unwrap_or(0)
+          let c = s.and_then(fn(x) => field(x, "covered_lines")).and_then(as_int).unwrap_or(0)
+          if n > 0 {
+            return Some(c.to_float() / n.to_float())
+          }
+        }
+      }
+      return None
+    },
+    _ => None,
+  }
+}
+
+fn short_role(role: Str) -> Str {
+  return role.split(":").get_or(0, role).trim()
+}
+
+fn md_table(header: List[Str], rows: List[List[Str]]) -> Str {
+  var s = "| " + header.join(" | ") + " |\n|" + header.map(fn(_h) => "---").join("|") + "|\n"
+  for r in rows {
+    s = s + "| " + r.join(" | ") + " |\n"
+  }
+  return s
+}
+
+fn main() uses io, fs, proc {
+  let o = parse_opts(cli_args())
+  let listed = match git(["ls-files"]) {
+    Ok(t) => t.lines().filter(fn(l) => not l.is_empty()),
+    Err(e) => {
+      eprint("inventory: {e}")
+      return exit(2)
+    },
+  }
+  let files: Map[Str, Bool] = listed.fold(Map {}, fn(s, f) => s.set(f, true))
+  let py = listed.filter(fn(f) => f.ends_with(".py"))
+  var graph: Map[Str, List[Str]] = Map {}
+  var sizes: Map[Str, Int] = Map {}
+  for f in py {
+    let text = read_file(f).unwrap_or("")
+    graph = graph.set(f, imports_of(path: f, text: text, files: files))
+    sizes = sizes.set(f, text.lines().len())
+  }
+  let reach = reachable(["klar/__main__.py", "klar/cli.py"].filter(fn(f) => files.has(f)), graph)
+  let history = match git(["log", "--no-merges", "--name-only", "--format=@%h"]) {
+    Ok(t) => commits(t),
+    Err(_) => [],
+  }
+  let report = match o.coverage.is_empty() {
+    true => Json.Null,
+    false => parse_json(read_file(o.coverage).unwrap_or("\{\}")).unwrap_or(Json.Null),
+  }
+  var rows: List[List[Str]] = []
+  var by_role: Map[Str, Int] = Map {}
+  var by_role_files: Map[Str, Int] = Map {}
+  var co_total = 0
+  var py_total = 0
+  for f in py.sort() {
+    let cp = counterpart(path: f, files: files)
+    let role = role_of(path: f, klar: cp.first, reach: reach)
+    let n = sizes.get(f).unwrap_or(0)
+    let key = short_role(role)
+    by_role = by_role.set(key, by_role.get(key).unwrap_or(0) + n)
+    by_role_files = by_role_files.set(key, by_role_files.get(key).unwrap_or(0) + 1)
+    let touched = history.filter(fn(c) => c.contains(f)).len()
+    let together = history.filter(fn(c) => c.contains(f) and cp.first.any(fn(k) => c.contains(k))).len()
+    if not cp.first.is_empty() {
+      co_total = co_total + together
+      py_total = py_total + touched
+    }
+    let cov = match covered(report: report, path: f) {
+      Some(x) => percent(x, 0),
+      None => "—",
+    }
+    let pair_text = match cp.first.is_empty() {
+      true => "—",
+      false => cp.first.map(fn(k) => "`" + k + "`").join(", "),
+    }
+    rows = rows.push(["`" + f + "`", "{n}", role, pair_text, "{together}/{touched}", cov])
+  }
+  let commit_count = history.len()
+  let both = history.filter(fn(c) => c.any(fn(x) => x.ends_with(".py") and x.starts_with("klar/")) and c.any(fn(x) =>
+    x.ends_with(".klar") and x.starts_with("compiler/"))).len()
+  var summary: List[List[Str]] = []
+  for k in by_role.keys().sort() {
+    summary = summary.push([k, "{by_role_files.get(k).unwrap_or(0)}", "{by_role.get(k).unwrap_or(0)}"])
+  }
+  let co_share = match py_total {
+    0 => "—",
+    _ => percent(co_total.to_float() / py_total.to_float(), 0),
+  }
+  let both_share = match commit_count {
+    0 => "—",
+    _ => percent(both.to_float() / commit_count.to_float(), 0),
+  }
+  let text = "# Python в репозитории — инвентарь\n\n" +
+    "Сгенерировано `tools/inventory.klar` из первоисточников: `git ls-files`, граф импортов Python-модулей " +
+    "(достижимость от `klar/cli.py`), пары с Klar-файлами и `git log`. Не править руками — перезапустить:\n\n" +
+    "```\nklarc run tools/inventory.klar -- --coverage cov.json\n```\n\n" + "## Итог по ролям\n\n" +
+    md_table(header: ["Роль", "Файлов", "Строк"], rows: summary) + "\n" + "## Цена двойной поддержки\n\n" +
+    "- Коммитов в истории: {commit_count}; из них меняют и `klar/*.py`, и `compiler/*.klar`: {both} ({both_share}).\n" +
+    "- Изменения модулей-оракулов вместе с их парой на Klar: {co_total} из {py_total} ({co_share}).\n" +
+    "  Каждое такое изменение — одна и та же правка, сделанная дважды. Коммиты в истории крупные, поэтому это " +
+    "грубая оценка.\n\n" + "## Каждый файл\n\n" +
+    "«Вместе» — коммиты, менявшие файл вместе с его парой на Klar, из всех коммитов, менявших файл. " +
+    "«Покрытие» — доля операторов, которые выполняет набор тестов (coverage.py, если передан `--coverage`).\n\n" +
+    md_table(header: ["Файл", "Строк", "Роль", "Пара на Klar", "Вместе", "Покрытие"], rows: rows)
+  match write_file(o.out, text) {
+    Ok(_) => print("inventory: {py.len()} Python files, {commit_count} commits -> {o.out}"),
+    Err(e) => {
+      eprint("inventory: {e}")
+      exit(2)
+    },
+  }
+}

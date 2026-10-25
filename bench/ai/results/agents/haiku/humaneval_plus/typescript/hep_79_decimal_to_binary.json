@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function decimal_to_binary(decimal: number): string {\n  return \"db\" + decimal.toString(2) + \"db\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

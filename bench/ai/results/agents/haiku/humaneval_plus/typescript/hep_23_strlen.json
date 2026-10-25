@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function strlen(string: string): number {\n  return string.length;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

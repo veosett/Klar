@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function smallest_change(arr: number[]): number {\n  let changes = 0;\n  let i = 0;\n  let j = arr.length - 1;\n  while (i < j) {\n    if (arr[i] !== arr[j]) {\n      changes++;\n    }\n    i++;\n    j--;\n  }\n  return changes;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

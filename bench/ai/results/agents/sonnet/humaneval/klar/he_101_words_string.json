@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn words_string(s: Str) -> List[Str] {\n  return s.replace(\",\", \" \").split(\" \").filter(fn(w) => not w.is_empty())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

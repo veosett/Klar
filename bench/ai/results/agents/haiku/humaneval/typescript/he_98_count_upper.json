@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_upper(s: string): number {\n  const vowels = \"AEIOU\";\n  let count = 0;\n  for (let i = 0; i < s.length; i += 2) {\n    if (vowels.includes(s[i])) {\n      count++;\n    }\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

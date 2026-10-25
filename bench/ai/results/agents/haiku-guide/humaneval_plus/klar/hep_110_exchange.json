@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn exchange(lst1: List[Int], lst2: List[Int]) -> Str {\n  let odd_count = lst1.count(fn(x) => x % 2 != 0)\n  let even_count = lst2.count(fn(x) => x % 2 == 0)\n  if even_count >= odd_count {\n    return \"YES\"\n  }\n  return \"NO\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

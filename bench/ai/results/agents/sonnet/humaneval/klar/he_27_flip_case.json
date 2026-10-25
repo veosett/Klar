@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn flip_case(string: Str) -> Str {\n  return string.chars().map(fn(c) => match c == c.upper() {\n    true => c.lower(),\n    false => c.upper(),\n  }).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -14,6 +14,53 @@ from .types import (ANY, BOOL, FLOAT, INT, NEVER, STR, UNIT, Eff, TCon, TFn, TPa
                     head, is_unit, list_of, map_of, option_of, prune, result_of, show, subst, unify)
 
 KNOWN_EFFECTS = {"io", "time", "rand", "fs", "net", "proc"}
+
+
+# ---- E0208: positional arguments of a function with 3+ parameters ----------------------------------------------
+# Positional is fine when the arguments cannot be in the wrong order unnoticed: parameters of different types
+# cannot be swapped (the types would not match), and among parameters of one type every argument but at most one
+# carries its parameter's name (`r` or `nr` for `r`, `r - 1`, `p.r`). Otherwise (`f(200, 20, 10)`, `cell(g, i, j)`)
+# the arguments must be named; an argument that carries another parameter's name is reported as swapped.
+def arg_name(e):
+    """The name an argument expression carries: `x`, `p.x`, `x + 1` / `x - 1` -> "x"; None for anything else."""
+    if isinstance(e, N.Name):
+        return e.name
+    if isinstance(e, N.FieldAccess):
+        return e.name
+    if isinstance(e, N.Binary) and e.op in ("+", "-"):
+        lit = (N.IntLit, N.FloatLit)
+        if isinstance(e.left, N.Name) and isinstance(e.right, lit):
+            return e.left.name
+        if isinstance(e.right, N.Name) and isinstance(e.left, lit) and e.op == "+":
+            return e.right.name
+    return None
+
+
+def carries(arg, param):
+    """Whether argument name `arg` stands for parameter `param`: equal, or with a prefix of 1-2 letters (`nr`, `pr`
+    for `r`; `new_count` is not `count`), ignoring a leading or trailing `_`."""
+    a, p = arg.strip("_"), param.strip("_")
+    return a == p or (len(p) > 0 and a.endswith(p) and 0 < len(a) - len(p) <= 2 and a[:len(a) - len(p)].isalpha())
+
+
+def positional_verdict(names, types, values):
+    """("ok",) | ("ambiguous", "`a`, `b`", type) | ("swapped", argument, parameter) for positional arguments."""
+    by_type = {}
+    for i, v in enumerate(values[:len(names)]):
+        by_type.setdefault(types[i], []).append(i)
+    for ty, idx in by_type.items():
+        if len(idx) < 2:
+            continue
+        group = [(names[i], arg_name(values[i])) for i in idx]
+        for p, a in group:
+            if a is not None and not carries(a, p):
+                for q, _ in group:
+                    if q != p and carries(a, q):
+                        return ("swapped", a, p)
+        unnamed = [p for p, a in group if a is None or not carries(a, p)]
+        if len(unnamed) > 1:
+            return ("ambiguous", "`, `".join(n for n, _ in group), ty)
+    return ("ok",)
 # the effects a test may declare: they run on fakes (an empty file system in memory, a clock at 0, fixed random numbers)
 TEST_EFFECTS = {"io", "fs", "time", "rand"}
 TEST_HINT = "pass the result of the program or network call as a parameter, so the code under test stays testable"
@@ -1442,12 +1489,20 @@ class Checker:
         if positional and named and args.index(positional[-1]) > args.index(named[0]):
             self.error("E0209", "positional arguments must come before named ones", span)
         if sig.user and len(sig.params) >= 3 and positional and not self.sys:
+            verdict = positional_verdict([n for n, _ in params], [show(prune(t)) for _, t in params],
+                                         [a.value for a in positional])
             names = [n for n, _ in params]
             example = ", ".join(f"{n}: ..." for n in names)
-            edits = [{"span": Span(a.span.file, a.span.line, a.span.col, a.span.line, a.span.col),
-                      "text": f"{names[i]}: "} for i, a in enumerate(positional) if i < len(names)]
-            self.error("E0208", f"`{display}` has {len(sig.params)} parameters, so arguments must be named",
-                       span, hint=f"write `{display}({example})`", fix={"edits": edits} if edits else None)
+            if verdict[0] == "swapped":
+                self.error("E0208", f"the arguments of `{display}` look swapped: `{verdict[1]}` is passed as "
+                                    f"`{verdict[2]}`", span,
+                           hint=f"check the order, or name them: `{display}({example})`")
+            elif verdict[0] == "ambiguous":
+                edits = [{"span": Span(a.span.file, a.span.line, a.span.col, a.span.line, a.span.col),
+                          "text": f"{names[i]}: "} for i, a in enumerate(positional) if i < len(names)]
+                self.error("E0208", f"`{display}` has {len(sig.params)} parameters and `{verdict[1]}` share the type "
+                                    f"`{verdict[2]}`, so the arguments must be named", span,
+                           hint=f"write `{display}({example})`", fix={"edits": edits} if edits else None)
         assigned = {}
         names = [n for n, _ in params]
         for i, a in enumerate(positional):

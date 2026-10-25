@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn skjkasdkd(lst: List[Int]) -> Int {\n  var best: Int = -1\n  for n in lst {\n    if n > best and is_prime(n) {\n      best = n\n    }\n  }\n  var total: Int = 0\n  var m: Int = best\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  return total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

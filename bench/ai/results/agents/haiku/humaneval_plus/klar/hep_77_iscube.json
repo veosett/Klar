@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn iscube(a: Int) -> Bool {\n  let m = a.abs()\n  let r = m.to_float().pow(0.3333333333333333).round()\n  for c in range(r - 1, r + 2) {\n    if c >= 0 and c.pow(3) == m {\n      return true\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

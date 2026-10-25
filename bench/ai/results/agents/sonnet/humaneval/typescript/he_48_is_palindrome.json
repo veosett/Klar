@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_palindrome(text: string): boolean {\n  return text === text.split(\"\").reverse().join(\"\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

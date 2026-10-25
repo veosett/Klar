@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sort_array(arr: number[]): number[] {\n  const ones = (n: number): number => {\n    let c = 0;\n    for (let m = Math.abs(n); m > 0; m = Math.floor(m / 2)) c += m % 2;\n    return c;\n  };\n  return [...arr].sort((a, b) => ones(a) - ones(b) || a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

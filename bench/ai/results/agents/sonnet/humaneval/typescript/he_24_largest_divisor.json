@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function largest_divisor(n: number): number {\n  for (let i = n - 1; i >= 1; i--) if (n % i === 0) return i;\n  return 1;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

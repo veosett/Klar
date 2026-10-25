@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function car_race_collision(n: number): number {\n  return n * n;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

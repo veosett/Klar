@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function separate_paren_groups(paren_string: string): string[] {\n  const res: string[] = [];\n  let depth = 0;\n  let cur = \"\";\n  for (const c of paren_string) {\n    if (c === \"(\") {\n      depth++;\n      cur += c;\n    } else if (c === \")\") {\n      depth--;\n      cur += c;\n      if (depth === 0) {\n        res.push(cur);\n        cur = \"\";\n      }\n    }\n  }\n  return res;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def odd_count(lst: list[str]) -> list[str]:\n    res = []\n    for s in lst:\n        n = str(sum(1 for c in s if c in '13579'))\n        res.append(\"the number of odd elements \" + n + \"n the str\" + n + \"ng \" + n + \" of the \" + n + \"nput.\")\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_happy(s: str) -> bool:\n    if len(s) < 3:\n        return False\n    for i in range(len(s) - 2):\n        if len(set(s[i:i + 3])) != 3:\n            return False\n    return True\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

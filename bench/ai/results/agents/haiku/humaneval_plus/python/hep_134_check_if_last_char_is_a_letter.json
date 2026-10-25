@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def check_if_last_char_is_a_letter(txt: str) -> bool:\n    if not txt:\n        return False\n    last = txt[-1]\n    if not last.isalpha():\n        return False\n    if len(txt) == 1:\n        return True\n    return txt[-2] == ' '\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

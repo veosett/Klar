@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fib(n: int) -> int:\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

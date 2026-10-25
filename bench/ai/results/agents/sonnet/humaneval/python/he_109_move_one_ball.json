@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def move_one_ball(arr: list[int]) -> bool:\n    n = len(arr)\n    if n == 0:\n        return True\n    drops = sum(1 for i in range(n) if arr[i] > arr[(i + 1) % n])\n    return drops <= 1\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

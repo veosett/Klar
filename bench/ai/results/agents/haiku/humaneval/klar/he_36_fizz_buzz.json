@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert fizz_buzz(78) == 2\npub fn fizz_buzz(n: Int) -> Int {\n  return range(0, n).filter(fn(i: Int) => i % 11 == 0 or i % 13 == 0).map(fn(i: Int) => i.to_str().count(\"7\")).sum()\n}\n\ntest \"fizz_buzz\" {\n  assert fizz_buzz(50) == 0\n  assert fizz_buzz(78) == 2\n  assert fizz_buzz(79) == 3\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

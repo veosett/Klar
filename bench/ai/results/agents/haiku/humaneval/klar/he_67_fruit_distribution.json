@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fruit_distribution(s: Str, n: Int) -> Int {\n  let parts = s.split(\" \")\n  let apples = parts.get_or(0, \"0\").to_int().unwrap_or(0)\n  let oranges = parts.get_or(3, \"0\").to_int().unwrap_or(0)\n  return n - apples - oranges\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

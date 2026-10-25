@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.text.{words}\n\nfn consonant_count(word: Str) -> Int {\n  return word.lower().chars().filter(fn(c) => \"bcdfghjklmnpqrstvwxyz\".contains(c)).len()\n}\n\npub fn select_words(s: Str, n: Int) -> List[Str] {\n  return words(s).filter(fn(w) => consonant_count(w) == n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

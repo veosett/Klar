@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def select_words(s: str, n: int) -> list[str]:\n    vowels = set('aeiouAEIOU')\n    result = []\n    for word in s.split():\n        consonants = sum(1 for ch in word if ch.isalpha() and ch not in vowels)\n        if consonants == n:\n            result.append(word)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

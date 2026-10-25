@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn next_smallest(lst: List[Int]) -> Option[Int] {\n  return lst.unique().sort().get(1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

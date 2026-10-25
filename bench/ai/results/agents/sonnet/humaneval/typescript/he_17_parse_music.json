@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function parse_music(music_string: string): number[] {\n  const m: { [k: string]: number } = { \"o\": 4, \"o|\": 2, \".|\": 1 };\n  return music_string.split(\" \").filter((x) => x !== \"\").map((x) => m[x]);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

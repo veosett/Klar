@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn digit_name(d: Int) -> Str {\n  return match d {\n    1 => \"One\",\n    2 => \"Two\",\n    3 => \"Three\",\n    4 => \"Four\",\n    5 => \"Five\",\n    6 => \"Six\",\n    7 => \"Seven\",\n    8 => \"Eight\",\n    9 => \"Nine\",\n    _ => \"\",\n  }\n}\n\npub fn by_length(arr: List[Int]) -> List[Str] {\n  let digits = arr.filter(fn(x) => (x >= 1) and (x <= 9)).sort().reverse()\n  return digits.map(fn(x) => digit_name(x))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

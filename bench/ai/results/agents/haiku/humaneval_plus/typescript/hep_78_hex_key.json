@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function hex_key(num: string): number {\n  const primes = \"2357BD\";\n  let count = 0;\n  for (let i = 0; i < num.length; i++) {\n    if (primes.indexOf(num.charAt(i)) !== -1) {\n      count++;\n    }\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

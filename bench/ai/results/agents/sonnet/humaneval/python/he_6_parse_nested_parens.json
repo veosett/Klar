@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def parse_nested_parens(paren_string: str) -> list[int]:\n    res = []\n    for g in paren_string.split():\n        d = m = 0\n        for c in g:\n            if c == '(':\n                d += 1\n                m = max(m, d)\n            elif c == ')':\n                d -= 1\n        res.append(m)\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

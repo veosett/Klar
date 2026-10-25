@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_valid_email(s: string): boolean {\n  if (s.includes(\" \")) return false;\n  const parts = s.split(\"@\");\n  if (parts.length !== 2) return false;\n  const [local, domain] = parts;\n  if (local.length === 0) return false;\n  if (!domain.includes(\".\")) return false;\n  if (domain.startsWith(\".\") || domain.endsWith(\".\")) return false;\n  if (domain.includes(\"..\")) return false;\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

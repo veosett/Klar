@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn ones_count(n: Int) -> Int {\n  var x = n.abs()\n  var c = 0\n  while x > 0 {\n    if x % 2 == 1 {\n      c = c + 1\n    }\n    x = x / 2\n  }\n  return c\n}\n\n/// >>> assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 3, 4, 5]\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  return arr.sort().sort_by(fn(n: Int) => ones_count(n))\n}\n\ntest \"sort_array\" {\n  assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 4, 3, 5]\n  assert sort_array([-2, -3, -4, -5, -6]) == [-4, -2, -6, -5, -3]\n  assert sort_array([1, 0, 2, 3, 4]) == [0, 1, 2, 3, 4]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

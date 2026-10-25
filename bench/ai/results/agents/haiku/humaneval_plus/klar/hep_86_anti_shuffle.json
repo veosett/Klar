@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn sort_word(word: Str) -> Str {\n  return word.chars().sort().join(\"\")\n}\n\n/// >>> assert anti_shuffle(\"hello\") == \"ehllo\"\npub fn anti_shuffle(s: Str) -> Str {\n  return s.split(\" \").map(fn(w) => sort_word(w)).join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

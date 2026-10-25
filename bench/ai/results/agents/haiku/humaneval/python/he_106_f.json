@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def f(n: int) -> list[int]:\n    result = []\n    for i in range(1, n + 1):\n        if i % 2 == 0:\n            fact = 1\n            for k in range(2, i + 1):\n                fact *= k\n            result.append(fact)\n        else:\n            result.append(i * (i + 1) // 2)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

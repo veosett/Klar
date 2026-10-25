@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Divides xs[i] by ys[i] (truncating); fails at the first zero divisor.\npub fn divide_all(xs: List[Int], ys: List[Int]) -> Result[List[Int], Str] {\n  var out: List[Int] = []\n  for i in range(0, xs.len()) {\n    let x = xs.get_or(i, 0)\n    let y = ys.get_or(i, 0)\n    if y == 0 {\n      return Err(\"division by zero at index {i}\")\n    }\n    out = out.push(x / y)\n  }\n  return Ok(out)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

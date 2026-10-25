@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function choose_num(x: number, y: number): number {\n  if (x > y) {\n    return -1;\n  }\n  return y % 2 === 0 ? y : (y - 1 >= x ? y - 1 : -1);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

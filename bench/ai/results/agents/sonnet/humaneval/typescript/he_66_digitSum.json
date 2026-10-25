@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function digitSum(s: string): number {\n  let t = 0;\n  for (const c of s) if (c >= \"A\" && c <= \"Z\") t += c.charCodeAt(0);\n  return t;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

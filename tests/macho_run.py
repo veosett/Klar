@@ -187,6 +187,10 @@ class Machine:
         if n == 42:                                             # pipe: fds in RAX, RDX
             r, w = os.pipe()
             return (r, w)
+        if n == 58:                                             # readlink(path, buf, n): EINVAL if not a link
+            target = os.readlink(self.cstr(a[0]))[:a[2]]
+            uc.mem_write(a[1], target)
+            return len(target)
         if n == 59:                                             # execve
             path = self.cstr(a[0])
             os.execve(path, self.ptrs(a[1]), {k.decode(): v.decode() for k, _, v in

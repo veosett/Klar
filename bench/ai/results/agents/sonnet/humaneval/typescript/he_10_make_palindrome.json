@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function make_palindrome(string: string): string {\n  const isPal = (s: string): boolean => {\n    for (let i = 0, j = s.length - 1; i < j; i++, j--) if (s[i] !== s[j]) return false;\n    return true;\n  };\n  for (let i = 0; i <= string.length; i++) {\n    if (isPal(string.slice(i))) {\n      return string + string.slice(0, i).split(\"\").reverse().join(\"\");\n    }\n  }\n  return string;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

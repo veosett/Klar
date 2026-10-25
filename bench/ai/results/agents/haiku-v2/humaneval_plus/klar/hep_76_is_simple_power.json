@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_simple_power(x: Int, n: Int) -> Bool {\n  if x == 1 {\n    return true\n  }\n  if n <= 1 {\n    return false\n  }\n  var p = n\n  while p < x {\n    p = p * n\n  }\n  return p == x\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

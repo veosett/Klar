@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from collections import Counter\n\n\ndef top_k(words: list[str], k: int) -> list[str]:\n    counts = Counter(words)\n    ordered = sorted(counts.keys(), key=lambda w: (-counts[w], w))\n    if k <= 0:\n        return []\n    return ordered[:k]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn strange_sort_list(lst: List[Int]) -> List[Int] {\n  let s = lst.sort()\n  var res: List[Int] = []\n  var lo = 0\n  var hi = s.len() - 1\n  var take_min = true\n  while lo <= hi {\n    if take_min {\n      res = res.push(s.get_or(lo, 0))\n      lo = lo + 1\n    } else {\n      res = res.push(s.get_or(hi, 0))\n      hi = hi - 1\n    }\n    take_min = not take_min\n  }\n  return res\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def correct_bracketing(brackets: str) -> bool:\n    d = 0\n    for c in brackets:\n        d += 1 if c == '(' else -1\n        if d < 0:\n            return False\n    return d == 0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

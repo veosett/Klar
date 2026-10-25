@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  var out: List[Int] = []\n  for x in range(lo, hi + 1) {\n    if x < 10 and x % 2 == 0 {\n      out = out.push(x)\n    }\n  }\n  return out\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "pub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  let top = hi.min(9)\n  var out: List[Int] = []\n  if lo > top {\n    return out\n  }\n  for x in range(lo, top + 1) {\n    if x % 2 == 0 {\n      out = out.push(x)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

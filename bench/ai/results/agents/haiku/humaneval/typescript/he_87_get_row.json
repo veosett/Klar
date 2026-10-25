@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function get_row(lst: number[][], x: number): [number, number][] {\n  const result: [number, number][] = [];\n  for (let r = 0; r < lst.length; r++) {\n    const row = lst[r];\n    const cols: number[] = [];\n    for (let c = 0; c < row.length; c++) {\n      if (row[c] === x) {\n        cols.push(c);\n      }\n    }\n    cols.sort((a, b) => b - a);\n    for (const c of cols) {\n      result.push([r, c]);\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

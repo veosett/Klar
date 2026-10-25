@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def histogram(test_value: str) -> dict[str, int]:\n    c = {}\n    for t in test_value.split():\n        c[t] = c.get(t, 0) + 1\n    if not c:\n        return {}\n    m = max(c.values())\n    return {k: v for k, v in c.items() if v == m}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

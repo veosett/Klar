@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def make_palindrome(string: str) -> str:\n    if not string:\n        return ''\n    n = len(string)\n    for i in range(n):\n        suffix = string[i:]\n        if suffix == suffix[::-1]:\n            return string + string[:i][::-1]\n    return string\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

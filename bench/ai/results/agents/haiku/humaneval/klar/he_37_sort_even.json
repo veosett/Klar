@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sort_even(l: List[Int]) -> List[Int] {\n  let evens = l.enumerate().filter(fn(q) => q.index % 2 == 0).map(fn(q) => q.value)\n  let sorted_evens = evens.sort()\n  var result: List[Int] = []\n  var k = 0\n  for item in l.enumerate() {\n    if item.index % 2 == 0 {\n      result = result.push(sorted_evens.get_or(k, 0))\n      k = k + 1\n    } else {\n      result = result.push(item.value)\n    }\n  }\n  return result\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

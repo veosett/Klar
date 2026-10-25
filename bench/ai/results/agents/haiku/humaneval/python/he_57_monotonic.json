@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def monotonic(l: list[int]) -> bool:\n    increasing = all(a <= b for a, b in zip(l, l[1:]))\n    decreasing = all(a >= b for a, b in zip(l, l[1:]))\n    return increasing or decreasing\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

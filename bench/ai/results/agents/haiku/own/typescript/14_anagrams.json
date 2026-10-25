@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function group_anagrams(words: string[]): string[][] {\n  const groups = new Map<string, string[]>();\n  for (const w of words) {\n    const key = w.split(\"\").sort().join(\"\");\n    const g = groups.get(key);\n    if (g) g.push(w);\n    else groups.set(key, [w]);\n  }\n  const out: string[][] = [];\n  for (const g of groups.values()) {\n    g.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));\n    out.push(g);\n  }\n  out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

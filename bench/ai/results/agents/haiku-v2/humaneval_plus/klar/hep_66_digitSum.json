@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_upper_char(c: Str) -> Bool {\n  return c == c.upper() and c != c.lower()\n}\n\npub fn digitSum(s: Str) -> Int {\n  let uppers = s.chars().filter(fn(c) => is_upper_char(c))\n  return uppers.map(fn(c) => c.codes().get_or(0, 0)).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

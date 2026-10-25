@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn digit_value(c: Str) -> Int {\n  return \"0123456789\".index_of(c).unwrap_or(0)\n}\n\nfn digit_key(x: Int) -> Int {\n  let s = x.abs().to_str()\n  var total: Int = 0\n  for c in s.chars() {\n    total = total + digit_value(c)\n  }\n  if x < 0 {\n    let first = digit_value(s.slice(0, 1))\n    return total - 2 * first\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let keyed: List[Pair[Int, Int]] = nums.enumerate().map(fn(p: Indexed[Int]) => Pair { first: digit_key(p.value) * 1000000007 + p.index, second: p.value })\n  let sorted: List[Pair[Int, Int]] = keyed.sort_by(fn(q: Pair[Int, Int]) => q.first)\n  return sorted.map(fn(q: Pair[Int, Int]) => q.second)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

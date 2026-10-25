@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The list whose total character count is smaller; the first list on a tie.\n/// >>> assert total_match([\"hi\", \"admin\"], [\"hI\", \"Hi\"]) == [\"hI\", \"Hi\"]\npub fn total_match(lst1: List[Str], lst2: List[Str]) -> List[Str] {\n  let n1 = lst1.map(fn(s) => s.len()).sum()\n  let n2 = lst2.map(fn(s) => s.len()).sum()\n  if n2 < n1 {\n    return lst2\n  }\n  return lst1\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

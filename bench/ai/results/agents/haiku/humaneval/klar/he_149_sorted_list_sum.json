@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sorted_list_sum(lst: List[Str]) -> List[Str] {\n  let alphabetical = lst.sort()\n  let longest = alphabetical.fold(0, fn(acc, w) => acc.max(w.len()))\n  var out: List[Str] = []\n  for size in range(0, longest + 1) {\n    if size % 2 == 0 {\n      out = out.concat(alphabetical.filter(fn(w) => w.len() == size))\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

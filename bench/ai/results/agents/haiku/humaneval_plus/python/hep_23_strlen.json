@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def strlen(string: str) -> int:\n    return len(string)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

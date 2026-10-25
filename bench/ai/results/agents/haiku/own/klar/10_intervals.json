@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Merges overlapping (and touching) [start, end] intervals, sorted by start.\npub fn merge_intervals(xs: List[List[Int]]) -> List[List[Int]] {\n  let sorted = xs.sort_by(fn(iv) => iv.get_or(0, 0))\n  var out: List[List[Int]] = []\n  var cur_s = 0\n  var cur_e = 0\n  var have = false\n  for iv in sorted {\n    let s = iv.get_or(0, 0)\n    let e = iv.get_or(1, 0)\n    if not have {\n      cur_s = s\n      cur_e = e\n      have = true\n    } else if s <= cur_e {\n      if e > cur_e {\n        cur_e = e\n      }\n    } else {\n      out = out.push([cur_s, cur_e])\n      cur_s = s\n      cur_e = e\n    }\n  }\n  if have {\n    out = out.push([cur_s, cur_e])\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

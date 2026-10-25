@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "export function solve(s: string): string {\n  const hasLetter = /[a-zA-Z]/.test(s);\n  if (!hasLetter) {\n    return s.split(\"\").reverse().join(\"\");\n  }\n  let result = \"\";\n  for (const ch of s) {\n    const lower = ch.toLowerCase();\n    const upper = ch.toUpperCase();\n    if (ch === lower && ch !== upper) {\n      result += upper;\n    } else if (ch === upper && ch !== lower) {\n      result += lower;\n    } else {\n      result += ch;\n    }\n  }\n  return result;\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "export function solve(s: string): string {\n  const chars = Array.from(s);\n  const hasLetter = chars.some((ch) => /\\p{L}/u.test(ch));\n  if (!hasLetter) {\n    return chars.reverse().join(\"\");\n  }\n  return chars\n    .map((ch) => {\n      const lower = ch.toLowerCase();\n      const upper = ch.toUpperCase();\n      if (ch === lower && upper !== lower) {\n        return upper;\n      }\n      if (ch === upper && lower !== upper) {\n        return lower;\n      }\n      return ch;\n    })\n    .join(\"\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

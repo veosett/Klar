@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function how_many_times(string: string, substring: string): number {\n  if (substring.length === 0) return 0;\n  let count = 0;\n  for (let i = 0; i + substring.length <= string.length; i++) {\n    if (string.startsWith(substring, i)) count++;\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

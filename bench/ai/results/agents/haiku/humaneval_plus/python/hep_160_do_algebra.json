@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def do_algebra(operator: list[str], operand: list[int]) -> int:\n    parts = [str(operand[0])]\n    for op, num in zip(operator, operand[1:]):\n        parts.append(op)\n        parts.append(str(num))\n    return eval(' '.join(parts))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

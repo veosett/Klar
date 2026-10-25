@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn derivative(xs: List[Int]) -> List[Int] {\n  let n = xs.len()\n  return range(1, n).map(fn(i) => xs.get_or(i, 0) * i)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

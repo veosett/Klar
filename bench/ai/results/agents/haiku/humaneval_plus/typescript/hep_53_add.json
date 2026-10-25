@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function add(x: number, y: number): number {\n  return x + y;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

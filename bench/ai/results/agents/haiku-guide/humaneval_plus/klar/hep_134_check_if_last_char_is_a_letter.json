@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn check_if_last_char_is_a_letter(txt: Str) -> Bool {\n  let cs = txt.chars()\n  if cs.is_empty() {\n    return false\n  }\n  let last = cs.last().unwrap_or(\" \")\n  let is_letter = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(last)\n  if not is_letter {\n    return false\n  }\n  if cs.len() == 1 {\n    return true\n  }\n  return cs.get(cs.len() - 2).unwrap_or(\" \") == \" \"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

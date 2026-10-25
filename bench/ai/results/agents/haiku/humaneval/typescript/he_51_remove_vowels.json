@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function remove_vowels(text: string): string {\n  return text.replace(/[aeiouAEIOU]/g, \"\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def skjkasdkd(lst: list[int]) -> int:\n    def is_prime(n: int) -> bool:\n        if n < 2:\n            return False\n        i = 2\n        while i * i <= n:\n            if n % i == 0:\n                return False\n            i += 1\n        return True\n\n    primes = [x for x in lst if is_prime(x)]\n    if not primes:\n        return 0\n    return sum(int(d) for d in str(max(primes)))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// How many times the substring occurs, counting overlapping cases.\n/// >>> assert how_many_times(\"aaaa\", \"aa\") == 3\npub fn how_many_times(string: Str, substring: Str) -> Int {\n  let n = string.len()\n  let m = substring.len()\n  var count = 0\n  for i in range(0, n - m + 1) {\n    if string.slice(i, i + m) == substring {\n      count = count + 1\n    }\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

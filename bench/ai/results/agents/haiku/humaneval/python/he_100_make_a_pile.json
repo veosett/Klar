@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def make_a_pile(n: int) -> list[int]:\n    return [n + 2 * i for i in range(n)]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

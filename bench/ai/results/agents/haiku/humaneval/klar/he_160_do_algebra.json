@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn safe_div(a: Int, b: Int) -> Int {\n  if b == 0 {\n    return 0\n  }\n  return a / b\n}\n\n/// Evaluates with the usual precedence: ** first, then * and //, then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var vals: List[Int] = [operand.get_or(0, 0)]\n  var ops: List[Str] = []\n  var j = 0\n  while j < operator.len() {\n    let op = operator.get_or(j, \"+\")\n    let b = operand.get_or(j + 1, 0)\n    if op == \"**\" {\n      let last = vals.last().unwrap_or(0)\n      vals = vals.set(vals.len() - 1, last.pow(b))\n    } else {\n      ops = ops.push(op)\n      vals = vals.push(b)\n    }\n    j = j + 1\n  }\n  var terms: List[Int] = []\n  var sign = 1\n  var cur = vals.get_or(0, 0)\n  var k = 0\n  while k < ops.len() {\n    let op = ops.get_or(k, \"+\")\n    let b = vals.get_or(k + 1, 0)\n    if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      cur = safe_div(cur, b)\n    } else {\n      terms = terms.push(sign * cur)\n      sign = 1\n      if op == \"-\" {\n        sign = -1\n      }\n      cur = b\n    }\n    k = k + 1\n  }\n  terms = terms.push(sign * cur)\n  return terms.sum()\n}\n\ntest \"do_algebra\" {\n  assert do_algebra([\"**\", \"*\", \"+\"], [2, 3, 4, 5]) == 37\n  assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\n  assert do_algebra([\"//\"], [7, 2]) == 3\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

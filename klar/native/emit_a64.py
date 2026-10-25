@@ -1093,6 +1093,13 @@ class A64Emitter:
         self.syscall(35)
         self.stub_end()
         sys("os_getcwd", 17, 2)                # -> length with the final NUL
+        self.stub_begin("os_readlink")         # readlinkat(AT_FDCWD, path, buf, n)
+        a.mov_ri(X0, AT_FDCWD)
+        self.arg(X1, 0)
+        self.arg(X2, 1)
+        self.arg(X3, 2)
+        self.syscall(78)
+        self.stub_end()
         self.stub_begin("os_poll")             # ppoll(fds, n, NULL, NULL, 0)
         self.arg(X0, 0)
         self.arg(X1, 1)

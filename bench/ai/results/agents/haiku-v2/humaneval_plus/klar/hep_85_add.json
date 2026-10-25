@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add(lst: List[Int]) -> Int {\n  var total: Int = 0\n  var i: Int = 1\n  let n = lst.len()\n  while i < n {\n    let v = lst.get_or(i, 0)\n    if v.is_even() {\n      total = total + v\n    }\n    i = i + 2\n  }\n  return total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "const NUMBER_WORDS: string[] = [\n  \"zero\",\n  \"one\",\n  \"two\",\n  \"three\",\n  \"four\",\n  \"five\",\n  \"six\",\n  \"seven\",\n  \"eight\",\n  \"nine\",\n];\n\nexport function sort_numbers(numbers: string): string {\n  const words = numbers.split(\" \").filter((w) => w.length > 0);\n  words.sort((a, b) => NUMBER_WORDS.indexOf(a) - NUMBER_WORDS.indexOf(b));\n  return words.join(\" \");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

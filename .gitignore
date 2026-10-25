@@ -6,6 +6,8 @@ build/
 *.map
 bench/ai/results/*.tmp
 bench/ai/results/reference/
+bench/ai/results/*-reference/
+bench/ai/results/humaneval-agents-sonnet/
 .ruff_cache/
 
 # editor extension
@@ -19,3 +21,4 @@ node_modules/
 
 # seed compilers for build.sh / build.bat
 /seed/
+fuzz-failures/

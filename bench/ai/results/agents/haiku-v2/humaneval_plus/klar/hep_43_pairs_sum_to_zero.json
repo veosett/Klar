@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn pairs_sum_to_zero(l: List[Int]) -> Bool {\n  let n = l.len()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      if l.get_or(i, 0) + l.get_or(j, 0) == 0 {\n        return true\n      }\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

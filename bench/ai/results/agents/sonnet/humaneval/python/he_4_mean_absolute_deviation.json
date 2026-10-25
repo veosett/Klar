@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def mean_absolute_deviation(numbers: list[float]) -> float:\n    m = sum(numbers) / len(numbers)\n    return sum(abs(x - m) for x in numbers) / len(numbers)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

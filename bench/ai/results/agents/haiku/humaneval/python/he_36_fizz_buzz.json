@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fizz_buzz(n: int) -> int:\n    count = 0\n    for i in range(n):\n        if i % 11 == 0 or i % 13 == 0:\n            count += str(i).count('7')\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

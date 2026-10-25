@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fibfib(n: Int) -> Int {\n  var a = 0\n  var b = 0\n  var c = 1\n  for _i in range(0, n) {\n    let t = a + b + c\n    a = b\n    b = c\n    c = t\n  }\n  return a\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

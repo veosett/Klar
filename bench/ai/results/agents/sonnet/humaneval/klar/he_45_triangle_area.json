@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn triangle_area(a: Int, h: Int) -> Float {\n  return (a * h).to_float() / 2.0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

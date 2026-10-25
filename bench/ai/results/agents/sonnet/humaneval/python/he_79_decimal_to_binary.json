@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def decimal_to_binary(decimal: int) -> str:\n    return \"db\" + bin(decimal)[2:] + \"db\"\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

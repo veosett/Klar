@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn signed_digit_sum(x: Int) -> Int {\n  let text = x.abs().to_str()\n  let total = text.chars().map(fn(c) => c.to_int().unwrap_or(0)).sum()\n  let first = text.slice(0, 1).to_int().unwrap_or(0)\n  if x < 0 {\n    return total - 2 * first\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let keyed = nums.enumerate().sort_by(fn(it) => signed_digit_sum(it.value) * 1000000 + it.index)\n  return keyed.map(fn(it) => it.value)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

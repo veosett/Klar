@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn transpose(m: List[List[Int]]) -> List[List[Int]] {\n  let width = match m.first() {\n    Some(r) => r.len(),\n    None => 0,\n  }\n  return range(0, width).map(fn(j: Int) -> List[Int] {\n    return m.map(fn(row: List[Int]) -> Int { return row.get_or(j, 0) })\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

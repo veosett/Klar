@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn has_close_elements(numbers: List[Float], threshold: Float) -> Bool {\n  let n = numbers.len()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      let d = (numbers.get_or(i, 0.0) - numbers.get_or(j, 0.0)).abs()\n      if d < threshold {\n        return true\n      }\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

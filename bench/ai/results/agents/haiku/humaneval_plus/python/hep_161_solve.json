@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def solve(s: str) -> str:\n    if not any(ch.isalpha() for ch in s):\n        return s[::-1]\n    return ''.join(ch.swapcase() if ch.isalpha() else ch for ch in s)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn has_even_digit(n: Int) -> Bool {\n  return n.to_str().chars().any(fn(c: Str) => c == \"0\" or c == \"2\" or c == \"4\" or c == \"6\" or c == \"8\")\n}\n\n/// >>> assert unique_digits([15, 33, 1422, 1]) == [1, 15, 33]\npub fn unique_digits(x: List[Int]) -> List[Int] {\n  return x.filter(fn(n: Int) => not has_even_digit(n)).sort()\n}\n\ntest \"unique_digits\" {\n  assert unique_digits([15, 33, 1422, 1]) == [1, 15, 33]\n  assert unique_digits([152, 323, 1422, 10]) == []\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

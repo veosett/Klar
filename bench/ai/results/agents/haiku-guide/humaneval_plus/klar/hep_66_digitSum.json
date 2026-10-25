@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Sum of the ASCII codes of the upper-case letters only.\n/// >>> assert digitSum(\"abAB\") == 131\n/// >>> assert digitSum(\"\") == 0\npub fn digitSum(s: Str) -> Int {\n  var total = 0\n  for c in s.chars() {\n    if c == c.upper() and c != c.lower() {\n      total = total + c.codes().sum()\n    }\n  }\n  return total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

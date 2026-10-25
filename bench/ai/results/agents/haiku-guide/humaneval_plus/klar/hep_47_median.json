@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn median(l: List[Int]) -> Float {\n  let s = l.sort()\n  let n = s.len()\n  if n == 0 {\n    return 0.0\n  }\n  let mid = n / 2\n  if n % 2 == 1 {\n    return s.get_or(mid, 0).to_float()\n  }\n  let lo = s.get_or(mid - 1, 0)\n  let hi = s.get_or(mid, 0)\n  return (lo + hi).to_float() / 2.0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

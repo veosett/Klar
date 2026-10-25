@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn valid_date(date: Str) -> Bool {\n  let parts = date.split(\"-\")\n  if parts.len() != 3 {\n    return false\n  }\n  let m = parts.get_or(0, \"\").to_int()\n  let d = parts.get_or(1, \"\").to_int()\n  let y = parts.get_or(2, \"\").to_int()\n  if m.is_none() or d.is_none() or y.is_none() {\n    return false\n  }\n  let mm = m.unwrap_or(0)\n  let dd = d.unwrap_or(0)\n  if mm < 1 or mm > 12 or dd < 1 {\n    return false\n  }\n  let maxd = match mm {\n    2 => 29,\n    4 => 30,\n    6 => 30,\n    9 => 30,\n    11 => 30,\n    _ => 31,\n  }\n  return dd <= maxd\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

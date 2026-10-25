@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn will_it_fly(q: List[Int], w: Int) -> Bool {\n  let n = q.len()\n  var balanced = true\n  for i in range(0, n) {\n    if q.get_or(i, 0) != q.get_or(n - 1 - i, 0) {\n      balanced = false\n    }\n  }\n  return balanced and q.sum() <= w\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

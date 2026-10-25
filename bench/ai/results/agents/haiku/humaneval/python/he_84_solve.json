@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def solve(N: int) -> str:\n    digit_sum = sum(int(d) for d in str(N))\n    return bin(digit_sum)[2:]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

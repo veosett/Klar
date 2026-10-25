@@ -79,6 +79,7 @@ SYS_SIGNATURES = [
     "fn os_setjmp(buf: Word) -> Word",
     "fn os_spawn_std(cl: Word, dir: Word, hin: Word, hout: Word, herr: Word) -> Word",
     "fn os_longjmp(buf: Word, v: Word) -> Never",
+    "fn os_readlink(path: Word, buf: Word, n: Word) -> Word",
 ]
 
 SYS_NAMES = {s.split("(")[0].split()[1].split("[")[0] for s in SYS_SIGNATURES}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def intersection(interval1: tuple[int, int], interval2: tuple[int, int]) -> str:\n    l = max(interval1[0], interval2[0])\n    r = min(interval1[1], interval2[1])\n    n = r - l\n    if n < 2:\n        return \"NO\"\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return \"NO\"\n        i += 1\n    return \"YES\"\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

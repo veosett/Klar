@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def match_parens(lst: list[str]) -> str:\n    def good(s):\n        d = 0\n        for c in s:\n            d += 1 if c == '(' else -1\n            if d < 0:\n                return False\n        return d == 0\n    a, b = lst\n    return 'Yes' if good(a + b) or good(b + a) else 'No'\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

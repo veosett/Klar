@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function pairs_sum_to_zero(l: number[]): boolean {\n  for (let i = 0; i < l.length; i++)\n    for (let j = i + 1; j < l.length; j++)\n      if (l[i] + l[j] === 0) return true;\n  return false;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

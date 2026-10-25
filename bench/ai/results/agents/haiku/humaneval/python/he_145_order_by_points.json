@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def order_by_points(nums: list[int]) -> list[int]:\n    def digit_sum(n: int) -> int:\n        digits = [int(c) for c in str(abs(n))]\n        total = sum(digits)\n        if n < 0:\n            total -= 2 * digits[0]\n        return total\n\n    return sorted(nums, key=digit_sum)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

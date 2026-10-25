@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function make_a_pile(n: number): number[] {\n  const pile: number[] = [];\n  for (let i = 0; i < n; i++) {\n    pile.push(n + 2 * i);\n  }\n  return pile;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

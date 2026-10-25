@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn move_one_ball(arr: List[Int]) -> Bool {\n  let adj = arr.zip(arr.drop(1)).filter(fn(p) => p.first > p.second).len()\n  let wrap = arr.last().unwrap_or(0) > arr.first().unwrap_or(0)\n  return (adj == 0) or ((adj == 1) and (not wrap))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

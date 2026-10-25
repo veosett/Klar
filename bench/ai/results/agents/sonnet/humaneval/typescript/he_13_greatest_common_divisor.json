@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function greatest_common_divisor(a: number, b: number): number {\n  while (b !== 0) {\n    const t = a % b;\n    a = b;\n    b = t;\n  }\n  return Math.abs(a);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

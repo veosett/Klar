@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Groups anagrams; words sorted inside each group, groups sorted by their first word.\npub fn group_anagrams(words: List[Str]) -> List[List[Str]] {\n  let groups = words.group_by(fn(w) => w.chars().sort().join(\"\"))\n  let sorted_groups = groups.values().map(fn(g) => g.sort())\n  return sorted_groups.sort_by(fn(g) => g.get_or(0, \"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

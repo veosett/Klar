@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function intersperse(numbers: number[], delimeter: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i < numbers.length; i++) {\n    if (i > 0) {\n      result.push(delimeter);\n    }\n    result.push(numbers[i]);\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

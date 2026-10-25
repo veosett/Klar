@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn decimal_to_binary(decimal: Int) -> Str {\n  var digits = \"\"\n  var m = decimal\n  while m > 0 {\n    digits = (m % 2).to_str() + digits\n    m = m / 2\n  }\n  if digits.is_empty() {\n    digits = \"0\"\n  }\n  return \"db{digits}db\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

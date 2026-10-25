@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function max_element(l: number[]): number {\n  let m = l[0];\n  for (const x of l) if (x > m) m = x;\n  return m;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function get_closest_vowel(word: string): string {\n  const v = \"aeiouAEIOU\";\n  for (let i = word.length - 2; i >= 1; i--) {\n    if (v.includes(word[i]) && !v.includes(word[i - 1]) && !v.includes(word[i + 1])) return word[i];\n  }\n  return \"\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

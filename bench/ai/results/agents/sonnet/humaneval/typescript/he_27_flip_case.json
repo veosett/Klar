@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function flip_case(string: string): string {\n  return string.split(\"\").map(c => {\n    const u = c.toUpperCase();\n    return c === u ? c.toLowerCase() : u;\n  }).join(\"\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

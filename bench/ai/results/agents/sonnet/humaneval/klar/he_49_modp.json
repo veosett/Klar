@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn modp(n: Int, p: Int) -> Int {\n  if p <= 0 {\n    return 0\n  }\n  var r = 1 % p\n  var i = 0\n  while i < n {\n    r = (r * 2) % p\n    i = i + 1\n  }\n  return r\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn largest_divisor(n: Int) -> Int {\n  var d = n - 1\n  while d > 0 {\n    if d != 0 {\n      if n % d == 0 {\n        return d\n      }\n    }\n    d = d - 1\n  }\n  return 1\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

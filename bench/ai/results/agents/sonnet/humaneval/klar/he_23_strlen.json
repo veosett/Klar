@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn strlen(string: Str) -> Int {\n  return string.len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

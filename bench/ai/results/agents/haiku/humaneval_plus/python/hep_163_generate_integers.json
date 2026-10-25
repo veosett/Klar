@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "def generate_integers(a: int, b: int) -> list[int]:\n    lo, hi = min(a, b), max(a, b)\n    return [d for d in range(lo, hi + 1) if d % 2 == 0 and 0 <= d <= 9]\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "def generate_integers(a: int, b: int) -> list[int]:\n    lo, hi = min(a, b), max(a, b)\n    return [d for d in (2, 4, 6, 8) if lo <= d <= hi]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

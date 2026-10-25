@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// True for a double-quote character (code 34).\nfn is_quote(c: Str) -> Bool {\n  return c.codes().get_or(0, 0) == 34\n}\n\n/// Splits one CSV line into fields; quoted fields may hold commas and \"\" escapes.\npub fn parse_csv_line(line: Str) -> Result[List[Str], Str] {\n  let chars = line.chars()\n  let n = chars.len()\n  var fields: List[Str] = []\n  var cur = \"\"\n  var in_q = false\n  var i = 0\n  while i < n {\n    let c = chars.get_or(i, \"\")\n    if in_q {\n      if is_quote(c) {\n        if i + 1 < n and is_quote(chars.get_or(i + 1, \"\")) {\n          cur = cur + c\n          i = i + 2\n        } else {\n          in_q = false\n          i = i + 1\n        }\n      } else {\n        cur = cur + c\n        i = i + 1\n      }\n    } else if is_quote(c) {\n      in_q = true\n      i = i + 1\n    } else if c == \",\" {\n      fields = fields.push(cur)\n      cur = \"\"\n      i = i + 1\n    } else {\n      cur = cur + c\n      i = i + 1\n    }\n  }\n  if in_q {\n    return Err(\"unterminated quote\")\n  }\n  fields = fields.push(cur)\n  return Ok(fields)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

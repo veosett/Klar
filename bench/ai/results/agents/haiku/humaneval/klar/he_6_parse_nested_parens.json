@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn group_depth(group: Str) -> Int {\n  let result = group.chars().fold(Pair { first: 0, second: 0 }, fn(acc: Pair[Int, Int], c: Str) -> Pair[Int, Int] {\n    var cur = acc.first\n    var best = acc.second\n    if c == \"(\" {\n      cur = cur + 1\n    } else if c == \")\" {\n      cur = cur - 1\n    }\n    if cur > best {\n      best = cur\n    }\n    return Pair { first: cur, second: best }\n  })\n  return result.second\n}\n\n/// >>> assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  return paren_string.split(\" \").filter(fn(g: Str) => not g.is_empty()).map(fn(g: Str) => group_depth(g))\n}\n\ntest \"parse_nested_parens\" {\n  assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\n  assert parse_nested_parens(\"() (()) ((())) (((())))\") == [1, 2, 3, 4]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

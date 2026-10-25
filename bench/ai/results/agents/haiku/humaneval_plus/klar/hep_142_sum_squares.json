@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn adjust(i: Int, x: Int) -> Int {\n  if i % 3 == 0 {\n    return x * x\n  }\n  if i % 4 == 0 {\n    return x * x * x\n  }\n  return x\n}\n\n/// >>> assert sum_squares([1, 2, 3]) == 6\npub fn sum_squares(lst: List[Int]) -> Int {\n  return lst.enumerate().map(fn(p) => adjust(p.index, p.value)).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

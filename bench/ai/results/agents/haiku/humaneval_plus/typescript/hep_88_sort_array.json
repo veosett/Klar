@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sort_array(array: number[]): number[] {\n  const copy = [...array];\n  if (copy.length === 0) {\n    return copy;\n  }\n  const edgeSum = copy[0] + copy[copy.length - 1];\n  copy.sort((a, b) => a - b);\n  if (edgeSum % 2 === 0) {\n    copy.reverse();\n  }\n  return copy;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

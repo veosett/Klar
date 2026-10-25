@@ -1,0 +1,2342 @@
+{
+ "he_0_has_close_elements/klar/0": {
+  "text": "```\npub fn has_close_elements(numbers: List[Float], threshold: Float) -> Bool {\n  for x in numbers.enumerate() {\n    for y in numbers.enumerate() {\n      if x.index < y.index {\n        if (x.value - y.value).abs() < threshold {\n          return true\n        }\n      }\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_100_make_a_pile/klar/0": {
+  "text": "```\npub fn make_a_pile(n: Int) -> List[Int] {\n  return range(0, n).map(fn(i) => n + 2 * i)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_101_words_string/klar/0": {
+  "text": "```\nuse std.text.{words}\n\npub fn words_string(s: Str) -> List[Str] {\n  return words(s.replace(\",\", \" \"))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_102_choose_num/klar/0": {
+  "text": "```\npub fn choose_num(x: Int, y: Int) -> Int {\n  if x > y {\n    return -1\n  }\n  if y % 2 == 0 {\n    return y\n  }\n  if y - 1 >= x {\n    return y - 1\n  }\n  return -1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_104_unique_digits/klar/0": {
+  "text": "```\nfn has_even_digit(n: Int) -> Bool {\n  return n.to_str().chars().any(fn(c: Str) => c == \"0\" or c == \"2\" or c == \"4\" or c == \"6\" or c == \"8\")\n}\n\n/// >>> assert unique_digits([15, 33, 1422, 1]) == [1, 15, 33]\npub fn unique_digits(x: List[Int]) -> List[Int] {\n  return x.filter(fn(n: Int) => not has_even_digit(n)).sort()\n}\n\ntest \"unique_digits\" {\n  assert unique_digits([15, 33, 1422, 1]) == [1, 15, 33]\n  assert unique_digits([152, 323, 1422, 10]) == []\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_105_by_length/klar/0": {
+  "text": "```\npub fn by_length(arr: List[Int]) -> List[Str] {\n  let names = [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", \"Six\", \"Seven\", \"Eight\", \"Nine\"]\n  let digits = arr.filter(fn(x) => x >= 1 and x <= 9).sort().reverse()\n  return digits.map(fn(x) => names.get_or(x - 1, \"\"))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_106_f/klar/0": {
+  "text": "```\npub fn f(n: Int) -> List[Int] {\n  var out: List[Int] = []\n  var fact: Int = 1\n  var total: Int = 0\n  for i in range(1, n + 1) {\n    fact = fact * i\n    total = total + i\n    if i % 2 == 0 {\n      out = out.push(fact)\n    } else {\n      out = out.push(total)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_107_even_odd_palindrome/klar/0": {
+  "text": "```\npub fn even_odd_palindrome(n: Int) -> Pair[Int, Int] {\n  var evens: Int = 0\n  var odds: Int = 0\n  for i in range(1, n + 1) {\n    let text = i.to_str()\n    if text == text.reverse() {\n      if i % 2 == 0 {\n        evens = evens + 1\n      } else {\n        odds = odds + 1\n      }\n    }\n  }\n  return Pair { first: evens, second: odds }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_108_count_nums/klar/0": {
+  "text": "```\nfn signed_digit_sum(n: Int) -> Int {\n  let digits = n.abs().to_str().chars().map(fn(c: Str) => c.to_int().unwrap_or(0))\n  let total = digits.sum()\n  if n < 0 {\n    return total - 2 * digits.first().unwrap_or(0)\n  }\n  return total\n}\n\n/// >>> assert count_nums([-1, 11, -11]) == 1\npub fn count_nums(arr: List[Int]) -> Int {\n  return arr.count(fn(n: Int) => signed_digit_sum(n) > 0)\n}\n\ntest \"count_nums\" {\n  assert count_nums([]) == 0\n  assert count_nums([-1, 11, -11]) == 1\n  assert count_nums([1, 1, 2]) == 3\n  assert count_nums([-1, -2, 0]) == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_109_move_one_ball/klar/0": {
+  "text": "```\npub fn move_one_ball(arr: List[Int]) -> Bool {\n  let n = arr.len()\n  var descents = 0\n  for i in range(0, n) {\n    let cur = arr.get_or(i, 0)\n    let j = match i + 1 == n {\n      true => 0,\n      false => i + 1,\n    }\n    let nxt = arr.get_or(j, 0)\n    if cur > nxt {\n      descents = descents + 1\n    }\n  }\n  return descents <= 1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_10_make_palindrome/klar/0": {
+  "text": "```\nfn is_pal(s: Str) -> Bool {\n  return s == s.reverse()\n}\n\n/// >>> assert make_palindrome(\"cat\") == \"catac\"\npub fn make_palindrome(string: Str) -> Str {\n  let n = string.len()\n  var i = 0\n  while i < n {\n    if is_pal(string.slice(i, n)) {\n      return string + string.slice(0, i).reverse()\n    }\n    i = i + 1\n  }\n  return string\n}\n\ntest \"make_palindrome\" {\n  assert make_palindrome(\"\") == \"\"\n  assert make_palindrome(\"cat\") == \"catac\"\n  assert make_palindrome(\"cata\") == \"catac\"\n  assert make_palindrome(\"x\") == \"x\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_110_exchange/klar/0": {
+  "text": "```\npub fn exchange(lst1: List[Int], lst2: List[Int]) -> Str {\n  let odd_count = lst1.count(fn(x) => x % 2 != 0)\n  let even_count = lst2.count(fn(x) => x % 2 == 0)\n  if odd_count <= even_count {\n    return \"YES\"\n  }\n  return \"NO\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_111_histogram/klar/0": {
+  "text": "```\npub fn histogram(test_value: Str) -> Map[Str, Int] {\n  var counts: Map[Str, Int] = Map {}\n  for w in test_value.split(\" \") {\n    if w != \"\" {\n      counts = counts.set(w, counts.get(w).unwrap_or(0) + 1)\n    }\n  }\n  let top = counts.values().max().unwrap_or(0)\n  return counts.filter(fn(k, v) => v == top)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_112_reverse_delete/klar/0": {
+  "text": "```\n/// >>> assert reverse_delete(\"abcdedcba\", \"ab\").second == true\npub fn reverse_delete(s: Str, c: Str) -> Pair[Str, Bool] {\n  let kept = s.chars().filter(fn(ch: Str) => not c.contains(ch)).join(\"\")\n  return Pair { first: kept, second: kept == kept.reverse() }\n}\n\ntest \"reverse_delete\" {\n  assert reverse_delete(\"abcde\", \"ae\") == Pair { first: \"bcd\", second: false }\n  assert reverse_delete(\"abcdef\", \"b\") == Pair { first: \"acdef\", second: false }\n  assert reverse_delete(\"abcdedcba\", \"ab\") == Pair { first: \"cdedc\", second: true }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_113_odd_count/klar/0": {
+  "text": "```\npub fn odd_count(lst: List[Str]) -> List[Str] {\n  return lst.map(fn(s) => report(s))\n}\n\nfn report(s: Str) -> Str {\n  let k = s.chars().filter(fn(c) => \"13579\".contains(c)).len().to_str()\n  return \"the number of odd elements {k}n the str{k}ng {k} of the {k}nput.\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_114_minSubArraySum/klar/0": {
+  "text": "```\npub fn minSubArraySum(nums: List[Int]) -> Int {\n  if nums.is_empty() {\n    return 0\n  }\n  var best: Int = nums.get_or(0, 0)\n  var cur: Int = best\n  for x in nums.drop(1) {\n    cur = (cur + x).min(x)\n    best = best.min(cur)\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_115_max_fill/klar/0": {
+  "text": "```\npub fn max_fill(grid: List[List[Int]], capacity: Int) -> Int {\n  if capacity == 0 {\n    return 0\n  }\n  var lowerings: Int = 0\n  for row in grid {\n    let filled = row.sum()\n    lowerings = lowerings + (filled + capacity - 1) / capacity\n  }\n  return lowerings\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_116_sort_array/klar/0": {
+  "text": "```\nfn ones_count(n: Int) -> Int {\n  var x = n.abs()\n  var c = 0\n  while x > 0 {\n    if x % 2 == 1 {\n      c = c + 1\n    }\n    x = x / 2\n  }\n  return c\n}\n\n/// >>> assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 3, 4, 5]\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  return arr.sort().sort_by(fn(n: Int) => ones_count(n))\n}\n\ntest \"sort_array\" {\n  assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 4, 3, 5]\n  assert sort_array([-2, -3, -4, -5, -6]) == [-4, -2, -6, -5, -3]\n  assert sort_array([1, 0, 2, 3, 4]) == [0, 1, 2, 3, 4]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_117_select_words/klar/0": {
+  "text": "```\nfn consonant_count(w: Str) -> Int {\n  return w.chars().filter(fn(c) => \"bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ\".contains(c)).len()\n}\n\npub fn select_words(s: Str, n: Int) -> List[Str] {\n  let words = s.split(\" \").filter(fn(w) => not w.is_empty())\n  return words.filter(fn(w) => consonant_count(w) == n)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_118_get_closest_vowel/klar/0": {
+  "text": "```\npub fn get_closest_vowel(word: Str) -> Str {\n  let cs = word.chars()\n  let n = cs.len()\n  let vowels = [\"a\", \"e\", \"i\", \"o\", \"u\", \"A\", \"E\", \"I\", \"O\", \"U\"]\n  for i in range(1, n - 1).reverse() {\n    let c = cs.get_or(i, \"\")\n    let left = cs.get_or(i - 1, \"\")\n    let right = cs.get_or(i + 1, \"\")\n    if vowels.contains(c) and not vowels.contains(left) and not vowels.contains(right) {\n      return c\n    }\n  }\n  return \"\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_119_match_parens/klar/0": {
+  "text": "```\nfn balanced_parens(s: Str) -> Bool {\n  var depth: Int = 0\n  var ok: Bool = true\n  for c in s.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n    } else if c == \")\" {\n      depth = depth - 1\n      if depth < 0 {\n        ok = false\n      }\n    }\n  }\n  return ok and depth == 0\n}\n\npub fn match_parens(lst: List[Str]) -> Str {\n  let a = lst.get_or(0, \"\")\n  let b = lst.get_or(1, \"\")\n  if balanced_parens(a + b) or balanced_parens(b + a) {\n    return \"Yes\"\n  }\n  return \"No\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_11_string_xor/klar/0": {
+  "text": "```\npub fn string_xor(a: Str, b: Str) -> Str {\n  let pairs = a.codes().zip(b.codes())\n  let bits = pairs.map(fn(p) => match p.first == p.second {\n    true => \"0\",\n    false => \"1\",\n  })\n  return bits.join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_120_maximum/klar/0": {
+  "text": "```\n/// >>> assert maximum([4, -4, 4], 2) == [4, 4]\npub fn maximum(arr: List[Int], k: Int) -> List[Int] {\n  let s = arr.sort()\n  return s.slice(s.len() - k, s.len())\n}\n\ntest \"maximum\" {\n  assert maximum([-3, -4, 5], 3) == [-4, -3, 5]\n  assert maximum([4, -4, 4], 2) == [4, 4]\n  assert maximum([-3, 2, 1, 2, -1, -2, 1], 1) == [2]\n  assert maximum([1, 2], 0) == []\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_121_solution/klar/0": {
+  "text": "```\npub fn solution(lst: List[Int]) -> Int {\n  let picked = lst.enumerate().filter(fn(q) => q.index % 2 == 0).map(fn(q) => q.value)\n  return picked.filter(fn(x) => x % 2 != 0).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_122_add_elements/klar/0": {
+  "text": "```\npub fn add_elements(arr: List[Int], k: Int) -> Int {\n  return arr.take(k).filter(fn(x) => x.abs() < 100).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_123_get_odd_collatz/klar/0": {
+  "text": "```\npub fn get_odd_collatz(n: Int) -> List[Int] {\n  var odds: List[Int] = []\n  var x: Int = n\n  while x != 1 {\n    if x % 2 == 1 {\n      odds = odds.push(x)\n      x = 3 * x + 1\n    } else {\n      x = x / 2\n    }\n  }\n  return odds.push(1).sort()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_124_valid_date/klar/0": {
+  "text": "```\n/// >>> assert valid_date(\"03-11-2000\") == true\npub fn valid_date(date: Str) -> Bool {\n  if date.is_empty() {\n    return false\n  }\n  let parts = date.split(\"-\")\n  if parts.len() != 3 {\n    return false\n  }\n  let ms = parts.get_or(0, \"\")\n  let ds = parts.get_or(1, \"\")\n  let ys = parts.get_or(2, \"\")\n  if ms.len() != 2 or ds.len() != 2 or ys.len() != 4 {\n    return false\n  }\n  if not (ms.is_numeric() and ds.is_numeric() and ys.is_numeric()) {\n    return false\n  }\n  let m = ms.to_int().unwrap_or(0)\n  let d = ds.to_int().unwrap_or(0)\n  if m < 1 or m > 12 {\n    return false\n  }\n  var max_days = 31\n  if m == 4 or m == 6 or m == 9 or m == 11 {\n    max_days = 30\n  }\n  if m == 2 {\n    max_days = 29\n  }\n  return d >= 1 and d <= max_days\n}\n\ntest \"valid_date\" {\n  assert valid_date(\"03-11-2000\") == true\n  assert valid_date(\"15-01-2012\") == false\n  assert valid_date(\"04-0-2040\") == false\n  assert valid_date(\"06-04-2020\") == true\n  assert valid_date(\"06/04/2020\") == false\n  assert valid_date(\"\") == false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_126_is_sorted/klar/0": {
+  "text": "```\npub fn is_sorted(lst: List[Int]) -> Bool {\n  let n = lst.len()\n  var ok = true\n  for i in range(0, n - 1) {\n    if lst.get_or(i, 0) > lst.get_or(i + 1, 0) {\n      ok = false\n    }\n  }\n  let triple = lst.any(fn(x) => lst.count(fn(y) => y == x) > 2)\n  return ok and not triple\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_127_intersection/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\npub fn intersection(interval1: Pair[Int, Int], interval2: Pair[Int, Int]) -> Str {\n  let start = interval1.first.max(interval2.first)\n  let end = interval1.second.min(interval2.second)\n  let length = end - start\n  if length <= 0 {\n    return \"NO\"\n  }\n  if is_prime(length) {\n    return \"YES\"\n  }\n  return \"NO\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_128_prod_signs/klar/0": {
+  "text": "```\npub fn prod_signs(arr: List[Int]) -> Option[Int] {\n  if arr.is_empty() {\n    return None\n  }\n  let magnitude = arr.map(fn(x) => x.abs()).sum()\n  let sign_product = arr.fold(1, fn(acc, x) => acc * x.sign())\n  return Some(magnitude * sign_product)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_129_minPath/klar/0": {
+  "text": "```\n/// The smallest path always starts at the cell holding 1 and then\n/// greedily steps to the smallest neighbour, since the values are unique.\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  let n = grid.len()\n  if n == 0 {\n    return []\n  }\n  let flat = grid.flatten()\n  var cur = flat.index_of(1).unwrap_or(0)\n  var out: List[Int] = [1]\n  while out.len() < k {\n    let r = cur / n\n    let c = cur % n\n    var nxt = cur\n    var nv = n * n + 1\n    if r > 0 {\n      let v1 = flat.get_or(cur - n, 0)\n      if v1 < nv {\n        nv = v1\n        nxt = cur - n\n      }\n    }\n    if r < n - 1 {\n      let v2 = flat.get_or(cur + n, 0)\n      if v2 < nv {\n        nv = v2\n        nxt = cur + n\n      }\n    }\n    if c > 0 {\n      let v3 = flat.get_or(cur - 1, 0)\n      if v3 < nv {\n        nv = v3\n        nxt = cur - 1\n      }\n    }\n    if c < n - 1 {\n      let v4 = flat.get_or(cur + 1, 0)\n      if v4 < nv {\n        nv = v4\n        nxt = cur + 1\n      }\n    }\n    cur = nxt\n    out = out.push(nv)\n  }\n  return out\n}\n\ntest \"minPath\" {\n  assert minPath([[1, 2, 3], [4, 5, 6], [7, 8, 9]], 3) == [1, 2, 1]\n  assert minPath([[5, 9, 3], [4, 1, 6], [7, 8, 2]], 1) == [1]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_12_longest/klar/0": {
+  "text": "```\npub fn longest(strings: List[Str]) -> Option[Str] {\n  var best: Option[Str] = None\n  for s in strings {\n    match best {\n      None => {\n        best = Some(s)\n      },\n      Some(b) => {\n        if s.len() > b.len() {\n          best = Some(s)\n        }\n      },\n    }\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_130_tri/klar/0": {
+  "text": "```\npub fn tri(n: Int) -> List[Int] {\n  var vals: List[Int] = []\n  var k = 0\n  while k <= n {\n    var v = 0\n    if k % 2 == 0 {\n      v = 1 + k / 2\n    } else {\n      if k == 1 {\n        v = 3\n      } else {\n        v = vals.get_or(k - 1, 0) + vals.get_or(k - 2, 0) + 1 + (k + 1) / 2\n      }\n    }\n    vals = vals.push(v)\n    k = k + 1\n  }\n  return vals\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_131_digits/klar/0": {
+  "text": "```\npub fn digits(n: Int) -> Int {\n  var m: Int = n.abs()\n  var product: Int = 1\n  var any_odd: Bool = false\n  while m > 0 {\n    let d = m % 10\n    if d % 2 == 1 {\n      product = product * d\n      any_odd = true\n    }\n    m = m / 10\n  }\n  if any_odd {\n    return product\n  }\n  return 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_132_is_nested/klar/0": {
+  "text": "```\npub fn is_nested(string: Str) -> Bool {\n  var stack: List[Int] = []\n  var max_closed_open: Int = -1\n  var nested: Bool = false\n  for item in string.chars().enumerate() {\n    if item.value == \"[\" {\n      stack = stack.push(item.index)\n    } else if item.value == \"]\" {\n      if not stack.is_empty() {\n        let opened = stack.last().unwrap_or(0)\n        stack = stack.remove_at(stack.len() - 1)\n        if max_closed_open > opened {\n          nested = true\n        }\n        if opened > max_closed_open {\n          max_closed_open = opened\n        }\n      }\n    }\n  }\n  return nested\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_133_sum_squares/klar/0": {
+  "text": "```\n/// >>> assert sum_squares([1.0, 2.0, 3.0]) == 14\npub fn sum_squares(lst: List[Float]) -> Int {\n  return lst.map(fn(x: Float) => x.ceil() * x.ceil()).sum()\n}\n\ntest \"sum_squares\" {\n  assert sum_squares([1.0, 2.0, 3.0]) == 14\n  assert sum_squares([1.0, 4.0, 9.0]) == 98\n  assert sum_squares([1.0, 3.0, 5.0, 7.0]) == 84\n  assert sum_squares([1.4, 4.2, 0.0]) == 29\n  assert sum_squares([-2.4, 1.0, 1.0]) == 6\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_134_check_if_last_char_is_a_letter/klar/0": {
+  "text": "```\npub fn check_if_last_char_is_a_letter(txt: Str) -> Bool {\n  let n = txt.len()\n  if n == 0 {\n    return false\n  }\n  let last = txt.slice(n - 1, n)\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  if not letters.contains(last) {\n    return false\n  }\n  if n == 1 {\n    return true\n  }\n  let prev = txt.slice(n - 2, n - 1)\n  return prev == \" \"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_135_can_arrange/klar/0": {
+  "text": "```\npub fn can_arrange(arr: List[Int]) -> Int {\n  var result: Int = -1\n  for x in arr.enumerate() {\n    if x.index > 0 {\n      let prev = arr.get_or(x.index - 1, 0)\n      if x.value < prev {\n        result = x.index\n      }\n    }\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_136_largest_smallest_integers/klar/0": {
+  "text": "```\npub fn largest_smallest_integers(lst: List[Int]) -> Pair[Option[Int], Option[Int]] {\n  let negatives = lst.filter(fn(x) => x < 0)\n  let positives = lst.filter(fn(x) => x > 0)\n  return Pair { first: negatives.max(), second: positives.min() }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_138_is_equal_to_sum_even/klar/0": {
+  "text": "```\n/// >>> assert is_equal_to_sum_even(8) == true\npub fn is_equal_to_sum_even(n: Int) -> Bool {\n  return n >= 8 and n % 2 == 0\n}\n\ntest \"is_equal_to_sum_even\" {\n  assert is_equal_to_sum_even(4) == false\n  assert is_equal_to_sum_even(6) == false\n  assert is_equal_to_sum_even(8) == true\n  assert is_equal_to_sum_even(9) == false\n  assert is_equal_to_sum_even(10) == true\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_139_special_factorial/klar/0": {
+  "text": "```\npub fn special_factorial(n: Int) -> Int {\n  var fact = 1\n  var result = 1\n  for k in range(1, n + 1) {\n    fact = fact * k\n    result = result * fact\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_13_greatest_common_divisor/klar/0": {
+  "text": "```\nfn gcd_nonneg(a: Int, b: Int) -> Int {\n  if b == 0 {\n    return a\n  }\n  return gcd_nonneg(b, a % b)\n}\n\npub fn greatest_common_divisor(a: Int, b: Int) -> Int {\n  return gcd_nonneg(a.abs(), b.abs())\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_140_fix_spaces/klar/0": {
+  "text": "```\npub fn fix_spaces(text: Str) -> Str {\n  var out: Str = \"\"\n  var run: Int = 0\n  for c in text.chars() {\n    if c == \" \" {\n      run = run + 1\n    } else {\n      if run > 2 {\n        out = out + \"-\"\n      } else {\n        out = out + \"_\".repeat(run)\n      }\n      run = 0\n      out = out + c\n    }\n  }\n  if run > 2 {\n    out = out + \"-\"\n  } else {\n    out = out + \"_\".repeat(run)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_141_file_name_check/klar/0": {
+  "text": "```\npub fn file_name_check(file_name: Str) -> Str {\n  let pieces = file_name.split(\".\")\n  if pieces.len() != 2 {\n    return \"No\"\n  }\n  let before = pieces.get_or(0, \"\")\n  let after = pieces.get_or(1, \"\")\n  let digits = \"0123456789\"\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  let extensions: List[Str] = [\"txt\", \"exe\", \"dll\"]\n  let digit_count = file_name.chars().filter(fn(c) => digits.contains(c)).len()\n  let starts_ok = before.chars().first().map(fn(c) => letters.contains(c)).unwrap_or(false)\n  let ext_ok = extensions.contains(after)\n  if digit_count <= 3 and starts_ok and ext_ok {\n    return \"Yes\"\n  }\n  return \"No\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_142_sum_squares/klar/0": {
+  "text": "```\nfn adjust(i: Int, v: Int) -> Int {\n  if i % 3 == 0 {\n    return v * v\n  }\n  if i % 4 == 0 {\n    return v * v * v\n  }\n  return v\n}\n\n/// >>> assert sum_squares([1, 2, 3]) == 6\npub fn sum_squares(lst: List[Int]) -> Int {\n  return range(0, lst.len()).map(fn(i: Int) => adjust(i, lst.get_or(i, 0))).sum()\n}\n\ntest \"sum_squares\" {\n  assert sum_squares([1, 2, 3]) == 6\n  assert sum_squares([]) == 0\n  assert sum_squares([-1, -5, 2, -1, -5]) == -126\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_143_words_in_sentence/klar/0": {
+  "text": "```\nfn is_prime_len(k: Int) -> Bool {\n  if k < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= k {\n    if k % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\npub fn words_in_sentence(sentence: Str) -> Str {\n  let words = sentence.split(\" \").filter(fn(w) => is_prime_len(w.len()))\n  return words.join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_144_simplify/klar/0": {
+  "text": "```\npub fn simplify(x: Str, n: Str) -> Bool {\n  let xs = x.split(\"/\")\n  let ns = n.split(\"/\")\n  let a = xs.get_or(0, \"\").to_int().unwrap_or(0)\n  let b = xs.get_or(1, \"\").to_int().unwrap_or(0)\n  let c = ns.get_or(0, \"\").to_int().unwrap_or(0)\n  let d = ns.get_or(1, \"\").to_int().unwrap_or(0)\n  let num = a * c\n  let den = b * d\n  if den == 0 {\n    return false\n  }\n  return num % den == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_145_order_by_points/klar/0": {
+  "text": "```\nfn signed_digit_sum(x: Int) -> Int {\n  let text = x.abs().to_str()\n  let total = text.chars().map(fn(c) => c.to_int().unwrap_or(0)).sum()\n  let first = text.slice(0, 1).to_int().unwrap_or(0)\n  if x < 0 {\n    return total - 2 * first\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let keyed = nums.enumerate().sort_by(fn(it) => signed_digit_sum(it.value) * 1000000 + it.index)\n  return keyed.map(fn(it) => it.value)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_146_specialFilter/klar/0": {
+  "text": "```\nfn first_digit(n: Int) -> Int {\n  return n.abs().to_str().chars().first().unwrap_or(\"0\").to_int().unwrap_or(0)\n}\n\nfn is_special(n: Int) -> Bool {\n  if n <= 10 {\n    return false\n  }\n  return first_digit(n) % 2 == 1 and n.abs() % 10 % 2 == 1\n}\n\n/// >>> assert specialFilter([15, -73, 14, -15]) == 1\npub fn specialFilter(nums: List[Int]) -> Int {\n  return nums.count(fn(n: Int) => is_special(n))\n}\n\ntest \"specialFilter\" {\n  assert specialFilter([15, -73, 14, -15]) == 1\n  assert specialFilter([33, -2, -3, 45, 21, 109]) == 2\n  assert specialFilter([5, -2, 1, -5]) == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_147_get_max_triples/klar/0": {
+  "text": "```\nfn choose3(c: Int) -> Int {\n  return c * (c - 1) * (c - 2) / 6\n}\n\npub fn get_max_triples(n: Int) -> Int {\n  let residues = range(1, n + 1).map(fn(i) => (i * i - i + 1) % 3)\n  let c0 = residues.count(fn(r) => r == 0)\n  let c1 = residues.count(fn(r) => r == 1)\n  let c2 = residues.count(fn(r) => r == 2)\n  return choose3(c0) + choose3(c1) + choose3(c2) + c0 * c1 * c2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_149_sorted_list_sum/klar/0": {
+  "text": "```\npub fn sorted_list_sum(lst: List[Str]) -> List[Str] {\n  let alphabetical = lst.sort()\n  let longest = alphabetical.fold(0, fn(acc, w) => acc.max(w.len()))\n  var out: List[Str] = []\n  for size in range(0, longest + 1) {\n    if size % 2 == 0 {\n      out = out.concat(alphabetical.filter(fn(w) => w.len() == size))\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_14_all_prefixes/klar/0": {
+  "text": "```\n/// >>> assert all_prefixes(\"abc\") == [\"a\", \"ab\", \"abc\"]\npub fn all_prefixes(string: Str) -> List[Str] {\n  let n = string.len()\n  return range(1, n + 1).map(fn(i: Int) => string.slice(0, i))\n}\n\ntest \"all_prefixes\" {\n  assert all_prefixes(\"\") == []\n  assert all_prefixes(\"asdfgh\") == [\"a\", \"as\", \"asd\", \"asdf\", \"asdfg\", \"asdfgh\"]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_150_x_or_y/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\npub fn x_or_y(n: Int, x: Int, y: Int) -> Int {\n  if is_prime(n) {\n    return x\n  }\n  return y\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_152_compare/klar/0": {
+  "text": "```\n/// >>> assert compare([1, 2, 3, 4, 5, 1], [1, 2, 3, 4, 2, -2]) == [0, 0, 0, 0, 3, 3]\npub fn compare(game: List[Int], guess: List[Int]) -> List[Int] {\n  return range(0, game.len()).map(fn(i: Int) => (game.get_or(i, 0) - guess.get_or(i, 0)).abs())\n}\n\ntest \"compare\" {\n  assert compare([1, 2, 3, 4, 5, 1], [1, 2, 3, 4, 2, -2]) == [0, 0, 0, 0, 3, 3]\n  assert compare([0, 5, 0, 0, 0, 4], [4, 1, 1, 0, 0, -2]) == [4, 4, 1, 0, 0, 6]\n  assert compare([0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0]) == [0, 0, 0, 0, 0, 0]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_153_Strongest_Extension/klar/0": {
+  "text": "```\nfn extension_strength(name: Str) -> Int {\n  let cap = name.chars().filter(fn(c) => \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c)).len()\n  let sm = name.chars().filter(fn(c) => \"abcdefghijklmnopqrstuvwxyz\".contains(c)).len()\n  return cap - sm\n}\n\npub fn Strongest_Extension(class_name: Str, extensions: List[Str]) -> Str {\n  var best_name = \"\"\n  var best_strength = 0\n  var found = false\n  for ext in extensions {\n    let s = extension_strength(ext)\n    if not found or s > best_strength {\n      best_name = ext\n      best_strength = s\n      found = true\n    }\n  }\n  if not found {\n    return class_name\n  }\n  return \"{class_name}.{best_name}\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_154_cycpattern_check/klar/0": {
+  "text": "```\npub fn cycpattern_check(a: Str, b: Str) -> Bool {\n  let n = b.len()\n  if n == 0 {\n    return true\n  }\n  for k in range(0, n) {\n    let rotated = b.slice(k, n) + b.slice(0, k)\n    if a.contains(rotated) {\n      return true\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_155_even_odd_count/klar/0": {
+  "text": "```\npub fn even_odd_count(num: Int) -> Pair[Int, Int] {\n  var evens: Int = 0\n  var odds: Int = 0\n  for c in num.abs().to_str().chars() {\n    let d = c.to_int().unwrap_or(0)\n    if d % 2 == 0 {\n      evens = evens + 1\n    } else {\n      odds = odds + 1\n    }\n  }\n  return Pair { first: evens, second: odds }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_156_int_to_mini_roman/klar/0": {
+  "text": "```\n/// >>> assert int_to_mini_roman(19) == \"xix\"\npub fn int_to_mini_roman(number: Int) -> Str {\n  let vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]\n  let syms = [\"m\", \"cm\", \"d\", \"cd\", \"c\", \"xc\", \"l\", \"xl\", \"x\", \"ix\", \"v\", \"iv\", \"i\"]\n  var n = number\n  var out = \"\"\n  var i = 0\n  while i < vals.len() {\n    let v = vals.get_or(i, 1)\n    while n >= v {\n      out = out + syms.get_or(i, \"\")\n      n = n - v\n    }\n    i = i + 1\n  }\n  return out\n}\n\ntest \"int_to_mini_roman\" {\n  assert int_to_mini_roman(19) == \"xix\"\n  assert int_to_mini_roman(152) == \"clii\"\n  assert int_to_mini_roman(426) == \"cdxxvi\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_157_right_angle_triangle/klar/0": {
+  "text": "```\npub fn right_angle_triangle(a: Int, b: Int, c: Int) -> Bool {\n  if a <= 0 or b <= 0 or c <= 0 {\n    return false\n  }\n  let aa = a * a\n  let bb = b * b\n  let cc = c * c\n  return aa + bb == cc or aa + cc == bb or bb + cc == aa\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_158_find_max/klar/0": {
+  "text": "```\npub fn find_max(words: List[Str]) -> Str {\n  var best: Str = \"\"\n  var best_count: Int = -1\n  for w in words {\n    let count = w.chars().unique().len()\n    if count > best_count or (count == best_count and w < best) {\n      best = w\n      best_count = count\n    }\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_159_eat/klar/0": {
+  "text": "```\npub fn eat(number: Int, need: Int, remaining: Int) -> List[Int] {\n  let eaten = need.min(remaining)\n  return [number + eaten, remaining - eaten]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_15_string_sequence/klar/0": {
+  "text": "```\npub fn string_sequence(n: Int) -> Str {\n  let nums = range(0, n + 1).map(fn(i) => i.to_str())\n  return nums.join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_160_do_algebra/klar/0": {
+  "text": "```\nfn safe_div(a: Int, b: Int) -> Int {\n  if b == 0 {\n    return 0\n  }\n  return a / b\n}\n\n/// Evaluates with the usual precedence: ** first, then * and //, then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var vals: List[Int] = [operand.get_or(0, 0)]\n  var ops: List[Str] = []\n  var j = 0\n  while j < operator.len() {\n    let op = operator.get_or(j, \"+\")\n    let b = operand.get_or(j + 1, 0)\n    if op == \"**\" {\n      let last = vals.last().unwrap_or(0)\n      vals = vals.set(vals.len() - 1, last.pow(b))\n    } else {\n      ops = ops.push(op)\n      vals = vals.push(b)\n    }\n    j = j + 1\n  }\n  var terms: List[Int] = []\n  var sign = 1\n  var cur = vals.get_or(0, 0)\n  var k = 0\n  while k < ops.len() {\n    let op = ops.get_or(k, \"+\")\n    let b = vals.get_or(k + 1, 0)\n    if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      cur = safe_div(cur, b)\n    } else {\n      terms = terms.push(sign * cur)\n      sign = 1\n      if op == \"-\" {\n        sign = -1\n      }\n      cur = b\n    }\n    k = k + 1\n  }\n  terms = terms.push(sign * cur)\n  return terms.sum()\n}\n\ntest \"do_algebra\" {\n  assert do_algebra([\"**\", \"*\", \"+\"], [2, 3, 4, 5]) == 37\n  assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\n  assert do_algebra([\"//\"], [7, 2]) == 3\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_161_solve/klar/0": {
+  "text": "```\nfn flip_case(c: Str) -> Str {\n  if \"abcdefghijklmnopqrstuvwxyz\".contains(c) {\n    return c.upper()\n  }\n  if \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c) {\n    return c.lower()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  let has_letter = s.chars().any(fn(c) => letters.contains(c))\n  if not has_letter {\n    return s.reverse()\n  }\n  return s.chars().map(fn(c) => flip_case(c)).join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_162_string_to_md5/klar/0": {
+  "text": "```\npub fn string_to_md5(text: Str) -> Option[Str] {\n  if text.is_empty() {\n    return None\n  }\n  let mask = 4294967295\n  var msg = text.to_bytes()\n  let bitlen = msg.len() * 8\n  msg = msg.push(128)\n  while msg.len() % 64 != 56 {\n    msg = msg.push(0)\n  }\n  msg = msg.push_le(bitlen, 8)\n  let k = range(0, 64).map(fn(j) => ((j + 1).to_float().sin().abs() * 4294967296.0).floor())\n  let shifts = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]\n  var a0: Int = 1732584193\n  var b0: Int = 4023233417\n  var c0: Int = 2562383102\n  var d0: Int = 271733878\n  for chunk in range(0, msg.len() / 64) {\n    let base = chunk * 64\n    var m: List[Int] = []\n    for j in range(0, 16) {\n      let p = base + 4 * j\n      let w = msg.get_or(p, 0) + msg.get_or(p + 1, 0) * 256 + msg.get_or(p + 2, 0) * 65536 + msg.get_or(p + 3, 0) * 16777216\n      m = m.push(w)\n    }\n    var a = a0\n    var b = b0\n    var c = c0\n    var d = d0\n    for i in range(0, 64) {\n      var f: Int = 0\n      var g: Int = 0\n      if i < 16 {\n        f = b.bit_and(c).bit_or(b.bit_not().bit_and(d))\n        g = i\n      } else if i < 32 {\n        f = d.bit_and(b).bit_or(d.bit_not().bit_and(c))\n        g = (5 * i + 1) % 16\n      } else if i < 48 {\n        f = b.bit_xor(c).bit_xor(d)\n        g = (3 * i + 5) % 16\n      } else {\n        f = c.bit_xor(b.bit_or(d.bit_not()))\n        g = (7 * i) % 16\n      }\n      let total = (f + a + k.get_or(i, 0) + m.get_or(g, 0)).bit_and(mask)\n      let r = shifts.get_or(i, 0)\n      let rotated = (total.shift_left(r).bit_or(total.shift_right(32 - r))).bit_and(mask)\n      a = d\n      d = c\n      c = b\n      b = (b + rotated).bit_and(mask)\n    }\n    a0 = (a0 + a).bit_and(mask)\n    b0 = (b0 + b).bit_and(mask)\n    c0 = (c0 + c).bit_and(mask)\n    d0 = (d0 + d).bit_and(mask)\n  }\n  var out = \"\".to_bytes()\n  out = out.push_le(a0, 4)\n  out = out.push_le(b0, 4)\n  out = out.push_le(c0, 4)\n  out = out.push_le(d0, 4)\n  return Some(out.hex())\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_163_generate_integers/klar/0": {
+  "text": "```\npub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  return range(lo, hi + 1).filter(fn(x) => x % 2 == 0 and x < 10)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_16_count_distinct_characters/klar/0": {
+  "text": "```\npub fn count_distinct_characters(string: Str) -> Int {\n  let lowered = string.lower()\n  let chars = lowered.chars()\n  return chars.unique().len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_17_parse_music/klar/0": {
+  "text": "```\npub fn parse_music(music_string: Str) -> List[Int] {\n  var out: List[Int] = []\n  for tok in music_string.split(\" \") {\n    if tok == \"o\" {\n      out = out.push(4)\n    } else if tok == \"o|\" {\n      out = out.push(2)\n    } else if tok == \".|\" {\n      out = out.push(1)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_18_how_many_times/klar/0": {
+  "text": "```\n/// >>> assert how_many_times(\"aaaa\", \"aa\") == 3\npub fn how_many_times(string: Str, substring: Str) -> Int {\n  let n = string.len()\n  let m = substring.len()\n  if m == 0 {\n    return 0\n  }\n  if m > n {\n    return 0\n  }\n  return range(0, n - m + 1).count(fn(i: Int) => string.slice(i, i + m) == substring)\n}\n\ntest \"how_many_times\" {\n  assert how_many_times(\"\", \"a\") == 0\n  assert how_many_times(\"aaa\", \"a\") == 3\n  assert how_many_times(\"aaaa\", \"aa\") == 3\n  assert how_many_times(\"xyxyxyx\", \"x\") == 4\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_19_sort_numbers/klar/0": {
+  "text": "```\nfn digit_value(w: Str) -> Int {\n  match w {\n    \"zero\" => { return 0 },\n    \"one\" => { return 1 },\n    \"two\" => { return 2 },\n    \"three\" => { return 3 },\n    \"four\" => { return 4 },\n    \"five\" => { return 5 },\n    \"six\" => { return 6 },\n    \"seven\" => { return 7 },\n    \"eight\" => { return 8 },\n    \"nine\" => { return 9 },\n    _ => { return 10 },\n  }\n}\n\npub fn sort_numbers(numbers: Str) -> Str {\n  let words = numbers.split(\" \").filter(fn(w) => not w.is_empty())\n  let sorted = words.sort_by(fn(w) => digit_value(w))\n  return sorted.join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_1_separate_paren_groups/klar/0": {
+  "text": "```\npub fn separate_paren_groups(paren_string: Str) -> List[Str] {\n  var groups: List[Str] = []\n  var current: Str = \"\"\n  var depth: Int = 0\n  for c in paren_string.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n      current = current + c\n    } else if c == \")\" {\n      depth = depth - 1\n      current = current + c\n      if depth == 0 {\n        groups = groups.push(current)\n        current = \"\"\n      }\n    }\n  }\n  return groups\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_20_find_closest_elements/klar/0": {
+  "text": "```\npub fn find_closest_elements(numbers: List[Float]) -> Pair[Float, Float] {\n  let sorted = numbers.sort()\n  var best_a = sorted.get_or(0, 0.0)\n  var best_b = sorted.get_or(1, 0.0)\n  var best_d = best_b - best_a\n  for x in sorted.enumerate() {\n    if x.index + 1 < sorted.len() {\n      let a = x.value\n      let b = sorted.get_or(x.index + 1, 0.0)\n      let d = b - a\n      if d < best_d {\n        best_d = d\n        best_a = a\n        best_b = b\n      }\n    }\n  }\n  return Pair { first: best_a, second: best_b }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_21_rescale_to_unit/klar/0": {
+  "text": "```\npub fn rescale_to_unit(numbers: List[Float]) -> List[Float] {\n  let lo = numbers.min().unwrap_or(0.0)\n  let hi = numbers.max().unwrap_or(1.0)\n  let span = hi - lo\n  return numbers.map(fn(x) => (x - lo) / span)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_23_strlen/klar/0": {
+  "text": "```\n/// >>> assert strlen(\"abc\") == 3\npub fn strlen(string: Str) -> Int {\n  return string.len()\n}\n\ntest \"strlen\" {\n  assert strlen(\"\") == 0\n  assert strlen(\"abc\") == 3\n  assert strlen(\"x\") == 1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_24_largest_divisor/klar/0": {
+  "text": "```\npub fn largest_divisor(n: Int) -> Int {\n  var d = n - 1\n  while d > 0 {\n    if d != 0 {\n      if n % d == 0 {\n        return d\n      }\n    }\n    d = d - 1\n  }\n  return 1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_25_factorize/klar/0": {
+  "text": "```\npub fn factorize(n: Int) -> List[Int] {\n  var m: Int = n\n  var d: Int = 2\n  var out: List[Int] = []\n  while d * d <= m {\n    if d == 0 {\n      return out\n    }\n    if m % d == 0 {\n      out = out.push(d)\n      m = m / d\n    } else {\n      d = d + 1\n    }\n  }\n  if m > 1 {\n    out = out.push(m)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_26_remove_duplicates/klar/0": {
+  "text": "```\npub fn remove_duplicates(numbers: List[Int]) -> List[Int] {\n  return numbers.filter(fn(x) => numbers.count(fn(y) => y == x) == 1)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_27_flip_case/klar/0": {
+  "text": "```\nfn flip_char(c: Str) -> Str {\n  if c == c.lower() {\n    return c.upper()\n  }\n  return c.lower()\n}\n\n/// >>> assert flip_case(\"Hello\") == \"hELLO\"\npub fn flip_case(string: Str) -> Str {\n  return string.chars().map(fn(c: Str) => flip_char(c)).join(\"\")\n}\n\ntest \"flip_case\" {\n  assert flip_case(\"\") == \"\"\n  assert flip_case(\"Hello\") == \"hELLO\"\n  assert flip_case(\"Hello!\") == \"hELLO!\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_28_concatenate/klar/0": {
+  "text": "```\npub fn concatenate(strings: List[Str]) -> Str {\n  return strings.join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_29_filter_by_prefix/klar/0": {
+  "text": "```\npub fn filter_by_prefix(strings: List[Str], prefix: Str) -> List[Str] {\n  return strings.filter(fn(s) => s.starts_with(prefix))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_2_truncate_number/klar/0": {
+  "text": "```\n/// >>> assert truncate_number(3.5) == 0.5\npub fn truncate_number(number: Float) -> Float {\n  return number - number.floor().to_float()\n}\n\ntest \"truncate_number\" {\n  assert truncate_number(3.5) == 0.5\n  assert truncate_number(1.25) == 0.25\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_30_get_positive/klar/0": {
+  "text": "```\npub fn get_positive(l: List[Int]) -> List[Int] {\n  return l.filter(fn(x) => x > 0)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_31_is_prime/klar/0": {
+  "text": "```\n/// >>> assert is_prime(101)\npub fn is_prime(n: Int) -> Bool {\n  if n < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= n {\n    if n % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\ntest \"is_prime\" {\n  assert is_prime(6) == false\n  assert is_prime(101) == true\n  assert is_prime(11) == true\n  assert is_prime(13441) == true\n  assert is_prime(61) == true\n  assert is_prime(4) == false\n  assert is_prime(1) == false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_33_sort_third/klar/0": {
+  "text": "```\npub fn sort_third(l: List[Int]) -> List[Int] {\n  let thirds = l.enumerate().filter(fn(q) => q.index % 3 == 0).map(fn(q) => q.value)\n  let sorted_thirds = thirds.sort()\n  var result: List[Int] = []\n  var k = 0\n  for item in l.enumerate() {\n    if item.index % 3 == 0 {\n      result = result.push(sorted_thirds.get_or(k, 0))\n      k = k + 1\n    } else {\n      result = result.push(item.value)\n    }\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_34_unique/klar/0": {
+  "text": "```\npub fn unique(l: List[Int]) -> List[Int] {\n  return l.unique().sort()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_35_max_element/klar/0": {
+  "text": "```\npub fn max_element(l: List[Int]) -> Int {\n  return l.max().unwrap_or(0)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_36_fizz_buzz/klar/0": {
+  "text": "```\n/// >>> assert fizz_buzz(78) == 2\npub fn fizz_buzz(n: Int) -> Int {\n  return range(0, n).filter(fn(i: Int) => i % 11 == 0 or i % 13 == 0).map(fn(i: Int) => i.to_str().count(\"7\")).sum()\n}\n\ntest \"fizz_buzz\" {\n  assert fizz_buzz(50) == 0\n  assert fizz_buzz(78) == 2\n  assert fizz_buzz(79) == 3\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_37_sort_even/klar/0": {
+  "text": "```\npub fn sort_even(l: List[Int]) -> List[Int] {\n  let evens = l.enumerate().filter(fn(q) => q.index % 2 == 0).map(fn(q) => q.value)\n  let sorted_evens = evens.sort()\n  var result: List[Int] = []\n  var k = 0\n  for item in l.enumerate() {\n    if item.index % 2 == 0 {\n      result = result.push(sorted_evens.get_or(k, 0))\n      k = k + 1\n    } else {\n      result = result.push(item.value)\n    }\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_39_prime_fib/klar/0": {
+  "text": "```\nuse std.math.{fib, is_prime}\n\npub fn prime_fib(n: Int) -> Int {\n  var count: Int = 0\n  var k: Int = 0\n  var result: Int = 0\n  while count < n {\n    k = k + 1\n    let f = fib(k)\n    if is_prime(f) {\n      count = count + 1\n      result = f\n    }\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_3_below_zero/klar/0": {
+  "text": "```\npub fn below_zero(operations: List[Int]) -> Bool {\n  var balance = 0\n  for op in operations {\n    balance = balance + op\n    if balance < 0 {\n      return true\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_40_triples_sum_to_zero/klar/0": {
+  "text": "```\npub fn triples_sum_to_zero(l: List[Int]) -> Bool {\n  var found: Bool = false\n  let n = l.len()\n  for i in range(0, n) {\n    for j in range(0, n) {\n      for k in range(0, n) {\n        if i < j and j < k {\n          let total = l.get_or(i, 0) + l.get_or(j, 0) + l.get_or(k, 0)\n          if total == 0 {\n            found = true\n          }\n        }\n      }\n    }\n  }\n  return found\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_41_car_race_collision/klar/0": {
+  "text": "```\n/// Every left-moving car meets every right-moving car exactly once.\npub fn car_race_collision(n: Int) -> Int {\n  return n * n\n}\n\ntest \"car_race_collision\" {\n  assert car_race_collision(2) == 4\n  assert car_race_collision(3) == 9\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_42_incr_list/klar/0": {
+  "text": "```\npub fn incr_list(l: List[Int]) -> List[Int] {\n  return l.map(fn(x) => x + 1)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_43_pairs_sum_to_zero/klar/0": {
+  "text": "```\npub fn pairs_sum_to_zero(l: List[Int]) -> Bool {\n  for x in l.enumerate() {\n    for y in l.enumerate() {\n      if x.index < y.index {\n        if x.value + y.value == 0 {\n          return true\n        }\n      }\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_44_change_base/klar/0": {
+  "text": "```\nfn digits_rec(n: Int, base: Int) -> Str {\n  if base == 0 {\n    return \"\"\n  }\n  if n == 0 {\n    return \"\"\n  }\n  return digits_rec(n / base, base) + (n % base).to_str()\n}\n\npub fn change_base(x: Int, base: Int) -> Str {\n  if x == 0 {\n    return \"0\"\n  }\n  return digits_rec(x, base)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_45_triangle_area/klar/0": {
+  "text": "```\n/// >>> assert triangle_area(5, 3) == 7.5\npub fn triangle_area(a: Int, h: Int) -> Float {\n  return a.to_float() * h.to_float() / 2.0\n}\n\ntest \"triangle_area\" {\n  assert triangle_area(5, 3) == 7.5\n  assert triangle_area(2, 2) == 2.0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_46_fib4/klar/0": {
+  "text": "```\npub fn fib4(n: Int) -> Int {\n  if n == 2 {\n    return 2\n  }\n  var a = 0\n  var b = 0\n  var c = 2\n  var d = 0\n  var i = 4\n  while i <= n {\n    let e = a + b + c + d\n    a = b\n    b = c\n    c = d\n    d = e\n    i = i + 1\n  }\n  return d\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_47_median/klar/0": {
+  "text": "```\npub fn median(l: List[Int]) -> Float {\n  let s = l.sort()\n  let n = s.len()\n  if n == 0 {\n    return 0.0\n  }\n  if n % 2 == 1 {\n    return s.get_or(n / 2, 0).to_float()\n  }\n  let a = s.get_or(n / 2 - 1, 0)\n  let b = s.get_or(n / 2, 0)\n  return (a + b).to_float() / 2.0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_48_is_palindrome/klar/0": {
+  "text": "```\npub fn is_palindrome(text: Str) -> Bool {\n  return text == text.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_49_modp/klar/0": {
+  "text": "```\n/// >>> assert modp(3, 5) == 3\npub fn modp(n: Int, p: Int) -> Int\n  requires p > 0\n{\n  var r = 1 % p\n  var i = 0\n  while i < n {\n    r = (r * 2) % p\n    i = i + 1\n  }\n  return r\n}\n\ntest \"modp\" {\n  assert modp(3, 5) == 3\n  assert modp(1101, 101) == 2\n  assert modp(0, 101) == 1\n  assert modp(3, 11) == 8\n  assert modp(100, 101) == 1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_4_mean_absolute_deviation/klar/0": {
+  "text": "```\npub fn mean_absolute_deviation(numbers: List[Float]) -> Float {\n  if numbers.is_empty() {\n    return 0.0\n  }\n  let n = numbers.len().to_float()\n  let mean = numbers.sum_float() / n\n  let deviations = numbers.map(fn(x) => (x - mean).abs())\n  return deviations.sum_float() / n\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_51_remove_vowels/klar/0": {
+  "text": "```\npub fn remove_vowels(text: Str) -> Str {\n  let kept = text.chars().filter(fn(c) => not \"aeiouAEIOU\".contains(c))\n  return kept.join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_52_below_threshold/klar/0": {
+  "text": "```\npub fn below_threshold(l: List[Int], t: Int) -> Bool {\n  return l.all(fn(x) => x < t)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_53_add/klar/0": {
+  "text": "```\npub fn add(x: Int, y: Int) -> Int {\n  return x + y\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_54_same_chars/klar/0": {
+  "text": "```\n/// >>> assert same_chars(\"abcd\", \"dddddddabc\") == true\npub fn same_chars(s0: Str, s1: Str) -> Bool {\n  return s0.chars().unique().sort() == s1.chars().unique().sort()\n}\n\ntest \"same_chars\" {\n  assert same_chars(\"eabcdzzzz\", \"dddzzzzzzzddeddabc\") == true\n  assert same_chars(\"abcd\", \"dddddddabc\") == true\n  assert same_chars(\"dddddddabc\", \"abcd\") == true\n  assert same_chars(\"eabcd\", \"dddddddabc\") == false\n  assert same_chars(\"abcd\", \"dddddddabce\") == false\n  assert same_chars(\"eabcdzzzz\", \"dddzzzzzzzddddabc\") == false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_55_fib/klar/0": {
+  "text": "```\npub fn fib(n: Int) -> Int {\n  var a = 0\n  var b = 1\n  var i = 0\n  while i < n {\n    let next = a + b\n    a = b\n    b = next\n    i = i + 1\n  }\n  return a\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_56_correct_bracketing/klar/0": {
+  "text": "```\npub fn correct_bracketing(brackets: Str) -> Bool {\n  var depth: Int = 0\n  for c in brackets.chars() {\n    if c == \"<\" {\n      depth = depth + 1\n    } else {\n      depth = depth - 1\n    }\n    if depth < 0 {\n      return false\n    }\n  }\n  return depth == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_57_monotonic/klar/0": {
+  "text": "```\npub fn monotonic(l: List[Int]) -> Bool {\n  let pairs = l.zip(l.drop(1))\n  let increasing = pairs.all(fn(p) => p.first <= p.second)\n  let decreasing = pairs.all(fn(p) => p.first >= p.second)\n  return increasing or decreasing\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_58_common/klar/0": {
+  "text": "```\n/// >>> assert common([5, 3, 2, 8], [3, 2]) == [2, 3]\npub fn common(l1: List[Int], l2: List[Int]) -> List[Int] {\n  return l1.filter(fn(x: Int) => l2.contains(x)).unique().sort()\n}\n\ntest \"common\" {\n  assert common([1, 4, 3, 34, 653, 2, 5], [5, 7, 1, 5, 9, 653, 121]) == [1, 5, 653]\n  assert common([5, 3, 2, 8], [3, 2]) == [2, 3]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_59_largest_prime_factor/klar/0": {
+  "text": "```\npub fn largest_prime_factor(n: Int) -> Int {\n  var m = n\n  var best = 1\n  var f = 2\n  while f * f <= m {\n    while m % f == 0 {\n      best = f\n      m = m / f\n    }\n    f = f + 1\n  }\n  if m > 1 {\n    return m\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_5_intersperse/klar/0": {
+  "text": "```\npub fn intersperse(numbers: List[Int], delimeter: Int) -> List[Int] {\n  var out: List[Int] = []\n  var first: Bool = true\n  for n in numbers {\n    if first {\n      first = false\n    } else {\n      out = out.push(delimeter)\n    }\n    out = out.push(n)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_60_sum_to_n/klar/0": {
+  "text": "```\npub fn sum_to_n(n: Int) -> Int {\n  return range(1, n + 1).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_61_correct_bracketing/klar/0": {
+  "text": "```\npub fn correct_bracketing(brackets: Str) -> Bool {\n  var depth: Int = 0\n  var ok: Bool = true\n  for c in brackets.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n    } else if c == \")\" {\n      depth = depth - 1\n      if depth < 0 {\n        ok = false\n      }\n    }\n  }\n  return ok and depth == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_62_derivative/klar/0": {
+  "text": "```\n/// >>> assert derivative([1, 2, 3]) == [2, 6]\npub fn derivative(xs: List[Int]) -> List[Int] {\n  return range(1, xs.len()).map(fn(i: Int) => xs.get_or(i, 0) * i)\n}\n\ntest \"derivative\" {\n  assert derivative([3, 1, 2, 4, 5]) == [1, 4, 12, 20]\n  assert derivative([1, 2, 3]) == [2, 6]\n  assert derivative([]) == []\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_63_fibfib/klar/0": {
+  "text": "```\npub fn fibfib(n: Int) -> Int {\n  if n < 2 {\n    return 0\n  }\n  var a = 0\n  var b = 0\n  var c = 1\n  var i = 3\n  while i <= n {\n    let e = a + b + c\n    a = b\n    b = c\n    c = e\n    i = i + 1\n  }\n  return c\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_64_vowels_count/klar/0": {
+  "text": "```\npub fn vowels_count(s: Str) -> Int {\n  let cs = s.lower().chars()\n  let last = cs.len() - 1\n  var count: Int = 0\n  for c in cs.enumerate() {\n    if [\"a\", \"e\", \"i\", \"o\", \"u\"].contains(c.value) {\n      count = count + 1\n    } else if c.value == \"y\" and c.index == last {\n      count = count + 1\n    }\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_65_circular_shift/klar/0": {
+  "text": "```\npub fn circular_shift(x: Int, shift: Int) -> Str {\n  let s = x.to_str()\n  let n = s.len()\n  if shift > n {\n    return s.reverse()\n  }\n  return s.slice(n - shift, n) + s.slice(0, n - shift)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_66_digitSum/klar/0": {
+  "text": "```\n/// >>> assert digitSum(\"abAB\") == 131\npub fn digitSum(s: Str) -> Int {\n  return s.codes().filter(fn(c: Int) => c >= 65 and c <= 90).sum()\n}\n\ntest \"digitSum\" {\n  assert digitSum(\"\") == 0\n  assert digitSum(\"abAB\") == 131\n  assert digitSum(\"abcCd\") == 67\n  assert digitSum(\"helloE\") == 69\n  assert digitSum(\"woArBld\") == 131\n  assert digitSum(\"aAaaaXa\") == 153\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_67_fruit_distribution/klar/0": {
+  "text": "```\npub fn fruit_distribution(s: Str, n: Int) -> Int {\n  let parts = s.split(\" \")\n  let apples = parts.get_or(0, \"0\").to_int().unwrap_or(0)\n  let oranges = parts.get_or(3, \"0\").to_int().unwrap_or(0)\n  return n - apples - oranges\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_68_pluck/klar/0": {
+  "text": "```\npub fn pluck(arr: List[Int]) -> List[Int] {\n  var best_value: Int = -1\n  var best_index: Int = -1\n  for x in arr.enumerate() {\n    if x.value % 2 == 0 {\n      if best_index < 0 or x.value < best_value {\n        best_value = x.value\n        best_index = x.index\n      }\n    }\n  }\n  if best_index < 0 {\n    return []\n  }\n  return [best_value, best_index]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_69_search/klar/0": {
+  "text": "```\npub fn search(lst: List[Int]) -> Int {\n  let good = lst.filter(fn(x) => x > 0 and lst.count(fn(y) => y == x) >= x)\n  return good.max().unwrap_or(-1)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_6_parse_nested_parens/klar/0": {
+  "text": "```\nfn group_depth(group: Str) -> Int {\n  let result = group.chars().fold(Pair { first: 0, second: 0 }, fn(acc: Pair[Int, Int], c: Str) -> Pair[Int, Int] {\n    var cur = acc.first\n    var best = acc.second\n    if c == \"(\" {\n      cur = cur + 1\n    } else if c == \")\" {\n      cur = cur - 1\n    }\n    if cur > best {\n      best = cur\n    }\n    return Pair { first: cur, second: best }\n  })\n  return result.second\n}\n\n/// >>> assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  return paren_string.split(\" \").filter(fn(g: Str) => not g.is_empty()).map(fn(g: Str) => group_depth(g))\n}\n\ntest \"parse_nested_parens\" {\n  assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\n  assert parse_nested_parens(\"() (()) ((())) (((())))\") == [1, 2, 3, 4]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_70_strange_sort_list/klar/0": {
+  "text": "```\n/// >>> assert strange_sort_list([1, 2, 3, 4]) == [1, 4, 2, 3]\npub fn strange_sort_list(lst: List[Int]) -> List[Int] {\n  var rest = lst.sort()\n  var out: List[Int] = []\n  var take_min = true\n  while not rest.is_empty() {\n    if take_min {\n      out = out.push(rest.first().unwrap_or(0))\n      rest = rest.drop(1)\n    } else {\n      out = out.push(rest.last().unwrap_or(0))\n      rest = rest.take(rest.len() - 1)\n    }\n    take_min = not take_min\n  }\n  return out\n}\n\ntest \"strange_sort_list\" {\n  assert strange_sort_list([1, 2, 3, 4]) == [1, 4, 2, 3]\n  assert strange_sort_list([5, 5, 5, 5]) == [5, 5, 5, 5]\n  assert strange_sort_list([]) == []\n  assert strange_sort_list([5, 6, 7, 8, 9]) == [5, 9, 6, 8, 7]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_71_triangle_area/klar/0": {
+  "text": "```\npub fn triangle_area(a: Int, b: Int, c: Int) -> Float {\n  if a + b <= c {\n    return -1.0\n  }\n  if a + c <= b {\n    return -1.0\n  }\n  if b + c <= a {\n    return -1.0\n  }\n  let x = a.to_float()\n  let y = b.to_float()\n  let z = c.to_float()\n  let s = (x + y + z) / 2.0\n  let area = (s * (s - x) * (s - y) * (s - z)).sqrt()\n  return area.round_to(2)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_72_will_it_fly/klar/0": {
+  "text": "```\npub fn will_it_fly(q: List[Int], w: Int) -> Bool {\n  if q.sum() > w {\n    return false\n  }\n  return q == q.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_73_smallest_change/klar/0": {
+  "text": "```\npub fn smallest_change(arr: List[Int]) -> Int {\n  let n = arr.len()\n  var changes: Int = 0\n  for i in range(0, n / 2) {\n    if arr.get_or(i, 0) != arr.get_or(n - 1 - i, 0) {\n      changes = changes + 1\n    }\n  }\n  return changes\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_74_total_match/klar/0": {
+  "text": "```\n/// >>> assert total_match([\"hi\", \"admin\"], [\"hi\", \"hi\"]) == [\"hi\", \"hi\"]\npub fn total_match(lst1: List[Str], lst2: List[Str]) -> List[Str] {\n  let n1 = lst1.fold(0, fn(acc: Int, s: Str) -> Int { return acc + s.len() })\n  let n2 = lst2.fold(0, fn(acc: Int, s: Str) -> Int { return acc + s.len() })\n  if n1 <= n2 {\n    return lst1\n  }\n  return lst2\n}\n\ntest \"total_match\" {\n  assert total_match([], []) == []\n  assert total_match([\"hi\", \"admin\"], [\"hI\", \"Hi\"]) == [\"hI\", \"Hi\"]\n  assert total_match([\"hi\", \"admin\"], [\"hi\", \"hi\", \"admin\", \"project\"]) == [\"hi\", \"admin\"]\n  assert total_match([\"hi\", \"admin\"], [\"hI\", \"hi\", \"hi\"]) == [\"hI\", \"hi\", \"hi\"]\n  assert total_match([\"4\"], [\"1\", \"2\", \"3\", \"4\", \"5\"]) == [\"4\"]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_75_is_multiply_prime/klar/0": {
+  "text": "```\npub fn is_multiply_prime(a: Int) -> Bool {\n  var m = a\n  var f = 2\n  var count = 0\n  while f <= m {\n    while m % f == 0 {\n      count = count + 1\n      m = m / f\n    }\n    f = f + 1\n  }\n  return count == 3\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_76_is_simple_power/klar/0": {
+  "text": "```\npub fn is_simple_power(x: Int, n: Int) -> Bool {\n  if x == 1 {\n    return true\n  }\n  if n <= 1 {\n    return false\n  }\n  var p: Int = 1\n  while p < x {\n    p = p * n\n  }\n  return p == x\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_77_iscube/klar/0": {
+  "text": "```\npub fn iscube(a: Int) -> Bool {\n  let r = a.abs().to_float().pow(0.3333333333333333).round()\n  return range(0 - r - 2, r + 3).any(fn(k) => k * k * k == a)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_78_hex_key/klar/0": {
+  "text": "```\n/// >>> assert hex_key(\"AB\") == 1\npub fn hex_key(num: Str) -> Int {\n  return num.chars().count(fn(c: Str) => c == \"2\" or c == \"3\" or c == \"5\" or c == \"7\" or c == \"B\" or c == \"D\")\n}\n\ntest \"hex_key\" {\n  assert hex_key(\"AB\") == 1\n  assert hex_key(\"1077E\") == 2\n  assert hex_key(\"ABED1A33\") == 4\n  assert hex_key(\"123456789ABCDEF0\") == 6\n  assert hex_key(\"2020\") == 2\n  assert hex_key(\"\") == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_79_decimal_to_binary/klar/0": {
+  "text": "```\npub fn decimal_to_binary(decimal: Int) -> Str {\n  var n = decimal\n  var bits: List[Str] = []\n  while n > 0 {\n    bits = bits.push((n % 2).to_str())\n    n = n / 2\n  }\n  if bits.is_empty() {\n    return \"db0db\"\n  }\n  let body = bits.reverse().join(\"\")\n  return \"db{body}db\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_7_filter_by_substring/klar/0": {
+  "text": "```\npub fn filter_by_substring(strings: List[Str], substring: Str) -> List[Str] {\n  return strings.filter(fn(s) => s.contains(substring))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_80_is_happy/klar/0": {
+  "text": "```\npub fn is_happy(s: Str) -> Bool {\n  let cs = s.chars()\n  let n = cs.len()\n  if n < 3 {\n    return false\n  }\n  for i in range(0, n - 2) {\n    let a = cs.get_or(i, \"\")\n    let b = cs.get_or(i + 1, \"\")\n    let c = cs.get_or(i + 2, \"\")\n    if a == b or b == c or a == c {\n      return false\n    }\n  }\n  return true\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_81_numerical_letter_grade/klar/0": {
+  "text": "```\nfn letter_of(gpa: Float) -> Str {\n  if gpa >= 4.0 {\n    return \"A+\"\n  }\n  if gpa > 3.7 {\n    return \"A\"\n  }\n  if gpa > 3.3 {\n    return \"A-\"\n  }\n  if gpa > 3.0 {\n    return \"B+\"\n  }\n  if gpa > 2.7 {\n    return \"B\"\n  }\n  if gpa > 2.3 {\n    return \"B-\"\n  }\n  if gpa > 2.0 {\n    return \"C+\"\n  }\n  if gpa > 1.7 {\n    return \"C\"\n  }\n  if gpa > 1.3 {\n    return \"C-\"\n  }\n  if gpa > 1.0 {\n    return \"D+\"\n  }\n  if gpa > 0.7 {\n    return \"D\"\n  }\n  if gpa > 0.0 {\n    return \"D-\"\n  }\n  return \"E\"\n}\n\npub fn numerical_letter_grade(grades: List[Float]) -> List[Str] {\n  return grades.map(fn(g) => letter_of(g))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_82_prime_length/klar/0": {
+  "text": "```\nfn is_prime_number(n: Int) -> Bool {\n  if n < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= n {\n    if n % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\n/// >>> assert prime_length(\"Hello\") == true\npub fn prime_length(string: Str) -> Bool {\n  return is_prime_number(string.len())\n}\n\ntest \"prime_length\" {\n  assert prime_length(\"Hello\") == true\n  assert prime_length(\"abcdcba\") == true\n  assert prime_length(\"kittens\") == true\n  assert prime_length(\"orange\") == false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_83_starts_one_ends/klar/0": {
+  "text": "```\npub fn starts_one_ends(n: Int) -> Int {\n  if n == 1 {\n    return 1\n  }\n  let p = (10).pow(n - 2)\n  return 10 * p + 8 * p\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_84_solve/klar/0": {
+  "text": "```\npub fn solve(N: Int) -> Str {\n  var m: Int = N\n  var total: Int = 0\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  if total == 0 {\n    return \"0\"\n  }\n  var t: Int = total\n  var bits: Str = \"\"\n  while t > 0 {\n    bits = (t % 2).to_str() + bits\n    t = t / 2\n  }\n  return bits\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_85_add/klar/0": {
+  "text": "```\npub fn add(lst: List[Int]) -> Int {\n  var total: Int = 0\n  for i in range(0, lst.len()) {\n    if i % 2 == 1 and lst.get_or(i, 1) % 2 == 0 {\n      total = total + lst.get_or(i, 0)\n    }\n  }\n  return total\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_86_anti_shuffle/klar/0": {
+  "text": "```\n/// >>> assert anti_shuffle(\"hello\") == \"ehllo\"\npub fn anti_shuffle(s: Str) -> Str {\n  return s.split(\" \").map(fn(w: Str) => w.chars().sort().join(\"\")).join(\" \")\n}\n\ntest \"anti_shuffle\" {\n  assert anti_shuffle(\"Hi\") == \"Hi\"\n  assert anti_shuffle(\"hello\") == \"ehllo\"\n  assert anti_shuffle(\"Hello World!!!\") == \"Hello !!!Wdlor\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_87_get_row/klar/0": {
+  "text": "```\npub fn get_row(lst: List[List[Int]], x: Int) -> List[Pair[Int, Int]] {\n  var result: List[Pair[Int, Int]] = []\n  for row in lst.enumerate() {\n    let hits = row.value.enumerate().filter(fn(q) => q.value == x).reverse()\n    for hit in hits {\n      result = result.push(Pair { first: row.index, second: hit.index })\n    }\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_88_sort_array/klar/0": {
+  "text": "```\npub fn sort_array(array: List[Int]) -> List[Int] {\n  if array.is_empty() {\n    return []\n  }\n  let total = array.get_or(0, 0) + array.get_or(array.len() - 1, 0)\n  let ascending = array.sort()\n  if total % 2 == 1 {\n    return ascending\n  }\n  return ascending.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_89_encrypt/klar/0": {
+  "text": "```\nfn rot4(code: Int) -> Int {\n  if code >= 97 and code <= 122 {\n    return (code - 97 + 4) % 26 + 97\n  }\n  return code\n}\n\npub fn encrypt(s: Str) -> Str {\n  let shifted = s.codes().map(fn(c) => rot4(c))\n  return shifted.fold(\"\", fn(acc, code) => acc + code.to_char().unwrap_or(\"\"))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_8_sum_product/klar/0": {
+  "text": "```\npub fn sum_product(numbers: List[Int]) -> Pair[Int, Int] {\n  return Pair { first: numbers.sum(), second: numbers.fold(1, fn(acc, x) => acc * x) }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_90_next_smallest/klar/0": {
+  "text": "```\n/// >>> assert next_smallest([1, 2, 3, 4, 5]) == Some(2)\npub fn next_smallest(lst: List[Int]) -> Option[Int] {\n  return lst.unique().sort().get(1)\n}\n\ntest \"next_smallest\" {\n  assert next_smallest([1, 2, 3, 4, 5]) == Some(2)\n  assert next_smallest([5, 1, 4, 3, 2]) == Some(2)\n  assert next_smallest([]) == None\n  assert next_smallest([1, 1]) == None\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_91_is_bored/klar/0": {
+  "text": "```\nfn starts_with_i(s: Str) -> Bool {\n  return s == \"I\" or s.starts_with(\"I \")\n}\n\npub fn is_bored(text: Str) -> Int {\n  let normalized = text.replace(\"?\", \".\").replace(\"!\", \".\")\n  let sentences = normalized.split(\".\")\n  let hits = sentences.filter(fn(s) => starts_with_i(s.trim()))\n  return hits.len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_93_encode/klar/0": {
+  "text": "```\npub fn encode(message: Str) -> Str {\n  var out: Str = \"\"\n  for c in message.chars() {\n    let lo = c.lower()\n    let is_upper = c != lo\n    let mapped = match lo {\n      \"a\" => \"c\",\n      \"e\" => \"g\",\n      \"i\" => \"k\",\n      \"o\" => \"q\",\n      \"u\" => \"w\",\n      _ => lo,\n    }\n    if is_upper {\n      out = out + mapped\n    } else {\n      out = out + mapped.upper()\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_94_skjkasdkd/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\npub fn skjkasdkd(lst: List[Int]) -> Int {\n  let primes = lst.filter(fn(x) => is_prime(x))\n  let biggest = primes.max().unwrap_or(0)\n  let digits = biggest.to_str().chars()\n  return digits.map(fn(c) => c.to_int().unwrap_or(0)).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_95_check_dict_case/klar/0": {
+  "text": "```\nfn is_lower_key(k: Str) -> Bool {\n  return k == k.lower() and k != k.upper()\n}\n\nfn is_upper_key(k: Str) -> Bool {\n  return k == k.upper() and k != k.lower()\n}\n\n/// >>> assert check_dict_case({\"STATE\": \"NC\", \"ZIP\": \"12345\"}) == true\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let ks = dict.keys()\n  if ks.is_empty() {\n    return false\n  }\n  return ks.all(fn(k: Str) => is_lower_key(k)) or ks.all(fn(k: Str) => is_upper_key(k))\n}\n\ntest \"check_dict_case\" {\n  assert check_dict_case({\"a\": \"apple\", \"b\": \"banana\"}) == true\n  assert check_dict_case({\"a\": \"apple\", \"A\": \"banana\", \"B\": \"banana\"}) == false\n  assert check_dict_case({\"a\": \"apple\", \"8\": \"banana\"}) == false\n  assert check_dict_case({\"Name\": \"John\", \"Age\": \"36\", \"City\": \"Houston\"}) == false\n  assert check_dict_case({\"STATE\": \"NC\", \"ZIP\": \"12345\"}) == true\n  assert check_dict_case(Map {}) == false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_95_check_dict_case/klar/1": {
+  "text": "```\nfn is_lower_key(k: Str) -> Bool {\n  return k == k.lower() and k != k.upper()\n}\n\nfn is_upper_key(k: Str) -> Bool {\n  return k == k.upper() and k != k.lower()\n}\n\n/// >>> assert check_dict_case(Map { \"STATE\": \"NC\", \"ZIP\": \"12345\" }) == true\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let ks = dict.keys()\n  if ks.is_empty() {\n    return false\n  }\n  return ks.all(fn(k: Str) => is_lower_key(k)) or ks.all(fn(k: Str) => is_upper_key(k))\n}\n\ntest \"check_dict_case\" {\n  assert check_dict_case(Map { \"a\": \"apple\", \"b\": \"banana\" }) == true\n  assert check_dict_case(Map { \"a\": \"apple\", \"A\": \"banana\", \"B\": \"banana\" }) == false\n  assert check_dict_case(Map { \"a\": \"apple\", \"8\": \"banana\" }) == false\n  assert check_dict_case(Map { \"Name\": \"John\", \"Age\": \"36\", \"City\": \"Houston\" }) == false\n  assert check_dict_case(Map { \"STATE\": \"NC\", \"ZIP\": \"12345\" }) == true\n  assert check_dict_case(Map {}) == false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_96_count_up_to/klar/0": {
+  "text": "```\nfn is_prime_num(k: Int) -> Bool {\n  if k < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= k {\n    if k % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\npub fn count_up_to(n: Int) -> List[Int] {\n  return range(2, n).filter(fn(k) => is_prime_num(k))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_97_multiply/klar/0": {
+  "text": "```\npub fn multiply(a: Int, b: Int) -> Int {\n  return (a.abs() % 10) * (b.abs() % 10)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_98_count_upper/klar/0": {
+  "text": "```\npub fn count_upper(s: Str) -> Int {\n  let vowels: List[Str] = [\"A\", \"E\", \"I\", \"O\", \"U\"]\n  var count: Int = 0\n  for item in s.chars().enumerate() {\n    if item.index % 2 == 0 and vowels.contains(item.value) {\n      count = count + 1\n    }\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_99_closest_integer/klar/0": {
+  "text": "```\n/// >>> assert closest_integer(\"15.3\") == 15\npub fn closest_integer(value: Str) -> Int {\n  let x = value.to_float().unwrap_or(0.0)\n  let a = x.abs()\n  let r = (a + 0.5).floor()\n  if x < 0.0 {\n    return 0 - r\n  }\n  return r\n}\n\ntest \"closest_integer\" {\n  assert closest_integer(\"10\") == 10\n  assert closest_integer(\"15.3\") == 15\n  assert closest_integer(\"14.5\") == 15\n  assert closest_integer(\"-14.5\") == -15\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_9_rolling_max/klar/0": {
+  "text": "```\npub fn rolling_max(numbers: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  var best: Int = 0\n  var seen: Bool = false\n  for n in numbers {\n    if not seen {\n      best = n\n      seen = true\n    } else if n > best {\n      best = n\n    }\n    out = out.push(best)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_0_has_close_elements/python/0": {
+  "text": "```\ndef has_close_elements(numbers: list[float], threshold: float) -> bool:\n    n = len(numbers)\n    for i in range(n):\n        for j in range(i + 1, n):\n            if abs(numbers[i] - numbers[j]) < threshold:\n                return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_100_make_a_pile/python/0": {
+  "text": "```\ndef make_a_pile(n: int) -> list[int]:\n    return [n + 2 * i for i in range(n)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_101_words_string/python/0": {
+  "text": "```\nimport re\n\n\ndef words_string(s: str) -> list[str]:\n    return [w for w in re.split(r\"[,\\s]+\", s) if w]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_102_choose_num/python/0": {
+  "text": "```\ndef choose_num(x: int, y: int) -> int:\n    if x > y:\n        return -1\n    if y % 2 == 0:\n        return y\n    if y - 1 >= x:\n        return y - 1\n    return -1\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_104_unique_digits/python/0": {
+  "text": "```\ndef unique_digits(x: list[int]) -> list[int]:\n    return sorted(n for n in x if all(int(d) % 2 == 1 for d in str(n)))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_105_by_length/python/0": {
+  "text": "```\ndef by_length(arr: list[int]) -> list[str]:\n    names = [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", \"Six\", \"Seven\", \"Eight\", \"Nine\"]\n    digits = sorted((x for x in arr if 1 <= x <= 9), reverse=True)\n    return [names[d - 1] for d in digits]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_106_f/python/0": {
+  "text": "```\ndef f(n: int) -> list[int]:\n    result = []\n    for i in range(1, n + 1):\n        if i % 2 == 0:\n            fact = 1\n            for k in range(2, i + 1):\n                fact *= k\n            result.append(fact)\n        else:\n            result.append(i * (i + 1) // 2)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_107_even_odd_palindrome/python/0": {
+  "text": "```\ndef even_odd_palindrome(n: int) -> tuple[int, int]:\n    even = 0\n    odd = 0\n    for i in range(1, n + 1):\n        s = str(i)\n        if s == s[::-1]:\n            if i % 2 == 0:\n                even += 1\n            else:\n                odd += 1\n    return (even, odd)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_108_count_nums/python/0": {
+  "text": "```\ndef count_nums(arr: list[int]) -> int:\n    count = 0\n    for n in arr:\n        digits = [int(d) for d in str(abs(n))]\n        total = sum(digits)\n        if n < 0:\n            total -= 2 * digits[0]\n        if total > 0:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_109_move_one_ball/python/0": {
+  "text": "```\ndef move_one_ball(arr: list[int]) -> bool:\n    n = len(arr)\n    if n <= 1:\n        return True\n    drops = 0\n    for i in range(n):\n        if arr[i] > arr[(i + 1) % n]:\n            drops += 1\n    return drops <= 1\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_10_make_palindrome/python/0": {
+  "text": "```\ndef is_palindrome(string: str) -> bool:\n    return string == string[::-1]\n\n\ndef make_palindrome(string: str) -> str:\n    for i in range(len(string) + 1):\n        if is_palindrome(string[i:]):\n            return string + string[:i][::-1]\n    return string\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_110_exchange/python/0": {
+  "text": "```\ndef exchange(lst1: list[int], lst2: list[int]) -> str:\n    odd_count = sum(1 for x in lst1 if x % 2 != 0)\n    even_available = sum(1 for x in lst2 if x % 2 == 0)\n    return \"YES\" if even_available >= odd_count else \"NO\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_111_histogram/python/0": {
+  "text": "```\ndef histogram(test_value: str) -> dict[str, int]:\n    counts = {}\n    for letter in test_value.split():\n        counts[letter] = counts.get(letter, 0) + 1\n    if not counts:\n        return {}\n    best = max(counts.values())\n    return {k: v for k, v in counts.items() if v == best}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_112_reverse_delete/python/0": {
+  "text": "```\ndef reverse_delete(s: str, c: str) -> tuple[str, bool]:\n    result = ''.join(ch for ch in s if ch not in c)\n    return (result, result == result[::-1])\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_113_odd_count/python/0": {
+  "text": "```\ndef odd_count(lst: list[str]) -> list[str]:\n    result = []\n    for s in lst:\n        k = sum(1 for ch in s if int(ch) % 2 == 1)\n        ks = str(k)\n        result.append(\n            f\"the number of odd elements {ks}n the str{ks}ng {ks} of the {ks}nput.\"\n        )\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_114_minSubArraySum/python/0": {
+  "text": "```\ndef minSubArraySum(nums: list[int]) -> int:\n    best = nums[0]\n    cur = nums[0]\n    for x in nums[1:]:\n        cur = min(x, cur + x)\n        best = min(best, cur)\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_115_max_fill/python/0": {
+  "text": "```\ndef max_fill(grid: list[list[int]], capacity: int) -> int:\n    total = sum(sum(row) for row in grid)\n    return -(-total // capacity)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_115_max_fill/python/1": {
+  "text": "```\ndef max_fill(grid: list[list[int]], capacity: int) -> int:\n    total = 0\n    for row in grid:\n        water = sum(row)\n        total += -(-water // capacity)\n    return total\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_116_sort_array/python/0": {
+  "text": "```\ndef sort_array(arr: list[int]) -> list[int]:\n    return sorted(arr, key=lambda x: (bin(x).count('1'), x))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_117_select_words/python/0": {
+  "text": "```\ndef select_words(s: str, n: int) -> list[str]:\n    vowels = set('aeiouAEIOU')\n    result = []\n    for word in s.split():\n        consonants = sum(1 for ch in word if ch.isalpha() and ch not in vowels)\n        if consonants == n:\n            result.append(word)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_118_get_closest_vowel/python/0": {
+  "text": "```\ndef get_closest_vowel(word: str) -> str:\n    vowels = \"aeiouAEIOU\"\n    for i in range(len(word) - 2, 0, -1):\n        if word[i] in vowels and word[i - 1] not in vowels and word[i + 1] not in vowels:\n            return word[i]\n    return \"\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_119_match_parens/python/0": {
+  "text": "```\ndef match_parens(lst: list[str]) -> str:\n    def balanced(s: str) -> bool:\n        depth = 0\n        for ch in s:\n            depth += 1 if ch == '(' else -1\n            if depth < 0:\n                return False\n        return depth == 0\n\n    for s in (lst[0] + lst[1], lst[1] + lst[0]):\n        if balanced(s):\n            return 'Yes'\n    return 'No'\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_11_string_xor/python/0": {
+  "text": "```\ndef string_xor(a: str, b: str) -> str:\n    return ''.join('0' if x == y else '1' for x, y in zip(a, b))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_120_maximum/python/0": {
+  "text": "```\ndef maximum(arr: list[int], k: int) -> list[int]:\n    if k == 0:\n        return []\n    return sorted(arr)[-k:]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_121_solution/python/0": {
+  "text": "```\ndef solution(lst: list[int]) -> int:\n    return sum(x for i, x in enumerate(lst) if i % 2 == 0 and x % 2 == 1)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_122_add_elements/python/0": {
+  "text": "```\ndef add_elements(arr: list[int], k: int) -> int:\n    return sum(x for x in arr[:k] if abs(x) < 100)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_123_get_odd_collatz/python/0": {
+  "text": "```\ndef get_odd_collatz(n: int) -> list[int]:\n    odds = set()\n    x = n\n    while True:\n        if x % 2 == 1:\n            odds.add(x)\n        if x == 1:\n            break\n        x = x // 2 if x % 2 == 0 else 3 * x + 1\n    return sorted(odds)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_124_valid_date/python/0": {
+  "text": "```\nimport re\n\n\ndef valid_date(date: str) -> bool:\n    if not date:\n        return False\n    if not re.fullmatch(r'[0-9]{2}-[0-9]{2}-[0-9]{4}', date):\n        return False\n    month = int(date[0:2])\n    day = int(date[3:5])\n    if month < 1 or month > 12:\n        return False\n    if month in (1, 3, 5, 7, 8, 10, 12):\n        max_day = 31\n    elif month in (4, 6, 9, 11):\n        max_day = 30\n    else:\n        max_day = 29\n    return 1 <= day <= max_day\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_126_is_sorted/python/0": {
+  "text": "```\ndef is_sorted(lst: list[int]) -> bool:\n    for i in range(1, len(lst)):\n        if lst[i] < lst[i - 1]:\n            return False\n    for x in set(lst):\n        if lst.count(x) > 2:\n            return False\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_127_intersection/python/0": {
+  "text": "```\ndef intersection(interval1: tuple[int, int], interval2: tuple[int, int]) -> str:\n    lo = max(interval1[0], interval2[0])\n    hi = min(interval1[1], interval2[1])\n    length = hi - lo\n    if length < 2:\n        return \"NO\"\n    d = 2\n    while d * d <= length:\n        if length % d == 0:\n            return \"NO\"\n        d += 1\n    return \"YES\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_128_prod_signs/python/0": {
+  "text": "```\ndef prod_signs(arr: list[int]) -> int | None:\n    if not arr:\n        return None\n    magnitude = sum(abs(x) for x in arr)\n    sign = 1\n    for x in arr:\n        if x == 0:\n            return 0\n        if x < 0:\n            sign = -sign\n    return sign * magnitude\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_129_minPath/python/0": {
+  "text": "```\ndef minPath(grid: list[list[int]], k: int) -> list[int]:\n    n = len(grid)\n    # locate the cell holding value 1\n    r, c = 0, 0\n    for i in range(n):\n        for j in range(n):\n            if grid[i][j] == 1:\n                r, c = i, j\n    path = [1]\n    for _ in range(k - 1):\n        best = None\n        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):\n            nr, nc = r + dr, c + dc\n            if 0 <= nr < n and 0 <= nc < n:\n                if best is None or grid[nr][nc] < grid[best[0]][best[1]]:\n                    best = (nr, nc)\n        r, c = best\n        path.append(grid[r][c])\n    return path\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_12_longest/python/0": {
+  "text": "```\ndef longest(strings: list[str]) -> str | None:\n    if not strings:\n        return None\n    best = strings[0]\n    for s in strings[1:]:\n        if len(s) > len(best):\n            best = s\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_130_tri/python/0": {
+  "text": "```\ndef tri(n: int) -> list[int]:\n    def even_val(k: int) -> int:\n        return 1 + k // 2\n\n    result = [even_val(0)]\n    if n >= 1:\n        result.append(3)\n    for k in range(2, n + 1):\n        if k % 2 == 0:\n            result.append(even_val(k))\n        else:\n            # tri(k+1) is even, so it can be computed directly\n            result.append(result[k - 1] + result[k - 2] + even_val(k + 1))\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_131_digits/python/0": {
+  "text": "```\ndef digits(n: int) -> int:\n    product = 1\n    found = False\n    for ch in str(abs(n)):\n        d = int(ch)\n        if d % 2 == 1:\n            product *= d\n            found = True\n    return product if found else 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_132_is_nested/python/0": {
+  "text": "```\ndef is_nested(string: str) -> bool:\n    pattern = '[[]]'\n    idx = 0\n    for ch in string:\n        if idx < len(pattern) and ch == pattern[idx]:\n            idx += 1\n    return idx == len(pattern)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_133_sum_squares/python/0": {
+  "text": "```\nimport math\n\n\ndef sum_squares(lst: list[float]) -> int:\n    return sum(int(math.ceil(x)) ** 2 for x in lst)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_134_check_if_last_char_is_a_letter/python/0": {
+  "text": "```\ndef check_if_last_char_is_a_letter(txt: str) -> bool:\n    if not txt:\n        return False\n    last = txt[-1]\n    if not last.isalpha() or not last.isascii():\n        return False\n    if len(txt) == 1:\n        return True\n    return txt[-2] == ' '\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_135_can_arrange/python/0": {
+  "text": "```\ndef can_arrange(arr: list[int]) -> int:\n    result = -1\n    for i in range(1, len(arr)):\n        if arr[i] < arr[i - 1]:\n            result = i\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_136_largest_smallest_integers/python/0": {
+  "text": "```\ndef largest_smallest_integers(lst: list[int]) -> tuple[int | None, int | None]:\n    negatives = [x for x in lst if x < 0]\n    positives = [x for x in lst if x > 0]\n    a = max(negatives) if negatives else None\n    b = min(positives) if positives else None\n    return (a, b)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_138_is_equal_to_sum_even/python/0": {
+  "text": "```\ndef is_equal_to_sum_even(n: int) -> bool:\n    return n >= 8 and n % 2 == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_139_special_factorial/python/0": {
+  "text": "```\ndef special_factorial(n: int) -> int:\n    result = 1\n    fact = 1\n    for k in range(1, n + 1):\n        fact *= k\n        result *= fact\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_13_greatest_common_divisor/python/0": {
+  "text": "```\ndef greatest_common_divisor(a: int, b: int) -> int:\n    a, b = abs(a), abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_140_fix_spaces/python/0": {
+  "text": "```\nimport re\n\n\ndef fix_spaces(text: str) -> str:\n    text = re.sub(r\" {3,}\", \"-\", text)\n    return text.replace(\" \", \"_\")\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_141_file_name_check/python/0": {
+  "text": "```\ndef file_name_check(file_name: str) -> str:\n    if sum(1 for ch in file_name if ch.isdigit() and '0' <= ch <= '9') > 3:\n        return 'No'\n    if file_name.count('.') != 1:\n        return 'No'\n    name, ext = file_name.split('.')\n    if not name:\n        return 'No'\n    if not (('a' <= name[0] <= 'z') or ('A' <= name[0] <= 'Z')):\n        return 'No'\n    if ext not in ('txt', 'exe', 'dll'):\n        return 'No'\n    return 'Yes'\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_142_sum_squares/python/0": {
+  "text": "```\ndef sum_squares(lst: list[int]) -> int:\n    total = 0\n    for i, x in enumerate(lst):\n        if i % 3 == 0:\n            total += x * x\n        elif i % 4 == 0:\n            total += x * x * x\n        else:\n            total += x\n    return total\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_143_words_in_sentence/python/0": {
+  "text": "```\ndef words_in_sentence(sentence: str) -> str:\n    def is_prime(n: int) -> bool:\n        if n < 2:\n            return False\n        d = 2\n        while d * d <= n:\n            if n % d == 0:\n                return False\n            d += 1\n        return True\n\n    return ' '.join(w for w in sentence.split() if is_prime(len(w)))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_144_simplify/python/0": {
+  "text": "```\ndef simplify(x: str, n: str) -> bool:\n    a, b = (int(v) for v in x.split(\"/\"))\n    c, d = (int(v) for v in n.split(\"/\"))\n    return (a * c) % (b * d) == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_145_order_by_points/python/0": {
+  "text": "```\ndef order_by_points(nums: list[int]) -> list[int]:\n    def digit_sum(n: int) -> int:\n        digits = [int(c) for c in str(abs(n))]\n        total = sum(digits)\n        if n < 0:\n            total -= 2 * digits[0]\n        return total\n\n    return sorted(nums, key=digit_sum)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_146_specialFilter/python/0": {
+  "text": "```\ndef specialFilter(nums: list[int]) -> int:\n    count = 0\n    for n in nums:\n        if n > 10:\n            s = str(abs(n))\n            if int(s[0]) % 2 == 1 and int(s[-1]) % 2 == 1:\n                count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_147_get_max_triples/python/0": {
+  "text": "```\ndef get_max_triples(n: int) -> int:\n    counts = [0, 0, 0]\n    for i in range(1, n + 1):\n        counts[(i * i - i + 1) % 3] += 1\n    c0, c1, c2 = counts\n\n    def comb3(c: int) -> int:\n        return c * (c - 1) * (c - 2) // 6\n\n    return comb3(c0) + comb3(c1) + comb3(c2) + c0 * c1 * c2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_149_sorted_list_sum/python/0": {
+  "text": "```\ndef sorted_list_sum(lst: list[str]) -> list[str]:\n    kept = [s for s in lst if len(s) % 2 == 0]\n    return sorted(kept, key=lambda s: (len(s), s))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_14_all_prefixes/python/0": {
+  "text": "```\ndef all_prefixes(string: str) -> list[str]:\n    return [string[:i] for i in range(1, len(string) + 1)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_150_x_or_y/python/0": {
+  "text": "```\ndef x_or_y(n: int, x: int, y: int) -> int:\n    if n < 2:\n        return y\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return y\n        i += 1\n    return x\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_152_compare/python/0": {
+  "text": "```\ndef compare(game: list[int], guess: list[int]) -> list[int]:\n    return [abs(g - s) for g, s in zip(game, guess)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_153_Strongest_Extension/python/0": {
+  "text": "```\ndef Strongest_Extension(class_name: str, extensions: list[str]) -> str:\n    best = None\n    best_strength = None\n    for ext in extensions:\n        cap = sum(1 for ch in ext if ch.isupper())\n        sm = sum(1 for ch in ext if ch.islower())\n        strength = cap - sm\n        if best_strength is None or strength > best_strength:\n            best = ext\n            best_strength = strength\n    return f\"{class_name}.{best}\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_154_cycpattern_check/python/0": {
+  "text": "```\ndef cycpattern_check(a: str, b: str) -> bool:\n    if not b:\n        return True\n    n = len(b)\n    for i in range(n):\n        rot = b[i:] + b[:i]\n        if rot in a:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_155_even_odd_count/python/0": {
+  "text": "```\ndef even_odd_count(num: int) -> tuple[int, int]:\n    even = 0\n    odd = 0\n    for c in str(abs(num)):\n        if int(c) % 2 == 0:\n            even += 1\n        else:\n            odd += 1\n    return (even, odd)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_156_int_to_mini_roman/python/0": {
+  "text": "```\ndef int_to_mini_roman(number: int) -> str:\n    values = [\n        (1000, 'm'), (900, 'cm'), (500, 'd'), (400, 'cd'),\n        (100, 'c'), (90, 'xc'), (50, 'l'), (40, 'xl'),\n        (10, 'x'), (9, 'ix'), (5, 'v'), (4, 'iv'), (1, 'i'),\n    ]\n    result = []\n    for value, symbol in values:\n        while number >= value:\n            result.append(symbol)\n            number -= value\n    return ''.join(result)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_157_right_angle_triangle/python/0": {
+  "text": "```\ndef right_angle_triangle(a: int, b: int, c: int) -> bool:\n    x, y, z = sorted((a, b, c))\n    if x <= 0:\n        return False\n    return x * x + y * y == z * z\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_158_find_max/python/0": {
+  "text": "```\ndef find_max(words: list[str]) -> str:\n    return min(words, key=lambda w: (-len(set(w)), w))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_159_eat/python/0": {
+  "text": "```\ndef eat(number: int, need: int, remaining: int) -> list[int]:\n    eaten = min(need, remaining)\n    return [number + eaten, remaining - eaten]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_15_string_sequence/python/0": {
+  "text": "```\ndef string_sequence(n: int) -> str:\n    return ' '.join(str(i) for i in range(n + 1))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_160_do_algebra/python/0": {
+  "text": "```\ndef do_algebra(operator: list[str], operand: list[int]) -> int:\n    nums = list(operand)\n    ops = list(operator)\n\n    # exponentiation first, right to left (right-associative)\n    i = len(ops) - 1\n    while i >= 0:\n        if ops[i] == '**':\n            nums[i] = nums[i] ** nums[i + 1]\n            del nums[i + 1]\n            del ops[i]\n        i -= 1\n\n    # multiplication and floor division, left to right\n    i = 0\n    while i < len(ops):\n        if ops[i] == '*':\n            nums[i] = nums[i] * nums[i + 1]\n            del nums[i + 1]\n            del ops[i]\n        elif ops[i] == '//':\n            nums[i] = nums[i] // nums[i + 1]\n            del nums[i + 1]\n            del ops[i]\n        else:\n            i += 1\n\n    # addition and subtraction, left to right\n    result = nums[0]\n    for op, val in zip(ops, nums[1:]):\n        if op == '+':\n            result += val\n        else:\n            result -= val\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_161_solve/python/0": {
+  "text": "```\ndef solve(s: str) -> str:\n    if not any(ch.isalpha() for ch in s):\n        return s[::-1]\n    return ''.join(ch.swapcase() if ch.isalpha() else ch for ch in s)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_162_string_to_md5/python/0": {
+  "text": "```\nimport hashlib\n\n\ndef string_to_md5(text: str) -> str | None:\n    if text == \"\":\n        return None\n    return hashlib.md5(text.encode(\"utf-8\")).hexdigest()\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_163_generate_integers/python/0": {
+  "text": "```\ndef generate_integers(a: int, b: int) -> list[int]:\n    lo, hi = min(a, b), max(a, b)\n    return [d for d in range(lo, hi + 1) if d % 2 == 0 and 0 <= d <= 9]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_16_count_distinct_characters/python/0": {
+  "text": "```\ndef count_distinct_characters(string: str) -> int:\n    return len(set(string.lower()))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_17_parse_music/python/0": {
+  "text": "```\ndef parse_music(music_string: str) -> list[int]:\n    result = []\n    for token in music_string.split():\n        if token == 'o':\n            result.append(4)\n        elif token == 'o|':\n            result.append(2)\n        elif token == '.|':\n            result.append(1)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_18_how_many_times/python/0": {
+  "text": "```\ndef how_many_times(string: str, substring: str) -> int:\n    count = 0\n    if not substring:\n        return 0\n    for i in range(len(string) - len(substring) + 1):\n        if string[i:i + len(substring)] == substring:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_19_sort_numbers/python/0": {
+  "text": "```\ndef sort_numbers(numbers: str) -> str:\n    order = {\n        'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,\n        'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,\n    }\n    words = numbers.split()\n    words.sort(key=lambda w: order[w])\n    return ' '.join(words)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_1_separate_paren_groups/python/0": {
+  "text": "```\ndef separate_paren_groups(paren_string: str) -> list[str]:\n    result = []\n    current = []\n    depth = 0\n    for ch in paren_string:\n        if ch == ' ':\n            continue\n        if ch == '(':\n            depth += 1\n            current.append(ch)\n        elif ch == ')':\n            depth -= 1\n            current.append(ch)\n            if depth == 0:\n                result.append(''.join(current))\n                current = []\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_20_find_closest_elements/python/0": {
+  "text": "```\ndef find_closest_elements(numbers: list[float]) -> tuple[float, float]:\n    s = sorted(numbers)\n    best = None\n    best_diff = None\n    for i in range(len(s) - 1):\n        d = s[i + 1] - s[i]\n        if best_diff is None or d < best_diff:\n            best_diff = d\n            best = (s[i], s[i + 1])\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_21_rescale_to_unit/python/0": {
+  "text": "```\ndef rescale_to_unit(numbers: list[float]) -> list[float]:\n    lo = min(numbers)\n    hi = max(numbers)\n    span = hi - lo\n    return [(x - lo) / span for x in numbers]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_23_strlen/python/0": {
+  "text": "```\ndef strlen(string: str) -> int:\n    return len(string)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_24_largest_divisor/python/0": {
+  "text": "```\ndef largest_divisor(n: int) -> int:\n    for d in range(n // 2, 0, -1):\n        if n % d == 0:\n            return d\n    return 1\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_25_factorize/python/0": {
+  "text": "```\ndef factorize(n: int) -> list[int]:\n    factors = []\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            factors.append(d)\n            n //= d\n        d += 1\n    if n > 1:\n        factors.append(n)\n    return factors\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_26_remove_duplicates/python/0": {
+  "text": "```\ndef remove_duplicates(numbers: list[int]) -> list[int]:\n    counts = {}\n    for n in numbers:\n        counts[n] = counts.get(n, 0) + 1\n    return [n for n in numbers if counts[n] == 1]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_27_flip_case/python/0": {
+  "text": "```\ndef flip_case(string: str) -> str:\n    return string.swapcase()\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_28_concatenate/python/0": {
+  "text": "```\ndef concatenate(strings: list[str]) -> str:\n    return ''.join(strings)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_29_filter_by_prefix/python/0": {
+  "text": "```\ndef filter_by_prefix(strings: list[str], prefix: str) -> list[str]:\n    return [s for s in strings if s.startswith(prefix)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_2_truncate_number/python/0": {
+  "text": "```\ndef truncate_number(number: float) -> float:\n    return number - int(number)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_30_get_positive/python/0": {
+  "text": "```\ndef get_positive(l: list[int]) -> list[int]:\n    return [x for x in l if x > 0]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_31_is_prime/python/0": {
+  "text": "```\ndef is_prime(n: int) -> bool:\n    if n < 2:\n        return False\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return False\n        i += 1\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_33_sort_third/python/0": {
+  "text": "```\ndef sort_third(l: list[int]) -> list[int]:\n    result = list(l)\n    indices = [i for i in range(len(l)) if i % 3 == 0]\n    values = sorted(l[i] for i in indices)\n    for i, v in zip(indices, values):\n        result[i] = v\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_34_unique/python/0": {
+  "text": "```\ndef unique(l: list[int]) -> list[int]:\n    return sorted(set(l))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_35_max_element/python/0": {
+  "text": "```\ndef max_element(l: list[int]) -> int:\n    m = l[0]\n    for x in l[1:]:\n        if x > m:\n            m = x\n    return m\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_36_fizz_buzz/python/0": {
+  "text": "```\ndef fizz_buzz(n: int) -> int:\n    count = 0\n    for i in range(n):\n        if i % 11 == 0 or i % 13 == 0:\n            count += str(i).count('7')\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_37_sort_even/python/0": {
+  "text": "```\ndef sort_even(l: list[int]) -> list[int]:\n    result = list(l)\n    evens = sorted(l[i] for i in range(0, len(l), 2))\n    for idx, v in zip(range(0, len(l), 2), evens):\n        result[idx] = v\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_39_prime_fib/python/0": {
+  "text": "```\ndef prime_fib(n: int) -> int:\n    def is_prime(m: int) -> bool:\n        if m < 2:\n            return False\n        if m < 4:\n            return True\n        if m % 2 == 0:\n            return False\n        d = 3\n        while d * d <= m:\n            if m % d == 0:\n                return False\n            d += 2\n        return True\n\n    a, b = 1, 2\n    count = 0\n    while True:\n        if is_prime(a):\n            count += 1\n            if count == n:\n                return a\n        a, b = b, a + b\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_3_below_zero/python/0": {
+  "text": "```\ndef below_zero(operations: list[int]) -> bool:\n    balance = 0\n    for op in operations:\n        balance += op\n        if balance < 0:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_40_triples_sum_to_zero/python/0": {
+  "text": "```\ndef triples_sum_to_zero(l: list[int]) -> bool:\n    n = len(l)\n    for i in range(n):\n        for j in range(i + 1, n):\n            for k in range(j + 1, n):\n                if l[i] + l[j] + l[k] == 0:\n                    return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_41_car_race_collision/python/0": {
+  "text": "```\ndef car_race_collision(n: int) -> int:\n    return n * n\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_42_incr_list/python/0": {
+  "text": "```\ndef incr_list(l: list[int]) -> list[int]:\n    return [x + 1 for x in l]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_43_pairs_sum_to_zero/python/0": {
+  "text": "```\ndef pairs_sum_to_zero(l: list[int]) -> bool:\n    n = len(l)\n    for i in range(n):\n        for j in range(i + 1, n):\n            if l[i] + l[j] == 0:\n                return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_44_change_base/python/0": {
+  "text": "```\ndef change_base(x: int, base: int) -> str:\n    if x == 0:\n        return '0'\n    digits = []\n    while x > 0:\n        digits.append(str(x % base))\n        x //= base\n    return ''.join(reversed(digits))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_45_triangle_area/python/0": {
+  "text": "```\ndef triangle_area(a: int, h: int) -> float:\n    return a * h / 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_46_fib4/python/0": {
+  "text": "```\ndef fib4(n: int) -> int:\n    vals = [0, 0, 2, 0]\n    if n < 4:\n        return vals[n]\n    a, b, c, d = vals\n    for _ in range(4, n + 1):\n        a, b, c, d = b, c, d, a + b + c + d\n    return d\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_47_median/python/0": {
+  "text": "```\ndef median(l: list[int]) -> float:\n    s = sorted(l)\n    n = len(s)\n    mid = n // 2\n    if n % 2 == 1:\n        return s[mid]\n    return (s[mid - 1] + s[mid]) / 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_48_is_palindrome/python/0": {
+  "text": "```\ndef is_palindrome(text: str) -> bool:\n    return text == text[::-1]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_49_modp/python/0": {
+  "text": "```\ndef modp(n: int, p: int) -> int:\n    return pow(2, n, p)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_4_mean_absolute_deviation/python/0": {
+  "text": "```\ndef mean_absolute_deviation(numbers: list[float]) -> float:\n    mean = sum(numbers) / len(numbers)\n    return sum(abs(x - mean) for x in numbers) / len(numbers)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_51_remove_vowels/python/0": {
+  "text": "```\ndef remove_vowels(text: str) -> str:\n    return ''.join(ch for ch in text if ch not in 'aeiouAEIOU')\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_52_below_threshold/python/0": {
+  "text": "```\ndef below_threshold(l: list[int], t: int) -> bool:\n    return all(x < t for x in l)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_53_add/python/0": {
+  "text": "```\ndef add(x: int, y: int) -> int:\n    return x + y\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_54_same_chars/python/0": {
+  "text": "```\ndef same_chars(s0: str, s1: str) -> bool:\n    return set(s0) == set(s1)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_55_fib/python/0": {
+  "text": "```\ndef fib(n: int) -> int:\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_56_correct_bracketing/python/0": {
+  "text": "```\ndef correct_bracketing(brackets: str) -> bool:\n    depth = 0\n    for ch in brackets:\n        if ch == \"<\":\n            depth += 1\n        elif ch == \">\":\n            depth -= 1\n            if depth < 0:\n                return False\n    return depth == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_57_monotonic/python/0": {
+  "text": "```\ndef monotonic(l: list[int]) -> bool:\n    increasing = all(a <= b for a, b in zip(l, l[1:]))\n    decreasing = all(a >= b for a, b in zip(l, l[1:]))\n    return increasing or decreasing\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_58_common/python/0": {
+  "text": "```\ndef common(l1: list[int], l2: list[int]) -> list[int]:\n    return sorted(set(l1) & set(l2))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_59_largest_prime_factor/python/0": {
+  "text": "```\ndef largest_prime_factor(n: int) -> int:\n    largest = 1\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            largest = d\n            n //= d\n        d += 1\n    if n > 1:\n        largest = n\n    return largest\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_5_intersperse/python/0": {
+  "text": "```\ndef intersperse(numbers: list[int], delimeter: int) -> list[int]:\n    result = []\n    for i, n in enumerate(numbers):\n        if i > 0:\n            result.append(delimeter)\n        result.append(n)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_60_sum_to_n/python/0": {
+  "text": "```\ndef sum_to_n(n: int) -> int:\n    return n * (n + 1) // 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_61_correct_bracketing/python/0": {
+  "text": "```\ndef correct_bracketing(brackets: str) -> bool:\n    depth = 0\n    for ch in brackets:\n        if ch == '(':\n            depth += 1\n        elif ch == ')':\n            depth -= 1\n            if depth < 0:\n                return False\n    return depth == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_62_derivative/python/0": {
+  "text": "```\ndef derivative(xs: list[int]) -> list[int]:\n    return [i * xs[i] for i in range(1, len(xs))]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_63_fibfib/python/0": {
+  "text": "```\ndef fibfib(n: int) -> int:\n    if n == 0 or n == 1:\n        return 0\n    if n == 2:\n        return 1\n    a, b, c = 0, 0, 1\n    for _ in range(3, n + 1):\n        a, b, c = b, c, a + b + c\n    return c\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_64_vowels_count/python/0": {
+  "text": "```\ndef vowels_count(s: str) -> int:\n    lower = s.lower()\n    count = 0\n    for i, ch in enumerate(lower):\n        if ch in \"aeiou\":\n            count += 1\n        elif ch == \"y\" and i == len(lower) - 1:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_65_circular_shift/python/0": {
+  "text": "```\ndef circular_shift(x: int, shift: int) -> str:\n    s = str(x)\n    n = len(s)\n    if shift > n:\n        return s[::-1]\n    if shift == 0:\n        return s\n    return s[-shift:] + s[:-shift]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_66_digitSum/python/0": {
+  "text": "```\ndef digitSum(s: str) -> int:\n    return sum(ord(c) for c in s if c.isupper())\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_67_fruit_distribution/python/0": {
+  "text": "```\ndef fruit_distribution(s: str, n: int) -> int:\n    parts = s.split()\n    apples = int(parts[0])\n    oranges = int(parts[3])\n    return n - apples - oranges\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_68_pluck/python/0": {
+  "text": "```\ndef pluck(arr: list[int]) -> list[int]:\n    best_val = None\n    best_idx = None\n    for i, v in enumerate(arr):\n        if v % 2 == 0:\n            if best_val is None or v < best_val:\n                best_val = v\n                best_idx = i\n    if best_val is None:\n        return []\n    return [best_val, best_idx]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_69_search/python/0": {
+  "text": "```\ndef search(lst: list[int]) -> int:\n    counts = {}\n    for x in lst:\n        counts[x] = counts.get(x, 0) + 1\n    best = -1\n    for value, freq in counts.items():\n        if value > 0 and freq >= value and value > best:\n            best = value\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_6_parse_nested_parens/python/0": {
+  "text": "```\ndef parse_nested_parens(paren_string: str) -> list[int]:\n    result = []\n    for group in paren_string.split():\n        depth = 0\n        max_depth = 0\n        for ch in group:\n            if ch == '(':\n                depth += 1\n                if depth > max_depth:\n                    max_depth = depth\n            elif ch == ')':\n                depth -= 1\n        result.append(max_depth)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_70_strange_sort_list/python/0": {
+  "text": "```\ndef strange_sort_list(lst: list[int]) -> list[int]:\n    remaining = sorted(lst)\n    result = []\n    take_min = True\n    while remaining:\n        if take_min:\n            result.append(remaining.pop(0))\n        else:\n            result.append(remaining.pop())\n        take_min = not take_min\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_71_triangle_area/python/0": {
+  "text": "```\ndef triangle_area(a: int, b: int, c: int) -> float:\n    if a + b <= c or a + c <= b or b + c <= a:\n        return -1\n    s = (a + b + c) / 2\n    area = (s * (s - a) * (s - b) * (s - c)) ** 0.5\n    return round(area, 2)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_72_will_it_fly/python/0": {
+  "text": "```\ndef will_it_fly(q: list[int], w: int) -> bool:\n    return q == q[::-1] and sum(q) <= w\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_73_smallest_change/python/0": {
+  "text": "```\ndef smallest_change(arr: list[int]) -> int:\n    n = len(arr)\n    count = 0\n    for i in range(n // 2):\n        if arr[i] != arr[n - 1 - i]:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_74_total_match/python/0": {
+  "text": "```\ndef total_match(lst1: list[str], lst2: list[str]) -> list[str]:\n    len1 = sum(len(s) for s in lst1)\n    len2 = sum(len(s) for s in lst2)\n    if len1 <= len2:\n        return lst1\n    return lst2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_75_is_multiply_prime/python/0": {
+  "text": "```\ndef is_multiply_prime(a: int) -> bool:\n    def is_prime(p: int) -> bool:\n        if p < 2:\n            return False\n        d = 2\n        while d * d <= p:\n            if p % d == 0:\n                return False\n            d += 1\n        return True\n\n    count = 0\n    n = a\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            count += 1\n            n //= d\n        d += 1\n    if n > 1:\n        count += 1\n    return count == 3 and is_prime(a) is False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_76_is_simple_power/python/0": {
+  "text": "```\ndef is_simple_power(x: int, n: int) -> bool:\n    if x == 1:\n        return True\n    if n == 1 or x < 1:\n        return False\n    p = n\n    while p <= x:\n        if p == x:\n            return True\n        p *= n\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_77_iscube/python/0": {
+  "text": "```\ndef iscube(a: int) -> bool:\n    n = abs(a)\n    r = round(n ** (1 / 3))\n    for c in (r - 1, r, r + 1):\n        if c >= 0 and c * c * c == n:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_78_hex_key/python/0": {
+  "text": "```\ndef hex_key(num: str) -> int:\n    primes = set(\"2357BD\")\n    return sum(1 for c in num if c in primes)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_79_decimal_to_binary/python/0": {
+  "text": "```\ndef decimal_to_binary(decimal: int) -> str:\n    return 'db' + format(decimal, 'b') + 'db'\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_7_filter_by_substring/python/0": {
+  "text": "```\ndef filter_by_substring(strings: list[str], substring: str) -> list[str]:\n    return [s for s in strings if substring in s]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_80_is_happy/python/0": {
+  "text": "```\ndef is_happy(s: str) -> bool:\n    if len(s) < 3:\n        return False\n    for i in range(len(s) - 2):\n        a, b, c = s[i], s[i + 1], s[i + 2]\n        if a == b or b == c or a == c:\n            return False\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_81_numerical_letter_grade/python/0": {
+  "text": "```\ndef numerical_letter_grade(grades: list[float]) -> list[str]:\n    result = []\n    for g in grades:\n        if g == 4.0:\n            result.append('A+')\n        elif g > 3.7:\n            result.append('A')\n        elif g > 3.3:\n            result.append('A-')\n        elif g > 3.0:\n            result.append('B+')\n        elif g > 2.7:\n            result.append('B')\n        elif g > 2.3:\n            result.append('B-')\n        elif g > 2.0:\n            result.append('C+')\n        elif g > 1.7:\n            result.append('C')\n        elif g > 1.3:\n            result.append('C-')\n        elif g > 1.0:\n            result.append('D+')\n        elif g > 0.7:\n            result.append('D')\n        elif g > 0.0:\n            result.append('D-')\n        else:\n            result.append('E')\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_82_prime_length/python/0": {
+  "text": "```\ndef prime_length(string: str) -> bool:\n    n = len(string)\n    if n < 2:\n        return False\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return False\n        i += 1\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_83_starts_one_ends/python/0": {
+  "text": "```\ndef starts_one_ends(n: int) -> int:\n    if n == 1:\n        return 1\n    return 10 ** (n - 1) + 8 * 10 ** (n - 2)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_84_solve/python/0": {
+  "text": "```\ndef solve(N: int) -> str:\n    digit_sum = sum(int(d) for d in str(N))\n    return bin(digit_sum)[2:]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_85_add/python/0": {
+  "text": "```\ndef add(lst: list[int]) -> int:\n    return sum(x for i, x in enumerate(lst) if i % 2 == 1 and x % 2 == 0)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_86_anti_shuffle/python/0": {
+  "text": "```\ndef anti_shuffle(s: str) -> str:\n    return ' '.join(''.join(sorted(word)) for word in s.split(' '))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_87_get_row/python/0": {
+  "text": "```\ndef get_row(lst: list[list[int]], x: int) -> list[tuple[int, int]]:\n    result = []\n    for r, row in enumerate(lst):\n        cols = [c for c, v in enumerate(row) if v == x]\n        cols.sort(reverse=True)\n        for c in cols:\n            result.append((r, c))\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_88_sort_array/python/0": {
+  "text": "```\ndef sort_array(array: list[int]) -> list[int]:\n    if not array:\n        return []\n    ascending = (array[0] + array[-1]) % 2 == 1\n    return sorted(array, reverse=not ascending)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_89_encrypt/python/0": {
+  "text": "```\ndef encrypt(s: str) -> str:\n    result = []\n    for ch in s:\n        if 'a' <= ch <= 'z':\n            result.append(chr((ord(ch) - ord('a') + 4) % 26 + ord('a')))\n        else:\n            result.append(ch)\n    return ''.join(result)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_8_sum_product/python/0": {
+  "text": "```\ndef sum_product(numbers: list[int]) -> tuple[int, int]:\n    total = 0\n    product = 1\n    for x in numbers:\n        total += x\n        product *= x\n    return (total, product)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_90_next_smallest/python/0": {
+  "text": "```\ndef next_smallest(lst: list[int]) -> int | None:\n    unique = sorted(set(lst))\n    if len(unique) < 2:\n        return None\n    return unique[1]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_91_is_bored/python/0": {
+  "text": "```\nimport re\n\n\ndef is_bored(S: str) -> int:\n    sentences = re.split(r'[.?!]', S)\n    count = 0\n    for sentence in sentences:\n        words = sentence.split()\n        if words and words[0] == 'I':\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_93_encode/python/0": {
+  "text": "```\ndef encode(message: str) -> str:\n    vowels = \"aeiouAEIOU\"\n    out = []\n    for ch in message:\n        if ch in vowels:\n            ch = chr(ord(ch) + 2)\n        out.append(ch.swapcase())\n    return \"\".join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_94_skjkasdkd/python/0": {
+  "text": "```\ndef skjkasdkd(lst: list[int]) -> int:\n    def is_prime(n: int) -> bool:\n        if n < 2:\n            return False\n        i = 2\n        while i * i <= n:\n            if n % i == 0:\n                return False\n            i += 1\n        return True\n\n    primes = [x for x in lst if is_prime(x)]\n    if not primes:\n        return 0\n    return sum(int(d) for d in str(max(primes)))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_95_check_dict_case/python/0": {
+  "text": "```\ndef check_dict_case(dict: dict[str, str]) -> bool:\n    if not dict:\n        return False\n    keys = list(dict.keys())\n    all_lower = all(isinstance(k, str) and k.islower() for k in keys)\n    all_upper = all(isinstance(k, str) and k.isupper() for k in keys)\n    return all_lower or all_upper\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_96_count_up_to/python/0": {
+  "text": "```\ndef count_up_to(n: int) -> list[int]:\n    primes = []\n    for k in range(2, n):\n        is_p = True\n        d = 2\n        while d * d <= k:\n            if k % d == 0:\n                is_p = False\n                break\n            d += 1\n        if is_p:\n            primes.append(k)\n    return primes\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_97_multiply/python/0": {
+  "text": "```\ndef multiply(a: int, b: int) -> int:\n    return (abs(a) % 10) * (abs(b) % 10)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_98_count_upper/python/0": {
+  "text": "```\ndef count_upper(s: str) -> int:\n    vowels = 'AEIOU'\n    return sum(1 for i in range(0, len(s), 2) if s[i] in vowels)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_99_closest_integer/python/0": {
+  "text": "```\nfrom decimal import Decimal, ROUND_HALF_UP\n\n\ndef closest_integer(value: str) -> int:\n    return int(Decimal(value).quantize(Decimal('1'), rounding=ROUND_HALF_UP))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_9_rolling_max/python/0": {
+  "text": "```\ndef rolling_max(numbers: list[int]) -> list[int]:\n    result = []\n    current = None\n    for n in numbers:\n        if current is None or n > current:\n            current = n\n        result.append(current)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_0_has_close_elements/typescript/0": {
+  "text": "```\nexport function has_close_elements(numbers: number[], threshold: number): boolean {\n  for (let i = 0; i < numbers.length; i++) {\n    for (let j = i + 1; j < numbers.length; j++) {\n      if (Math.abs(numbers[i] - numbers[j]) < threshold) {\n        return true;\n      }\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_100_make_a_pile/typescript/0": {
+  "text": "```\nexport function make_a_pile(n: number): number[] {\n  const pile: number[] = [];\n  for (let i = 0; i < n; i++) {\n    pile.push(n + 2 * i);\n  }\n  return pile;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_101_words_string/typescript/0": {
+  "text": "```\nexport function words_string(s: string): string[] {\n  return s.split(/[\\s,]+/).filter((w) => w.length > 0);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_102_choose_num/typescript/0": {
+  "text": "```\nexport function choose_num(x: number, y: number): number {\n  if (x > y) {\n    return -1;\n  }\n  return y % 2 === 0 ? y : (y - 1 >= x ? y - 1 : -1);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_104_unique_digits/typescript/0": {
+  "text": "```\nexport function unique_digits(x: number[]): number[] {\n  return x\n    .filter((n) => String(n).split(\"\").every((d) => Number(d) % 2 === 1))\n    .sort((a, b) => a - b);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_105_by_length/typescript/0": {
+  "text": "```\nconst DIGIT_NAMES: string[] = [\n  \"One\",\n  \"Two\",\n  \"Three\",\n  \"Four\",\n  \"Five\",\n  \"Six\",\n  \"Seven\",\n  \"Eight\",\n  \"Nine\",\n];\n\nexport function by_length(arr: number[]): string[] {\n  const digits = arr.filter((x) => x >= 1 && x <= 9);\n  digits.sort((a, b) => a - b);\n  digits.reverse();\n  return digits.map((d) => DIGIT_NAMES[d - 1]);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_106_f/typescript/0": {
+  "text": "```\nexport function f(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 2 === 0) {\n      let fact = 1;\n      for (let k = 2; k <= i; k++) {\n        fact *= k;\n      }\n      result.push(fact);\n    } else {\n      result.push((i * (i + 1)) / 2);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_107_even_odd_palindrome/typescript/0": {
+  "text": "```\nfunction isPalindrome(n: number): boolean {\n  const s = String(n);\n  return s === s.split(\"\").reverse().join(\"\");\n}\n\nexport function even_odd_palindrome(n: number): [number, number] {\n  let even = 0;\n  let odd = 0;\n  for (let i = 1; i <= n; i++) {\n    if (isPalindrome(i)) {\n      if (i % 2 === 0) {\n        even++;\n      } else {\n        odd++;\n      }\n    }\n  }\n  return [even, odd];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_108_count_nums/typescript/0": {
+  "text": "```\nexport function count_nums(arr: number[]): number {\n  let count = 0;\n  for (const n of arr) {\n    const digits = String(Math.abs(n)).split(\"\").map(Number);\n    if (n < 0) digits[0] = -digits[0];\n    const sum = digits.reduce((a, b) => a + b, 0);\n    if (sum > 0) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_109_move_one_ball/typescript/0": {
+  "text": "```\nexport function move_one_ball(arr: number[]): boolean {\n  const n = arr.length;\n  if (n <= 1) {\n    return true;\n  }\n  let descents = 0;\n  for (let i = 0; i < n; i++) {\n    if (arr[i] > arr[(i + 1) % n]) {\n      descents++;\n    }\n  }\n  return descents <= 1;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_10_make_palindrome/typescript/0": {
+  "text": "```\nfunction isPalindrome(s: string): boolean {\n  let i = 0;\n  let j = s.length - 1;\n  while (i < j) {\n    if (s[i] !== s[j]) return false;\n    i++;\n    j--;\n  }\n  return true;\n}\n\nexport function make_palindrome(string: string): string {\n  for (let i = 0; i <= string.length; i++) {\n    if (isPalindrome(string.slice(i))) {\n      const prefix = string.slice(0, i);\n      return string + prefix.split(\"\").reverse().join(\"\");\n    }\n  }\n  return string;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_110_exchange/typescript/0": {
+  "text": "```\nexport function exchange(lst1: number[], lst2: number[]): string {\n  const oddInFirst = lst1.filter((x) => x % 2 !== 0).length;\n  const evenInSecond = lst2.filter((x) => x % 2 === 0).length;\n  return evenInSecond >= oddInFirst ? \"YES\" : \"NO\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_111_histogram/typescript/0": {
+  "text": "```\nexport function histogram(test_value: string): Record<string, number> {\n  const counts: Record<string, number> = {};\n  const words = test_value.split(\" \").filter((w) => w !== \"\");\n  for (const w of words) {\n    counts[w] = (counts[w] ?? 0) + 1;\n  }\n  let max = 0;\n  for (const k of Object.keys(counts)) {\n    if (counts[k] > max) {\n      max = counts[k];\n    }\n  }\n  const result: Record<string, number> = {};\n  if (max === 0) {\n    return result;\n  }\n  for (const k of Object.keys(counts)) {\n    if (counts[k] === max) {\n      result[k] = max;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_112_reverse_delete/typescript/0": {
+  "text": "```\nexport function reverse_delete(s: string, c: string): [string, boolean] {\n  const remove = new Set(c.split(\"\"));\n  const result = s\n    .split(\"\")\n    .filter((ch) => !remove.has(ch))\n    .join(\"\");\n  const isPalindrome = result === result.split(\"\").reverse().join(\"\");\n  return [result, isPalindrome];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_113_odd_count/typescript/0": {
+  "text": "```\nexport function odd_count(lst: string[]): string[] {\n  return lst.map((s) => {\n    let odd = 0;\n    for (const ch of s) {\n      if ((ch.charCodeAt(0) - 48) % 2 === 1) {\n        odd++;\n      }\n    }\n    const d = String(odd);\n    return `the number of odd elements ${d}n the str${d}ng ${d} of the ${d}nput.`;\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_114_minSubArraySum/typescript/0": {
+  "text": "```\nexport function minSubArraySum(nums: number[]): number {\n  let best = nums[0];\n  let current = nums[0];\n  for (let i = 1; i < nums.length; i++) {\n    current = Math.min(nums[i], current + nums[i]);\n    best = Math.min(best, current);\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_115_max_fill/typescript/0": {
+  "text": "```\nexport function max_fill(grid: number[][], capacity: number): number {\n  let total = 0;\n  for (const row of grid) {\n    const units = row.reduce((a, b) => a + b, 0);\n    total += Math.ceil(units / capacity);\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_116_sort_array/typescript/0": {
+  "text": "```\nfunction popcount(n: number): number {\n  let x = Math.abs(n);\n  let count = 0;\n  while (x > 0) {\n    count += x % 2;\n    x = Math.floor(x / 2);\n  }\n  return count;\n}\n\nexport function sort_array(arr: number[]): number[] {\n  return [...arr].sort((a, b) => {\n    const diff = popcount(a) - popcount(b);\n    return diff !== 0 ? diff : a - b;\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_117_select_words/typescript/0": {
+  "text": "```\nexport function select_words(s: string, n: number): string[] {\n  if (s === \"\") {\n    return [];\n  }\n  const words = s.split(\" \").filter((w) => w !== \"\");\n  return words.filter((w) => {\n    let consonants = 0;\n    for (const ch of w) {\n      if (/[a-zA-Z]/.test(ch) && !/[aeiouAEIOU]/.test(ch)) {\n        consonants++;\n      }\n    }\n    return consonants === n;\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_118_get_closest_vowel/typescript/0": {
+  "text": "```\nexport function get_closest_vowel(word: string): string {\n  const vowels = \"aeiouAEIOU\";\n  for (let i = word.length - 2; i >= 1; i--) {\n    if (vowels.includes(word[i]) && !vowels.includes(word[i - 1]) && !vowels.includes(word[i + 1])) {\n      return word[i];\n    }\n  }\n  return \"\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_119_match_parens/typescript/0": {
+  "text": "```\nfunction isBalanced(s: string): boolean {\n  let depth = 0;\n  for (const ch of s) {\n    if (ch === \"(\") {\n      depth++;\n    } else if (ch === \")\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n\nexport function match_parens(lst: string[]): string {\n  const [a, b] = lst;\n  return isBalanced(a + b) || isBalanced(b + a) ? \"Yes\" : \"No\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_11_string_xor/typescript/0": {
+  "text": "```\nexport function string_xor(a: string, b: string): string {\n  let result = \"\";\n  for (let i = 0; i < a.length; i++) {\n    result += a[i] === b[i] ? \"0\" : \"1\";\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_120_maximum/typescript/0": {
+  "text": "```\nexport function maximum(arr: number[], k: number): number[] {\n  if (k === 0) return [];\n  return [...arr].sort((a, b) => a - b).slice(-k);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_121_solution/typescript/0": {
+  "text": "```\nexport function solution(lst: number[]): number {\n  let sum = 0;\n  for (let i = 0; i < lst.length; i += 2) {\n    if (lst[i] % 2 !== 0) {\n      sum += lst[i];\n    }\n  }\n  return sum;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_122_add_elements/typescript/0": {
+  "text": "```\nexport function add_elements(arr: number[], k: number): number {\n  let sum = 0;\n  for (let i = 0; i < k; i++) {\n    if (Math.abs(arr[i]) < 100) {\n      sum += arr[i];\n    }\n  }\n  return sum;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_123_get_odd_collatz/typescript/0": {
+  "text": "```\nexport function get_odd_collatz(n: number): number[] {\n  const odds = new Set<number>();\n  let x = n;\n  while (true) {\n    if (x % 2 === 1) {\n      odds.add(x);\n    }\n    if (x === 1) {\n      break;\n    }\n    x = x % 2 === 0 ? x / 2 : 3 * x + 1;\n  }\n  return Array.from(odds).sort((a, b) => a - b);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_124_valid_date/typescript/0": {
+  "text": "```\nexport function valid_date(date: string): boolean {\n  if (date.length === 0) return false;\n  const match = /^(\\d{2})-(\\d{2})-(\\d{4})$/.exec(date);\n  if (!match) return false;\n  const month = parseInt(match[1], 10);\n  const day = parseInt(match[2], 10);\n  if (month < 1 || month > 12) return false;\n  if (day < 1) return false;\n  if ([1, 3, 5, 7, 8, 10, 12].includes(month)) return day <= 31;\n  if ([4, 6, 9, 11].includes(month)) return day <= 30;\n  return day <= 29;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_126_is_sorted/typescript/0": {
+  "text": "```\nexport function is_sorted(lst: number[]): boolean {\n  for (let i = 1; i < lst.length; i++) {\n    if (lst[i - 1] > lst[i]) {\n      return false;\n    }\n  }\n  const counts = new Map<number, number>();\n  for (const x of lst) {\n    const c = (counts.get(x) ?? 0) + 1;\n    if (c > 2) {\n      return false;\n    }\n    counts.set(x, c);\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_127_intersection/typescript/0": {
+  "text": "```\nexport function intersection(interval1: [number, number], interval2: [number, number]): string {\n  const start = Math.max(interval1[0], interval2[0]);\n  const end = Math.min(interval1[1], interval2[1]);\n  const length = end - start;\n  if (length <= 1) {\n    return \"NO\";\n  }\n  for (let d = 2; d * d <= length; d++) {\n    if (length % d === 0) {\n      return \"NO\";\n    }\n  }\n  return \"YES\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_128_prod_signs/typescript/0": {
+  "text": "```\nexport function prod_signs(arr: number[]): number | null {\n  if (arr.length === 0) {\n    return null;\n  }\n  let magnitude = 0;\n  let sign = 1;\n  for (const n of arr) {\n    magnitude += Math.abs(n);\n    if (n === 0) {\n      sign = 0;\n    } else if (n < 0 && sign !== 0) {\n      sign = -sign;\n    }\n  }\n  return magnitude * sign;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_129_minPath/typescript/0": {
+  "text": "```\nexport function minPath(grid: number[][], k: number): number[] {\n  const n = grid.length;\n  // locate the cell holding value 1\n  let r = 0;\n  let c = 0;\n  for (let i = 0; i < n; i++) {\n    for (let j = 0; j < n; j++) {\n      if (grid[i][j] === 1) {\n        r = i;\n        c = j;\n      }\n    }\n  }\n  const path: number[] = [grid[r][c]];\n  const dirs: [number, number][] = [\n    [-1, 0],\n    [1, 0],\n    [0, -1],\n    [0, 1],\n  ];\n  while (path.length < k) {\n    let bestR = -1;\n    let bestC = -1;\n    let bestVal = Infinity;\n    for (const [dr, dc] of dirs) {\n      const nr = r + dr;\n      const nc = c + dc;\n      if (nr >= 0 && nr < n && nc >= 0 && nc < n && grid[nr][nc] < bestVal) {\n        bestVal = grid[nr][nc];\n        bestR = nr;\n        bestC = nc;\n      }\n    }\n    r = bestR;\n    c = bestC;\n    path.push(bestVal);\n  }\n  return path;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_12_longest/typescript/0": {
+  "text": "```\nexport function longest(strings: string[]): string | null {\n  if (strings.length === 0) {\n    return null;\n  }\n  let best = strings[0];\n  for (const s of strings) {\n    if (s.length > best.length) {\n      best = s;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_130_tri/typescript/0": {
+  "text": "```\nfunction triValue(i: number): number {\n  if (i % 2 === 0) {\n    return 1 + i / 2;\n  }\n  return triValue(i - 1) + triValue(i - 2) + triValue(i + 1);\n}\n\nexport function tri(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i <= n; i++) {\n    result.push(triValue(i));\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_130_tri/typescript/1": {
+  "text": "```\nfunction triValue(i: number): number {\n  if (i === 1) {\n    return 3;\n  }\n  if (i % 2 === 0) {\n    return 1 + i / 2;\n  }\n  return triValue(i - 1) + triValue(i - 2) + triValue(i + 1);\n}\n\nexport function tri(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i <= n; i++) {\n    result.push(triValue(i));\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_131_digits/typescript/0": {
+  "text": "```\nexport function digits(n: number): number {\n  let product = 1;\n  let hasOdd = false;\n  for (const ch of String(Math.abs(n))) {\n    const d = Number(ch);\n    if (d % 2 === 1) {\n      product *= d;\n      hasOdd = true;\n    }\n  }\n  return hasOdd ? product : 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_132_is_nested/typescript/0": {
+  "text": "```\nexport function is_nested(string: string): boolean {\n  // Look for a subsequence \"[[]]\": two opening brackets followed by two closing ones.\n  const pattern = \"[[]]\";\n  let p = 0;\n  for (const ch of string) {\n    if (p < pattern.length && ch === pattern[p]) {\n      p++;\n    }\n  }\n  return p === pattern.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_133_sum_squares/typescript/0": {
+  "text": "```\nexport function sum_squares(lst: number[]): number {\n  return lst.reduce((acc, x) => {\n    const c = Math.ceil(x);\n    return acc + c * c;\n  }, 0);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_134_check_if_last_char_is_a_letter/typescript/0": {
+  "text": "```\nexport function check_if_last_char_is_a_letter(txt: string): boolean {\n  if (txt.length === 0) {\n    return false;\n  }\n  const lastChar = txt[txt.length - 1];\n  if (!/^[a-zA-Z]$/.test(lastChar)) {\n    return false;\n  }\n  const words = txt.split(\" \");\n  const lastWord = words[words.length - 1];\n  return lastWord.length === 1;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_135_can_arrange/typescript/0": {
+  "text": "```\nexport function can_arrange(arr: number[]): number {\n  let result = -1;\n  for (let i = 1; i < arr.length; i++) {\n    if (arr[i] < arr[i - 1]) {\n      result = i;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_136_largest_smallest_integers/typescript/0": {
+  "text": "```\nexport function largest_smallest_integers(lst: number[]): [number | null, number | null] {\n  let largestNeg: number | null = null;\n  let smallestPos: number | null = null;\n  for (const n of lst) {\n    if (n < 0 && (largestNeg === null || n > largestNeg)) {\n      largestNeg = n;\n    } else if (n > 0 && (smallestPos === null || n < smallestPos)) {\n      smallestPos = n;\n    }\n  }\n  return [largestNeg, smallestPos];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_138_is_equal_to_sum_even/typescript/0": {
+  "text": "```\nexport function is_equal_to_sum_even(n: number): boolean {\n  // sum of 4 positive even numbers: even, and at least 2+2+2+2 = 8\n  return n % 2 === 0 && n >= 8;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_139_special_factorial/typescript/0": {
+  "text": "```\nexport function special_factorial(n: number): number {\n  let result = 1;\n  let factorial = 1;\n  for (let k = 1; k <= n; k++) {\n    factorial *= k;\n    result *= factorial;\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_13_greatest_common_divisor/typescript/0": {
+  "text": "```\nexport function greatest_common_divisor(a: number, b: number): number {\n  let x = Math.abs(a);\n  let y = Math.abs(b);\n  while (y !== 0) {\n    const t = x % y;\n    x = y;\n    y = t;\n  }\n  return x;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_140_fix_spaces/typescript/0": {
+  "text": "```\nexport function fix_spaces(text: string): string {\n  return text.replace(/ {3,}/g, \"-\").replace(/ /g, \"_\").replace(/ {2}/g, \"__\");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_141_file_name_check/typescript/0": {
+  "text": "```\nexport function file_name_check(file_name: string): string {\n  const digits = file_name.replace(/[^0-9]/g, \"\");\n  if (digits.length > 3) {\n    return \"No\";\n  }\n  const parts = file_name.split(\".\");\n  if (parts.length !== 2) {\n    return \"No\";\n  }\n  const [before, after] = parts;\n  if (before.length === 0 || !/^[a-zA-Z]/.test(before)) {\n    return \"No\";\n  }\n  if (![\"txt\", \"exe\", \"dll\"].includes(after)) {\n    return \"No\";\n  }\n  return \"Yes\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_142_sum_squares/typescript/0": {
+  "text": "```\nexport function sum_squares(lst: number[]): number {\n  let total = 0;\n  for (let i = 0; i < lst.length; i++) {\n    const x = lst[i];\n    if (i % 3 === 0) {\n      total += x * x;\n    } else if (i % 4 === 0) {\n      total += x * x * x;\n    } else {\n      total += x;\n    }\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_143_words_in_sentence/typescript/0": {
+  "text": "```\nfunction isPrime(k: number): boolean {\n  if (k < 2) {\n    return false;\n  }\n  for (let d = 2; d * d <= k; d++) {\n    if (k % d === 0) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function words_in_sentence(sentence: string): string {\n  const words = sentence.split(\" \").filter((w) => w !== \"\");\n  return words.filter((w) => isPrime(w.length)).join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_144_simplify/typescript/0": {
+  "text": "```\nexport function simplify(x: string, n: string): boolean {\n  const [xn, xd] = x.split(\"/\").map(Number);\n  const [nn, nd] = n.split(\"/\").map(Number);\n  const num = xn * nn;\n  const den = xd * nd;\n  return num % den === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_145_order_by_points/typescript/0": {
+  "text": "```\nfunction signedDigitSum(n: number): number {\n  const s = String(Math.abs(n));\n  let sum = 0;\n  for (const ch of s) {\n    sum += Number(ch);\n  }\n  // The leading digit of a negative number carries the minus sign.\n  return n < 0 ? sum - 2 * Number(s[0]) : sum;\n}\n\nexport function order_by_points(nums: number[]): number[] {\n  return nums\n    .map((value, index) => ({ value, index, key: signedDigitSum(value) }))\n    .sort((a, b) => a.key - b.key || a.index - b.index)\n    .map((e) => e.value);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_146_specialFilter/typescript/0": {
+  "text": "```\nexport function specialFilter(nums: number[]): number {\n  let count = 0;\n  for (const n of nums) {\n    if (n <= 10) continue;\n    const digits = String(Math.abs(n));\n    const first = Number(digits[0]);\n    const last = Number(digits[digits.length - 1]);\n    if (first % 2 === 1 && last % 2 === 1) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_147_get_max_triples/typescript/0": {
+  "text": "```\nexport function get_max_triples(n: number): number {\n  let c0 = 0;\n  let c1 = 0;\n  for (let i = 1; i <= n; i++) {\n    const v = i * i - i + 1;\n    if (v % 3 === 0) {\n      c0++;\n    } else {\n      c1++;\n    }\n  }\n  const choose3 = (m: number): number => (m * (m - 1) * (m - 2)) / 6;\n  return choose3(c0) + choose3(c1);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_149_sorted_list_sum/typescript/0": {
+  "text": "```\nexport function sorted_list_sum(lst: string[]): string[] {\n  return lst\n    .filter((s) => s.length % 2 === 0)\n    .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_14_all_prefixes/typescript/0": {
+  "text": "```\nexport function all_prefixes(string: string): string[] {\n  const result: string[] = [];\n  for (let i = 1; i <= string.length; i++) {\n    result.push(string.slice(0, i));\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_150_x_or_y/typescript/0": {
+  "text": "```\nexport function x_or_y(n: number, x: number, y: number): number {\n  if (n < 2) {\n    return y;\n  }\n  for (let d = 2; d * d <= n; d++) {\n    if (n % d === 0) {\n      return y;\n    }\n  }\n  return x;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_152_compare/typescript/0": {
+  "text": "```\nexport function compare(game: number[], guess: number[]): number[] {\n  return game.map((score, i) => Math.abs(score - guess[i]));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_153_Strongest_Extension/typescript/0": {
+  "text": "```\nexport function Strongest_Extension(class_name: string, extensions: string[]): string {\n  let best = extensions[0];\n  let bestStrength = Number.NEGATIVE_INFINITY;\n  for (const ext of extensions) {\n    let cap = 0;\n    let sm = 0;\n    for (const ch of ext) {\n      if (ch >= \"A\" && ch <= \"Z\") {\n        cap++;\n      } else if (ch >= \"a\" && ch <= \"z\") {\n        sm++;\n      }\n    }\n    const strength = cap - sm;\n    if (strength > bestStrength) {\n      bestStrength = strength;\n      best = ext;\n    }\n  }\n  return `${class_name}.${best}`;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_154_cycpattern_check/typescript/0": {
+  "text": "```\nexport function cycpattern_check(a: string, b: string): boolean {\n  const n = b.length;\n  for (let i = 0; i < n; i++) {\n    const rotation = b.slice(i) + b.slice(0, i);\n    if (a.includes(rotation)) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_155_even_odd_count/typescript/0": {
+  "text": "```\nexport function even_odd_count(num: number): [number, number] {\n  let even = 0;\n  let odd = 0;\n  for (const ch of String(Math.abs(num))) {\n    if (Number(ch) % 2 === 0) {\n      even++;\n    } else {\n      odd++;\n    }\n  }\n  return [even, odd];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_156_int_to_mini_roman/typescript/0": {
+  "text": "```\nexport function int_to_mini_roman(number: number): string {\n  const table: [number, string][] = [\n    [1000, \"m\"],\n    [900, \"cm\"],\n    [500, \"d\"],\n    [400, \"cd\"],\n    [100, \"c\"],\n    [90, \"xc\"],\n    [50, \"l\"],\n    [40, \"xl\"],\n    [10, \"x\"],\n    [9, \"ix\"],\n    [5, \"v\"],\n    [4, \"iv\"],\n    [1, \"i\"],\n  ];\n  let n = number;\n  let out = \"\";\n  for (const [value, symbol] of table) {\n    while (n >= value) {\n      out += symbol;\n      n -= value;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_157_right_angle_triangle/typescript/0": {
+  "text": "```\nexport function right_angle_triangle(a: number, b: number, c: number): boolean {\n  const sides = [a, b, c].sort((x, y) => x - y);\n  const [x, y, z] = sides;\n  if (x <= 0) {\n    return false;\n  }\n  return x * x + y * y === z * z;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_158_find_max/typescript/0": {
+  "text": "```\nexport function find_max(words: string[]): string {\n  let best = \"\";\n  let bestCount = -1;\n  for (const w of words) {\n    const count = new Set(w).size;\n    if (count > bestCount || (count === bestCount && w < best)) {\n      best = w;\n      bestCount = count;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_159_eat/typescript/0": {
+  "text": "```\nexport function eat(number: number, need: number, remaining: number): number[] {\n  const eaten = Math.min(need, remaining);\n  return [number + eaten, remaining - eaten];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_15_string_sequence/typescript/0": {
+  "text": "```\nexport function string_sequence(n: number): string {\n  const parts: string[] = [];\n  for (let i = 0; i <= n; i++) {\n    parts.push(String(i));\n  }\n  return parts.join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_160_do_algebra/typescript/0": {
+  "text": "```\nexport function do_algebra(operator: string[], operand: number[]): number {\n  // Apply operators with standard precedence: ** first (right-assoc),\n  // then * and // (left-assoc), then + and - (left-assoc).\n  const nums: number[] = [operand[0]];\n  const ops: string[] = [];\n  for (let i = 0; i < operator.length; i++) {\n    ops.push(operator[i]);\n    nums.push(operand[i + 1]);\n  }\n\n  // pass 1: exponentiation, right to left\n  for (let i = ops.length - 1; i >= 0; i--) {\n    if (ops[i] === \"**\") {\n      nums[i] = Math.pow(nums[i], nums[i + 1]);\n      nums.splice(i + 1, 1);\n      ops.splice(i, 1);\n    }\n  }\n\n  // pass 2: multiplication and floor division, left to right\n  for (let i = 0; i < ops.length; ) {\n    if (ops[i] === \"*\" || ops[i] === \"//\") {\n      const a = nums[i];\n      const b = nums[i + 1];\n      nums[i] = ops[i] === \"*\" ? a * b : Math.floor(a / b);\n      nums.splice(i + 1, 1);\n      ops.splice(i, 1);\n    } else {\n      i++;\n    }\n  }\n\n  // pass 3: addition and subtraction, left to right\n  let result = nums[0];\n  for (let i = 0; i < ops.length; i++) {\n    if (ops[i] === \"+\") {\n      result += nums[i + 1];\n    } else {\n      result -= nums[i + 1];\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_161_solve/typescript/0": {
+  "text": "```\nexport function solve(s: string): string {\n  const hasLetter = /[a-zA-Z]/.test(s);\n  if (!hasLetter) {\n    return s.split(\"\").reverse().join(\"\");\n  }\n  let result = \"\";\n  for (const ch of s) {\n    const lower = ch.toLowerCase();\n    const upper = ch.toUpperCase();\n    if (ch === lower && ch !== upper) {\n      result += upper;\n    } else if (ch === upper && ch !== lower) {\n      result += lower;\n    } else {\n      result += ch;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_162_string_to_md5/typescript/0": {
+  "text": "```\nfunction md5Hex(text: string): string {\n  // UTF-8 encode the input.\n  const bytes: number[] = [];\n  for (let i = 0; i < text.length; i++) {\n    let c = text.charCodeAt(i);\n    if (c >= 0xd800 && c <= 0xdbff && i + 1 < text.length) {\n      const c2 = text.charCodeAt(i + 1);\n      if (c2 >= 0xdc00 && c2 <= 0xdfff) {\n        c = 0x10000 + ((c - 0xd800) << 10) + (c2 - 0xdc00);\n        i++;\n      }\n    }\n    if (c < 0x80) {\n      bytes.push(c);\n    } else if (c < 0x800) {\n      bytes.push(0xc0 | (c >> 6), 0x80 | (c & 63));\n    } else if (c < 0x10000) {\n      bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));\n    } else {\n      bytes.push(\n        0xf0 | (c >> 18),\n        0x80 | ((c >> 12) & 63),\n        0x80 | ((c >> 6) & 63),\n        0x80 | (c & 63)\n      );\n    }\n  }\n\n  // Padding.\n  const bitLen = bytes.length * 8;\n  bytes.push(0x80);\n  while (bytes.length % 64 !== 56) {\n    bytes.push(0);\n  }\n  const lo = bitLen >>> 0;\n  const hi = Math.floor(bitLen / 4294967296) >>> 0;\n  for (let i = 0; i < 4; i++) {\n    bytes.push((lo >>> (8 * i)) & 0xff);\n  }\n  for (let i = 0; i < 4; i++) {\n    bytes.push((hi >>> (8 * i)) & 0xff);\n  }\n\n  const S = [\n    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,\n    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,\n    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,\n    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,\n  ];\n  const K: number[] = [];\n  for (let i = 0; i < 64; i++) {\n    K.push(Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) >>> 0);\n  }\n\n  let a0 = 0x67452301;\n  let b0 = 0xefcdab89;\n  let c0 = 0x98badcfe;\n  let d0 = 0x10325476;\n\n  for (let off = 0; off < bytes.length; off += 64) {\n    const M: number[] = [];\n    for (let j = 0; j < 16; j++) {\n      const p = off + j * 4;\n      M.push((bytes[p] | (bytes[p + 1] << 8) | (bytes[p + 2] << 16) | (bytes[p + 3] << 24)) >>> 0);\n    }\n    let A = a0;\n    let B = b0;\n    let C = c0;\n    let D = d0;\n    for (let i = 0; i < 64; i++) {\n      let F: number;\n      let g: number;\n      if (i < 16) {\n        F = (B & C) | (~B & D);\n        g = i;\n      } else if (i < 32) {\n        F = (D & B) | (~D & C);\n        g = (5 * i + 1) % 16;\n      } else if (i < 48) {\n        F = B ^ C ^ D;\n        g = (3 * i + 5) % 16;\n      } else {\n        F = C ^ (B | ~D);\n        g = (7 * i) % 16;\n      }\n      F = (F + A + K[i] + M[g]) >>> 0;\n      A = D;\n      D = C;\n      C = B;\n      B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) >>> 0;\n    }\n    a0 = (a0 + A) >>> 0;\n    b0 = (b0 + B) >>> 0;\n    c0 = (c0 + C) >>> 0;\n    d0 = (d0 + D) >>> 0;\n  }\n\n  const hexWord = (w: number): string => {\n    let s = \"\";\n    for (let i = 0; i < 4; i++) {\n      s += (\"0\" + ((w >>> (8 * i)) & 0xff).toString(16)).slice(-2);\n    }\n    return s;\n  };\n  return hexWord(a0) + hexWord(b0) + hexWord(c0) + hexWord(d0);\n}\n\nexport function string_to_md5(text: string): string | null {\n  if (text === \"\") {\n    return null;\n  }\n  return md5Hex(text);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_163_generate_integers/typescript/0": {
+  "text": "```\nexport function generate_integers(a: number, b: number): number[] {\n  const lo = Math.max(Math.min(a, b), 0);\n  const hi = Math.max(a, b);\n  const result: number[] = [];\n  for (let d = 2; d <= 8; d += 2) {\n    if (d >= lo && d <= hi) {\n      result.push(d);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_16_count_distinct_characters/typescript/0": {
+  "text": "```\nexport function count_distinct_characters(string: string): number {\n  return new Set(string.toLowerCase().split(\"\")).size;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_17_parse_music/typescript/0": {
+  "text": "```\nexport function parse_music(music_string: string): number[] {\n  const result: number[] = [];\n  for (const token of music_string.split(\" \")) {\n    if (token === \"\") {\n      continue;\n    }\n    if (token === \"o\") {\n      result.push(4);\n    } else if (token === \"o|\") {\n      result.push(2);\n    } else if (token === \".|\") {\n      result.push(1);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_18_how_many_times/typescript/0": {
+  "text": "```\nexport function how_many_times(string: string, substring: string): number {\n  if (substring.length === 0) return 0;\n  let count = 0;\n  for (let i = 0; i + substring.length <= string.length; i++) {\n    if (string.startsWith(substring, i)) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_19_sort_numbers/typescript/0": {
+  "text": "```\nconst NUMBER_WORDS: string[] = [\n  \"zero\",\n  \"one\",\n  \"two\",\n  \"three\",\n  \"four\",\n  \"five\",\n  \"six\",\n  \"seven\",\n  \"eight\",\n  \"nine\",\n];\n\nexport function sort_numbers(numbers: string): string {\n  if (numbers.trim() === \"\") {\n    return \"\";\n  }\n  const words = numbers.split(\" \").filter((w) => w !== \"\");\n  words.sort((a, b) => NUMBER_WORDS.indexOf(a) - NUMBER_WORDS.indexOf(b));\n  return words.join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_1_separate_paren_groups/typescript/0": {
+  "text": "```\nexport function separate_paren_groups(paren_string: string): string[] {\n  const result: string[] = [];\n  let current = \"\";\n  let depth = 0;\n  for (const ch of paren_string) {\n    if (ch === \" \") {\n      continue;\n    }\n    if (ch === \"(\") {\n      depth++;\n      current += ch;\n    } else if (ch === \")\") {\n      depth--;\n      current += ch;\n      if (depth === 0) {\n        result.push(current);\n        current = \"\";\n      }\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_20_find_closest_elements/typescript/0": {
+  "text": "```\nexport function find_closest_elements(numbers: number[]): [number, number] {\n  const sorted = [...numbers].sort((a, b) => a - b);\n  let best: [number, number] = [sorted[0], sorted[1]];\n  let bestDiff = sorted[1] - sorted[0];\n  for (let i = 1; i + 1 < sorted.length; i++) {\n    const diff = sorted[i + 1] - sorted[i];\n    if (diff < bestDiff) {\n      bestDiff = diff;\n      best = [sorted[i], sorted[i + 1]];\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_21_rescale_to_unit/typescript/0": {
+  "text": "```\nexport function rescale_to_unit(numbers: number[]): number[] {\n  const lo = Math.min(...numbers);\n  const hi = Math.max(...numbers);\n  const span = hi - lo;\n  return numbers.map((n) => (n - lo) / span);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_23_strlen/typescript/0": {
+  "text": "```\nexport function strlen(string: string): number {\n  return string.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_24_largest_divisor/typescript/0": {
+  "text": "```\nexport function largest_divisor(n: number): number {\n  for (let d = Math.floor(n) - 1; d >= 1; d--) {\n    if (n % d === 0) {\n      return d;\n    }\n  }\n  return 1;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_25_factorize/typescript/0": {
+  "text": "```\nexport function factorize(n: number): number[] {\n  const factors: number[] = [];\n  let m = n;\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      factors.push(p);\n      m = m / p;\n    }\n  }\n  if (m > 1) {\n    factors.push(m);\n  }\n  return factors;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_26_remove_duplicates/typescript/0": {
+  "text": "```\nexport function remove_duplicates(numbers: number[]): number[] {\n  const counts = new Map<number, number>();\n  for (const n of numbers) {\n    counts.set(n, (counts.get(n) ?? 0) + 1);\n  }\n  return numbers.filter((n) => counts.get(n) === 1);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_27_flip_case/typescript/0": {
+  "text": "```\nexport function flip_case(string: string): string {\n  let out = \"\";\n  for (const ch of string) {\n    const lower = ch.toLowerCase();\n    out += lower === ch ? ch.toUpperCase() : lower;\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_28_concatenate/typescript/0": {
+  "text": "```\nexport function concatenate(strings: string[]): string {\n  return strings.join(\"\");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_29_filter_by_prefix/typescript/0": {
+  "text": "```\nexport function filter_by_prefix(strings: string[], prefix: string): string[] {\n  return strings.filter((s) => s.startsWith(prefix));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_2_truncate_number/typescript/0": {
+  "text": "```\nexport function truncate_number(number: number): number {\n  return number - Math.trunc(number);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_30_get_positive/typescript/0": {
+  "text": "```\nexport function get_positive(l: number[]): number[] {\n  return l.filter((n) => n > 0);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_31_is_prime/typescript/0": {
+  "text": "```\nexport function is_prime(n: number): boolean {\n  if (n < 2) return false;\n  for (let d = 2; d * d <= n; d++) {\n    if (n % d === 0) return false;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_33_sort_third/typescript/0": {
+  "text": "```\nexport function sort_third(l: number[]): number[] {\n  const thirds: number[] = [];\n  for (let i = 0; i < l.length; i += 3) {\n    thirds.push(l[i]);\n  }\n  thirds.sort((a, b) => a - b);\n  const result = l.slice();\n  let k = 0;\n  for (let i = 0; i < result.length; i += 3) {\n    result[i] = thirds[k++];\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_34_unique/typescript/0": {
+  "text": "```\nexport function unique(l: number[]): number[] {\n  return Array.from(new Set(l)).sort((a, b) => a - b);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_35_max_element/typescript/0": {
+  "text": "```\nexport function max_element(l: number[]): number {\n  let best = l[0];\n  for (const n of l) {\n    if (n > best) {\n      best = n;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_36_fizz_buzz/typescript/0": {
+  "text": "```\nexport function fizz_buzz(n: number): number {\n  let count = 0;\n  for (let i = 1; i < n; i++) {\n    if (i % 11 === 0 || i % 13 === 0) {\n      for (const ch of String(i)) {\n        if (ch === \"7\") count++;\n      }\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_37_sort_even/typescript/0": {
+  "text": "```\nexport function sort_even(l: number[]): number[] {\n  const evens: number[] = [];\n  for (let i = 0; i < l.length; i += 2) {\n    evens.push(l[i]);\n  }\n  evens.sort((a, b) => a - b);\n  const result = l.slice();\n  let k = 0;\n  for (let i = 0; i < result.length; i += 2) {\n    result[i] = evens[k++];\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_39_prime_fib/typescript/0": {
+  "text": "```\nfunction isPrime(x: number): boolean {\n  if (x < 2) {\n    return false;\n  }\n  for (let d = 2; d * d <= x; d++) {\n    if (x % d === 0) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function prime_fib(n: number): number {\n  let count = 0;\n  let a = 0;\n  let b = 1;\n  while (true) {\n    const next = a + b;\n    a = b;\n    b = next;\n    if (isPrime(a)) {\n      count++;\n      if (count === n) {\n        return a;\n      }\n    }\n  }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_3_below_zero/typescript/0": {
+  "text": "```\nexport function below_zero(operations: number[]): boolean {\n  let balance = 0;\n  for (const op of operations) {\n    balance += op;\n    if (balance < 0) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_40_triples_sum_to_zero/typescript/0": {
+  "text": "```\nexport function triples_sum_to_zero(l: number[]): boolean {\n  const n = l.length;\n  for (let i = 0; i < n; i++) {\n    for (let j = i + 1; j < n; j++) {\n      for (let k = j + 1; k < n; k++) {\n        if (l[i] + l[j] + l[k] === 0) {\n          return true;\n        }\n      }\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_41_car_race_collision/typescript/0": {
+  "text": "```\nexport function car_race_collision(n: number): number {\n  return n * n;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_42_incr_list/typescript/0": {
+  "text": "```\nexport function incr_list(l: number[]): number[] {\n  return l.map((x) => x + 1);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_43_pairs_sum_to_zero/typescript/0": {
+  "text": "```\nexport function pairs_sum_to_zero(l: number[]): boolean {\n  for (let i = 0; i < l.length; i++) {\n    for (let j = i + 1; j < l.length; j++) {\n      if (l[i] + l[j] === 0) {\n        return true;\n      }\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_44_change_base/typescript/0": {
+  "text": "```\nexport function change_base(x: number, base: number): string {\n  if (x === 0) {\n    return \"0\";\n  }\n  let n = x;\n  let out = \"\";\n  while (n > 0) {\n    out = String(n % base) + out;\n    n = Math.floor(n / base);\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_45_triangle_area/typescript/0": {
+  "text": "```\nexport function triangle_area(a: number, h: number): number {\n  return (a * h) / 2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_46_fib4/typescript/0": {
+  "text": "```\nexport function fib4(n: number): number {\n  const base: number[] = [0, 0, 2, 0];\n  if (n < 4) {\n    return base[n];\n  }\n  let a = 0;\n  let b = 0;\n  let c = 2;\n  let d = 0;\n  for (let i = 4; i <= n; i++) {\n    const next = a + b + c + d;\n    a = b;\n    b = c;\n    c = d;\n    d = next;\n  }\n  return d;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_47_median/typescript/0": {
+  "text": "```\nexport function median(l: number[]): number {\n  const sorted = [...l].sort((a, b) => a - b);\n  const mid = Math.floor(sorted.length / 2);\n  if (sorted.length % 2 === 1) {\n    return sorted[mid];\n  }\n  return (sorted[mid - 1] + sorted[mid]) / 2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_48_is_palindrome/typescript/0": {
+  "text": "```\nexport function is_palindrome(text: string): boolean {\n  let i = 0;\n  let j = text.length - 1;\n  while (i < j) {\n    if (text[i] !== text[j]) {\n      return false;\n    }\n    i++;\n    j--;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_49_modp/typescript/0": {
+  "text": "```\nexport function modp(n: number, p: number): number {\n  let result = 1 % p;\n  for (let i = 0; i < n; i++) {\n    result = (result * 2) % p;\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_4_mean_absolute_deviation/typescript/0": {
+  "text": "```\nexport function mean_absolute_deviation(numbers: number[]): number {\n  const mean = numbers.reduce((acc, x) => acc + x, 0) / numbers.length;\n  const total = numbers.reduce((acc, x) => acc + Math.abs(x - mean), 0);\n  return total / numbers.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_51_remove_vowels/typescript/0": {
+  "text": "```\nexport function remove_vowels(text: string): string {\n  return text.replace(/[aeiouAEIOU]/g, \"\");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_52_below_threshold/typescript/0": {
+  "text": "```\nexport function below_threshold(l: number[], t: number): boolean {\n  return l.every((x) => x < t);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_53_add/typescript/0": {
+  "text": "```\nexport function add(x: number, y: number): number {\n  return x + y;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_54_same_chars/typescript/0": {
+  "text": "```\nexport function same_chars(s0: string, s1: string): boolean {\n  const a = new Set(s0.split(\"\"));\n  const b = new Set(s1.split(\"\"));\n  if (a.size !== b.size) return false;\n  for (const ch of a) {\n    if (!b.has(ch)) return false;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_55_fib/typescript/0": {
+  "text": "```\nexport function fib(n: number): number {\n  let a = 0;\n  let b = 1;\n  for (let i = 0; i < n; i++) {\n    const next = a + b;\n    a = b;\n    b = next;\n  }\n  return a;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_56_correct_bracketing/typescript/0": {
+  "text": "```\nexport function correct_bracketing(brackets: string): boolean {\n  let depth = 0;\n  for (const ch of brackets) {\n    if (ch === \"<\") {\n      depth++;\n    } else if (ch === \">\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_57_monotonic/typescript/0": {
+  "text": "```\nexport function monotonic(l: number[]): boolean {\n  let inc = true;\n  let dec = true;\n  for (let i = 1; i < l.length; i++) {\n    if (l[i] > l[i - 1]) {\n      dec = false;\n    } else if (l[i] < l[i - 1]) {\n      inc = false;\n    }\n  }\n  return inc || dec;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_58_common/typescript/0": {
+  "text": "```\nexport function common(l1: number[], l2: number[]): number[] {\n  const set2 = new Set(l2);\n  const seen = new Set<number>();\n  for (const x of l1) {\n    if (set2.has(x)) seen.add(x);\n  }\n  return Array.from(seen).sort((a, b) => a - b);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_59_largest_prime_factor/typescript/0": {
+  "text": "```\nexport function largest_prime_factor(n: number): number {\n  let largest = 1;\n  let m = n;\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      largest = p;\n      m = m / p;\n    }\n  }\n  if (m > 1) {\n    largest = m;\n  }\n  return largest;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_5_intersperse/typescript/0": {
+  "text": "```\nexport function intersperse(numbers: number[], delimeter: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i < numbers.length; i++) {\n    if (i > 0) {\n      result.push(delimeter);\n    }\n    result.push(numbers[i]);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_60_sum_to_n/typescript/0": {
+  "text": "```\nexport function sum_to_n(n: number): number {\n  return (n * (n + 1)) / 2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_61_correct_bracketing/typescript/0": {
+  "text": "```\nexport function correct_bracketing(brackets: string): boolean {\n  let depth = 0;\n  for (const ch of brackets) {\n    if (ch === \"(\") {\n      depth++;\n    } else if (ch === \")\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_62_derivative/typescript/0": {
+  "text": "```\nexport function derivative(xs: number[]): number[] {\n  const result: number[] = [];\n  for (let i = 1; i < xs.length; i++) {\n    result.push(xs[i] * i);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_63_fibfib/typescript/0": {
+  "text": "```\nexport function fibfib(n: number): number {\n  if (n === 0) {\n    return 0;\n  }\n  if (n === 1) {\n    return 0;\n  }\n  if (n === 2) {\n    return 1;\n  }\n  let a = 0;\n  let b = 0;\n  let c = 1;\n  for (let i = 3; i <= n; i++) {\n    const next = a + b + c;\n    a = b;\n    b = c;\n    c = next;\n  }\n  return c;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_64_vowels_count/typescript/0": {
+  "text": "```\nexport function vowels_count(s: string): number {\n  const lower = s.toLowerCase();\n  let count = 0;\n  for (let i = 0; i < lower.length; i++) {\n    const ch = lower[i];\n    if (\"aeiou\".includes(ch)) {\n      count++;\n    } else if (ch === \"y\" && i === lower.length - 1) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_65_circular_shift/typescript/0": {
+  "text": "```\nexport function circular_shift(x: number, shift: number): string {\n  const s = String(x);\n  const n = s.length;\n  if (shift > n) {\n    return s.split(\"\").reverse().join(\"\");\n  }\n  const k = n - shift;\n  return s.slice(k) + s.slice(0, k);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_66_digitSum/typescript/0": {
+  "text": "```\nexport function digitSum(s: string): number {\n  let sum = 0;\n  for (let i = 0; i < s.length; i++) {\n    const code = s.charCodeAt(i);\n    if (code >= 65 && code <= 90) {\n      sum += code;\n    }\n  }\n  return sum;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_67_fruit_distribution/typescript/0": {
+  "text": "```\nexport function fruit_distribution(s: string, n: number): number {\n  const parts = s.match(/\\d+/g) ?? [];\n  let used = 0;\n  for (const p of parts) {\n    used += parseInt(p, 10);\n  }\n  return n - used;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_68_pluck/typescript/0": {
+  "text": "```\nexport function pluck(arr: number[]): number[] {\n  let bestValue: number | null = null;\n  let bestIndex = -1;\n  for (let i = 0; i < arr.length; i++) {\n    const v = arr[i];\n    if (v % 2 === 0 && (bestValue === null || v < bestValue)) {\n      bestValue = v;\n      bestIndex = i;\n    }\n  }\n  if (bestValue === null) {\n    return [];\n  }\n  return [bestValue, bestIndex];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_69_search/typescript/0": {
+  "text": "```\nexport function search(lst: number[]): number {\n  const counts = new Map<number, number>();\n  for (const n of lst) {\n    counts.set(n, (counts.get(n) ?? 0) + 1);\n  }\n  let best = -1;\n  for (const [value, freq] of counts) {\n    if (value > 0 && freq >= value && value > best) {\n      best = value;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_6_parse_nested_parens/typescript/0": {
+  "text": "```\nexport function parse_nested_parens(paren_string: string): number[] {\n  return paren_string\n    .split(\" \")\n    .filter((g) => g.length > 0)\n    .map((group) => {\n      let depth = 0;\n      let maxDepth = 0;\n      for (const ch of group) {\n        if (ch === \"(\") {\n          depth++;\n          if (depth > maxDepth) maxDepth = depth;\n        } else if (ch === \")\") {\n          depth--;\n        }\n      }\n      return maxDepth;\n    });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_70_strange_sort_list/typescript/0": {
+  "text": "```\nexport function strange_sort_list(lst: number[]): number[] {\n  const sorted = [...lst].sort((a, b) => a - b);\n  const result: number[] = [];\n  let lo = 0;\n  let hi = sorted.length - 1;\n  let takeMin = true;\n  while (lo <= hi) {\n    if (takeMin) {\n      result.push(sorted[lo++]);\n    } else {\n      result.push(sorted[hi--]);\n    }\n    takeMin = !takeMin;\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_71_triangle_area/typescript/0": {
+  "text": "```\nexport function triangle_area(a: number, b: number, c: number): number {\n  if (a + b <= c || a + c <= b || b + c <= a) {\n    return -1;\n  }\n  const s = (a + b + c) / 2;\n  const area = Math.sqrt(s * (s - a) * (s - b) * (s - c));\n  return Math.round(area * 100) / 100;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_72_will_it_fly/typescript/0": {
+  "text": "```\nexport function will_it_fly(q: number[], w: number): boolean {\n  const n = q.length;\n  for (let i = 0; i < Math.floor(n / 2); i++) {\n    if (q[i] !== q[n - 1 - i]) {\n      return false;\n    }\n  }\n  const total = q.reduce((acc, x) => acc + x, 0);\n  return total <= w;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_73_smallest_change/typescript/0": {
+  "text": "```\nexport function smallest_change(arr: number[]): number {\n  let changes = 0;\n  let i = 0;\n  let j = arr.length - 1;\n  while (i < j) {\n    if (arr[i] !== arr[j]) {\n      changes++;\n    }\n    i++;\n    j--;\n  }\n  return changes;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_74_total_match/typescript/0": {
+  "text": "```\nexport function total_match(lst1: string[], lst2: string[]): string[] {\n  const len1 = lst1.reduce((acc, s) => acc + s.length, 0);\n  const len2 = lst2.reduce((acc, s) => acc + s.length, 0);\n  return len1 <= len2 ? lst1 : lst2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_75_is_multiply_prime/typescript/0": {
+  "text": "```\nexport function is_multiply_prime(a: number): boolean {\n  if (a < 2) {\n    return false;\n  }\n  let m = a;\n  let count = 0;\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      m = m / p;\n      count++;\n    }\n  }\n  if (m > 1) {\n    count++;\n  }\n  return count === 3;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_76_is_simple_power/typescript/0": {
+  "text": "```\nexport function is_simple_power(x: number, n: number): boolean {\n  if (n === 1) {\n    return x === 1;\n  }\n  let p = 1;\n  while (p < x) {\n    p *= n;\n  }\n  return p === x;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_77_iscube/typescript/0": {
+  "text": "```\nexport function iscube(a: number): boolean {\n  const r = Math.round(Math.cbrt(a));\n  for (const c of [r - 1, r, r + 1]) {\n    if (c * c * c === a) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_78_hex_key/typescript/0": {
+  "text": "```\nexport function hex_key(num: string): number {\n  const primes = new Set([\"2\", \"3\", \"5\", \"7\", \"B\", \"D\"]);\n  let count = 0;\n  for (const ch of num) {\n    if (primes.has(ch)) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_79_decimal_to_binary/typescript/0": {
+  "text": "```\nexport function decimal_to_binary(decimal: number): string {\n  return \"db\" + decimal.toString(2) + \"db\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_7_filter_by_substring/typescript/0": {
+  "text": "```\nexport function filter_by_substring(strings: string[], substring: string): string[] {\n  return strings.filter((s) => s.includes(substring));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_80_is_happy/typescript/0": {
+  "text": "```\nexport function is_happy(s: string): boolean {\n  if (s.length < 3) {\n    return false;\n  }\n  for (let i = 0; i + 2 < s.length; i++) {\n    const a = s[i];\n    const b = s[i + 1];\n    const c = s[i + 2];\n    if (a === b || b === c || a === c) {\n      return false;\n    }\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_81_numerical_letter_grade/typescript/0": {
+  "text": "```\nexport function iscube(a: number): boolean {\n  const r = Math.round(Math.cbrt(a));\n  for (const c of [r - 1, r, r + 1]) {\n    if (c * c * c === a) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_81_numerical_letter_grade/typescript/1": {
+  "text": "```\nexport function numerical_letter_grade(grades: number[]): string[] {\n  return grades.map((g) => {\n    if (g === 4.0) return \"A+\";\n    if (g > 3.7) return \"A\";\n    if (g > 3.3) return \"A-\";\n    if (g > 3.0) return \"B+\";\n    if (g > 2.7) return \"B\";\n    if (g > 2.3) return \"B-\";\n    if (g > 2.0) return \"C+\";\n    if (g > 1.7) return \"C\";\n    if (g > 1.3) return \"C-\";\n    if (g > 1.0) return \"D+\";\n    if (g > 0.7) return \"D\";\n    if (g > 0.0) return \"D-\";\n    return \"E\";\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_82_prime_length/typescript/0": {
+  "text": "```\nexport function hex_key(num: string): number {\n  const primes = new Set([\"2\", \"3\", \"5\", \"7\", \"B\", \"D\"]);\n  let count = 0;\n  for (const ch of num) {\n    if (primes.has(ch)) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_82_prime_length/typescript/1": {
+  "text": "```\nexport function prime_length(string: string): boolean {\n  const n = string.length;\n  if (n < 2) return false;\n  for (let d = 2; d * d <= n; d++) {\n    if (n % d === 0) return false;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_83_starts_one_ends/typescript/0": {
+  "text": "```\nexport function starts_one_ends(n: number): number {\n  if (n === 1) {\n    return 1;\n  }\n  return Math.pow(10, n - 1) + 8 * Math.pow(10, n - 2);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_84_solve/typescript/0": {
+  "text": "```\nexport function is_happy(s: string): boolean {\n  if (s.length < 3) {\n    return false;\n  }\n  for (let i = 0; i + 2 < s.length; i++) {\n    const a = s[i];\n    const b = s[i + 1];\n    const c = s[i + 2];\n    if (a === b || b === c || a === c) {\n      return false;\n    }\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_84_solve/typescript/1": {
+  "text": "```\nexport function solve(N: number): string {\n  const digitSum = String(N)\n    .split(\"\")\n    .reduce((acc, d) => acc + Number(d), 0);\n  return digitSum.toString(2);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_85_add/typescript/0": {
+  "text": "```\nexport function add(lst: number[]): number {\n  let total = 0;\n  for (let i = 1; i < lst.length; i += 2) {\n    if (lst[i] % 2 === 0) {\n      total += lst[i];\n    }\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_86_anti_shuffle/typescript/0": {
+  "text": "```\nexport function anti_shuffle(s: string): string {\n  return s\n    .split(\" \")\n    .map((word) => word.split(\"\").sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0)).join(\"\"))\n    .join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_87_get_row/typescript/0": {
+  "text": "```\nexport function get_row(lst: number[][], x: number): [number, number][] {\n  const result: [number, number][] = [];\n  for (let r = 0; r < lst.length; r++) {\n    const row = lst[r];\n    const cols: number[] = [];\n    for (let c = 0; c < row.length; c++) {\n      if (row[c] === x) {\n        cols.push(c);\n      }\n    }\n    cols.sort((a, b) => b - a);\n    for (const c of cols) {\n      result.push([r, c]);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_88_sort_array/typescript/0": {
+  "text": "```\nexport function sort_array(array: number[]): number[] {\n  if (array.length === 0) {\n    return [];\n  }\n  const sum = array[0] + array[array.length - 1];\n  const copy = [...array];\n  if (sum % 2 === 1) {\n    copy.sort((a, b) => a - b);\n  } else {\n    copy.sort((a, b) => b - a);\n  }\n  return copy;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_89_encrypt/typescript/0": {
+  "text": "```\nexport function encrypt(s: string): string {\n  let out = \"\";\n  for (const ch of s) {\n    const code = ch.charCodeAt(0);\n    if (code >= 97 && code <= 122) {\n      out += String.fromCharCode(((code - 97 + 4) % 26) + 97);\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_8_sum_product/typescript/0": {
+  "text": "```\nexport function sum_product(numbers: number[]): [number, number] {\n  let sum = 0;\n  let product = 1;\n  for (const n of numbers) {\n    sum += n;\n    product *= n;\n  }\n  return [sum, product];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_90_next_smallest/typescript/0": {
+  "text": "```\nexport function next_smallest(lst: number[]): number | null {\n  const unique = Array.from(new Set(lst)).sort((a, b) => a - b);\n  return unique.length >= 2 ? unique[1] : null;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_91_is_bored/typescript/0": {
+  "text": "```\nexport function is_bored(S: string): number {\n  const sentences = S.split(/[.?!]/);\n  let count = 0;\n  for (const sentence of sentences) {\n    const words = sentence.trim().split(/\\s+/);\n    if (words[0] === \"I\") {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_93_encode/typescript/0": {
+  "text": "```\nexport function encode(message: string): string {\n  const vowels = \"aeiouAEIOU\";\n  let result = \"\";\n  for (const ch of message) {\n    let c = ch;\n    if (vowels.includes(ch)) {\n      c = String.fromCharCode(ch.charCodeAt(0) + 2);\n    }\n    if (c === c.toUpperCase() && c !== c.toLowerCase()) {\n      result += c.toLowerCase();\n    } else if (c === c.toLowerCase() && c !== c.toUpperCase()) {\n      result += c.toUpperCase();\n    } else {\n      result += c;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_94_skjkasdkd/typescript/0": {
+  "text": "```\nfunction isPrime(n: number): boolean {\n  if (n < 2) {\n    return false;\n  }\n  for (let d = 2; d * d <= n; d++) {\n    if (n % d === 0) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function skjkasdkd(lst: number[]): number {\n  let largest = -1;\n  for (const n of lst) {\n    if (isPrime(n) && n > largest) {\n      largest = n;\n    }\n  }\n  if (largest < 0) {\n    return 0;\n  }\n  let sum = 0;\n  for (const ch of String(largest)) {\n    sum += Number(ch);\n  }\n  return sum;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_95_check_dict_case/typescript/0": {
+  "text": "```\nexport function check_dict_case(dict: Record<string, string>): boolean {\n  const keys = Object.keys(dict);\n  if (keys.length === 0) return false;\n  const allLower = keys.every((k) => k === k.toLowerCase() && k !== k.toUpperCase());\n  const allUpper = keys.every((k) => k === k.toUpperCase() && k !== k.toLowerCase());\n  return allLower || allUpper;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_96_count_up_to/typescript/0": {
+  "text": "```\nexport function count_up_to(n: number): number[] {\n  const primes: number[] = [];\n  for (let k = 2; k < n; k++) {\n    let isPrime = true;\n    for (let d = 2; d * d <= k; d++) {\n      if (k % d === 0) {\n        isPrime = false;\n        break;\n      }\n    }\n    if (isPrime) {\n      primes.push(k);\n    }\n  }\n  return primes;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_97_multiply/typescript/0": {
+  "text": "```\nexport function multiply(a: number, b: number): number {\n  return (Math.abs(a) % 10) * (Math.abs(b) % 10);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_98_count_upper/typescript/0": {
+  "text": "```\nexport function count_upper(s: string): number {\n  const vowels = \"AEIOU\";\n  let count = 0;\n  for (let i = 0; i < s.length; i += 2) {\n    if (vowels.includes(s[i])) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_99_closest_integer/typescript/0": {
+  "text": "```\nexport function closest_integer(value: string): number {\n  const x = parseFloat(value);\n  const floor = Math.floor(x);\n  const diff = x - floor;\n  if (diff > 0.5) return floor + 1;\n  if (diff < 0.5) return floor;\n  // exactly halfway: round away from zero\n  return x >= 0 ? floor + 1 : floor;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "he_9_rolling_max/typescript/0": {
+  "text": "```\nexport function rolling_max(numbers: number[]): number[] {\n  const result: number[] = [];\n  let best: number | undefined = undefined;\n  for (const n of numbers) {\n    best = best === undefined || n > best ? n : best;\n    result.push(best);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ }
+}

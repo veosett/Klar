@@ -2,6 +2,7 @@
 // line, the same tools and the same answers, character for character (tests/selfhost.py). A tool runs the klarc
 // command of the same name as a child process (`--klarc PATH`, default `klarc` from PATH) and returns its output.
 use builtin_sigs.{klar_version}
+use dev.{parse_allow}
 use jsonout.{J, compact}
 use std.json.{Json, parse_json}
 
@@ -182,7 +183,7 @@ fn text_result(text: Str, is_error: Bool) -> J {
 }
 
 /// Runs a tool: None for an unknown name.
-fn call_tool(name: Str, a: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
+fn call_tool(name: Str, a: Json, klarc: Str, lib: Str, allow: Str) -> Option[J] uses proc {
   let found = tools().filter(fn(t) => t.name == name)
   let tool = match found.get(0) {
     Some(t) => t,
@@ -196,6 +197,10 @@ fn call_tool(name: Str, a: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
     }
   }
   var argv = [klarc].concat(command(name, a))
+  // the tools that run the model's code get the rights of `klarc mcp --allow` (docs/THREATS.md T5)
+  if name == "klar_dev" or name == "klar_eval" {
+    argv = argv.concat(["--allow", allow])
+  }
   if name != "klar_explain" {
     argv = argv.concat(["--lib", lib])
   }
@@ -211,7 +216,7 @@ fn error_reply(id: J, code: Int, msg: Str) -> J {
 }
 
 /// The answer to one message (None for a notification).
-fn handle(msg: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
+fn handle(msg: Json, klarc: Str, lib: Str, allow: Str) -> Option[J] uses proc {
   let fields = match msg {
     Json.Obj(fs) => fs,
     _ => {
@@ -253,7 +258,7 @@ fn handle(msg: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
       Json.Obj(fs) => Json.Obj(fs),
       _ => Json.Obj(Map {}),
     }
-    match call_tool(name: name, a: args, klarc: klarc, lib: lib) {
+    match call_tool(name: name, a: args, klarc: klarc, lib: lib, allow: allow) {
       Some(r) => {
         result = r
       },
@@ -267,7 +272,7 @@ fn handle(msg: Json, klarc: Str, lib: Str) -> Option[J] uses proc {
   return Some(J.JObj([kv("jsonrpc", J.JStr("2.0")), kv("id", id), kv("result", result)]))
 }
 
-/// `klarc mcp [--klarc PATH]`
+/// `klarc mcp [--klarc PATH] [--allow RIGHTS]`
 pub fn mcp_command(args: List[Str], lib: Str) -> Int uses io, proc {
   var klarc = "klarc"
   match args.index_of("--klarc") {
@@ -276,6 +281,17 @@ pub fn mcp_command(args: List[Str], lib: Str) -> Int uses io, proc {
     },
     None => {},
   }
+  let allow = match args.index_of("--allow") {
+    Some(k) => args.get_or(k + 1, ""),
+    None => "",
+  }
+  match parse_allow(allow) {
+    Ok(_) => {},
+    Err(e) => {
+      eprint("error: " + e)
+      return 2
+    },
+  }
   var reading = true
   while reading {
     match read_line() {
@@ -283,7 +299,7 @@ pub fn mcp_command(args: List[Str], lib: Str) -> Int uses io, proc {
         let text = line.trim()
         if text != "" {
           let reply = match parse_json(text) {
-            Ok(msg) => handle(msg: msg, klarc: klarc, lib: lib),
+            Ok(msg) => handle(msg: msg, klarc: klarc, lib: lib, allow: allow),
             Err(_) => Some(error_reply(id: J.JNull, code: -32700, msg: "parse error")),
           }
           match reply {

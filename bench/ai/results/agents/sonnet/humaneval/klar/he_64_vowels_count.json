@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn vowels_count(s: Str) -> Int {\n  let low = s.lower()\n  var n: Int = low.chars().count(fn(c) => c == \"a\" or c == \"e\" or c == \"i\" or c == \"o\" or c == \"u\")\n  if low.ends_with(\"y\") {\n    n = n + 1\n  }\n  return n\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

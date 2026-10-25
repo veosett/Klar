@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn decimal_to_binary(decimal: Int) -> Str {\n  var n = decimal\n  var bits: List[Str] = []\n  while n > 0 {\n    bits = bits.push((n % 2).to_str())\n    n = n / 2\n  }\n  if bits.is_empty() {\n    return \"db0db\"\n  }\n  let body = bits.reverse().join(\"\")\n  return \"db{body}db\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

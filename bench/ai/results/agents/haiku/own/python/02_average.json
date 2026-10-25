@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def average(xs: list[int]) -> float | None:\n    if not xs:\n        return None\n    return sum(xs) / len(xs)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

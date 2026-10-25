@@ -17,6 +17,11 @@ KEYWORDS = {
     "const", "property", "trait", "impl", "pub",
 }
 
+def is_digit_of(c, radix):
+    """A digit of a hexadecimal, binary or octal literal."""
+    return c != "" and c.lower() in "0123456789abcdef"[:radix]
+
+
 def is_digit(c):
     """An ASCII digit: only 0-9 make numbers (str.isdigit also accepts other scripts' digits and `²`)."""
     return "0" <= c <= "9" and len(c) == 1
@@ -155,6 +160,18 @@ class Lexer:
 
     def number(self, sl, sc):
         buf = []
+        radix = {"x": 16, "b": 2, "o": 8}.get(self.ch(1).lower()) if self.ch() == "0" else None
+        if radix and is_digit_of(self.ch(2), radix):
+            # 0x1F, 0b1010, 0o17 (underscores allowed between digits)
+            buf += [self.adv(), self.adv()]
+            while is_digit_of(self.ch(), radix) or self.ch() == "_":
+                buf.append(self.adv())
+            if self.ch().isalnum() or self.ch() == "_":
+                self.error("E0001", f"invalid number literal `{''.join(buf)}{self.ch()}`", sl, sc,
+                           {16: "hexadecimal digits are 0-9 and a-f", 2: "binary digits are 0 and 1",
+                            8: "octal digits are 0-7"}[radix])
+            self.add("INT", int("".join(buf[2:]).replace("_", ""), radix), sl, sc)
+            return
         while is_digit(self.ch()) or self.ch() == "_":
             buf.append(self.adv())
         is_float = False
@@ -162,6 +179,14 @@ class Lexer:
             is_float = True
             buf.append(self.adv())
             while is_digit(self.ch()) or self.ch() == "_":
+                buf.append(self.adv())
+        # an exponent: 1e-5, 2.5E10 (always a Float)
+        if self.ch() in ("e", "E") and (is_digit(self.ch(1)) or (self.ch(1) in ("+", "-") and is_digit(self.ch(2)))):
+            is_float = True
+            buf.append(self.adv())
+            if self.ch() in ("+", "-"):
+                buf.append(self.adv())
+            while is_digit(self.ch()):
                 buf.append(self.adv())
         text = "".join(buf).replace("_", "")
         if self.ch().isalpha() or self.ch() == "_":
@@ -191,9 +216,13 @@ class Lexer:
                 e = self.ch()
                 if e not in escapes:
                     self.error("E0004", f"invalid escape `\\{e}`", el, ec,
-                               "valid escapes: \\n \\t \\\\ \\\" \\{ \\} \\0", width=2)
+                               "valid escapes: \\n \\t \\r \\\\ \\\" \\{ \\} \\0", width=2)
                 self.adv()
                 buf.append(escapes[e])
+            elif c == "{" and self.ch(1) in ('"', "\\", "}"):
+                # `{` that cannot start an interpolation (`"{"`, `"{}"`, `"{\"a\": 1}"`) is a literal brace
+                self.adv()
+                buf.append("{")
             elif c == "{":
                 if buf:
                     parts.append("".join(buf))

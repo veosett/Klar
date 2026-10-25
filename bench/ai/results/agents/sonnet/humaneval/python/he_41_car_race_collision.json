@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def car_race_collision(n: int) -> int:\n    return n * n\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

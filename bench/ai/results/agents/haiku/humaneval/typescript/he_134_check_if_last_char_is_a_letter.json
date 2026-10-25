@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function check_if_last_char_is_a_letter(txt: string): boolean {\n  if (txt.length === 0) {\n    return false;\n  }\n  const lastChar = txt[txt.length - 1];\n  if (!/^[a-zA-Z]$/.test(lastChar)) {\n    return false;\n  }\n  const words = txt.split(\" \");\n  const lastWord = words[words.length - 1];\n  return lastWord.length === 1;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

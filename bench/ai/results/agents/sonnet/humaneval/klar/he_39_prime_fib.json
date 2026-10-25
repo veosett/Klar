@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn prime_fib(n: Int) -> Int {\n  var a: Int = 1\n  var b: Int = 2\n  var found: Int = 0\n  while true {\n    if is_prime(b) {\n      found = found + 1\n      if found >= n {\n        return b\n      }\n    }\n    let c = a + b\n    a = b\n    b = c\n  }\n  return 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

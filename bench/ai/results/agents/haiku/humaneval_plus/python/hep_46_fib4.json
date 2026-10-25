@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fib4(n: int) -> int:\n    base = [0, 0, 2, 0]\n    if n < 4:\n        return base[n]\n    a, b, c, d = base\n    for _ in range(4, n + 1):\n        a, b, c, d = b, c, d, a + b + c + d\n    return d\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

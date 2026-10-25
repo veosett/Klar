@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function divide_all(xs: number[], ys: number[]): number[] {\n  for (let i = 0; i < ys.length; i++) {\n    if (ys[i] === 0) {\n      throw new Error(`division by zero at index ${i}`);\n    }\n  }\n  const out: number[] = [];\n  for (let i = 0; i < xs.length; i++) {\n    out.push(Math.trunc(xs[i] / ys[i]) || 0);\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

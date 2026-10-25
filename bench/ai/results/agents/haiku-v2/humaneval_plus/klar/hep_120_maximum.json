@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn maximum(arr: List[Int], k: Int) -> List[Int] {\n  if k <= 0 {\n    return []\n  }\n  let sorted = arr.sort()\n  let n = sorted.len()\n  let start = (n - k).max(0)\n  return sorted.slice(start, n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

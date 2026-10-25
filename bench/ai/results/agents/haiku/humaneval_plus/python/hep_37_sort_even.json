@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_even(l: list[int]) -> list[int]:\n    result = list(l)\n    evens = sorted(l[i] for i in range(0, len(l), 2))\n    for k, i in enumerate(range(0, len(l), 2)):\n        result[i] = evens[k]\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

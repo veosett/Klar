@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_up_to(n: number): number[] {\n  const primes: number[] = [];\n  for (let k = 2; k < n; k++) {\n    let isPrime = true;\n    for (let d = 2; d * d <= k; d++) {\n      if (k % d === 0) {\n        isPrime = false;\n        break;\n      }\n    }\n    if (isPrime) {\n      primes.push(k);\n    }\n  }\n  return primes;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

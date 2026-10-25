@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function solution(lst: number[]): number {\n  let s = 0;\n  for (let i = 0; i < lst.length; i += 2) if (Math.abs(lst[i]) % 2 === 1) s += lst[i];\n  return s;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn maximum(arr: List[Int], k: Int) -> List[Int] {\n  if k <= 0 {\n    return []\n  }\n  return arr.sort().reverse().take(k).sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

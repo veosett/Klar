@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function encrypt(s: string): string {\n  let r = \"\";\n  for (const c of s) {\n    const code = c.charCodeAt(0);\n    if (code >= 97 && code <= 122) r += String.fromCharCode(((code - 97 + 4) % 26) + 97);\n    else r += c;\n  }\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

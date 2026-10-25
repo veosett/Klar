@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn truncate_number(number: Float) -> Float {\n  return number - number.floor().to_float()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

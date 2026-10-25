@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn filter_by_substring(strings: List[Str], substring: Str) -> List[Str] {\n  return strings.filter(fn(s) => s.contains(substring))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

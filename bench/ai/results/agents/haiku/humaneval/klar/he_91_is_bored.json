@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn starts_with_i(s: Str) -> Bool {\n  return s == \"I\" or s.starts_with(\"I \")\n}\n\npub fn is_bored(text: Str) -> Int {\n  let normalized = text.replace(\"?\", \".\").replace(\"!\", \".\")\n  let sentences = normalized.split(\".\")\n  let hits = sentences.filter(fn(s) => starts_with_i(s.trim()))\n  return hits.len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

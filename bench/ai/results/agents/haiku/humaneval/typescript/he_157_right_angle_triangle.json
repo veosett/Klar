@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function right_angle_triangle(a: number, b: number, c: number): boolean {\n  const sides = [a, b, c].sort((x, y) => x - y);\n  const [x, y, z] = sides;\n  if (x <= 0) {\n    return false;\n  }\n  return x * x + y * y === z * z;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

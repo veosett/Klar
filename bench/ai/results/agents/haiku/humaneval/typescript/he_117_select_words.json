@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function select_words(s: string, n: number): string[] {\n  if (s === \"\") {\n    return [];\n  }\n  const words = s.split(\" \").filter((w) => w !== \"\");\n  return words.filter((w) => {\n    let consonants = 0;\n    for (const ch of w) {\n      if (/[a-zA-Z]/.test(ch) && !/[aeiouAEIOU]/.test(ch)) {\n        consonants++;\n      }\n    }\n    return consonants === n;\n  });\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

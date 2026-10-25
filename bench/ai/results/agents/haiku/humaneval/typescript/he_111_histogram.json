@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function histogram(test_value: string): Record<string, number> {\n  const counts: Record<string, number> = {};\n  const words = test_value.split(\" \").filter((w) => w !== \"\");\n  for (const w of words) {\n    counts[w] = (counts[w] ?? 0) + 1;\n  }\n  let max = 0;\n  for (const k of Object.keys(counts)) {\n    if (counts[k] > max) {\n      max = counts[k];\n    }\n  }\n  const result: Record<string, number> = {};\n  if (max === 0) {\n    return result;\n  }\n  for (const k of Object.keys(counts)) {\n    if (counts[k] === max) {\n      result[k] = max;\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

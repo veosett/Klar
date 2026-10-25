@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn flip_case(c: Str) -> Str {\n  if \"abcdefghijklmnopqrstuvwxyz\".contains(c) {\n    return c.upper()\n  }\n  if \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c) {\n    return c.lower()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  let cs = s.chars()\n  if not cs.any(fn(c) => letters.contains(c)) {\n    return s.reverse()\n  }\n  return cs.map(fn(c) => flip_case(c)).join(\"\")\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "fn is_letter(c: Str) -> Bool {\n  if c.upper() != c.lower() {\n    return true\n  }\n  let code = c.codes().get_or(0, 0)\n  if code >= 1488 and code <= 1514 {\n    return true\n  }\n  if code >= 1568 and code <= 1610 {\n    return true\n  }\n  if code >= 2309 and code <= 2361 {\n    return true\n  }\n  if code >= 4352 and code <= 4607 {\n    return true\n  }\n  if code >= 12352 and code <= 12543 {\n    return true\n  }\n  if code >= 19968 and code <= 40959 {\n    return true\n  }\n  if code >= 44032 and code <= 55203 {\n    return true\n  }\n  return false\n}\n\nfn flip_case(c: Str) -> Str {\n  let up = c.upper()\n  if up != c {\n    return up\n  }\n  let low = c.lower()\n  if low != c {\n    return low\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let cs = s.chars()\n  if not cs.any(fn(c) => is_letter(c)) {\n    return s.reverse()\n  }\n  return cs.map(fn(c) => flip_case(c)).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

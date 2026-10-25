@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fix_spaces(text: Str) -> Str {\n  let cs = text.chars()\n  let n = cs.len()\n  var out = \"\"\n  var i = 0\n  while i < n {\n    let c = cs.get_or(i, \"\")\n    if c == \" \" {\n      var j = i\n      while j < n and cs.get_or(j, \"\") == \" \" {\n        j = j + 1\n      }\n      let run = j - i\n      if run > 2 {\n        out = out + \"-\"\n      } else {\n        out = out + \"_\".repeat(run)\n      }\n      i = j\n    } else {\n      out = out + c\n      i = i + 1\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

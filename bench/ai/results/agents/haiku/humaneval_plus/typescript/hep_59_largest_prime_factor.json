@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function largest_prime_factor(n: number): number {\n  let largest = 1;\n  let m = n;\n  while (m % 2 === 0) {\n    largest = 2;\n    m = m / 2;\n  }\n  for (let p = 3; p * p <= m; p += 2) {\n    while (m % p === 0) {\n      largest = p;\n      m = m / p;\n    }\n  }\n  if (m > 1) {\n    largest = m;\n  }\n  return largest;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

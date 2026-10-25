@@ -1,0 +1,295 @@
+{
+ "note": "per agent: [tokens, tool calls, wall-clock ms] as the agent runner reported them when the agent finished; the wall-clock time includes the harness (tsc is the slowest) and a busy machine; haiku/humaneval/typescript agents 0-2 were interrupted by a harness outage and resumed, their time is the sum of both parts and their tokens the total; haiku-guide: Haiku that first read the reference, docs/GUIDE.md and examples/*.klar (with the number literals and std.math.floor_div that the first runs led to); haiku-v2: Haiku with the reference only, after the changes the first runs led to (E0208 only for swappable arguments, {\"a\": 1} maps, `=> {` lambdas, literal braces, 0x/1e literals, floor_div)",
+ "sonnet": {
+  "humaneval": {
+   "klar": [
+    [
+     130742,
+     82,
+     260815
+    ],
+    [
+     121853,
+     42,
+     225949
+    ],
+    [
+     121872,
+     42,
+     221400
+    ],
+    [
+     121247,
+     42,
+     225342
+    ]
+   ],
+   "python": [
+    [
+     104188,
+     81,
+     205060
+    ],
+    [
+     108244,
+     118,
+     228759
+    ],
+    [
+     97372,
+     40,
+     181048
+    ],
+    [
+     103869,
+     78,
+     206347
+    ]
+   ],
+   "typescript": [
+    [
+     107072,
+     81,
+     815149
+    ],
+    [
+     106464,
+     80,
+     811503
+    ],
+    [
+     98691,
+     40,
+     745859
+    ],
+    [
+     99619,
+     40,
+     768859
+    ]
+   ]
+  }
+ },
+ "haiku": {
+  "humaneval": {
+   "klar": [
+    [
+     149145,
+     119,
+     515739
+    ],
+    [
+     144714,
+     119,
+     491179
+    ],
+    [
+     152443,
+     118,
+     502054
+    ],
+    [
+     143838,
+     116,
+     478742
+    ]
+   ],
+   "python": [
+    [
+     111922,
+     118,
+     421178
+    ],
+    [
+     113923,
+     120,
+     423664
+    ],
+    [
+     111617,
+     115,
+     407123
+    ],
+    [
+     111366,
+     115,
+     401133
+    ]
+   ],
+   "typescript": [
+    [
+     123861,
+     79,
+     998722
+    ],
+    [
+     123434,
+     82,
+     985083
+    ],
+    [
+     120509,
+     78,
+     941409
+    ],
+    [
+     117458,
+     121,
+     931387
+    ]
+   ]
+  },
+  "humaneval_plus": {
+   "klar": [
+    [
+     151552,
+     121,
+     433142
+    ],
+    [
+     157272,
+     86,
+     570089
+    ],
+    [
+     151376,
+     120,
+     437747
+    ],
+    [
+     182356,
+     158,
+     557918
+    ]
+   ],
+   "python": [
+    [
+     113030,
+     118,
+     308781
+    ],
+    [
+     112242,
+     81,
+     447942
+    ],
+    [
+     105385,
+     77,
+     291745
+    ],
+    [
+     113762,
+     115,
+     306498
+    ]
+   ],
+   "typescript": [
+    [
+     119285,
+     118,
+     840825
+    ],
+    [
+     122676,
+     122,
+     862709
+    ],
+    [
+     115817,
+     115,
+     809091
+    ],
+    [
+     119772,
+     117,
+     817949
+    ]
+   ]
+  },
+  "own": {
+   "klar": [
+    [
+     131421,
+     80,
+     234464
+    ]
+   ],
+   "python": [
+    [
+     90736,
+     49,
+     139662
+    ]
+   ],
+   "typescript": [
+    [
+     95883,
+     73,
+     317811
+    ]
+   ]
+  }
+ },
+ "haiku-guide": {
+  "humaneval_plus": {
+   "klar": [
+    [
+     180091,
+     123,
+     373115
+    ],
+    [
+     185683,
+     86,
+     529311
+    ],
+    [
+     179855,
+     133,
+     356063
+    ],
+    [
+     166261,
+     81,
+     403029
+    ]
+   ]
+  }
+ },
+ "haiku-v2": {
+  "humaneval_plus": {
+   "klar": [
+    [
+     144870,
+     80,
+     287808
+    ],
+    [
+     164371,
+     125,
+     467096
+    ],
+    [
+     153137,
+     120,
+     298566
+    ],
+    [
+     151430,
+     118,
+     329068
+    ]
+   ]
+  },
+  "own": {
+   "klar": [
+    [
+     127977,
+     74,
+     187599
+    ]
+   ]
+  }
+ }
+}

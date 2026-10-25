@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fib_mod(n: number, m: number): number {\n  const mod = BigInt(m);\n  if (n === 0) return 0 % m;\n  let a = 0n;\n  let b = 1n % mod;\n  for (let i = 1; i < n; i++) {\n    const next = (a + b) % mod;\n    a = b;\n    b = next;\n  }\n  return Number(b % mod);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

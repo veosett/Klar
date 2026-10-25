@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert anti_shuffle(\"hello\") == \"ehllo\"\npub fn anti_shuffle(s: Str) -> Str {\n  return s.split(\" \").map(fn(w: Str) => w.chars().sort().join(\"\")).join(\" \")\n}\n\ntest \"anti_shuffle\" {\n  assert anti_shuffle(\"Hi\") == \"Hi\"\n  assert anti_shuffle(\"hello\") == \"ehllo\"\n  assert anti_shuffle(\"Hello World!!!\") == \"Hello !!!Wdlor\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

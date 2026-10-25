@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn move_one_ball(arr: List[Int]) -> Bool {\n  let n = arr.len()\n  var descents: Int = 0\n  for i in range(0, n) {\n    let j = match i + 1 == n {\n      true => 0,\n      false => i + 1,\n    }\n    if arr.get_or(i, 0) > arr.get_or(j, 0) {\n      descents = descents + 1\n    }\n  }\n  return descents <= 1\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -667,6 +667,112 @@ fn sh(c: Ck, t: Type) -> Str {
   return show(c.s, t)
 }
 
+// ---- E0208: positional arguments of a function with 3+ parameters (klar/checker.py `positional_verdict`) ----
+// Positional is fine when the arguments cannot be in the wrong order unnoticed: parameters of different types
+// cannot be swapped, and among parameters of one type every argument but at most one carries its parameter's name
+// (`r` or `nr` for `r`, `r - 1`, `p.r`). Otherwise the arguments must be named; an argument that carries another
+// parameter's name is reported as swapped.
+
+/// The name an argument expression carries: `x`, `p.x`, `x + 1` / `x - 1` -> "x".
+fn arg_name(e: Expr) -> Option[Str] {
+  return match e {
+    Expr.Name(_, n) => Some(n),
+    Expr.FieldAccess(_, _, n, _) => Some(n),
+    Expr.Binary(_, op, l, r) => match op == "+" or op == "-" {
+      true => match l {
+        Expr.Name(_, n) => match is_number_lit(r) {
+          true => Some(n),
+          false => None,
+        },
+        _ => match r {
+          Expr.Name(_, n) => match is_number_lit(l) and op == "+" {
+            true => Some(n),
+            false => None,
+          },
+          _ => None,
+        },
+      },
+      false => None,
+    },
+    _ => None,
+  }
+}
+
+fn is_number_lit(e: Expr) -> Bool {
+  return match e {
+    Expr.IntLit(_, _) => true,
+    Expr.FloatLit(_, _) => true,
+    _ => false,
+  }
+}
+
+fn strip_underscores(s: Str) -> Str {
+  var a = 0
+  var z = s.len()
+  while a < z and s.slice(a, a + 1) == "_" {
+    a = a + 1
+  }
+  while z > a and s.slice(z - 1, z) == "_" {
+    z = z - 1
+  }
+  return s.slice(a, z)
+}
+
+fn ascii_letters(s: Str) -> Bool {
+  return not s.is_empty() and s.chars().all(fn(ch) => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(ch))
+}
+
+/// Whether argument name `arg` stands for parameter `param`: equal, or with a prefix of 1-2 letters.
+fn carries(arg: Str, param: Str) -> Bool {
+  let a = strip_underscores(arg)
+  let p = strip_underscores(param)
+  if a == p {
+    return true
+  }
+  let extra = a.len() - p.len()
+  return p.len() > 0 and a.ends_with(p) and extra > 0 and extra <= 2 and ascii_letters(a.slice(0, extra))
+}
+
+/// ["ok"] | ["ambiguous", "a`, `b", type] | ["swapped", argument, parameter] for the positional arguments.
+fn positional_verdict(names: List[Str], types: List[Str], values: List[Expr]) -> List[Str] {
+  let n = values.len().min(names.len())
+  var order: List[Str] = []
+  for i in range(0, n) {
+    let t = types.get_or(i, "")
+    if not order.contains(t) {
+      order = order.push(t)
+    }
+  }
+  for ty in order {
+    let idx = range(0, n).filter(fn(i) => types.get_or(i, "") == ty)
+    if idx.len() >= 2 {
+      let group = idx.map(fn(i) => Pair { first: names.get_or(i, ""), second: values.get(i).and_then(arg_name) })
+      for g in group {
+        match g.second {
+          Some(a) => {
+            if not carries(a, g.first) {
+              for q in group {
+                if q.first != g.first and carries(a, q.first) {
+                  return ["swapped", a, g.first]
+                }
+              }
+            }
+          },
+          None => {},
+        }
+      }
+      let unnamed = group.filter(fn(g) => match g.second {
+        Some(a) => not carries(a, g.first),
+        None => true,
+      })
+      if unnamed.len() > 1 {
+        return ["ambiguous", group.map(fn(g) => g.first).join("`, `"), ty]
+      }
+    }
+  }
+  return ["ok"]
+}
+
 fn hd(c: Ck, t: Type) -> Option[Str] {
   return head(c.s, t)
 }
@@ -3352,8 +3458,20 @@ fn call_sig_p(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Ty
       }
     }
     let names = params.map(fn(p) => p.first)
-    if sig.user and sig.params.len() >= 3 and not positional.is_empty() and not c.sys {
-      let example = names.map(fn(n) => "{n}: ...").join(", ")
+    let c_now = c
+    let verdict = match sig.user and sig.params.len() >= 3 and not positional.is_empty() and not c.sys {
+      true => positional_verdict(names: names, types: params.map(fn(p) => sh(c_now, p.second)), values: positional.map(
+        fn(a) => a.value)),
+      false => ["ok"],
+    }
+    let example = names.map(fn(n) => "{n}: ...").join(", ")
+    if verdict.get_or(0, "") == "swapped" {
+      let a_name = verdict.get_or(1, "")
+      let p_name = verdict.get_or(2, "")
+      c = error(c: c, code: "E0208", msg: "the arguments of `{display}` look swapped: `{a_name}` is passed as `{p_name}`",
+        span: span, hint: Some("check the order, or name them: `{display}({example})`"))
+    }
+    if verdict.get_or(0, "") == "ambiguous" {
       var edits: List[FixEdit] = []
       var k = 0
       for a in positional {
@@ -3367,8 +3485,10 @@ fn call_sig_p(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Ty
       if not edits.is_empty() {
         fix = Some(DiagFix { edits: edits, safe: true })
       }
-      c = error_fix(c: c, code: "E0208", msg: "`{display}` has {sig.params.len()} parameters, so arguments must be named",
-        span: span, hint: Some("write `{display}({example})`"), fix: fix)
+      let shared = verdict.get_or(1, "")
+      let ty = verdict.get_or(2, "")
+      c = error_fix(c: c, code: "E0208", msg: "`{display}` has {sig.params.len()} parameters and `{shared}` share the type " +
+          "`{ty}`, so the arguments must be named", span: span, hint: Some("write `{display}({example})`"), fix: fix)
     }
     var assigned: Map[Str, Arg] = Map {}
     var i = 0

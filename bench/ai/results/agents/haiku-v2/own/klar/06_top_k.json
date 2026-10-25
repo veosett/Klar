@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn top_k(words: List[Str], k: Int) -> List[Str] {\n  let distinct = words.unique()\n  let keyed = distinct.map(fn(w: Str) -> Str {\n    let c = words.count(fn(x: Str) => x == w)\n    return (999999 - c).to_str().pad_left(6, \"0\") + w\n  })\n  return keyed.sort().take(k).map(fn(s: Str) => s.slice(6, s.len()))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

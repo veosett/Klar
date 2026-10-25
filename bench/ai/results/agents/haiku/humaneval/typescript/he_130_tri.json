@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "function triValue(i: number): number {\n  if (i % 2 === 0) {\n    return 1 + i / 2;\n  }\n  return triValue(i - 1) + triValue(i - 2) + triValue(i + 1);\n}\n\nexport function tri(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i <= n; i++) {\n    result.push(triValue(i));\n  }\n  return result;\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "function triValue(i: number): number {\n  if (i === 1) {\n    return 3;\n  }\n  if (i % 2 === 0) {\n    return 1 + i / 2;\n  }\n  return triValue(i - 1) + triValue(i - 2) + triValue(i + 1);\n}\n\nexport function tri(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i <= n; i++) {\n    result.push(triValue(i));\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

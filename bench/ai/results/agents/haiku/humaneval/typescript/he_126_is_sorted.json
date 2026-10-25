@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_sorted(lst: number[]): boolean {\n  for (let i = 1; i < lst.length; i++) {\n    if (lst[i - 1] > lst[i]) {\n      return false;\n    }\n  }\n  const counts = new Map<number, number>();\n  for (const x of lst) {\n    const c = (counts.get(x) ?? 0) + 1;\n    if (c > 2) {\n      return false;\n    }\n    counts.set(x, c);\n  }\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

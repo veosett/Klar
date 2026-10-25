@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn count_distinct_characters(string: Str) -> Int {\n  return string.lower().chars().unique().len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

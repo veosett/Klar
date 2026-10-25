@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.list.{frequencies}\n\npub fn search(lst: List[Int]) -> Int {\n  let counts = frequencies(lst)\n  var best: Int = -1\n  for n in lst {\n    if n > 0 and counts.get(n).unwrap_or(0) >= n and n > best {\n      best = n\n    }\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn unique(l: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  for x in l.sort() {\n    let fresh = match out.last() {\n      Some(v) => v != x,\n      None => true,\n    }\n    if fresh {\n      out = out.push(x)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

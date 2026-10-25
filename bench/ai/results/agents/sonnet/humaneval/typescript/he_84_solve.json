@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function solve(N: number): string {\n  let s = 0;\n  for (const c of String(N)) s += Number(c);\n  return s.toString(2);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

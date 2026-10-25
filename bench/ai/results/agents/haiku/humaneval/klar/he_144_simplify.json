@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn simplify(x: Str, n: Str) -> Bool {\n  let xs = x.split(\"/\")\n  let ns = n.split(\"/\")\n  let a = xs.get_or(0, \"\").to_int().unwrap_or(0)\n  let b = xs.get_or(1, \"\").to_int().unwrap_or(0)\n  let c = ns.get_or(0, \"\").to_int().unwrap_or(0)\n  let d = ns.get_or(1, \"\").to_int().unwrap_or(0)\n  let num = a * c\n  let den = b * d\n  if den == 0 {\n    return false\n  }\n  return num % den == 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

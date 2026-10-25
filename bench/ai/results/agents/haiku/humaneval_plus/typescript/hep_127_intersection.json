@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function intersection(interval1: [number, number], interval2: [number, number]): string {\n  const start = Math.max(interval1[0], interval2[0]);\n  const end = Math.min(interval1[1], interval2[1]);\n  const length = end - start;\n  if (length < 2) {\n    return \"NO\";\n  }\n  for (let d = 2; d * d <= length; d++) {\n    if (length % d === 0) {\n      return \"NO\";\n    }\n  }\n  return \"YES\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

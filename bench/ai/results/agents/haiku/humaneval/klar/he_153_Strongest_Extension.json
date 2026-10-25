@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn extension_strength(name: Str) -> Int {\n  let cap = name.chars().filter(fn(c) => \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c)).len()\n  let sm = name.chars().filter(fn(c) => \"abcdefghijklmnopqrstuvwxyz\".contains(c)).len()\n  return cap - sm\n}\n\npub fn Strongest_Extension(class_name: Str, extensions: List[Str]) -> Str {\n  var best_name = \"\"\n  var best_strength = 0\n  var found = false\n  for ext in extensions {\n    let s = extension_strength(ext)\n    if not found or s > best_strength {\n      best_name = ext\n      best_strength = s\n      found = true\n    }\n  }\n  if not found {\n    return class_name\n  }\n  return \"{class_name}.{best_name}\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

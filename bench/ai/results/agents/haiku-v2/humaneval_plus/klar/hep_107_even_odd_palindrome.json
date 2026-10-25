@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn even_odd_palindrome(n: Int) -> Pair[Int, Int] {\n  var evens: Int = 0\n  var odds: Int = 0\n  for i in range(1, n + 1) {\n    let s = i.to_str()\n    if s == s.reverse() {\n      if i % 2 == 0 {\n        evens = evens + 1\n      } else {\n        odds = odds + 1\n      }\n    }\n  }\n  return Pair { first: evens, second: odds }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

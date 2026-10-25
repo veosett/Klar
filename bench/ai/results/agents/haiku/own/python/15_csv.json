@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def parse_csv_line(line: str) -> list[str]:\n    fields: list[str] = []\n    current: list[str] = []\n    i = 0\n    n = len(line)\n    at_field_start = True\n    while True:\n        if at_field_start and i < n and line[i] == '\"':\n            # quoted field\n            i += 1\n            closed = False\n            while i < n:\n                ch = line[i]\n                if ch == '\"':\n                    if i + 1 < n and line[i + 1] == '\"':\n                        current.append('\"')\n                        i += 2\n                        continue\n                    closed = True\n                    i += 1\n                    break\n                current.append(ch)\n                i += 1\n            if not closed:\n                raise ValueError(\"unterminated quote\")\n            # any stray characters up to the next comma are kept literally\n            while i < n and line[i] != \",\":\n                current.append(line[i])\n                i += 1\n        else:\n            while i < n and line[i] != \",\":\n                current.append(line[i])\n                i += 1\n        fields.append(\"\".join(current))\n        current = []\n        if i >= n:\n            break\n        # line[i] is a comma; move past it and start a new field\n        i += 1\n        at_field_start = True\n        if i >= n:\n            fields.append(\"\")\n            break\n    return fields\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

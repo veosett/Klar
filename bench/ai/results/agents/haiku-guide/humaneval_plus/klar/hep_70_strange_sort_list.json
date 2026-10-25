@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Strange order: the minimum, then the maximum of the rest, then the minimum, and so on.\n/// >>> assert strange_sort_list([1, 2, 3, 4]) == [1, 4, 2, 3]\npub fn strange_sort_list(lst: List[Int]) -> List[Int] {\n  let s = lst.sort()\n  var out: List[Int] = []\n  var lo = 0\n  var hi = s.len() - 1\n  var take_min = true\n  while lo <= hi {\n    if take_min {\n      out = out.push(s.get_or(lo, 0))\n      lo = lo + 1\n    } else {\n      out = out.push(s.get_or(hi, 0))\n      hi = hi - 1\n    }\n    take_min = not take_min\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

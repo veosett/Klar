@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function prod_signs(arr: number[]): number | null {\n  if (arr.length === 0) {\n    return null;\n  }\n  let magnitude = 0;\n  let negatives = 0;\n  let hasZero = false;\n  for (const x of arr) {\n    if (x === 0) {\n      hasZero = true;\n    } else if (x < 0) {\n      negatives++;\n    }\n    magnitude += Math.abs(x);\n  }\n  if (hasZero) {\n    return 0;\n  }\n  return negatives % 2 === 0 ? magnitude : -magnitude;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fib_mod(n: int, m: int) -> int:\n    # fast doubling: returns (F(k) mod m, F(k+1) mod m)\n    def fd(k: int) -> tuple[int, int]:\n        if k == 0:\n            return 0, 1 % m\n        a, b = fd(k >> 1)\n        c = (a * ((2 * b - a) % m)) % m\n        d = (a * a + b * b) % m\n        if k & 1:\n            return d, (c + d) % m\n        return c, d\n\n    return fd(n)[0] % m\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

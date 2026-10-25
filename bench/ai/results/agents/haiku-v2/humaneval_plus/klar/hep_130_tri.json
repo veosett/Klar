@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn tri_at(m: Int) -> Int {\n  if m % 2 == 0 {\n    return 1 + m / 2\n  }\n  var acc: Int = 3\n  var k: Int = 3\n  while k <= m {\n    acc = acc + k + 2\n    k = k + 2\n  }\n  return acc\n}\n\npub fn tri(n: Int) -> List[Int] {\n  return range(0, n + 1).map(fn(m) => tri_at(m))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

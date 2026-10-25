@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def specialFilter(nums: list[int]) -> int:\n    count = 0\n    for n in nums:\n        if n > 10:\n            s = str(abs(n))\n            if int(s[0]) % 2 == 1 and int(s[-1]) % 2 == 1:\n                count += 1\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

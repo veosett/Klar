@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn floor_quot(a: Int, b: Int) -> Int {\n  if b == 0 {\n    return 0\n  }\n  let q = a / b\n  if a % b != 0 and ((a < 0) != (b < 0)) {\n    return q - 1\n  }\n  return q\n}\n\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var cur = operand.get_or(0, 0)\n  var sign = 1\n  var total = 0\n  for i in range(0, operator.len()) {\n    let op = operator.get_or(i, \"+\")\n    let x = operand.get_or(i + 1, 0)\n    if op == \"**\" {\n      cur = cur.pow(x)\n    } else if op == \"*\" {\n      cur = cur * x\n    } else if op == \"//\" {\n      cur = floor_quot(cur, x)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = x\n    }\n  }\n  return total + sign * cur\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "fn floor_quot(a: Int, b: Int) -> Int {\n  if b == 0 {\n    return 0\n  }\n  let q = a / b\n  if a % b != 0 and ((a < 0) != (b < 0)) {\n    return q - 1\n  }\n  return q\n}\n\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  let m = operator.len()\n  if m == 0 {\n    return operand.get_or(0, 0)\n  }\n  var term = operand.get_or(m, 0)\n  var nums_rev: List[Int] = []\n  var ops_rev: List[Str] = []\n  for i in range(0, m) {\n    let j = m - 1 - i\n    let op = operator.get_or(j, \"+\")\n    let left = operand.get_or(j, 0)\n    if op == \"**\" {\n      term = left.pow(term)\n    } else {\n      nums_rev = nums_rev.push(term)\n      ops_rev = ops_rev.push(op)\n      term = left\n    }\n  }\n  nums_rev = nums_rev.push(term)\n  let nums = nums_rev.reverse()\n  let ops = ops_rev.reverse()\n  var cur = nums.get_or(0, 0)\n  var sign = 1\n  var total = 0\n  for i in range(0, ops.len()) {\n    let op = ops.get_or(i, \"+\")\n    let x = nums.get_or(i + 1, 0)\n    if op == \"*\" {\n      cur = cur * x\n    } else if op == \"//\" {\n      cur = floor_quot(cur, x)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = x\n    }\n  }\n  return total + sign * cur\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

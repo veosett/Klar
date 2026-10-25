@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// 2^n modulo p, by repeated squaring so that large n stays fast.\n/// >>> assert modp(3, 5) == 3\n/// >>> assert modp(1101, 101) == 2\n/// >>> assert modp(0, 101) == 1\npub fn modp(n: Int, p: Int) -> Int {\n  if p == 0 {\n    return 0\n  }\n  var result = 1 % p\n  var base = 2 % p\n  var e = n\n  while e > 0 {\n    if e % 2 == 1 {\n      result = (result * base) % p\n    }\n    base = (base * base) % p\n    e = e / 2\n  }\n  return result\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

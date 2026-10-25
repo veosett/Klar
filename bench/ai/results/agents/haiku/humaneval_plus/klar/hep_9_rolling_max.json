@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rolling_max(numbers: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  var best: Option[Int] = None\n  for n in numbers {\n    match best {\n      None => { best = Some(n) },\n      Some(b) => { best = Some(b.max(n)) },\n    }\n    match best {\n      Some(v) => { out = out.push(v) },\n      None => { },\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

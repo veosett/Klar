@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn encrypt(s: Str) -> Str {\n  var out: Str = \"\"\n  for c in s.codes() {\n    if c >= 97 and c <= 122 {\n      let n = (c - 97 + 4) % 26 + 97\n      out = out + n.to_char().unwrap_or(\"\")\n    } else {\n      out = out + c.to_char().unwrap_or(\"\")\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

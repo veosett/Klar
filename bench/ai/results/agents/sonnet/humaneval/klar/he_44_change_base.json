@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn change_base(x: Int, base: Int) -> Str {\n  if base == 0 {\n    return \"\"\n  }\n  var n: Int = x\n  var out: Str = \"\"\n  while n > 0 {\n    out = (n % base).to_str() + out\n    n = n / base\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function closest_integer(value: string): number {\n  const x = parseFloat(value);\n  const r = x < 0 ? -Math.round(-x) : Math.round(x);\n  return r === 0 ? 0 : r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

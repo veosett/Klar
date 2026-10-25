@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function pluck(arr: number[]): number[] {\n  let bi = -1;\n  for (let i = 0; i < arr.length; i++) {\n    if (arr[i] % 2 === 0 && (bi < 0 || arr[i] < arr[bi])) bi = i;\n  }\n  return bi < 0 ? [] : [arr[bi], bi];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

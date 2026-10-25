@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The arithmetic mean of `xs` as a Float, or None for an empty list.\npub fn average(xs: List[Int]) -> Option[Float] {\n  if xs.is_empty() {\n    return None\n  }\n  let total = xs.sum().to_float()\n  return Some(total / xs.len().to_float())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

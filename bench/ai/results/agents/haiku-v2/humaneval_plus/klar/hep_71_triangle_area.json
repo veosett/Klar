@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn triangle_area(a: Int, b: Int, c: Int) -> Float {\n  if a + b <= c or a + c <= b or b + c <= a {\n    return -1.0\n  }\n  let x = a.to_float()\n  let y = b.to_float()\n  let z = c.to_float()\n  let s = (x + y + z) / 2.0\n  let area = (s * (s - x) * (s - y) * (s - z)).sqrt()\n  return area.round_to(2)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

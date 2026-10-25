@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn closest_integer(value: Str) -> Int {\n  let f = value.to_float().unwrap_or(0.0)\n  let a = f.abs()\n  let r = (a + 0.5).floor()\n  return match f < 0.0 {\n    true => 0 - r,\n    false => r,\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function factorize(n: number): number[] {\n  const factors: number[] = [];\n  let m = n;\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      factors.push(p);\n      m = m / p;\n    }\n  }\n  if (m > 1) {\n    factors.push(m);\n  }\n  return factors;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

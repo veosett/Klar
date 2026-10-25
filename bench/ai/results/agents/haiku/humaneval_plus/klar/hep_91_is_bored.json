@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.text.{words}\n\npub fn is_bored(s: Str) -> Int {\n  let parts = s.replace(\"?\", \".\").replace(\"!\", \".\").split(\".\")\n  return parts.filter(fn(p) => words(p).first().unwrap_or(\"\") == \"I\").len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

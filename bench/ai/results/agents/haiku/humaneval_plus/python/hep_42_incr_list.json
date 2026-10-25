@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def incr_list(l: list[int]) -> list[int]:\n    return [x + 1 for x in l]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

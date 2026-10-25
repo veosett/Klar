@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn int_to_mini_roman(number: Int) -> Str {\n  let vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]\n  let syms = [\"m\", \"cm\", \"d\", \"cd\", \"c\", \"xc\", \"l\", \"xl\", \"x\", \"ix\", \"v\", \"iv\", \"i\"]\n  var n = number\n  var out = \"\"\n  for i in range(0, 13) {\n    let v = vals.get_or(i, 0)\n    let s = syms.get_or(i, \"\")\n    while v > 0 and n >= v {\n      out = out + s\n      n = n - v\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

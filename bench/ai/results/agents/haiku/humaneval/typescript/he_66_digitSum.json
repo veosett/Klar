@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function digitSum(s: string): number {\n  let sum = 0;\n  for (let i = 0; i < s.length; i++) {\n    const code = s.charCodeAt(i);\n    if (code >= 65 && code <= 90) {\n      sum += code;\n    }\n  }\n  return sum;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def cycpattern_check(a: str, b: str) -> bool:\n    n = len(b)\n    if n == 0:\n        return True\n    doubled = b + b\n    for i in range(n):\n        if doubled[i:i + n] in a:\n            return True\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

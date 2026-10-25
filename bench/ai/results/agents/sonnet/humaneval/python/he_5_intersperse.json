@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def intersperse(numbers: list[int], delimeter: int) -> list[int]:\n    res = []\n    for i, n in enumerate(numbers):\n        if i > 0:\n            res.append(delimeter)\n        res.append(n)\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

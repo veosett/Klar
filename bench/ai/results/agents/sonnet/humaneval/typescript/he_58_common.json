@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function common(l1: number[], l2: number[]): number[] {\n  const b = new Set(l2);\n  return Array.from(new Set(l1.filter(x => b.has(x)))).sort((x, y) => x - y);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

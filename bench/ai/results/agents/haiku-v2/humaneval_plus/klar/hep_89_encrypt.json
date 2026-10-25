@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn encrypt(s: Str) -> Str {\n  let alpha = \"abcdefghijklmnopqrstuvwxyz\"\n  var out: Str = \"\"\n  for c in s.chars() {\n    match alpha.index_of(c) {\n      Some(i) => {\n        let j = (i + 4) % 26\n        out = out + alpha.slice(j, j + 1)\n      }\n      None => {\n        out = out + c\n      }\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

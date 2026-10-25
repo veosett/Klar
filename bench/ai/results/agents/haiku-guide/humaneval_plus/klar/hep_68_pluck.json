@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn pluck(arr: List[Int]) -> List[Int] {\n  var found = false\n  var best_value = 0\n  var best_index = 0\n  for e in arr.enumerate() {\n    if e.value % 2 == 0 {\n      if (not found) or e.value < best_value {\n        found = true\n        best_value = e.value\n        best_index = e.index\n      }\n    }\n  }\n  if found {\n    return [best_value, best_index]\n  }\n  return []\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

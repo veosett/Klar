@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function filter_by_substring(strings: string[], substring: string): string[] {\n  return strings.filter((s) => s.includes(substring));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

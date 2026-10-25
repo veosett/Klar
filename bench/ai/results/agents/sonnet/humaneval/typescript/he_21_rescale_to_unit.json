@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function rescale_to_unit(numbers: number[]): number[] {\n  const mn = Math.min(...numbers);\n  const mx = Math.max(...numbers);\n  return numbers.map((x) => (x - mn) / (mx - mn));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

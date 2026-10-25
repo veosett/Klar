@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def Strongest_Extension(class_name: str, extensions: list[str]) -> str:\n    best = None\n    best_strength = None\n    for ext in extensions:\n        cap = sum(1 for ch in ext if ch.isupper())\n        sm = sum(1 for ch in ext if ch.islower())\n        strength = cap - sm\n        if best_strength is None or strength > best_strength:\n            best = ext\n            best_strength = strength\n    if best is None:\n        return class_name\n    return f\"{class_name}.{best}\"\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

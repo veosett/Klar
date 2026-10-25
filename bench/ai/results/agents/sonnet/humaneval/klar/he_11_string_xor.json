@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn string_xor(a: Str, b: Str) -> Str {\n  let pairs = a.chars().zip(b.chars())\n  return pairs.map(fn(p) => match p.first == p.second { true => \"0\", false => \"1\" }).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

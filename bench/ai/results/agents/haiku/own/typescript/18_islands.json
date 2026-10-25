@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_islands(grid: string[]): number {\n  const rows = grid.length;\n  if (rows === 0) return 0;\n  const seen: boolean[][] = grid.map((r) => new Array<boolean>(r.length).fill(false));\n  let count = 0;\n  for (let r = 0; r < rows; r++) {\n    for (let c = 0; c < grid[r].length; c++) {\n      if (grid[r][c] !== \"#\" || seen[r][c]) continue;\n      count++;\n      const stack: [number, number][] = [[r, c]];\n      seen[r][c] = true;\n      while (stack.length > 0) {\n        const [y, x] = stack.pop()!;\n        const neighbors: [number, number][] = [\n          [y - 1, x], [y + 1, x], [y, x - 1], [y, x + 1],\n        ];\n        for (const [ny, nx] of neighbors) {\n          if (\n            ny >= 0 && ny < rows &&\n            nx >= 0 && nx < grid[ny].length &&\n            grid[ny][nx] === \"#\" && !seen[ny][nx]\n          ) {\n            seen[ny][nx] = true;\n            stack.push([ny, nx]);\n          }\n        }\n      }\n    }\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

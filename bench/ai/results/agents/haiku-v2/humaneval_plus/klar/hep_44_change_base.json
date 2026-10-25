@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn change_base(x: Int, base: Int) -> Str {\n  if base == 0 {\n    return \"\"\n  }\n  if base < 2 {\n    return \"\"\n  }\n  if x == 0 {\n    return \"0\"\n  }\n  var n: Int = x.abs()\n  var digits: Str = \"\"\n  while n > 0 {\n    let d = n % base\n    digits = d.to_str() + digits\n    n = n / base\n  }\n  if x < 0 {\n    return \"-\" + digits\n  }\n  return digits\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

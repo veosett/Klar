@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function run_ops(ops: string[]): number {\n  let balance = 0;\n  for (let i = 0; i < ops.length; i++) {\n    const pos = i + 1;\n    const m = /^(deposit|withdraw) (\\d+)$/.exec(ops[i]);\n    if (m === null) {\n      throw new Error(`bad op at op ${pos}`);\n    }\n    const amount = Number(m[2]);\n    if (m[1] === \"deposit\") {\n      balance += amount;\n    } else {\n      if (balance - amount < 0) {\n        throw new Error(`insufficient funds at op ${pos}`);\n      }\n      balance -= amount;\n    }\n  }\n  return balance;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

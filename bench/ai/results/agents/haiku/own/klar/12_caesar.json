@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Shifts each ASCII letter by `shift` places, wrapping and keeping case.\npub fn caesar(text: Str, shift: Int) -> Str {\n  let k = ((shift % 26) + 26) % 26\n  var out = \"\"\n  for c in text.chars() {\n    let code = c.codes().get_or(0, 0)\n    if code >= 65 and code <= 90 {\n      let n = (code - 65 + k) % 26 + 65\n      out = out + match n.to_char() {\n        Some(x) => x,\n        None => c,\n      }\n    } else if code >= 97 and code <= 122 {\n      let n = (code - 97 + k) % 26 + 97\n      out = out + match n.to_char() {\n        Some(x) => x,\n        None => c,\n      }\n    } else {\n      out = out + c\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

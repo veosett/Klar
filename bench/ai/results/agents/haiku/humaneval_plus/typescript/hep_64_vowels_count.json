@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function vowels_count(s: string): number {\n  const lower = s.toLowerCase();\n  let count = 0;\n  for (let i = 0; i < lower.length; i++) {\n    const c = lower[i];\n    if (\"aeiou\".includes(c)) {\n      count++;\n    } else if (c === \"y\" && i === lower.length - 1) {\n      count++;\n    }\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

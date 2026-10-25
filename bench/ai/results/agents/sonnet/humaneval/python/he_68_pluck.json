@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def pluck(arr: list[int]) -> list[int]:\n    best = None\n    for i, v in enumerate(arr):\n        if v % 2 == 0 and (best is None or v < best[0]):\n            best = [v, i]\n    return best if best else []\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

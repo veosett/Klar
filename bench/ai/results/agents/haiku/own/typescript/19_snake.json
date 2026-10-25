@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function camel_to_snake(s: string): string {\n  let out = \"\";\n  for (let i = 0; i < s.length; i++) {\n    const ch = s[i];\n    const isUpper = ch >= \"A\" && ch <= \"Z\";\n    if (isUpper) {\n      if (i > 0) out += \"_\";\n      out += ch.toLowerCase();\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

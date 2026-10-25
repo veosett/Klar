@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def int_to_mini_roman(number: int) -> str:\n    values = [\n        (1000, 'm'), (900, 'cm'), (500, 'd'), (400, 'cd'),\n        (100, 'c'), (90, 'xc'), (50, 'l'), (40, 'xl'),\n        (10, 'x'), (9, 'ix'), (5, 'v'), (4, 'iv'), (1, 'i'),\n    ]\n    result = []\n    for value, symbol in values:\n        while number >= value:\n            result.append(symbol)\n            number -= value\n    return ''.join(result)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

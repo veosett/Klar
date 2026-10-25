@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function parse_csv_line(line: string): string[] {\n  const fields: string[] = [];\n  let cur = \"\";\n  let i = 0;\n  const n = line.length;\n  while (true) {\n    if (i < n && line[i] === '\"' && cur === \"\") {\n      // quoted field\n      i++;\n      let closed = false;\n      while (i < n) {\n        if (line[i] === '\"') {\n          if (i + 1 < n && line[i + 1] === '\"') {\n            cur += '\"';\n            i += 2;\n          } else {\n            closed = true;\n            i++;\n            break;\n          }\n        } else {\n          cur += line[i];\n          i++;\n        }\n      }\n      if (!closed) throw new Error(\"unterminated quote\");\n      // after closing quote, consume until comma or end\n      while (i < n && line[i] !== \",\") {\n        cur += line[i];\n        i++;\n      }\n    } else {\n      while (i < n && line[i] !== \",\") {\n        cur += line[i];\n        i++;\n      }\n    }\n    fields.push(cur);\n    cur = \"\";\n    if (i >= n) break;\n    // line[i] is a comma\n    i++;\n    if (i >= n) {\n      fields.push(\"\");\n      break;\n    }\n  }\n  return fields;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

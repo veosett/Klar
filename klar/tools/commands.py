@@ -161,8 +161,12 @@ def cmd_rename(args):
 
 # ---- eval / coverage / new --------------------------------------------------------------------------------
 def cmd_eval(args):
+    from ..cli import sandbox_of
     from .runtools import evaluate
-    res = evaluate(args.code, args.file)
+    sandbox = sandbox_of(args)
+    if sandbox is False:
+        return 2
+    res = evaluate(args.code, args.file, sandbox)
     if args.json:
         emit(res)
         return 0 if res["ok"] else 1
@@ -268,6 +272,7 @@ def register(sub):
     p.add_argument("code", nargs="+")
     p.add_argument("--in", dest="file", help="evaluate in the context of this file (its functions and types)")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--allow", metavar="RIGHTS", help="evaluate with only these rights (as `klar run --allow`)")
     p.set_defaults(fn=cmd_eval)
     p = sub.add_parser("coverage", help="run the tests and list statements they never execute")
     p.add_argument("file")

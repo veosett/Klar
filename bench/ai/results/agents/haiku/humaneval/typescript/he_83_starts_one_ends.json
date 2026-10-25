@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function starts_one_ends(n: number): number {\n  if (n === 1) {\n    return 1;\n  }\n  return Math.pow(10, n - 1) + 8 * Math.pow(10, n - 2);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

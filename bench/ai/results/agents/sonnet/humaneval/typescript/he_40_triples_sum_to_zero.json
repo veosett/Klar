@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function triples_sum_to_zero(l: number[]): boolean {\n  for (let i = 0; i < l.length; i++)\n    for (let j = i + 1; j < l.length; j++)\n      for (let k = j + 1; k < l.length; k++)\n        if (l[i] + l[j] + l[k] === 0) return true;\n  return false;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

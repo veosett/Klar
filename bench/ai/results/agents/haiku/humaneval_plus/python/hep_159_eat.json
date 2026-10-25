@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def eat(number: int, need: int, remaining: int) -> list[int]:\n    if need <= remaining:\n        return [number + need, remaining - need]\n    return [number + remaining, 0]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

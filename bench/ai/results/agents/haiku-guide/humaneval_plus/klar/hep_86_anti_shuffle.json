@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Sorts the characters inside each space-separated word; spaces and word order are kept.\n/// >>> assert anti_shuffle(\"hello\") == \"ehllo\"\n/// >>> assert anti_shuffle(\"Hello World!!!\") == \"Hello !!!Wdlor\"\npub fn anti_shuffle(s: Str) -> Str {\n  return s.split(\" \").map(fn(w) => w.chars().sort().join(\"\")).join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

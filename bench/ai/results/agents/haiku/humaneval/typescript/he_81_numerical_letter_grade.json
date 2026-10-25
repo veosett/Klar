@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "export function iscube(a: number): boolean {\n  const r = Math.round(Math.cbrt(a));\n  for (const c of [r - 1, r, r + 1]) {\n    if (c * c * c === a) {\n      return true;\n    }\n  }\n  return false;\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "export function numerical_letter_grade(grades: number[]): string[] {\n  return grades.map((g) => {\n    if (g === 4.0) return \"A+\";\n    if (g > 3.7) return \"A\";\n    if (g > 3.3) return \"A-\";\n    if (g > 3.0) return \"B+\";\n    if (g > 2.7) return \"B\";\n    if (g > 2.3) return \"B-\";\n    if (g > 2.0) return \"C+\";\n    if (g > 1.7) return \"C\";\n    if (g > 1.3) return \"C-\";\n    if (g > 1.0) return \"D+\";\n    if (g > 0.7) return \"D\";\n    if (g > 0.0) return \"D-\";\n    return \"E\";\n  });\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert valid_date(\"03-11-2000\") == true\npub fn valid_date(date: Str) -> Bool {\n  if date.is_empty() {\n    return false\n  }\n  let parts = date.split(\"-\")\n  if parts.len() != 3 {\n    return false\n  }\n  let ms = parts.get_or(0, \"\")\n  let ds = parts.get_or(1, \"\")\n  let ys = parts.get_or(2, \"\")\n  if ms.len() != 2 or ds.len() != 2 or ys.len() != 4 {\n    return false\n  }\n  if not (ms.is_numeric() and ds.is_numeric() and ys.is_numeric()) {\n    return false\n  }\n  let m = ms.to_int().unwrap_or(0)\n  let d = ds.to_int().unwrap_or(0)\n  if m < 1 or m > 12 {\n    return false\n  }\n  var max_days = 31\n  if m == 4 or m == 6 or m == 9 or m == 11 {\n    max_days = 30\n  }\n  if m == 2 {\n    max_days = 29\n  }\n  return d >= 1 and d <= max_days\n}\n\ntest \"valid_date\" {\n  assert valid_date(\"03-11-2000\") == true\n  assert valid_date(\"15-01-2012\") == false\n  assert valid_date(\"04-0-2040\") == false\n  assert valid_date(\"06-04-2020\") == true\n  assert valid_date(\"06/04/2020\") == false\n  assert valid_date(\"\") == false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

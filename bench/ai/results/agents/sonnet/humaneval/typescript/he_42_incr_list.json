@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function incr_list(l: number[]): number[] {\n  return l.map((x) => x + 1);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The second smallest distinct element, or None when there is none.\n/// >>> assert next_smallest([1, 2, 3, 4, 5]) == Some(2)\n/// >>> assert next_smallest([1, 1]) == None\npub fn next_smallest(lst: List[Int]) -> Option[Int] {\n  return lst.unique().sort().get(1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

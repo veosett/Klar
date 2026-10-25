@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn count_upper(s: Str) -> Int {\n  var count: Int = 0\n  var i: Int = 0\n  for c in s.chars() {\n    if i % 2 == 0 and (c == \"A\" or c == \"E\" or c == \"I\" or c == \"O\" or c == \"U\") {\n      count = count + 1\n    }\n    i = i + 1\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

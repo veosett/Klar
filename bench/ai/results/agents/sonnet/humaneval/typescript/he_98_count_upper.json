@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_upper(s: string): number {\n  let c = 0;\n  for (let i = 0; i < s.length; i += 2) if (\"AEIOU\".includes(s[i])) c++;\n  return c;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

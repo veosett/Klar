@@ -60,8 +60,10 @@ fn sb_need(what: Str, at: Word, right: Str, sp: Word) {
   }
 }
 
-// the absolute form of a path as its parts joined by `/` (no leading `/`): `\` is a separator too, relative paths
-// start at the working directory, `.` and `..` are resolved
+// the absolute form of a path as its parts joined by `/` (no leading `/`), the way the system opens it: `\` is a
+// separator too, relative paths start at the working directory, and `.`, `..` and symbolic links are resolved part
+// by part, as realpath does — so `link/..` is the parent of the link's target, and a link inside an allowed
+// directory that points outside of it is outside (klar/sandbox.py: `os.path.realpath`). Windows: no links resolved.
 fn sb_norm(path: Word) -> Word {
   let b = sb_new()
   let n = peek(path + 16)
@@ -72,8 +74,73 @@ fn sb_norm(path: Word) -> Word {
     sb_add_segments(b, cwd)
     rc_dec(cwd)
   }
-  sb_add_segments(b, path)
+  var q = str_from(path + 32, n)
+  let buf = alloc(4096)
+  var links: Word = 0
+  var i: Word = 0
+  while i <= peek(q + 16) {
+    let qn = peek(q + 16)
+    let p = q + 32
+    var j = i
+    while j < qn and peek8(p + j) != 47 and peek8(p + j) != 92 {
+      j = j + 1
+    }
+    let len = j - i
+    var next = j + 1
+    if len == 0 or (len == 1 and peek8(p + i) == 46) {
+      // an empty part or `.`
+    } else if len == 2 and peek8(p + i) == 46 and peek8(p + i + 1) == 46 {
+      sb_pop_segment(b)
+    } else {
+      let mark = sb_len(b)
+      if mark > 0 {
+        sb_add_byte(b, 47)
+      }
+      sb_add_bytes(b, p + i, len)
+      if links < 40 {
+        let c = sb_new()
+        sb_add_byte(c, 47)
+        sb_add_bytes(c, peek(b + 32), sb_len(b))
+        let cs = sb_finish(c)
+        let r = os_readlink(cs + 32, buf, 4095)
+        rc_dec(cs)
+        if r > 0 {
+          // a link: its target takes its place, followed by the rest of the path
+          links = links + 1
+          poke(b + 16, mark)
+          if peek8(buf) == 47 {
+            poke(b + 16, 0)
+          }
+          let nq = sb_new()
+          sb_add_bytes(nq, buf, r)
+          sb_add_byte(nq, 47)
+          if j < qn {
+            sb_add_bytes(nq, p + j, qn - j)
+          }
+          let q2 = sb_finish(nq)
+          rc_dec(q)
+          q = q2
+          next = 0
+        }
+      }
+    }
+    i = next
+  }
+  block_free(buf)
+  rc_dec(q)
   return sb_finish(b)
+}
+
+// drops the last part of a path being built (`..`)
+fn sb_pop_segment(b: Word) {
+  var k = sb_len(b) - 1
+  while k > 0 and peek8(peek(b + 32) + k) != 47 {
+    k = k - 1
+  }
+  if k < 0 {
+    k = 0
+  }
+  poke(b + 16, k)
 }
 
 fn sb_add_segments(b: Word, s: Word) {

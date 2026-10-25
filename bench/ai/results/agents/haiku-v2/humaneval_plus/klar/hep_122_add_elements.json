@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add_elements(arr: List[Int], k: Int) -> Int {\n  var total = 0\n  for i in range(0, k) {\n    let x = arr.get_or(i, 0)\n    if x.abs() < 100 {\n      total = total + x\n    }\n  }\n  return total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn skjkasdkd(lst: List[Int]) -> Int {\n  let best = lst.filter(fn(x) => x > 1 and is_prime(x)).max().unwrap_or(0)\n  return best.to_str().codes().fold(0, fn(a, c) => a + c - 48)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

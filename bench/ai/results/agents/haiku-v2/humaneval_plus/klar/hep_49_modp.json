@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn pow2_mod(n: Int, p: Int) -> Int {\n  if p == 0 {\n    return 0\n  }\n  if n <= 0 {\n    return 1 % p\n  }\n  let half = pow2_mod(n / 2, p)\n  let sq = half * half % p\n  if n % 2 == 1 {\n    return sq * 2 % p\n  }\n  return sq\n}\n\npub fn modp(n: Int, p: Int) -> Int {\n  return pow2_mod(n, p)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

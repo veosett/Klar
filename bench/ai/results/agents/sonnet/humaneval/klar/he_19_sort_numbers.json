@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sort_numbers(numbers: Str) -> Str {\n  let names = [\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\", \"six\", \"seven\", \"eight\", \"nine\"]\n  let ws = numbers.split(\" \").filter(fn(w) => not w.is_empty())\n  return ws.sort_by(fn(w) => names.index_of(w).unwrap_or(0)).join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

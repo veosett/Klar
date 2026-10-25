@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sort_numbers(numbers: string): string {\n  const names = [\"zero\", \"one\", \"two\", \"three\", \"four\", \"five\", \"six\", \"seven\", \"eight\", \"nine\"];\n  const w = numbers.split(\" \").filter((x) => x.length > 0);\n  w.sort((a, b) => names.indexOf(a) - names.indexOf(b));\n  return w.join(\" \");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

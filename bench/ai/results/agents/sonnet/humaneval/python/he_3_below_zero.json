@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def below_zero(operations: list[int]) -> bool:\n    b = 0\n    for o in operations:\n        b += o\n        if b < 0:\n            return True\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

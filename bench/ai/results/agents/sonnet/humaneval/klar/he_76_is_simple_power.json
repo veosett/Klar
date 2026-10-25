@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_simple_power(x: Int, n: Int) -> Bool {\n  if n == 1 {\n    return x == 1\n  }\n  if n == 0 or n == -1 {\n    return x == 1\n  }\n  var p: Int = 1\n  var steps: Int = 0\n  while p.abs() <= x.abs() and steps < 200 {\n    if p == x {\n      return true\n    }\n    p = p * n\n    steps = steps + 1\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

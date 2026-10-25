@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rolling_max(numbers: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  var m: Int = 0\n  var first: Bool = true\n  for x in numbers {\n    if first {\n      m = x\n      first = false\n    } else {\n      m = m.max(x)\n    }\n    out = out.push(m)\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.list.{frequencies}\n\npub fn remove_duplicates(numbers: List[Int]) -> List[Int] {\n  let counts = frequencies(numbers)\n  var out: List[Int] = []\n  for n in numbers {\n    if counts.get(n).unwrap_or(0) == 1 {\n      out = out.push(n)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

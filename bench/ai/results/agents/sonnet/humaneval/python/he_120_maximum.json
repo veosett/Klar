@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def maximum(arr: list[int], k: int) -> list[int]:\n    if k == 0:\n        return []\n    return sorted(arr)[-k:]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

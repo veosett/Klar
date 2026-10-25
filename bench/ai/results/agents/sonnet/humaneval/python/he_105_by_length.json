@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def by_length(arr: list[int]) -> list[str]:\n    names = [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", \"Six\", \"Seven\", \"Eight\", \"Nine\"]\n    return [names[x - 1] for x in sorted(arr, reverse=True) if 1 <= x <= 9]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

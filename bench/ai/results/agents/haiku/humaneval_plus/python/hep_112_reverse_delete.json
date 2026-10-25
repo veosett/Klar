@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def reverse_delete(s: str, c: str) -> tuple[str, bool]:\n    result = ''.join(ch for ch in s if ch not in c)\n    return (result, result == result[::-1])\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

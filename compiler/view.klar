@@ -896,6 +896,26 @@ fn opt_arg(args: List[Str], names: List[Str]) -> Str {
 }
 
 /// `klarc view FILE [-o OUT] [--run] [--stdin TEXT] [--json]`
+/// Opens a file with the system's default program (`--open`; like Python's `webbrowser`): `start` on Windows,
+/// `open` on macOS, `xdg-open` elsewhere. A failure is not an error: the file is written anyway.
+fn open_in_browser(path: Str) uses io, fs, proc {
+  let full = match path.starts_with("/") or path.slice(1, 2) == ":" {
+    true => path,
+    false => current_dir() + "/" + path,
+  }
+  let cmd = match env_var("OS") == Some("Windows_NT") {
+    true => ["cmd", "/c", "start", "", full.replace("/", "\\")],
+    false => match is_dir("/System/Library") and file_exists("/usr/bin/open") {
+      true => ["/usr/bin/open", full],
+      false => ["xdg-open", full],
+    },
+  }
+  match run_command(cmd) {
+    Ok(_) => {},
+    Err(e) => eprint("note: cannot open a browser: {e}"),
+  }
+}
+
 pub fn view_command(args: List[Str], lib: Str) -> Int uses io, fs, proc, time {
   var file = ""
   var i = 0
@@ -957,5 +977,8 @@ pub fn view_command(args: List[Str], lib: Str) -> Int uses io, fs, proc, time {
     },
   }
   print("wrote {out} — open it in a browser")
+  if args.contains("--open") {
+    open_in_browser(out)
+  }
   return 0
 }

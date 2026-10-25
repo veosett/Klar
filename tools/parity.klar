@@ -1,0 +1,299 @@
+// Which commands and flags of `klar` (Python) `klarc` (native, no Python) has (ROADMAP item 29). The sources are
+// the tools themselves, not the docs: `klar --help` and `klar <command> --help` (argparse), the usage text that
+// `klarc` prints, and the string literals of compiler/*.klar (what the implementation actually compares against).
+//
+//     klarc run tools/parity.klar -- [--klarc build/klarc] [--python python3] [--out docs/PARITY.md] [--check]
+//
+// Run it from the repository root. `--check` exits with 1 when a command or flag is missing in klarc (apart from the
+// ones that only make sense in the Python backends).
+
+type ParityOpts { klarc: Str, python: Str, out: Str, check: Bool }
+
+/// Flags of the Python backends: `klarc` is the native backend, so it has no use for them.
+const PY_ONLY: List[Str] = ["--py", "--interp", "--emit-python", "--verbose"]
+
+/// One flag of a `klar` command with its other spellings (`-q` and `--quiet`).
+type Flag { names: List[Str] }
+
+/// A command of `klarc`: the flags its usage line names.
+type KCommand { name: Str, flags: List[Str] }
+
+fn parse_parity_opts(args: List[Str]) -> ParityOpts uses io {
+  let py = match env_var("OS") == Some("Windows_NT") {
+    true => "python",
+    false => "python3",
+  }
+  var o = ParityOpts { klarc: "build/klarc", python: py, out: "docs/PARITY.md", check: false }
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    let v = args.get_or(i + 1, "")
+    if a == "--check" {
+      o = o with { check: true }
+      i = i + 1
+    } else {
+      if a == "--klarc" {
+        o = o with { klarc: v }
+      } else if a == "--python" {
+        o = o with { python: v }
+      } else if a == "--out" {
+        o = o with { out: v }
+      }
+      i = i + 2
+    }
+  }
+  return o
+}
+
+/// The standard output of a command, or the problem.
+fn output(cmd: List[Str]) -> Result[Str, Str] uses proc {
+  let r = run_capture(cmd, "", "")?
+  return Ok(r.get_or(1, "") + r.get_or(2, ""))
+}
+
+fn is_word_char(c: Str) -> Bool {
+  return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".contains(c) and c.len() == 1
+}
+
+fn is_flag_char(c: Str) -> Bool {
+  return is_word_char(c) or c == "-" or c == "_"
+}
+
+/// `-x` or `--name` (not `-`, `--` or `-1`).
+fn looks_like_flag(f: Str) -> Bool {
+  if f.len() == 2 {
+    return is_word_char(f.slice(1, 2)) and not f.slice(1, 2).is_numeric()
+  }
+  return f.len() > 2 and f.slice(1, 2) == "-" and is_word_char(f.slice(2, 3))
+}
+
+/// A whole option name: `--allow`, not the `--allow`)` of a wrapped help line.
+fn whole_flag(f: Str) -> Bool {
+  var i = 0
+  while i < f.len() {
+    if not is_flag_char(f.slice(i, i + 1)) {
+      return false
+    }
+    i = i + 1
+  }
+  return looks_like_flag(f)
+}
+
+/// The flags (`-x`, `--name`) in a piece of text, in order.
+fn flags_in(text: Str) -> List[Str] {
+  var out: List[Str] = []
+  let cs = text.chars()
+  var i = 0
+  while i < cs.len() {
+    let prev = match i {
+      0 => " ",
+      _ => cs.get_or(i - 1, " "),
+    }
+    if cs.get_or(i, "") == "-" and (prev == " " or prev == "[" or prev == "(" or prev == "|") {
+      var j = i
+      while j < cs.len() and is_flag_char(cs.get_or(j, "")) {
+        j = j + 1
+      }
+      let f = cs.slice(i, j).join("")
+      if looks_like_flag(f) {
+        out = out.push(f)
+      }
+      i = j
+    } else {
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/// The command names of `klar --help` (the `{a,b,c}` list).
+fn klar_commands(help: Str) -> List[Str] {
+  return match help.index_of("\{") {
+    Some(a) => {
+      let rest = help.slice(a + 1, help.len())
+      return match rest.index_of("\}") {
+        Some(b) => rest.slice(0, b).split(",").map(fn(c) => c.trim()),
+        None => [],
+      }
+    },
+    None => [],
+  }
+}
+
+/// The flags of one `klar <command> --help`, from its options section.
+fn klar_flags(help: Str) -> List[Flag] {
+  var out: List[Flag] = []
+  var inside = false
+  for line in help.lines() {
+    if line.starts_with("options:") or line.starts_with("optional arguments:") {
+      inside = true
+    } else if inside and line.trim().starts_with("-") {
+      let spec = line.trim().split("  ").get_or(0, "")
+      let names = spec.split(", ").map(fn(p) => p.trim().split(" ").get_or(0, "")).filter(fn(n) => n.starts_with("-") and
+          whole_flag(n))
+      if not names.is_empty() and not names.contains("-h") {
+        out = out.push(Flag { names: names })
+      }
+    } else if inside and not line.starts_with(" ") and not line.trim().is_empty() {
+      inside = false
+    }
+  }
+  return out
+}
+
+/// The commands of `klarc`'s usage text: `klarc NAME ...` lines; `| other` names more commands on the same line.
+fn klarc_commands(usage: Str, known: List[Str]) -> List[KCommand] {
+  var out: List[KCommand] = []
+  for line in usage.lines() {
+    let t = line.trim()
+    let body = match t.starts_with("usage: ") {
+      true => t.slice(7, t.len()),
+      false => t,
+    }
+    if body.starts_with("klarc ") {
+      let words = body.split(" ").filter(fn(w) => not w.is_empty())
+      var names = [words.get_or(1, "")]
+      var k = 2
+      while k < words.len() {
+        if words.get_or(k - 1, "") == "|" and known.contains(words.get_or(k, "")) {
+          names = names.push(words.get_or(k, ""))
+        }
+        k = k + 1
+      }
+      let fl = flags_in(body)
+      for n in names {
+        out = out.push(KCommand { name: n, flags: fl })
+      }
+    }
+  }
+  return out
+}
+
+/// Every `"..."` string literal of the Klar compiler sources that looks like a flag or a command name.
+fn literals(sources: List[Str]) -> List[Str] {
+  var out: List[Str] = []
+  for text in sources {
+    for part in text.split("\"").enumerate() {
+      if part.index % 2 == 1 {
+        let s = part.value
+        if s.len() < 30 and not s.contains(" ") {
+          out = out.push(s)
+        }
+      }
+    }
+  }
+  return out.unique()
+}
+
+fn code(s: Str) -> Str {
+  return "`" + s + "`"
+}
+
+fn main() uses io, fs, proc {
+  let o = parse_parity_opts(cli_args())
+  let top = match output([o.python, "-m", "klar", "--help"]) {
+    Ok(t) => t,
+    Err(e) => {
+      eprint("parity: cannot run klar: {e}")
+      return exit(2)
+    },
+  }
+  let usage = match output([o.klarc]) {
+    Ok(t) => t,
+    Err(e) => {
+      eprint("parity: cannot run {o.klarc}: {e} (build it with build.sh, or pass --klarc)")
+      return exit(2)
+    },
+  }
+  let names = klar_commands(top)
+  let kcmds = klarc_commands(usage: usage, known: names)
+  let srcs = list_dir("compiler").unwrap_or([]).filter(fn(f) => f.ends_with(".klar")).map(fn(f) => read_file(
+    "compiler/" + f).unwrap_or(""))
+  let lits = literals(srcs)
+  var rows: List[List[Str]] = []
+  var missing_cmds: List[Str] = []
+  var missing_flags = 0
+  var total_flags = 0
+  var undocumented: List[Str] = []
+  for c in names {
+    let help = output([o.python, "-m", "klar", c, "--help"]).unwrap_or("")
+    let fl = klar_flags(help)
+    let kc = kcmds.filter(fn(k) => k.name == c)
+    let in_usage = not kc.is_empty()
+    let in_code = lits.contains(c)
+    let kflags = kc.flat_map(fn(k) => k.flags)
+    var lacking: List[Str] = []
+    var py_only: List[Str] = []
+    for f in fl {
+      let main_name = f.names.last().unwrap_or("")
+      if f.names.any(fn(n) => PY_ONLY.contains(n)) {
+        py_only = py_only.push(main_name)
+      } else {
+        total_flags = total_flags + 1
+        let has = f.names.any(fn(n) => kflags.contains(n) or lits.contains(n))
+        if not has {
+          lacking = lacking.push(main_name)
+          missing_flags = missing_flags + 1
+        }
+      }
+    }
+    let all_names = fl.flat_map(fn(f) => f.names)
+    let extra = kflags.unique().filter(fn(n) => not all_names.contains(n))
+    let status = match in_usage {
+      true => "✅",
+      false => match in_code {
+        true => "⚠️ нет в usage",
+        false => "❌",
+      },
+    }
+    if not in_usage and not in_code {
+      missing_cmds = missing_cmds.push(c)
+    }
+    if not in_usage and in_code {
+      undocumented = undocumented.push(c)
+    }
+    let lack_text = match lacking.is_empty() {
+      true => "—",
+      false => lacking.map(code).join(", "),
+    }
+    let extra_text = match extra.is_empty() {
+      true => "—",
+      false => extra.map(code).join(", "),
+    }
+    let py_text = match py_only.is_empty() {
+      true => "—",
+      false => py_only.map(code).join(", "),
+    }
+    rows = rows.push([code(c), status, "{fl.len()}", lack_text, extra_text, py_text])
+  }
+  let have_flags = total_flags - missing_flags
+  var text = "# `klar` и `klarc` — сравнение команд и флагов\n\n" +
+    "Сгенерировано `tools/parity.klar` из самих инструментов: `klar --help`, `klar <команда> --help`, текст usage " +
+    "`klarc` и строковые литералы `compiler/*.klar`. Не править руками — перезапустить:\n\n" +
+    "```\nklarc run tools/parity.klar -- --klarc build/klarc\n```\n\n" + "## Итог\n\n" +
+    "- Команд у `klar`: {names.len()}; есть в `klarc`: {names.len() - missing_cmds.len()}" +
+    " (из них не названы в usage: {undocumented.len()}).\n" +
+    "- Флагов (без флагов Python-бэкендов): {total_flags}; есть в `klarc`: {have_flags}.\n"
+  if not missing_cmds.is_empty() {
+    text = text + "- Команд нет в `klarc`: " + missing_cmds.map(code).join(", ") + ".\n"
+  }
+  if not undocumented.is_empty() {
+    text = text + "- Есть в `klarc`, но не в его usage: " + undocumented.map(code).join(", ") + ".\n"
+  }
+  text = text + "\n## По командам\n\n" +
+    "«Нет в klarc» — флаг `klar`, которого нет ни в usage `klarc`, ни среди литералов его исходников. " +
+    "«Только в klarc» — флаги из usage `klarc`, которых нет у `klar`. «Python» — флаги Python-бэкендов, " +
+    "не нужные native-компилятору.\n\n" + "| Команда | В klarc | Флагов у klar | Нет в klarc | Только в klarc | Python |\n" +
+    "|---|---|---|---|---|---|\n" + rows.map(fn(r) => "| " + r.join(" | ") + " |").join("\n") + "\n"
+  match write_file(o.out, text) {
+    Ok(_) => {},
+    Err(e) => {
+      eprint("parity: {e}")
+      exit(2)
+    },
+  }
+  print("parity: {names.len() - missing_cmds.len()}/{names.len()} commands, {have_flags}/{total_flags} flags -> {o.out}")
+  if o.check and (not missing_cmds.is_empty() or missing_flags > 0) {
+    exit(1)
+  }
+}

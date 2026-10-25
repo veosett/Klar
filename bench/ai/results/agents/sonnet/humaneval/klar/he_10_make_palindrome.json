@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn make_palindrome(string: Str) -> Str {\n  let n = string.len()\n  var i = 0\n  while i < n {\n    let suffix = string.slice(i, n)\n    if suffix == suffix.reverse() {\n      return string + string.slice(0, i).reverse()\n    }\n    i = i + 1\n  }\n  return string\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

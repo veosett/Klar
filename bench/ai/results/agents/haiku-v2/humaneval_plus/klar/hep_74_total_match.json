@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn char_total(xs: List[Str]) -> Int {\n  return xs.map(fn(s) => s.len()).sum()\n}\n\npub fn total_match(lst1: List[Str], lst2: List[Str]) -> List[Str] {\n  if char_total(lst1) <= char_total(lst2) {\n    return lst1\n  }\n  return lst2\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

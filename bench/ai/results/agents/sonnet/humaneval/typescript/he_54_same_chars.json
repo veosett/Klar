@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function same_chars(s0: string, s1: string): boolean {\n  const a = new Set(s0), b = new Set(s1);\n  if (a.size !== b.size) return false;\n  for (const c of a) if (!b.has(c)) return false;\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

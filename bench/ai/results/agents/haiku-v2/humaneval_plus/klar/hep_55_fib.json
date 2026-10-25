@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fib(n: Int) -> Int {\n  var a: Int = 0\n  var b: Int = 1\n  var i: Int = 0\n  while i < n {\n    let t = a + b\n    a = b\n    b = t\n    i = i + 1\n  }\n  return a\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

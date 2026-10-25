@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def eval_rpn(expr: str) -> int:\n    stack: list[int] = []\n    for tok in expr.split():\n        if tok in (\"+\", \"-\", \"*\", \"/\"):\n            if len(stack) < 2:\n                raise ValueError(\"stack underflow\")\n            b = stack.pop()\n            a = stack.pop()\n            if tok == \"+\":\n                stack.append(a + b)\n            elif tok == \"-\":\n                stack.append(a - b)\n            elif tok == \"*\":\n                stack.append(a * b)\n            else:\n                if b == 0:\n                    raise ValueError(\"division by zero\")\n                q = abs(a) // abs(b)\n                stack.append(q if (a < 0) == (b < 0) else -q)\n        else:\n            digits = tok[1:] if tok.startswith(\"-\") else tok\n            if digits == \"\" or not all(\"0\" <= ch <= \"9\" for ch in digits):\n                raise ValueError(f\"bad token {tok}\")\n            stack.append(int(tok))\n    if len(stack) != 1:\n        raise ValueError(\"bad expression\")\n    return stack[0]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

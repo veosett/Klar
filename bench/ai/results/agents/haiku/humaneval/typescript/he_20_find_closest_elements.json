@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function find_closest_elements(numbers: number[]): [number, number] {\n  const sorted = [...numbers].sort((a, b) => a - b);\n  let best: [number, number] = [sorted[0], sorted[1]];\n  let bestDiff = sorted[1] - sorted[0];\n  for (let i = 1; i + 1 < sorted.length; i++) {\n    const diff = sorted[i + 1] - sorted[i];\n    if (diff < bestDiff) {\n      bestDiff = diff;\n      best = [sorted[i], sorted[i + 1]];\n    }\n  }\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

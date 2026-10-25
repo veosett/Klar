@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def simplify(x: str, n: str) -> bool:\n    a, b = (int(v) for v in x.split(\"/\"))\n    c, d = (int(v) for v in n.split(\"/\"))\n    return (a * c) % (b * d) == 0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

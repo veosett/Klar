@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_happy(s: Str) -> Bool {\n  let cs = s.chars()\n  let n = cs.len()\n  if n < 3 {\n    return false\n  }\n  for i in range(0, n - 2) {\n    let a = cs.get_or(i, \"\")\n    let b = cs.get_or(i + 1, \"\")\n    let c = cs.get_or(i + 2, \"\")\n    if a == b or b == c or a == c {\n      return false\n    }\n  }\n  return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

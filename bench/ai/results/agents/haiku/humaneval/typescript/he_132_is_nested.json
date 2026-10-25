@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_nested(string: string): boolean {\n  // Look for a subsequence \"[[]]\": two opening brackets followed by two closing ones.\n  const pattern = \"[[]]\";\n  let p = 0;\n  for (const ch of string) {\n    if (p < pattern.length && ch === pattern[p]) {\n      p++;\n    }\n  }\n  return p === pattern.length;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

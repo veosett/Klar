@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_happy(s: string): boolean {\n  if (s.length < 3) {\n    return false;\n  }\n  for (let i = 0; i + 2 < s.length; i++) {\n    const a = s[i];\n    const b = s[i + 1];\n    const c = s[i + 2];\n    if (a === b || b === c || a === c) {\n      return false;\n    }\n  }\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

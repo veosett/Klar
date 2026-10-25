@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Whether n is a sum of exactly four positive even numbers: n must be even and at least 8.\n/// >>> assert is_equal_to_sum_even(8) == true\n/// >>> assert is_equal_to_sum_even(6) == false\npub fn is_equal_to_sum_even(n: Int) -> Bool {\n  return n >= 8 and n % 2 == 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

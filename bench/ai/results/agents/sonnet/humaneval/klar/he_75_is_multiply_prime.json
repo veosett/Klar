@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_multiply_prime(a: Int) -> Bool {\n  var m = a\n  var d = 2\n  var cnt = 0\n  while d * d <= m {\n    if m % d == 0 {\n      cnt = cnt + 1\n      m = m / d\n    } else {\n      d = d + 1\n    }\n  }\n  if m > 1 {\n    cnt = cnt + 1\n  }\n  return cnt == 3\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

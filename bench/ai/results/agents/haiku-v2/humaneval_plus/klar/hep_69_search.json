@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn search(lst: List[Int]) -> Int {\n  var best: Int = -1\n  for x in lst {\n    if x > 0 {\n      let freq = lst.count(fn(y) => y == x)\n      if freq >= x and x > best {\n        best = x\n      }\n    }\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

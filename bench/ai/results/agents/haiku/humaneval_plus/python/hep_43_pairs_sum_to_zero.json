@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def pairs_sum_to_zero(l: list[int]) -> bool:\n    seen = set()\n    for x in l:\n        if -x in seen:\n            return True\n        seen.add(x)\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

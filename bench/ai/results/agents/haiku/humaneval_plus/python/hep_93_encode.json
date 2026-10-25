@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def encode(message: str) -> str:\n    vowels = \"aeiou\"\n    out = []\n    for ch in message:\n        if ch.isalpha():\n            lower = ch.lower()\n            if lower in vowels:\n                lower = chr(ord(lower) + 2)\n            out.append(lower.upper() if ch.islower() else lower.lower())\n        else:\n            out.append(ch)\n    return \"\".join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

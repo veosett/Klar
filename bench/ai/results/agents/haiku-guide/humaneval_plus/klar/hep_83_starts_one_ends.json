@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn starts_one_ends(n: Int) -> Int {\n  if n <= 1 {\n    return 1\n  }\n  return 18 * 10.pow(n - 2)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert maximum([-3, -4, 5], 3) == [-4, -3, 5]\npub fn maximum(arr: List[Int], k: Int) -> List[Int] {\n  let s = arr.sort()\n  let n = s.len()\n  let start = (n - k).max(0)\n  return s.slice(start, n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

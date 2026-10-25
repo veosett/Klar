@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_upper(c: Str) -> Bool {\n  return c == c.upper() and c != c.lower()\n}\n\n/// >>> assert digitSum(\"abAB\") == 131\npub fn digitSum(s: Str) -> Int {\n  return s.chars().filter(fn(c) => is_upper(c)).map(fn(c) => c.codes().sum()).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

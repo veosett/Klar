@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn multiply(a: Int, b: Int) -> Int {\n  let da = a.abs() % 10\n  let db = b.abs() % 10\n  return da * db\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def common_prefix(words: list[str]) -> str:\n    if not words:\n        return \"\"\n    prefix = words[0]\n    for w in words[1:]:\n        i = 0\n        limit = min(len(prefix), len(w))\n        while i < limit and prefix[i] == w[i]:\n            i += 1\n        prefix = prefix[:i]\n        if not prefix:\n            break\n    return prefix\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

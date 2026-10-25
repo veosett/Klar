@@ -27,7 +27,7 @@ pub const OS_FUNCS: List[Str] = ["os_write", "os_read", "os_exit", "os_alloc", "
   "os_close", "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
   "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir", "os_getdents", "os_find_first",
   "os_find_next", "os_find_close", "os_mkdir", "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink",
-  "os_getcwd", "os_setjmp", "os_longjmp", "os_spawn_std"]
+  "os_getcwd", "os_setjmp", "os_longjmp", "os_spawn_std", "os_readlink"]
 
 pub const WIN_IMPORTS: List[Str] = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc",
   "QueryPerformanceCounter", "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA",
@@ -1613,6 +1613,7 @@ fn linux_layer(a0: Asm, main_entry: Str) -> Asm {
   a = sys_stub(a0: a, name: "os_execve", nr: 59, nargs: 3)
   a = sys_stub(a0: a, name: "os_unlink", nr: 87, nargs: 1)
   a = sys_stub(a0: a, name: "os_getcwd", nr: 79, nargs: 2)                                  // -> length with the NUL
+  a = sys_stub(a0: a, name: "os_readlink", nr: 89, nargs: 3)          // -> length of the target, or -errno
   a = arg(a: arg(a: stub_begin(a, "os_poll"), reg: RDI, i: 0), reg: RSI, i: 1)          // poll(fds, n, -1)
   a = stub_end(syscall(mov_ri(a: mov_ri(a: a, dst: RDX, imm: -1), dst: RAX, imm: 7)))
   for name in ["os_find_first", "os_find_next", "os_find_close", "os_spawn_std"] {     // (Windows)
@@ -1778,6 +1779,7 @@ fn macos_layer(a0: Asm, main_entry: Str) -> Asm {
   a = mac_stub(a0: a, name: "os_chdir", nr: 12, nargs: 1)
   a = mac_stub(a0: a, name: "os_execve", nr: 59, nargs: 3)
   a = mac_stub(a0: a, name: "os_unlink", nr: 10, nargs: 1)
+  a = mac_stub(a0: a, name: "os_readlink", nr: 58, nargs: 3)
   // getcwd: open(".") + fcntl(F_GETPATH) into the buffer (at least 1024 bytes) -> length without the NUL
   a = alu_ri(a: stub_begin(a, "os_getcwd"), op: "sub", dst: RSP, imm: 16)
   a = store(a: mov_ri(a: a, dst: RAX, imm: 46), base: RSP, disp: 0, src: RAX)               // "."
@@ -1990,7 +1992,7 @@ fn windows_layer(a0: Asm, main_entry: Str) -> Asm {
   a = mov_ri(a: win_call(a, "FindNextFileA"), dst: RCX, imm: 4294967295)
   a = win_end(alu_rr(a: a, op: "and", dst: RAX, src: RCX))       // BOOL
   a = win_end(win_call(arg(a: win_begin(a: a, name: "os_find_close", extra: 0), reg: RCX, i: 0), "FindClose"))
-  for name in ["os_dup2", "os_chdir", "os_execve", "os_poll"] {                          // (Linux)
+  for name in ["os_dup2", "os_chdir", "os_execve", "os_poll", "os_readlink"] {           // (Linux)
     a = stub_end(mov_ri(a: stub_begin(a, name), dst: RAX, imm: -1))
   }
   a = mov_ri(a: arg(a: win_begin(a: a, name: "os_mkdir", extra: 0), reg: RCX, i: 0), dst: RDX, imm: 0)

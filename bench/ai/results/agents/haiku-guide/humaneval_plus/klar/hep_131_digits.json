@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn digits(n: Int) -> Int {\n  var m = n.abs()\n  var prod = 1\n  var any_odd = false\n  while m > 0 {\n    let d = m % 10\n    if d % 2 == 1 {\n      prod = prod * d\n      any_odd = true\n    }\n    m = m / 10\n  }\n  if any_odd {\n    return prod\n  }\n  return 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

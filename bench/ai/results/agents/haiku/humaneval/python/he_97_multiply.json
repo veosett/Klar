@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def multiply(a: int, b: int) -> int:\n    return (abs(a) % 10) * (abs(b) % 10)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

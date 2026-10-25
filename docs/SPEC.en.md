@@ -36,9 +36,9 @@ compilers (`klar/*.py`, `compiler/*.klar`, `klar/rt/*.klar`) and everything mark
 | Comments | `// to the end of the line`; `/// doc comment` before a top-level declaration |
 | Identifiers | a letter or `_`, then letters, digits, `_` (letters need not be Latin, but non-ASCII names get warning W0104); types, traits and variants `PascalCase`, functions and variables `snake_case`, constants `UPPER_SNAKE_CASE`; `_x` marks a deliberately unused name |
 | Keywords | `module use pub fn type enum trait impl const let var return if else while for in break continue match test property assert requires ensures uses and or not true false with` |
-| Integers | `42`, `1_000_000` (arbitrary precision; digits `0`–`9` only, no suffixes) |
-| Floats | `3.14`, `0.5` (a digit is required on both sides of the point) |
-| Strings | `"..."`, escapes `\n \t \r \0 \\ \" \{ \}`, interpolation `{expr}` (no string literals inside `{...}`) |
+| Integers | `42`, `1_000_000`, `0xFF`, `0b1010`, `0o17` (arbitrary precision; ASCII digits, no suffixes) |
+| Floats | `3.14`, `0.5`, `1e-5`, `2.5E10` (a digit is required on both sides of the point; with an exponent always a `Float`) |
+| Strings | `"..."`, escapes `\n \t \r \0 \\ \" \{ \}`, interpolation `{expr}` (no string literals inside `{...}`); a `{` before `"`, `\` or `}` is a plain brace: `"{"`, `"{}"` |
 | Operators | `+ - * / % == != < > <= >= = -> => ( ) [ ] { } , : . ?` |
 | End of statement | a newline (ignored inside `()` and `[]`; a line starting with `.` continues the previous one; a line ending with a binary operator continues on the next) |
 
@@ -135,7 +135,7 @@ pattern     = "_" | ident | int | float | string | "true" | "false" | "-" ( int 
 | `Unit` | `()` | the result of functions without `->` |
 | `Never` | — | the type of `fail(...)`, `todo(...)`, `exit(...)`; compatible with every type |
 | `List[T]` | `[a, b]` | immutable |
-| `Map[K, V]` | `Map { k: v }` | a key is any value without functions (compared with `==`); iteration in insertion order; `==` on maps ignores the order |
+| `Map[K, V]` | `Map { k: v }`, or `{ k: v }` where an expression is expected | a key is any value without functions (compared with `==`); iteration in insertion order; `==` on maps ignores the order |
 | `Option[T]` | `Some(v)`, `None` | |
 | `Result[T, E]` | `Ok(v)`, `Err(e)` | |
 | `fn(A) -> R` | lambdas, functions | functions cannot be compared |
@@ -189,8 +189,11 @@ otherwise); `sort`, `min`, `max` for lists of them (E0215; records via `sort_by`
   whole program.
 * **Return.** An explicit `return` on every path (E0205). A path ends when it ends in `fail(...)`, `todo(...)`,
   `exit(...)`, a `while true` without `break` in its body (even in a nested loop), or a `match` all of whose arms end.
-* **Calls.** Positional arguments, then named ones. User functions with 3 or more parameters take named arguments
-  only (E0208).
+* **Calls.** Positional arguments, then named ones. User functions with 3 or more parameters take positional
+  arguments only where they cannot be swapped unnoticed (E0208): parameters of different types cannot be swapped
+  (the types would not match), and among parameters of one type every argument but at most one carries its
+  parameter's name (`r` or `nr` for `r`, `r - 1`, `p.r`). Otherwise — `f(200, 20, 10)`, `cell(g, i, j)` — the
+  arguments are named; an argument that carries another parameter's name (`cell(g, c, r)`) is reported as swapped.
 * **Method syntax (UFCS).** `x.f(a)` is looked up as: (1) a function field of a record, (2) a built-in method of the
   type, (3) a trait method (of the `impl` for `x`'s type or from a type parameter's bound), (4) a user function `f`
   whose first parameter accepts `x`'s type.

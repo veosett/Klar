@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def check_dict_case(dict: dict[str, str]) -> bool:\n    if not dict:\n        return False\n    keys = list(dict.keys())\n    all_lower = all(isinstance(k, str) and k.islower() for k in keys)\n    all_upper = all(isinstance(k, str) and k.isupper() for k in keys)\n    return all_lower or all_upper\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

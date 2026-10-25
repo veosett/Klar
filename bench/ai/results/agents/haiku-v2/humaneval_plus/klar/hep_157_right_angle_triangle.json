@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn right_angle_triangle(a: Int, b: Int, c: Int) -> Bool {\n  let s = [a, b, c].sort()\n  let x = s.get_or(0, 0)\n  let y = s.get_or(1, 0)\n  let z = s.get_or(2, 0)\n  return x > 0 and x * x + y * y == z * z\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

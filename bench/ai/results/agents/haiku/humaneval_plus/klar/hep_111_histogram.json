@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.list.{frequencies}\nuse std.text.{words}\n\npub fn histogram(test_value: Str) -> Map[Str, Int] {\n  let counts = frequencies(words(test_value))\n  return match counts.values().max() {\n    Some(best) => counts.filter(fn(k, v) => v == best),\n    None => Map {},\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

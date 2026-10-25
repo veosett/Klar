@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function generate_integers(a: number, b: number): number[] {\n  const lo = Math.max(Math.min(a, b), 0);\n  const hi = Math.max(a, b);\n  const result: number[] = [];\n  for (let d = 2; d <= 8; d += 2) {\n    if (d >= lo && d <= hi) {\n      result.push(d);\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

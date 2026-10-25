@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from collections import Counter\n\n\ndef histogram(test_value: str) -> dict[str, int]:\n    counts = Counter(test_value.split())\n    if not counts:\n        return {}\n    best = max(counts.values())\n    return {k: v for k, v in counts.items() if v == best}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

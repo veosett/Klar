@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn pluck(arr: List[Int]) -> List[Int] {\n  var best_val = -1\n  var best_idx = -1\n  let n = arr.len()\n  for i in range(0, n) {\n    let v = arr.get_or(i, 0)\n    if v % 2 == 0 {\n      if best_idx == -1 or v < best_val {\n        best_val = v\n        best_idx = i\n      }\n    }\n  }\n  if best_idx == -1 {\n    return []\n  }\n  return [best_val, best_idx]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Derivative of a polynomial given by its coefficients (lowest degree first).\n/// >>> assert derivative([3, 1, 2, 4, 5]) == [1, 4, 12, 20]\npub fn derivative(xs: List[Int]) -> List[Int] {\n  return xs.enumerate().drop(1).map(fn(e) => e.value * e.index)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

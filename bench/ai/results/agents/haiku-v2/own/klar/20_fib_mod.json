@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fib_mod(n: Int, m: Int) -> Int\n  requires m != 0\n{\n  var a = 0\n  var b = 1 % m\n  var i = 0\n  while i < n {\n    let t = (a + b) % m\n    a = b\n    b = t\n    i = i + 1\n  }\n  return a\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,20 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_nested(string: string): boolean {\n  const openings: number[] = [];\n  const closings: number[] = [];\n  for (let i = 0; i < string.length; i++) {\n    if (string[i] === \"[\") {\n      openings.push(i);\n    } else if (string[i] === \"]\") {\n      closings.push(i);\n    }\n  }\n  closings.reverse();\n  let cnt = 0;\n  let i = 0;\n  for (const idx of openings) {\n    if (i < closings.length && idx < closings[i]) {\n      cnt++;\n      i++;\n    }\n  }\n  return cnt >= 2;\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "export function is_nested(string: string): boolean {\n  // A nested valid subsequence exists iff the string contains \"[\", \"[\", \"]\", \"]\"\n  // as a subsequence (the four chars form \"[[]]\", which is valid and nested).\n  let stage = 0;\n  const pattern = [\"[\", \"[\", \"]\", \"]\"];\n  for (const ch of string) {\n    if (stage < pattern.length && ch === pattern[stage]) {\n      stage++;\n    }\n  }\n  return stage === pattern.length;\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "export function is_nested(string: string): boolean {\n  // Match brackets with a stack; the string is nested if some matched pair\n  // contains another matched pair inside it.\n  const stack: boolean[] = []; // each entry: does this open bracket contain a matched pair?\n  let nested = false;\n  for (const ch of string) {\n    if (ch === \"[\") {\n      stack.push(false);\n    } else if (ch === \"]\") {\n      if (stack.length > 0) {\n        const hadInner = stack.pop() as boolean;\n        if (hadInner) {\n          nested = true;\n        }\n        if (stack.length > 0) {\n          stack[stack.length - 1] = true;\n        }\n      }\n    }\n  }\n  return nested;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

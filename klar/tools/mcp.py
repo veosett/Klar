@@ -114,7 +114,11 @@ def run_cli(argv):
     return code, out.getvalue()
 
 
-def call_tool(name, args, runner=run_cli):
+# the tools that run the model's code: they get the rights of `klar mcp --allow` (docs/THREATS.md T5)
+RUNS_CODE = ("dev", "eval")
+
+
+def call_tool(name, args, runner=run_cli, allow=""):
     entry = next((t for t in TOOLS if t[0] == name), None)
     if entry is None:
         return None
@@ -122,11 +126,14 @@ def call_tool(name, args, runner=run_cli):
     missing = [r for r in required if not isinstance(args.get(r), str) or args.get(r) == ""]
     if missing:
         return {"content": [{"type": "text", "text": f"missing argument: {missing[0]}"}], "isError": True}
-    code, text = runner(build(args))
+    argv = build(args)
+    if argv[0] in RUNS_CODE and allow is not None:
+        argv = argv + ["--allow", allow]
+    code, text = runner(argv)
     return {"content": [{"type": "text", "text": text}], "isError": code != 0}
 
 
-def handle(msg, runner=run_cli):
+def handle(msg, runner=run_cli, allow=""):
     """The response to one message (None for notifications)."""
     from .. import __version__
     if not isinstance(msg, dict):
@@ -147,7 +154,7 @@ def handle(msg, runner=run_cli):
     elif method == "tools/call":
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         name = params.get("name") if isinstance(params.get("name"), str) else ""
-        result = call_tool(name, args, runner)
+        result = call_tool(name, args, runner, allow)
         if result is None:
             return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": f"unknown tool: {name}"}}
     else:
@@ -159,7 +166,7 @@ def dumps(obj):
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
 
 
-def serve(inp, out, runner=run_cli):
+def serve(inp, out, runner=run_cli, allow=""):
     for line in inp:
         line = line.strip()
         if not line:
@@ -169,17 +176,26 @@ def serve(inp, out, runner=run_cli):
         except ValueError:
             resp = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
         else:
-            resp = handle(msg, runner)
+            resp = handle(msg, runner, allow)
         if resp is not None:
             out.write(dumps(resp) + "\n")
             out.flush()
 
 
 def cmd_mcp(args):
-    serve(sys.stdin, sys.stdout)
+    from ..sandbox import RightsError, parse_allow
+    try:
+        parse_allow(args.allow)
+    except RightsError as ex:
+        print(f"error: {ex}", file=sys.stderr)
+        return 2
+    serve(sys.stdin, sys.stdout, allow=args.allow)
     return 0
 
 
 def register(sub):
     p = sub.add_parser("mcp", help="run a Model Context Protocol server (stdio) with the Klar tools for AI agents")
+    p.add_argument("--allow", metavar="RIGHTS", default="",
+                   help="the rights of the model's code in klar_dev and klar_eval (default: none but io; "
+                        "e.g. fs:.,time,rand)")
     p.set_defaults(fn=cmd_mcp)

@@ -84,7 +84,11 @@ fn tokenize_line(line: Str) -> List[FTok] {
       var going = true
       while going and j < n {
         let d = cs.get_or(j, "")
-        if is_alnum(d) or d == "_" or (d == "." and j + 1 < n and is_digit(cs.get_or(j + 1, ""))) {
+        let prev = cs.get_or(j - 1, "")
+        // the sign of an exponent (1e-5) belongs to the number; not in hexadecimal (0x1e-5 is a subtraction)
+        let exp_sign = (d == "+" or d == "-") and (prev == "e" or prev == "E") and is_digit(cs.get_or(j + 1, "")) and
+          not (cs.get_or(i + 1, "") == "x" or cs.get_or(i + 1, "") == "X")
+        if is_alnum(d) or d == "_" or (d == "." and j + 1 < n and is_digit(cs.get_or(j + 1, ""))) or exp_sign {
           j = j + 1
         } else {
           going = false

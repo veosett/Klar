@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_odd_digit(c: Str) -> Bool {\n  return c == \"1\" or c == \"3\" or c == \"5\" or c == \"7\" or c == \"9\"\n}\n\nfn both_ends_odd(n: Int) -> Bool {\n  let cs = n.abs().to_str().chars()\n  let first = cs.first().unwrap_or(\"0\")\n  let last = cs.last().unwrap_or(\"0\")\n  return is_odd_digit(first) and is_odd_digit(last)\n}\n\n/// >>> assert specialFilter([15, -73, 14, -15]) == 1\npub fn specialFilter(nums: List[Int]) -> Int {\n  return nums.filter(fn(n) => n > 10 and both_ends_odd(n)).len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

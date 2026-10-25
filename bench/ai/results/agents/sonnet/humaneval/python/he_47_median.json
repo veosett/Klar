@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def median(l: list[int]) -> float:\n    s = sorted(l)\n    n = len(s)\n    if n % 2 == 1:\n        return float(s[n // 2])\n    return (s[n // 2 - 1] + s[n // 2]) / 2.0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

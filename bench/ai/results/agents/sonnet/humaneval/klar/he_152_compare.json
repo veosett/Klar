@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn compare(game: List[Int], guess: List[Int]) -> List[Int] {\n  return game.zip(guess).map(fn(p) => (p.first - p.second).abs())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

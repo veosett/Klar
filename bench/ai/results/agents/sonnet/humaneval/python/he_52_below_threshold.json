@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def below_threshold(l: list[int], t: int) -> bool:\n    return all(x < t for x in l)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

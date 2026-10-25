@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn swap_char(c: Str) -> Str {\n  let u = c.upper()\n  if u == c {\n    return c.lower()\n  }\n  return u\n}\n\nfn shifted(lc: Str) -> Str {\n  return match lc {\n    \"a\" => \"c\",\n    \"e\" => \"g\",\n    \"i\" => \"k\",\n    \"o\" => \"q\",\n    \"u\" => \"w\",\n    _ => lc,\n  }\n}\n\nfn encode_char(c: Str) -> Str {\n  let lc = c.lower()\n  let r = shifted(lc)\n  if r != lc {\n    if lc != c {\n      return r\n    }\n    return r.upper()\n  }\n  return swap_char(c)\n}\n\npub fn encode(message: Str) -> Str {\n  return message.chars().map(fn(c) => encode_char(c)).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

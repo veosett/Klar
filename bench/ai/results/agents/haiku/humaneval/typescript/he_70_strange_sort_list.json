@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function strange_sort_list(lst: number[]): number[] {\n  const sorted = [...lst].sort((a, b) => a - b);\n  const result: number[] = [];\n  let lo = 0;\n  let hi = sorted.length - 1;\n  let takeMin = true;\n  while (lo <= hi) {\n    if (takeMin) {\n      result.push(sorted[lo++]);\n    } else {\n      result.push(sorted[hi--]);\n    }\n    takeMin = !takeMin;\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

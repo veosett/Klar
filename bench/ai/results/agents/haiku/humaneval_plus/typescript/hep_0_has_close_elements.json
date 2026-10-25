@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function has_close_elements(numbers: number[], threshold: number): boolean {\n  for (let i = 0; i < numbers.length; i++) {\n    for (let j = i + 1; j < numbers.length; j++) {\n      if (Math.abs(numbers[i] - numbers[j]) < threshold) {\n        return true;\n      }\n    }\n  }\n  return false;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

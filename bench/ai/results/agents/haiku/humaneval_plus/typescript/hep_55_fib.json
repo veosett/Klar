@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fib(n: number): number {\n  if (n <= 0) {\n    return 0;\n  }\n  let a = 0;\n  let b = 1;\n  for (let i = 1; i < n; i++) {\n    const next = a + b;\n    a = b;\n    b = next;\n  }\n  return b;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

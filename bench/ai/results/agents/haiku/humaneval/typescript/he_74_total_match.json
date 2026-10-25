@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function total_match(lst1: string[], lst2: string[]): string[] {\n  const len1 = lst1.reduce((acc, s) => acc + s.length, 0);\n  const len2 = lst2.reduce((acc, s) => acc + s.length, 0);\n  return len1 <= len2 ? lst1 : lst2;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

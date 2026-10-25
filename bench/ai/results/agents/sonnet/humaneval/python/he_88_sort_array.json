@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_array(array: list[int]) -> list[int]:\n    if not array:\n        return []\n    return sorted(array, reverse=(array[0] + array[-1]) % 2 == 0)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

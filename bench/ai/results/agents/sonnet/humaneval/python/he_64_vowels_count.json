@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def vowels_count(s: str) -> int:\n    c = sum(1 for ch in s.lower() if ch in \"aeiou\")\n    if s and s[-1] in \"yY\":\n        c += 1\n    return c\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function string_xor(a: string, b: string): string {\n  let result = \"\";\n  const n = Math.min(a.length, b.length);\n  for (let i = 0; i < n; i++) {\n    result += a[i] === b[i] ? \"0\" : \"1\";\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

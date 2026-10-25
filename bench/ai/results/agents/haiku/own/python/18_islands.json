@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def count_islands(grid: list[str]) -> int:\n    if not grid:\n        return 0\n    rows = len(grid)\n    cols = len(grid[0])\n    seen = [[False] * cols for _ in range(rows)]\n    count = 0\n    for r in range(rows):\n        for c in range(cols):\n            if grid[r][c] != \"#\" or seen[r][c]:\n                continue\n            count += 1\n            stack = [(r, c)]\n            seen[r][c] = True\n            while stack:\n                y, x = stack.pop()\n                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                    ny, nx = y + dy, x + dx\n                    if 0 <= ny < rows and 0 <= nx < cols and not seen[ny][nx] and grid[ny][nx] == \"#\":\n                        seen[ny][nx] = True\n                        stack.append((ny, nx))\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

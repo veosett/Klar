@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def compare(game: list[int], guess: list[int]) -> list[int]:\n    return [abs(g - s) for g, s in zip(game, guess)]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

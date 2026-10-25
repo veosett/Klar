@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def longest(strings: list[str]) -> str | None:\n    if not strings:\n        return None\n    best = strings[0]\n    for s in strings[1:]:\n        if len(s) > len(best):\n            best = s\n    return best\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

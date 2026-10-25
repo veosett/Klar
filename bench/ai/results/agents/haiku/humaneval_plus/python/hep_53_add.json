@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def add(x: int, y: int) -> int:\n    return x + y\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Every left-moving car meets every right-moving car exactly once.\npub fn car_race_collision(n: Int) -> Int {\n  return n * n\n}\n\ntest \"car_race_collision\" {\n  assert car_race_collision(2) == 4\n  assert car_race_collision(3) == 9\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

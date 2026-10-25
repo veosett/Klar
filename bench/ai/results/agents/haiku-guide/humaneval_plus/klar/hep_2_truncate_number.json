@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Returns the fractional part of a number.\n/// >>> assert truncate_number(3.5) == 0.5\npub fn truncate_number(number: Float) -> Float {\n  return number - number.floor().to_float()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

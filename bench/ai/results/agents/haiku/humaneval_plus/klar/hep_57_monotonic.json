@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn monotonic(l: List[Int]) -> Bool {\n  var inc = true\n  var dec = true\n  let n = l.len()\n  for i in range(0, n - 1) {\n    let a = l.get_or(i, 0)\n    let b = l.get_or(i + 1, 0)\n    if a > b {\n      inc = false\n    }\n    if a < b {\n      dec = false\n    }\n  }\n  return inc or dec\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

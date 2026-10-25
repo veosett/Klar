@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert same_chars(\"abcd\", \"dddddddabc\") == true\npub fn same_chars(s0: Str, s1: Str) -> Bool {\n  return s0.chars().unique().sort() == s1.chars().unique().sort()\n}\n\ntest \"same_chars\" {\n  assert same_chars(\"eabcdzzzz\", \"dddzzzzzzzddeddabc\") == true\n  assert same_chars(\"abcd\", \"dddddddabc\") == true\n  assert same_chars(\"dddddddabc\", \"abcd\") == true\n  assert same_chars(\"eabcd\", \"dddddddabc\") == false\n  assert same_chars(\"abcd\", \"dddddddabce\") == false\n  assert same_chars(\"eabcdzzzz\", \"dddzzzzzzzddddabc\") == false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

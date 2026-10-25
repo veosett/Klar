@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function remove_duplicates(numbers: number[]): number[] {\n  const c = new Map<number, number>();\n  for (const n of numbers) c.set(n, (c.get(n) ?? 0) + 1);\n  return numbers.filter((n) => c.get(n) === 1);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

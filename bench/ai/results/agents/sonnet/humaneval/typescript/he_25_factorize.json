@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function factorize(n: number): number[] {\n  const r: number[] = [];\n  let d = 2;\n  while (d * d <= n) {\n    while (n % d === 0) { r.push(d); n = n / d; }\n    d++;\n  }\n  if (n > 1) r.push(n);\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

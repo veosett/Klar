@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_multiply_prime(a: number): boolean {\n  if (a < 2) {\n    return false;\n  }\n  let m = a;\n  let count = 0;\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      m = m / p;\n      count++;\n    }\n  }\n  if (m > 1) {\n    count++;\n  }\n  return count === 3;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

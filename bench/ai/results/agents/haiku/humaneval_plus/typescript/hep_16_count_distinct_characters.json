@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_distinct_characters(string: string): number {\n  return new Set(string.toLowerCase().split(\"\")).size;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

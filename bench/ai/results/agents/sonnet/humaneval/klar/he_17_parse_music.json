@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn parse_music(music_string: Str) -> List[Int] {\n  var out: List[Int] = []\n  for w in music_string.split(\" \") {\n    if w == \"o\" {\n      out = out.push(4)\n    } else if w == \"o|\" {\n      out = out.push(2)\n    } else if w == \".|\" {\n      out = out.push(1)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn first_digit(n: Int) -> Int {\n  return n.abs().to_str().chars().first().unwrap_or(\"0\").to_int().unwrap_or(0)\n}\n\nfn is_special(n: Int) -> Bool {\n  if n <= 10 {\n    return false\n  }\n  return first_digit(n) % 2 == 1 and n.abs() % 10 % 2 == 1\n}\n\n/// >>> assert specialFilter([15, -73, 14, -15]) == 1\npub fn specialFilter(nums: List[Int]) -> Int {\n  return nums.count(fn(n: Int) => is_special(n))\n}\n\ntest \"specialFilter\" {\n  assert specialFilter([15, -73, 14, -15]) == 1\n  assert specialFilter([33, -2, -3, 45, 21, 109]) == 2\n  assert specialFilter([5, -2, 1, -5]) == 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

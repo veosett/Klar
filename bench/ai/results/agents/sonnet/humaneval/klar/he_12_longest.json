@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn longest(strings: List[Str]) -> Option[Str] {\n  var best: Option[Str] = None\n  var best_len: Int = -1\n  for s in strings {\n    if s.len() > best_len {\n      best = Some(s)\n      best_len = s.len()\n    }\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

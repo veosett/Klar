@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn digit_sum(n: Int) -> Int {\n  var m: Int = n.abs()\n  var total: Int = 0\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let big: Int = 1_000_000_000\n  var keys: List[Int] = []\n  var i: Int = 0\n  for n in nums {\n    keys = keys.push(digit_sum(n) * big + i)\n    i = i + 1\n  }\n  var out: List[Int] = []\n  for k in keys.sort() {\n    out = out.push(nums.get_or(k % big, 0))\n  }\n  return out\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "fn signed_digit_sum(n: Int) -> Int {\n  var m: Int = n.abs()\n  var total: Int = 0\n  var first: Int = 0\n  while m > 0 {\n    let d = m % 10\n    total = total + d\n    first = d\n    m = m / 10\n  }\n  if n < 0 {\n    return total - 2 * first\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let big: Int = 1_000_000_000\n  let offset: Int = 1_000_000\n  var keys: List[Int] = []\n  var i: Int = 0\n  for n in nums {\n    keys = keys.push((signed_digit_sum(n) + offset) * big + i)\n    i = i + 1\n  }\n  var out: List[Int] = []\n  for k in keys.sort() {\n    out = out.push(nums.get_or(k % big, 0))\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

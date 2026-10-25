@@ -23,7 +23,7 @@ use mcp.{mcp_command}
 use repl.{repl_command}
 use coverage.{coverage_command}
 use profile.{profile_command}
-use dev.{dev_command, host_target, show_failure, test_items}
+use dev.{dev_command, host_target, parse_allow, show_failure, test_items}
 use report.{check_json, render_report, user_diags}
 use emit.{emit_program}
 use emit_a64.{emit_a64}
@@ -38,28 +38,6 @@ const TARGETS: List[Str] = ["linux", "windows", "linux-arm64", "macos"]
 type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, quiet: Bool, filter: Str,
   runs: Int, seed: Int, args: List[Str], allow: Option[Str], record: Option[Str] }
 
-/// The rights of an `--allow` value (klar/sandbox.py), or the problem with an unknown one.
-fn parse_allow(spec: Str) -> Result[List[Str], Str] {
-  var out: List[Str] = []
-  for raw in spec.split(",") {
-    let r = raw.trim()
-    if r != "" {
-      let kind = r.split(":").get_or(0, "")
-      let has_colon = r.contains(":")
-      let arg = match r.index_of(":") {
-        Some(k) => r.slice(k + 1, r.len()),
-        None => "",
-      }
-      let known = ["io", "time", "rand", "net", "fs", "proc"].contains(kind)
-      if not known or (arg != "" and kind != "fs" and kind != "proc") or (has_colon and arg == "") {
-        return Err("unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME)")
-      }
-      out = out.push(r)
-    }
-  }
-  return Ok(out)
-}
-
 fn usage() -> Never uses io {
   print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64|macos] [--allow <rights>] [--lib <dir>]")
   print("                   [--time]")
@@ -72,11 +50,13 @@ fn usage() -> Never uses io {
   print("       klarc profile <file.klar> [args...] [--top <n>] [--show-output] [--json]")
   print("       klarc coverage <file.klar> [--main] [--runs <n>] [--min <percent>] [--json]")
   print("       klarc repl [--plain]                       an interactive session (--plain: no banner, no prompts)")
-  print("       klarc lsp                                  the language server (LSP over stdin/stdout)")
-  print("       klarc mcp [--klarc <path>]                 the MCP server with the Klar tools for AI agents (stdio)")
-  print("       klarc view <file.klar> [-o <out.html>] [--run] [--stdin <text>] [--json]")
-  print("       klarc eval [statements...] <expression> [--in <file.klar>] [--json]")
+  print("       klarc lsp [--stdio]                        the language server (LSP over stdin/stdout)")
+  print("       klarc mcp [--klarc <path>] [--allow <rights>] the MCP server with the Klar tools for AI agents (stdio)")
+  print("       klarc view <file.klar> [-o <out.html>] [--run] [--stdin <text>] [--open] [--json]")
+  print("       klarc context <file.klar> <name> [--max-tokens <n>] [--json]")
+  print("       klarc eval [statements...] <expression> [--in <file.klar>] [--allow <rights>] [--json]")
   print("       klarc dev <file.klar> [--json] [--no-run] [--stdin <text>] [--max-output <n>] [--max-warnings <n>]")
+  print("                 [--allow <rights>]")
   print("       klarc check <file.klar> [--lib <dir>] [--json]")
   print("       klarc fmt [files or directories] [--check] [--json]")
   print("       klarc explain <code>")

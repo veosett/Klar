@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function will_it_fly(q: number[], w: number): boolean {\n  const n = q.length;\n  for (let i = 0; i < n / 2; i++) if (q[i] !== q[n - 1 - i]) return false;\n  return q.reduce((a, b) => a + b, 0) <= w;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

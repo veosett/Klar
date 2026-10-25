@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn find_max(words: List[Str]) -> Str {\n  var best = \"\"\n  var best_n = -1\n  for w in words {\n    let n = w.chars().unique().len()\n    if n > best_n or (n == best_n and w < best) {\n      best = w\n      best_n = n\n    }\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

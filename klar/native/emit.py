@@ -21,7 +21,8 @@ OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall
             "os_file_exists", "os_argc", "os_argv", "os_cmdline", "os_platform", "os_getenv", "os_spawn", "os_chmod",
             "os_fork", "os_pipe", "os_wait", "os_kill", "os_cpu_mask", "os_is_dir",
             "os_getdents", "os_find_first", "os_find_next", "os_find_close", "os_mkdir",
-            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd", "os_setjmp", "os_longjmp", "os_spawn_std"]
+            "os_dup2", "os_chdir", "os_execve", "os_poll", "os_unlink", "os_getcwd", "os_setjmp", "os_longjmp", "os_spawn_std",
+            "os_readlink"]
 
 WIN_IMPORTS = ["GetStdHandle", "WriteFile", "ReadFile", "ExitProcess", "VirtualAlloc", "QueryPerformanceCounter",
                "QueryPerformanceFrequency", "CreateFileA", "CloseHandle", "GetFileAttributesA", "GetCommandLineA",
@@ -1226,6 +1227,7 @@ class Emitter:
         sys("os_execve", 59, 3)
         sys("os_unlink", 87, 1)
         sys("os_getcwd", 79, 2)                # -> length with the final NUL
+        sys("os_readlink", 89, 3)              # -> length of the target, or -errno (not a link: -EINVAL)
         self.stub_begin("os_poll")             # poll(fds, n, -1)
         self.arg(RDI, 0)
         self.arg(RSI, 1)
@@ -1498,6 +1500,7 @@ class Emitter:
         sys("os_chdir", 12, 1)
         sys("os_execve", 59, 3)
         sys("os_unlink", 10, 1)
+        sys("os_readlink", 58, 3)
         # getcwd: open(".") + fcntl(F_GETPATH) into the buffer (at least 1024 bytes) -> length without the NUL
         self.stub_begin("os_getcwd")
         a.alu_ri("sub", RSP, 16)
@@ -1801,7 +1804,7 @@ class Emitter:
         self.arg(RCX, 0)
         call("FindClose")
         win_end()
-        for name in ("os_dup2", "os_chdir", "os_execve", "os_poll"):          # (Linux)
+        for name in ("os_dup2", "os_chdir", "os_execve", "os_poll", "os_readlink"):          # (Linux)
             self.stub_begin(name)
             a.mov_ri(RAX, -1)
             self.stub_end()

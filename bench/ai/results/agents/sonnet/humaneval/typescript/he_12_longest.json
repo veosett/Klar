@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function longest(strings: string[]): string | null {\n  let best: string | null = null;\n  for (const s of strings) {\n    if (best === null || s.length > best.length) best = s;\n  }\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

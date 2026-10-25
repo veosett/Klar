@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn signed_digit_sum(n: Int) -> Int {\n  let ds = n.abs().to_str().chars().map(fn(c) => c.to_int().unwrap_or(0))\n  let total = ds.sum()\n  if n < 0 {\n    return total - 2 * ds.first().unwrap_or(0)\n  }\n  return total\n}\n\npub fn count_nums(arr: List[Int]) -> Int {\n  return arr.filter(fn(n) => signed_digit_sum(n) > 0).len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

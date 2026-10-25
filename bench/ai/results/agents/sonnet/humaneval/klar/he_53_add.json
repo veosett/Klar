@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add(x: Int, y: Int) -> Int {\n  return x + y\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sum_to_n(n: number): number {\n  return (n * (n + 1)) / 2;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

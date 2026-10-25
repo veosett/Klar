@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Return 2^n modulo p.\n/// >>> assert modp(3, 5) == 3\npub fn modp(n: Int, p: Int) -> Int\n  requires p != 0\n{\n  let base = 2\n  return base.pow(n) % p\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

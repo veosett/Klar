@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert all_prefixes(\"abc\") == [\"a\", \"ab\", \"abc\"]\npub fn all_prefixes(string: Str) -> List[Str] {\n  let n = string.len()\n  return range(1, n + 1).map(fn(i: Int) => string.slice(0, i))\n}\n\ntest \"all_prefixes\" {\n  assert all_prefixes(\"\") == []\n  assert all_prefixes(\"asdfgh\") == [\"a\", \"as\", \"asd\", \"asdf\", \"asdfg\", \"asdfgh\"]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_vowel(c: Str) -> Bool {\n  return \"aeiou\".contains(c.lower())\n}\n\npub fn get_closest_vowel(word: Str) -> Str {\n  let cs = word.chars()\n  let n = cs.len()\n  var i = n - 2\n  while i >= 1 {\n    let c = cs.get_or(i, \"\")\n    let before = cs.get_or(i - 1, \"\")\n    let after = cs.get_or(i + 1, \"\")\n    if is_vowel(c) and (not is_vowel(before)) and (not is_vowel(after)) {\n      return c\n    }\n    i = i - 1\n  }\n  return \"\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

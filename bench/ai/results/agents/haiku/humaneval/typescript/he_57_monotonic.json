@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function monotonic(l: number[]): boolean {\n  let inc = true;\n  let dec = true;\n  for (let i = 1; i < l.length; i++) {\n    if (l[i] > l[i - 1]) {\n      dec = false;\n    } else if (l[i] < l[i - 1]) {\n      inc = false;\n    }\n  }\n  return inc || dec;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

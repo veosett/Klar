@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function prod_signs(arr: number[]): number | null {\n  if (arr.length === 0) return null;\n  let sign = 1;\n  let sum = 0;\n  for (const x of arr) {\n    if (x === 0) return 0;\n    if (x < 0) sign = -sign;\n    sum += Math.abs(x);\n  }\n  return sign * sum;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def words_in_sentence(sentence: str) -> str:\n    def prime(k):\n        return k >= 2 and all(k % d for d in range(2, int(k ** 0.5) + 1))\n    return ' '.join(w for w in sentence.split() if prime(len(w)))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

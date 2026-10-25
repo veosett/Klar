@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var stack: List[Int] = []\n  var max_closed_open: Int = -1\n  var nested: Bool = false\n  for item in string.chars().enumerate() {\n    if item.value == \"[\" {\n      stack = stack.push(item.index)\n    } else if item.value == \"]\" {\n      if not stack.is_empty() {\n        let opened = stack.last().unwrap_or(0)\n        stack = stack.remove_at(stack.len() - 1)\n        if max_closed_open > opened {\n          nested = true\n        }\n        if opened > max_closed_open {\n          max_closed_open = opened\n        }\n      }\n    }\n  }\n  return nested\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

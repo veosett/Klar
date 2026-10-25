@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(grid: List[List[Int]], r: Int, c: Int) -> Option[Int] {\n  if r < 0 or c < 0 {\n    return None\n  }\n  let row = grid.get(r)\n  if row.is_none() {\n    return None\n  }\n  return row.unwrap_or([]).get(c)\n}\n\nfn walk(grid: List[List[Int]], flat: List[Int], n: Int, v: Int, steps: Int) -> List[Int] {\n  if steps <= 1 {\n    return [v]\n  }\n  if n == 0 {\n    return [v]\n  }\n  let idx = flat.index_of(v).unwrap_or(0)\n  let r = idx / n\n  let c = idx % n\n  let cands = [cell(grid, r - 1, c), cell(grid, r + 1, c), cell(grid, r, c - 1), cell(grid, r, c + 1)]\n  let vals = cands.filter(fn(o) => o.is_some()).map(fn(o) => o.unwrap_or(0))\n  let nxt = vals.min().unwrap_or(v)\n  return [v].concat(walk(grid, flat, n, nxt, steps - 1))\n}\n\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  if k <= 0 {\n    return []\n  }\n  let flat = grid.flatten()\n  let n = grid.len()\n  return walk(grid, flat, n, 1, k)\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn cell(grid: List[List[Int]], r: Int, c: Int) -> Option[Int] {\n  if r < 0 or c < 0 {\n    return None\n  }\n  let row = grid.get(r)\n  if row.is_none() {\n    return None\n  }\n  return row.unwrap_or([]).get(c)\n}\n\nfn walk(grid: List[List[Int]], flat: List[Int], n: Int, v: Int, steps: Int) -> List[Int] {\n  if steps <= 1 {\n    return [v]\n  }\n  if n == 0 {\n    return [v]\n  }\n  let idx = flat.index_of(v).unwrap_or(0)\n  let r = idx / n\n  let c = idx % n\n  let cands = [cell(grid, r - 1, c), cell(grid, r + 1, c), cell(grid, r, c - 1), cell(grid, r, c + 1)]\n  let vals = cands.filter(fn(o) => o.is_some()).map(fn(o) => o.unwrap_or(0))\n  let nxt = vals.min().unwrap_or(v)\n  return [v].concat(walk(grid: grid, flat: flat, n: n, v: nxt, steps: steps - 1))\n}\n\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  if k <= 0 {\n    return []\n  }\n  let flat = grid.flatten()\n  let n = grid.len()\n  return walk(grid: grid, flat: flat, n: n, v: 1, steps: k)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

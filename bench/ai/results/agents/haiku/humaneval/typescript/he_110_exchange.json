@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function exchange(lst1: number[], lst2: number[]): string {\n  const oddInFirst = lst1.filter((x) => x % 2 !== 0).length;\n  const evenInSecond = lst2.filter((x) => x % 2 === 0).length;\n  return evenInSecond >= oddInFirst ? \"YES\" : \"NO\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

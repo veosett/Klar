@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn flip_case(c: Str) -> Str {\n  if \"abcdefghijklmnopqrstuvwxyz\".contains(c) {\n    return c.upper()\n  }\n  if \"ABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c) {\n    return c.lower()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  let has_letter = s.chars().any(fn(c) => letters.contains(c))\n  if not has_letter {\n    return s.reverse()\n  }\n  return s.chars().map(fn(c) => flip_case(c)).join(\"\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

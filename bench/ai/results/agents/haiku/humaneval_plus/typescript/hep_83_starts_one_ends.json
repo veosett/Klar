@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function starts_one_ends(n: number): number {\n  if (n <= 0) {\n    return 0;\n  }\n  if (n === 1) {\n    return 1;\n  }\n  // Starts with 1: 10^(n-1). Ends with 1: 9 * 10^(n-2). Both: 10^(n-2).\n  const ten = BigInt(10);\n  const k = BigInt(n - 2);\n  const startsWith = ten ** BigInt(n - 1);\n  const endsWith = BigInt(9) * ten ** k;\n  const both = ten ** k;\n  return Number(startsWith + endsWith - both);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

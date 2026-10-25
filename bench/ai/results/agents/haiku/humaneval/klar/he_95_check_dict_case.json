@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_lower_key(k: Str) -> Bool {\n  return k == k.lower() and k != k.upper()\n}\n\nfn is_upper_key(k: Str) -> Bool {\n  return k == k.upper() and k != k.lower()\n}\n\n/// >>> assert check_dict_case({\"STATE\": \"NC\", \"ZIP\": \"12345\"}) == true\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let ks = dict.keys()\n  if ks.is_empty() {\n    return false\n  }\n  return ks.all(fn(k: Str) => is_lower_key(k)) or ks.all(fn(k: Str) => is_upper_key(k))\n}\n\ntest \"check_dict_case\" {\n  assert check_dict_case({\"a\": \"apple\", \"b\": \"banana\"}) == true\n  assert check_dict_case({\"a\": \"apple\", \"A\": \"banana\", \"B\": \"banana\"}) == false\n  assert check_dict_case({\"a\": \"apple\", \"8\": \"banana\"}) == false\n  assert check_dict_case({\"Name\": \"John\", \"Age\": \"36\", \"City\": \"Houston\"}) == false\n  assert check_dict_case({\"STATE\": \"NC\", \"ZIP\": \"12345\"}) == true\n  assert check_dict_case(Map {}) == false\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn is_lower_key(k: Str) -> Bool {\n  return k == k.lower() and k != k.upper()\n}\n\nfn is_upper_key(k: Str) -> Bool {\n  return k == k.upper() and k != k.lower()\n}\n\n/// >>> assert check_dict_case(Map { \"STATE\": \"NC\", \"ZIP\": \"12345\" }) == true\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let ks = dict.keys()\n  if ks.is_empty() {\n    return false\n  }\n  return ks.all(fn(k: Str) => is_lower_key(k)) or ks.all(fn(k: Str) => is_upper_key(k))\n}\n\ntest \"check_dict_case\" {\n  assert check_dict_case(Map { \"a\": \"apple\", \"b\": \"banana\" }) == true\n  assert check_dict_case(Map { \"a\": \"apple\", \"A\": \"banana\", \"B\": \"banana\" }) == false\n  assert check_dict_case(Map { \"a\": \"apple\", \"8\": \"banana\" }) == false\n  assert check_dict_case(Map { \"Name\": \"John\", \"Age\": \"36\", \"City\": \"Houston\" }) == false\n  assert check_dict_case(Map { \"STATE\": \"NC\", \"ZIP\": \"12345\" }) == true\n  assert check_dict_case(Map {}) == false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

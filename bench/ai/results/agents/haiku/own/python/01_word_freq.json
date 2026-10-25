@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def word_freq(text: str) -> dict[str, int]:\n    counts: dict[str, int] = {}\n    for word in text.split(\" \"):\n        if word == \"\":\n            continue\n        key = word.lower()\n        counts[key] = counts.get(key, 0) + 1\n    return counts\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

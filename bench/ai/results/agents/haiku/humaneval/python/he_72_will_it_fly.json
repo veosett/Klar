@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def will_it_fly(q: list[int], w: int) -> bool:\n    return q == q[::-1] and sum(q) <= w\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

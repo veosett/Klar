@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def rolling_max(numbers: list[int]) -> list[int]:\n    result = []\n    best = None\n    for n in numbers:\n        if best is None or n > best:\n            best = n\n        result.append(best)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

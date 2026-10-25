@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn filter_by_prefix(strings: List[Str], prefix: Str) -> List[Str] {\n  return strings.filter(fn(s) => s.starts_with(prefix))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

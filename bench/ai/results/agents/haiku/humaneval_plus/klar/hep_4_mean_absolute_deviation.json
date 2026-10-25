@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn mean_absolute_deviation(numbers: List[Float]) -> Float {\n  if numbers.is_empty() {\n    return 0.0\n  }\n  let n = numbers.len().to_float()\n  let m = numbers.sum_float() / n\n  let devs = numbers.map(fn(x: Float) -> Float { return (x - m).abs() })\n  return devs.sum_float() / n\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

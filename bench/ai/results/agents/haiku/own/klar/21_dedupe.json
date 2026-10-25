@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The elements of `xs` without repetitions, keeping first occurrences in order.\npub fn dedupe(xs: List[Int]) -> List[Int] {\n  var seen: Map[Int, Bool] = Map {}\n  var out: List[Int] = []\n  for x in xs {\n    if not seen.has(x) {\n      seen = seen.set(x, true)\n      out = out.push(x)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

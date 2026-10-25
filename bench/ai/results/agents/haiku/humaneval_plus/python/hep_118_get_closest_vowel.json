@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def get_closest_vowel(word: str) -> str:\n    vowels = \"aeiouAEIOU\"\n    for i in range(len(word) - 2, 0, -1):\n        if word[i] in vowels and word[i - 1] not in vowels and word[i + 1] not in vowels:\n            return word[i]\n    return \"\"\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

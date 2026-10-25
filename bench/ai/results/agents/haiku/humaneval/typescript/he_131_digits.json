@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function digits(n: number): number {\n  let product = 1;\n  let hasOdd = false;\n  for (const ch of String(Math.abs(n))) {\n    const d = Number(ch);\n    if (d % 2 === 1) {\n      product *= d;\n      hasOdd = true;\n    }\n  }\n  return hasOdd ? product : 0;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

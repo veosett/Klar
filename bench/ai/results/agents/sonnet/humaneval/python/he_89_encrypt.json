@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def encrypt(s: str) -> str:\n    out = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            out.append(chr((ord(c) - 97 + 4) % 26 + 97))\n        else:\n            out.append(c)\n    return ''.join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

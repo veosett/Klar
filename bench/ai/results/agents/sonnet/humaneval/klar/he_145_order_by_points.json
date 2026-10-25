@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn dsum(x: Int) -> Int {\n  let ds = x.abs().to_str().codes().map(fn(c) => c - 48)\n  let s = ds.sum()\n  if x < 0 {\n    return s - 2 * ds.get_or(0, 0)\n  }\n  return s\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  return nums.enumerate()\n    .sort_by(fn(p) => dsum(p.value) * 1000000 + p.index)\n    .map(fn(p) => p.value)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

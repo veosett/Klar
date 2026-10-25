@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn order_key(n: Int) -> Int {\n  let s = n.abs().to_str()\n  let total = s.codes().fold(0, fn(acc, c) => acc + c - 48)\n  if n < 0 {\n    let first = s.codes().get_or(0, 48) - 48\n    return total - 2 * first\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let indexed = nums.enumerate()\n  let sorted = indexed.sort_by(fn(p) => order_key(p.value) * 1000000000 + p.index)\n  return sorted.map(fn(p) => p.value)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

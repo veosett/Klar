@@ -1,0 +1,34 @@
+// Number literals in every form (hexadecimal, binary, octal, exponents) and string escapes: the same values in the
+// interpreter, the Python backend and native code.
+
+const MASK: Int = 0xFF_FF
+
+fn main() uses io {
+  print(0xFF)
+  print(0x1f + 0b1010 + 0o17)
+  print(MASK)
+  print(0xFFFF_FFFF_FFFF_FFFF_FF)
+  print(1e-5)
+  print(2.5E10)
+  print(3e2 + 1.0)
+  print(1E+3)
+  print(0x1e - 5)
+  print("a\rb\tc\0d".len())
+  print("a\rb".codes())
+  // what models write out of habit: a map without `Map`, a block after `=>`, braces in strings
+  let m: Map[Str, Int] = { "a": 1, "b": 2 }
+  let e: Map[Str, Int] = {}
+  let inc = fn(x: Int) => {
+    return x + 1
+  }
+  print(m.get("b"))
+  print(e.len())
+  print(inc(41))
+  print("{" + "{}" + "{\"k\": {inc(1)}}" + "}")
+}
+
+test "literals" {
+  assert 0x10 == 16
+  assert 0b11 == 3
+  assert 1e3 == 1000.0
+}

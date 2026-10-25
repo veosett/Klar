@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn will_it_fly(q: List[Int], w: Int) -> Bool {\n  return q.reverse() == q and q.sum() <= w\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

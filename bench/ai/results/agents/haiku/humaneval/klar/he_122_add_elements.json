@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add_elements(arr: List[Int], k: Int) -> Int {\n  return arr.take(k).filter(fn(x) => x.abs() < 100).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

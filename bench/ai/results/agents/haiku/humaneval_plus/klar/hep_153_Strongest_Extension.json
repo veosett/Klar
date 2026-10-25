@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn strength(ext: Str) -> Int {\n  let cap = ext.chars().filter(fn(c) => c != c.lower()).len()\n  let sm = ext.chars().filter(fn(c) => c != c.upper()).len()\n  return cap - sm\n}\n\npub fn Strongest_Extension(class_name: Str, extensions: List[Str]) -> Str {\n  if extensions.is_empty() {\n    return class_name\n  }\n  var best = extensions.first().unwrap_or(\"\")\n  var best_strength = strength(best)\n  for e in extensions {\n    let s = strength(e)\n    if s > best_strength {\n      best = e\n      best_strength = s\n    }\n  }\n  return class_name + \".\" + best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

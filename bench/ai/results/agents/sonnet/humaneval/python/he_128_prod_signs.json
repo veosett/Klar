@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def prod_signs(arr: list[int]) -> int | None:\n    if not arr:\n        return None\n    if 0 in arr:\n        return 0\n    neg = sum(1 for x in arr if x < 0)\n    s = -1 if neg % 2 else 1\n    return s * sum(abs(x) for x in arr)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

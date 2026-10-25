@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sum_squares(lst: List[Int]) -> Int {\n  return lst.enumerate().map(fn(e) => match true {\n    _ if e.index % 3 == 0 => e.value * e.value,\n    _ if e.index % 4 == 0 => e.value * e.value * e.value,\n    _ => e.value,\n  }).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

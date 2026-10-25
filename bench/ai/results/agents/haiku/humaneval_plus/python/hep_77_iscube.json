@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def iscube(a: int) -> bool:\n    n = abs(a)\n    r = round(n ** (1.0 / 3))\n    for c in range(max(0, r - 2), r + 3):\n        if c * c * c == n:\n            return True\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

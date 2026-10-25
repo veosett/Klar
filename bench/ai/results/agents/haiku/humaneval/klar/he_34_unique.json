@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn unique(l: List[Int]) -> List[Int] {\n  return l.unique().sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

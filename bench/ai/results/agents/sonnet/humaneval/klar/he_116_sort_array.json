@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn ones(n: Int) -> Int {\n  var m = n.abs()\n  var c = 0\n  while m > 0 {\n    c = c + m % 2\n    m = m / 2\n  }\n  return c\n}\n\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  return arr.sort_by(fn(x) => ones(x) * 1000000000000000 + x)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

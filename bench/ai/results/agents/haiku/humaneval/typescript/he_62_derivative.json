@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function derivative(xs: number[]): number[] {\n  const result: number[] = [];\n  for (let i = 1; i < xs.length; i++) {\n    result.push(xs[i] * i);\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

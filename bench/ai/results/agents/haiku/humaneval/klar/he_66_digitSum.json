@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert digitSum(\"abAB\") == 131\npub fn digitSum(s: Str) -> Int {\n  return s.codes().filter(fn(c: Int) => c >= 65 and c <= 90).sum()\n}\n\ntest \"digitSum\" {\n  assert digitSum(\"\") == 0\n  assert digitSum(\"abAB\") == 131\n  assert digitSum(\"abcCd\") == 67\n  assert digitSum(\"helloE\") == 69\n  assert digitSum(\"woArBld\") == 131\n  assert digitSum(\"aAaaaXa\") == 153\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

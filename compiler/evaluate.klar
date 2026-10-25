@@ -2,7 +2,7 @@
 // klar/tools/runtools.py — checked by the Klar checker (which also gives the type), then compiled as a test block and
 // run natively; the value comes back through `dbg`.
 use commands.{absolute}
-use dev.{host_target, native_image, parse_rt, save_exe, temp_path, test_items}
+use dev.{allow_of, host_target, native_image_allow, parse_rt, save_exe, temp_path, test_items}
 use jsonout.{J, compact}
 use loader.{load_program_with, load_runtime}
 use report.{user_diags}
@@ -35,7 +35,7 @@ fn type_at(types: Map[Str, Str], file: Str, line: Int, col: Int) -> Str {
   return best
 }
 
-fn evaluate(parts: List[Str], context: Str, lib: Str) -> Eval uses io, fs, proc {
+fn evaluate(parts: List[Str], context: Str, lib: Str, allow: Option[List[Str]]) -> Eval uses io, fs, proc {
   let stmts = parts.take(parts.len() - 1)
   let expr = parts.last().unwrap_or("")
   var base = ""
@@ -90,7 +90,7 @@ fn evaluate(parts: List[Str], context: Str, lib: Str) -> Eval uses io, fs, proc 
   }
   let index = test_items(tl, path).filter(fn(t) => t.name == ENTRY).get(0).map(fn(t) => t.index).unwrap_or(0)
   let exe = temp_path(path, "eval")
-  match save_exe(exe, native_image(ld: tl, main_path: path, target: host_target(), tests: true)) {
+  match save_exe(exe, native_image_allow(ld: tl, main_path: path, target: host_target(), tests: true, allow: allow)) {
     Ok(_) => {},
     Err(e) => {
       return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
@@ -147,7 +147,7 @@ pub fn eval_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
     if a == "--in" {
       context = args.get_or(i + 1, "")
       i = i + 2
-    } else if a == "--lib" {
+    } else if a == "--lib" or a == "--allow" {
       i = i + 2
     } else if a == "--json" {
       json = true
@@ -161,7 +161,14 @@ pub fn eval_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
     eprint("usage: klarc eval [statements...] <expression> [--in file.klar] [--json]")
     return 2
   }
-  let res = evaluate(parts: parts, context: context, lib: lib)
+  let rights = match allow_of(args) {
+    Ok(r) => r,
+    Err(e) => {
+      eprint("error: " + e)
+      return 2
+    },
+  }
+  let res = evaluate(parts: parts, context: context, lib: lib, allow: rights)
   if json {
     print(compact(J.JObj(res.fields)))
     return match res.ok {

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def camel_to_snake(s: str) -> str:\n    out = []\n    for i, ch in enumerate(s):\n        if \"A\" <= ch <= \"Z\":\n            if i == 0:\n                out.append(ch.lower())\n            else:\n                out.append(\"_\" + ch.lower())\n        else:\n            out.append(ch)\n    return \"\".join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

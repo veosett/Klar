@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_palindrome_chars(cs: List[Str]) -> Bool {\n  return cs == cs.reverse()\n}\n\n/// >>> assert make_palindrome(\"cat\") == \"catac\"\npub fn make_palindrome(string: Str) -> Str {\n  let cs = string.chars()\n  let n = cs.len()\n  if n == 0 {\n    return \"\"\n  }\n  var cut = n - 1\n  var i = 0\n  while i < n {\n    if is_palindrome_chars(cs.slice(i, n)) {\n      cut = i\n      break\n    }\n    i = i + 1\n  }\n  let prefix = cs.slice(0, cut).reverse().join(\"\")\n  return string + prefix\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

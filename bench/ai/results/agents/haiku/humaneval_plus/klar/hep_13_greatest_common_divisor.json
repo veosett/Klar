@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{gcd}\n\npub fn greatest_common_divisor(a: Int, b: Int) -> Int {\n  return gcd(a, b)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

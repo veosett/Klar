@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Deletes every character of s that occurs in c; returns the rest and whether it is a palindrome.\n/// >>> assert reverse_delete(\"abcde\", \"ae\") == Pair { first: \"bcd\", second: false }\n/// >>> assert reverse_delete(\"abcdedcba\", \"ab\") == Pair { first: \"cdedc\", second: true }\npub fn reverse_delete(s: Str, c: Str) -> Pair[Str, Bool] {\n  let kept = s.chars().filter(fn(ch) => not c.contains(ch)).join(\"\")\n  return Pair { first: kept, second: kept == kept.reverse() }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

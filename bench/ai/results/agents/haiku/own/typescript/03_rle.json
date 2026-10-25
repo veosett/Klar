@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function rle(s: string): string {\n  let out = \"\";\n  let i = 0;\n  while (i < s.length) {\n    const ch = s[i];\n    let j = i;\n    while (j < s.length && s[j] === ch) j++;\n    out += ch + String(j - i);\n    i = j;\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

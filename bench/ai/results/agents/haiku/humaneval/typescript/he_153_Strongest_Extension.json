@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function Strongest_Extension(class_name: string, extensions: string[]): string {\n  let best = extensions[0];\n  let bestStrength = Number.NEGATIVE_INFINITY;\n  for (const ext of extensions) {\n    let cap = 0;\n    let sm = 0;\n    for (const ch of ext) {\n      if (ch >= \"A\" && ch <= \"Z\") {\n        cap++;\n      } else if (ch >= \"a\" && ch <= \"z\") {\n        sm++;\n      }\n    }\n    const strength = cap - sm;\n    if (strength > bestStrength) {\n      bestStrength = strength;\n      best = ext;\n    }\n  }\n  return `${class_name}.${best}`;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

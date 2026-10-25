@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def change_base(x: int, base: int) -> str:\n    if x == 0:\n        return \"0\"\n    s = \"\"\n    while x > 0:\n        s = str(x % base) + s\n        x //= base\n    return s\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

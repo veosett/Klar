@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn word_freq(text: Str) -> Map[Str, Int] {\n  let words = text.lower().split(\" \").filter(fn(w) => not w.is_empty())\n  let start: Map[Str, Int] = Map {}\n  return words.fold(start, fn(m: Map[Str, Int], w: Str) -> Map[Str, Int] {\n    match m.get(w) {\n      Some(n) => { return m.set(w, n + 1) },\n      None => { return m.set(w, 1) },\n    }\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

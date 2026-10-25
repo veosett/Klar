@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function order_by_points(nums: number[]): number[] {\n  const ds = (n: number): number => {\n    const s = String(Math.abs(n));\n    let t = 0;\n    for (let i = 0; i < s.length; i++) t += Number(s[i]);\n    if (n < 0) t -= 2 * Number(s[0]);\n    return t;\n  };\n  return nums\n    .map((v, i) => ({ v, i, k: ds(v) }))\n    .sort((a, b) => a.k - b.k || a.i - b.i)\n    .map((o) => o.v);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

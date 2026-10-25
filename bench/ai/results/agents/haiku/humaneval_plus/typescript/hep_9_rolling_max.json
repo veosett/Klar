@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function rolling_max(numbers: number[]): number[] {\n  const result: number[] = [];\n  let best: number | undefined = undefined;\n  for (const n of numbers) {\n    if (best === undefined || n > best) {\n      best = n;\n    }\n    result.push(best);\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

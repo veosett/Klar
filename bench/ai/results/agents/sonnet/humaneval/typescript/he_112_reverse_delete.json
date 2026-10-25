@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function reverse_delete(s: string, c: string): [string, boolean] {\n  const r = s.split(\"\").filter(ch => !c.includes(ch)).join(\"\");\n  return [r, r === r.split(\"\").reverse().join(\"\")];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

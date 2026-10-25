@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def even_odd_count(num: int) -> tuple[int, int]:\n    even = 0\n    odd = 0\n    for ch in str(abs(num)):\n        if int(ch) % 2 == 0:\n            even += 1\n        else:\n            odd += 1\n    return (even, odd)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

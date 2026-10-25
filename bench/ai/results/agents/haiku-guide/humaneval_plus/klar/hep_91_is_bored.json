@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.text.{words}\n\nfn starts_with_i(sentence: Str) -> Bool {\n  return words(sentence).first() == Some(\"I\")\n}\n\npub fn is_bored(text: Str) -> Int {\n  let sentences = text.replace(\"?\", \".\").replace(\"!\", \".\").split(\".\")\n  return sentences.filter(fn(s) => starts_with_i(s)).len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

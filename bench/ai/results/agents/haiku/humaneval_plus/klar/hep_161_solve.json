@@ -1,0 +1,20 @@
+{
+ "attempts": [
+  {
+   "code": "fn swap_case(c: Str) -> Str {\n  if c != c.lower() {\n    return c.lower()\n  }\n  if c != c.upper() {\n    return c.upper()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => (c != c.lower()) or (c != c.upper()))\n  if has_letter {\n    return s.chars().map(fn(c) => swap_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "fn is_cased(c: Str) -> Bool {\n  return (c != c.lower()) or (c != c.upper())\n}\n\n// A character counts as a letter when it has a case, or when it is a\n// non-ASCII character that is not a symbol, punctuation or emoji.\nfn is_letter(c: Str) -> Bool {\n  if is_cased(c) {\n    return true\n  }\n  let code = c.codes().first().unwrap_or(0)\n  if code < 128 {\n    return false\n  }\n  if (code >= 0x2000) and (code < 0x3100) {\n    return false\n  }\n  if code >= 0x1F000 {\n    return false\n  }\n  return true\n}\n\nfn swap_case(c: Str) -> Str {\n  if c != c.lower() {\n    return c.lower()\n  }\n  if c != c.upper() {\n    return c.upper()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => is_letter(c))\n  if has_letter {\n    return s.chars().map(fn(c) => swap_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn is_cased(c: Str) -> Bool {\n  return (c != c.lower()) or (c != c.upper())\n}\n\n// A character counts as a letter when it has a case, or when it is a\n// non-ASCII character that is not a symbol, punctuation or emoji.\nfn is_letter(c: Str) -> Bool {\n  if is_cased(c) {\n    return true\n  }\n  let code = c.codes().first().unwrap_or(0)\n  if code < 128 {\n    return false\n  }\n  if (code >= 8192) and (code < 11264) {\n    return false\n  }\n  if (code >= 12288) and (code < 12352) {\n    return false\n  }\n  if code >= 126976 {\n    return false\n  }\n  return true\n}\n\nfn swap_case(c: Str) -> Str {\n  if c != c.lower() {\n    return c.lower()\n  }\n  if c != c.upper() {\n    return c.upper()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => is_letter(c))\n  if has_letter {\n    return s.chars().map(fn(c) => swap_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

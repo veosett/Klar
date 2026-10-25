@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def remove_vowels(text: str) -> str:\n    return ''.join(ch for ch in text if ch not in 'aeiouAEIOU')\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

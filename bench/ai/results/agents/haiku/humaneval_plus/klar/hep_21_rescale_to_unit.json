@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rescale_to_unit(numbers: List[Float]) -> List[Float] {\n  let lo = match numbers.min() {\n    Some(v) => v,\n    None => { return [] },\n  }\n  let hi = match numbers.max() {\n    Some(v) => v,\n    None => { return [] },\n  }\n  let span = hi - lo\n  var out: List[Float] = []\n  for x in numbers {\n    out = out.push((x - lo) / span)\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

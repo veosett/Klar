@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn total_match(lst1: List[Str], lst2: List[Str]) -> List[Str] {\n  let a = lst1.map(fn(s) => s.len()).sum()\n  let b = lst2.map(fn(s) => s.len()).sum()\n  return match a <= b {\n    true => lst1,\n    false => lst2,\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

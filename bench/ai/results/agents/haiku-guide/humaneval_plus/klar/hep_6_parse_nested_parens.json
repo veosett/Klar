@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The deepest nesting level of one group of parentheses.\n/// >>> assert max_depth(\"(()())\") == 2\nfn max_depth(group: Str) -> Int {\n  var depth = 0\n  var best = 0\n  for c in group.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n      best = best.max(depth)\n    }\n    if c == \")\" {\n      depth = depth - 1\n    }\n  }\n  return best\n}\n\n/// For each space-separated group, the deepest level of nesting.\n/// >>> assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  return paren_string.split(\" \").filter(fn(g) => not g.is_empty()).map(fn(g) => max_depth(g))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

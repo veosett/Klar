@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import re\n\n\ndef words_string(s: str) -> list[str]:\n    return [w for w in re.split(r\"[,\\s]+\", s) if w]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

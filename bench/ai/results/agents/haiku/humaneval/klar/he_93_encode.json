@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn encode(message: Str) -> Str {\n  var out: Str = \"\"\n  for c in message.chars() {\n    let lo = c.lower()\n    let is_upper = c != lo\n    let mapped = match lo {\n      \"a\" => \"c\",\n      \"e\" => \"g\",\n      \"i\" => \"k\",\n      \"o\" => \"q\",\n      \"u\" => \"w\",\n      _ => lo,\n    }\n    if is_upper {\n      out = out + mapped\n    } else {\n      out = out + mapped.upper()\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

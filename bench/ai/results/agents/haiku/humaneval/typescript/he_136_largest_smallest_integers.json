@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function largest_smallest_integers(lst: number[]): [number | null, number | null] {\n  let largestNeg: number | null = null;\n  let smallestPos: number | null = null;\n  for (const n of lst) {\n    if (n < 0 && (largestNeg === null || n > largestNeg)) {\n      largestNeg = n;\n    } else if (n > 0 && (smallestPos === null || n < smallestPos)) {\n      smallestPos = n;\n    }\n  }\n  return [largestNeg, smallestPos];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

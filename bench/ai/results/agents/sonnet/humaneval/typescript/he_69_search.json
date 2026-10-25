@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function search(lst: number[]): number {\n  const c = new Map<number, number>();\n  for (const n of lst) c.set(n, (c.get(n) ?? 0) + 1);\n  let best = -1;\n  c.forEach((f, n) => {\n    if (n > 0 && f >= n && n > best) best = n;\n  });\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

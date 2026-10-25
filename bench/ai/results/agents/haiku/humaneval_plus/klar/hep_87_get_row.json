@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_row(lst: List[List[Int]], x: Int) -> List[Pair[Int, Int]] {\n  return lst.enumerate().flat_map(fn(r) => r.value.enumerate().filter(fn(c) => c.value == x).map(fn(c) => Pair { first: r.index, second: c.index }).reverse())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

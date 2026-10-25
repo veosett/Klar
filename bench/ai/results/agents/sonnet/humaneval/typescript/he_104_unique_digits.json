@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function unique_digits(x: number[]): number[] {\n  return x.filter(n => !/[02468]/.test(String(n))).sort((a, b) => a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

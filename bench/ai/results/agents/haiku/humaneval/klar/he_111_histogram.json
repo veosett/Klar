@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn histogram(test_value: Str) -> Map[Str, Int] {\n  var counts: Map[Str, Int] = Map {}\n  for w in test_value.split(\" \") {\n    if w != \"\" {\n      counts = counts.set(w, counts.get(w).unwrap_or(0) + 1)\n    }\n  }\n  let top = counts.values().max().unwrap_or(0)\n  return counts.filter(fn(k, v) => v == top)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def file_name_check(file_name: str) -> str:\n    if file_name.count('.') != 1:\n        return 'No'\n    if sum(1 for c in file_name if '0' <= c <= '9') > 3:\n        return 'No'\n    name, ext = file_name.split('.')\n    if not name:\n        return 'No'\n    c = name[0]\n    if not (('a' <= c <= 'z') or ('A' <= c <= 'Z')):\n        return 'No'\n    if ext not in ('txt', 'exe', 'dll'):\n        return 'No'\n    return 'Yes'\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

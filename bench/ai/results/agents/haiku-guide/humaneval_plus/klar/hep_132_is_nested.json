@@ -1,0 +1,20 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var opens: List[Int] = []\n  var closes: List[Int] = []\n  var pos = 0\n  for c in string.chars() {\n    if c == \"[\" {\n      opens = opens.push(pos)\n    } else {\n      closes = closes.push(pos)\n    }\n    pos = pos + 1\n  }\n  let rev_closes = closes.reverse()\n  let total_closes = rev_closes.len()\n  var matched = 0\n  var j = 0\n  for idx in opens {\n    if j < total_closes and idx < rev_closes.get_or(j, 0) {\n      matched = matched + 1\n      j = j + 1\n    }\n  }\n  return matched >= 2\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var state = 0\n  for c in string.chars() {\n    if state == 0 and c == \"[\" {\n      state = 1\n    } else if state == 1 and c == \"[\" {\n      state = 2\n    } else if state == 2 and c == \"]\" {\n      state = 3\n    } else if state == 3 and c == \"]\" {\n      state = 4\n    }\n  }\n  return state == 4\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var state = 0\n  for c in string.chars() {\n    if state == 0 and c == \"[\" {\n      state = 1\n    } else if state == 1 and c == \"[\" {\n      state = 2\n    } else if state == 2 and c == \"]\" {\n      state = 3\n    } else if state == 3 and c == \"]\" {\n      state = 4\n    }\n  }\n  return state == 4\n}\n",
+   "stage": "test",
+   "ok": false
+  }
+ ],
+ "solved": false
+}

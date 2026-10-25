@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from decimal import Decimal, ROUND_HALF_UP\n\n\ndef closest_integer(value: str) -> int:\n    return int(Decimal(value).quantize(Decimal('1'), rounding=ROUND_HALF_UP))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

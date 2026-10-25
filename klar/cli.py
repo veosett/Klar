@@ -488,6 +488,9 @@ def compact_rt(e):
 
 def cmd_dev(args):
     from .contracts import load_with_contracts
+    sandbox = sandbox_of(args)
+    if sandbox is False:
+        return 2
     loaded, full = load_with_contracts(args.file)
     diags = user_diags(loaded)
     errors = [d for d in diags if d.severity == "error"]
@@ -514,8 +517,10 @@ def cmd_dev(args):
     if has_main(loaded) and not args.no_run:
         out, errs = io.StringIO(), io.StringIO()
         interp2 = Interpreter(loaded, out=out, err_stream=errs, inp=io.StringIO(args.stdin or ""))
+        interp2.sandbox = sandbox
         try:
             runner = CompiledProgram(loaded, out=out, err_stream=errs, inp=io.StringIO(args.stdin or ""))
+            runner.ctx.sandbox = sandbox
         except Unsupported:
             runner = interp2
         _, run_err = runtime_guard(runner.run_main, interp2)
@@ -701,6 +706,7 @@ def main(argv=None):
     p.add_argument("--stdin", help="text passed to read_line()")
     p.add_argument("--max-output", type=int, default=2000)
     p.add_argument("--max-warnings", type=int, default=10)
+    p.add_argument("--allow", metavar="RIGHTS", help="run main() with only these rights (as `klar run --allow`)")
     p.set_defaults(fn=cmd_dev)
     p = sub.add_parser("fix", help="apply safe machine fixes from diagnostics (repeatedly)")
     p.add_argument("file")

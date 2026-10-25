@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def file_name_check(file_name: str) -> str:\n    digits = sum(1 for ch in file_name if '0' <= ch <= '9')\n    if digits > 3:\n        return 'No'\n    parts = file_name.split('.')\n    if len(parts) != 2:\n        return 'No'\n    name, ext = parts\n    if not name:\n        return 'No'\n    if not (('a' <= name[0] <= 'z') or ('A' <= name[0] <= 'Z')):\n        return 'No'\n    if ext not in ('txt', 'exe', 'dll'):\n        return 'No'\n    return 'Yes'\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

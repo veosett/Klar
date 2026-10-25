@@ -1,0 +1,2387 @@
+{
+ "hep_0_has_close_elements/klar/0": {
+  "text": "```\npub fn has_close_elements(numbers: List[Float], threshold: Float) -> Bool {\n  let n = numbers.len()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      let d = (numbers.get_or(i, 0.0) - numbers.get_or(j, 0.0)).abs()\n      if d < threshold {\n        return true\n      }\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_100_make_a_pile/klar/0": {
+  "text": "```\npub fn make_a_pile(n: Int) -> List[Int] {\n  return range(0, n).map(fn(i) => n + 2 * i)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_101_words_string/klar/0": {
+  "text": "```\nuse std.text.{words}\n\npub fn words_string(s: Str) -> List[Str] {\n  return words(s.replace(\",\", \" \"))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_102_choose_num/klar/0": {
+  "text": "```\npub fn choose_num(x: Int, y: Int) -> Int {\n  if x > y {\n    return -1\n  }\n  var candidate: Int = y\n  if candidate % 2 != 0 {\n    candidate = y - 1\n  }\n  if candidate < x {\n    return -1\n  }\n  return candidate\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_104_unique_digits/klar/0": {
+  "text": "```\nfn has_even_digit(n: Int) -> Bool {\n  return n.to_str().chars().any(fn(c) => c == \"0\" or c == \"2\" or c == \"4\" or c == \"6\" or c == \"8\")\n}\n\n/// >>> assert unique_digits([15, 33, 1422, 1]) == [1, 15, 33]\npub fn unique_digits(x: List[Int]) -> List[Int] {\n  return x.filter(fn(n) => not has_even_digit(n)).sort()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_105_by_length/klar/0": {
+  "text": "```\nfn digit_name(d: Int) -> Str {\n  return match d {\n    1 => \"One\",\n    2 => \"Two\",\n    3 => \"Three\",\n    4 => \"Four\",\n    5 => \"Five\",\n    6 => \"Six\",\n    7 => \"Seven\",\n    8 => \"Eight\",\n    9 => \"Nine\",\n    _ => \"\",\n  }\n}\n\npub fn by_length(arr: List[Int]) -> List[Str] {\n  let digits = arr.filter(fn(x) => (x >= 1) and (x <= 9)).sort().reverse()\n  return digits.map(fn(x) => digit_name(x))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_106_f/klar/0": {
+  "text": "```\npub fn f(n: Int) -> List[Int] {\n  var out: List[Int] = []\n  var fact = 1\n  var total = 0\n  for i in range(1, n + 1) {\n    fact = fact * i\n    total = total + i\n    if i % 2 == 0 {\n      out = out.push(fact)\n    } else {\n      out = out.push(total)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_107_even_odd_palindrome/klar/0": {
+  "text": "```\npub fn even_odd_palindrome(n: Int) -> Pair[Int, Int] {\n  var evens: Int = 0\n  var odds: Int = 0\n  for i in range(1, n + 1) {\n    let s = i.to_str()\n    if s == s.reverse() {\n      if i % 2 == 0 {\n        evens = evens + 1\n      } else {\n        odds = odds + 1\n      }\n    }\n  }\n  return Pair { first: evens, second: odds }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_108_count_nums/klar/0": {
+  "text": "```\nfn signed_digit_sum(n: Int) -> Int {\n  let ds = n.abs().to_str().chars().map(fn(c) => c.to_int().unwrap_or(0))\n  let total = ds.sum()\n  if n < 0 {\n    return total - 2 * ds.first().unwrap_or(0)\n  }\n  return total\n}\n\n/// >>> assert count_nums([-1, 11, -11]) == 1\npub fn count_nums(arr: List[Int]) -> Int {\n  return arr.filter(fn(n) => signed_digit_sum(n) > 0).len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_109_move_one_ball/klar/0": {
+  "text": "```\npub fn move_one_ball(arr: List[Int]) -> Bool {\n  let adj = arr.zip(arr.drop(1)).filter(fn(p) => p.first > p.second).len()\n  let wrap = arr.last().unwrap_or(0) > arr.first().unwrap_or(0)\n  return (adj == 0) or ((adj == 1) and (not wrap))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_10_make_palindrome/klar/0": {
+  "text": "```\nfn is_palindrome_chars(cs: List[Str]) -> Bool {\n  return cs == cs.reverse()\n}\n\n/// >>> assert make_palindrome(\"cat\") == \"catac\"\npub fn make_palindrome(string: Str) -> Str {\n  let cs = string.chars()\n  let n = cs.len()\n  if n == 0 {\n    return \"\"\n  }\n  var cut = n - 1\n  var i = 0\n  while i < n {\n    if is_palindrome_chars(cs.slice(i, n)) {\n      cut = i\n      break\n    }\n    i = i + 1\n  }\n  let prefix = cs.slice(0, cut).reverse().join(\"\")\n  return string + prefix\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_110_exchange/klar/0": {
+  "text": "```\npub fn exchange(lst1: List[Int], lst2: List[Int]) -> Str {\n  let odd_1 = lst1.count(fn(x: Int) -> Bool { return x % 2 != 0 })\n  let even_2 = lst2.count(fn(x: Int) -> Bool { return x % 2 == 0 })\n  if odd_1 <= even_2 {\n    return \"YES\"\n  }\n  return \"NO\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_111_histogram/klar/0": {
+  "text": "```\nuse std.list.{frequencies}\nuse std.text.{words}\n\npub fn histogram(test_value: Str) -> Map[Str, Int] {\n  let counts = frequencies(words(test_value))\n  return match counts.values().max() {\n    Some(best) => counts.filter(fn(k, v) => v == best),\n    None => Map {},\n  }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_112_reverse_delete/klar/0": {
+  "text": "```\n/// >>> assert reverse_delete(\"abcde\", \"ae\") == Pair { first: \"bcd\", second: false }\npub fn reverse_delete(s: Str, c: Str) -> Pair[Str, Bool] {\n  let kept = s.chars().filter(fn(ch) => not c.chars().contains(ch)).join(\"\")\n  let is_pal = kept == kept.reverse()\n  return Pair { first: kept, second: is_pal }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_113_odd_count/klar/0": {
+  "text": "```\nfn describe_odd(s: Str) -> Str {\n  let k = s.codes().filter(fn(c) => c % 2 == 1).len()\n  return \"the number of odd elements {k}n the str{k}ng {k} of the {k}nput.\"\n}\n\npub fn odd_count(lst: List[Str]) -> List[Str] {\n  return lst.map(fn(s) => describe_odd(s))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_114_minSubArraySum/klar/0": {
+  "text": "```\npub fn minSubArraySum(nums: List[Int]) -> Int {\n  if nums.is_empty() {\n    return 0\n  }\n  var cur = nums.get_or(0, 0)\n  var best = cur\n  let n = nums.len()\n  for i in range(1, n) {\n    let x = nums.get_or(i, 0)\n    cur = (cur + x).min(x)\n    best = best.min(cur)\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_115_max_fill/klar/0": {
+  "text": "```\npub fn max_fill(grid: List[List[Int]], capacity: Int) -> Int {\n  if capacity <= 0 {\n    return 0\n  }\n  if capacity == 0 {\n    return 0\n  }\n  var total: Int = 0\n  for row in grid {\n    let water = row.sum()\n    total = total + (water + capacity - 1) / capacity\n  }\n  return total\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_116_sort_array/klar/0": {
+  "text": "```\nfn popcount(n: Int) -> Int {\n  var x = n.abs()\n  var c = 0\n  while x > 0 {\n    if x % 2 == 1 {\n      c = c + 1\n    }\n    x = x / 2\n  }\n  return c\n}\n\n/// Sort by number of one bits, then by value.\n/// >>> assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 4, 3, 5]\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  let sorted = arr.sort()\n  let top = arr.map(fn(n) => popcount(n)).max().unwrap_or(0)\n  return range(0, top + 1).flat_map(fn(k) => sorted.filter(fn(n) => popcount(n) == k))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_117_select_words/klar/0": {
+  "text": "```\nuse std.text.{words}\n\nfn consonant_count(w: Str) -> Int {\n  let vowels = [\"a\", \"e\", \"i\", \"o\", \"u\"]\n  return w.lower().chars().filter(fn(c) => not vowels.contains(c)).len()\n}\n\npub fn select_words(s: Str, n: Int) -> List[Str] {\n  return words(s).filter(fn(w) => consonant_count(w) == n)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_118_get_closest_vowel/klar/0": {
+  "text": "```\nfn is_vowel_char(c: Str) -> Bool {\n  return \"aeiouAEIOU\".contains(c)\n}\n\npub fn get_closest_vowel(word: Str) -> Str {\n  let cs = word.chars()\n  let n = cs.len()\n  if n < 3 {\n    return \"\"\n  }\n  for k in range(1, n - 1) {\n    let i = n - 1 - k\n    let c = cs.get_or(i, \"\")\n    let left = cs.get_or(i - 1, \"\")\n    let right = cs.get_or(i + 1, \"\")\n    if is_vowel_char(c) and not is_vowel_char(left) and not is_vowel_char(right) {\n      return c\n    }\n  }\n  return \"\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_119_match_parens/klar/0": {
+  "text": "```\nfn is_balanced(s: Str) -> Bool {\n  var depth: Int = 0\n  for c in s.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n    } else if c == \")\" {\n      depth = depth - 1\n      if depth < 0 {\n        return false\n      }\n    }\n  }\n  return depth == 0\n}\n\npub fn match_parens(lst: List[Str]) -> Str {\n  let a = lst.get_or(0, \"\")\n  let b = lst.get_or(1, \"\")\n  if is_balanced(a + b) or is_balanced(b + a) {\n    return \"Yes\"\n  }\n  return \"No\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_11_string_xor/klar/0": {
+  "text": "```\npub fn string_xor(a: Str, b: Str) -> Str {\n  let pairs = a.chars().zip(b.chars())\n  let bits = pairs.map(fn(p) => match p.first == p.second {\n    true => \"0\",\n    false => \"1\",\n  })\n  return bits.join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_120_maximum/klar/0": {
+  "text": "```\n/// >>> assert maximum([-3, -4, 5], 3) == [-4, -3, 5]\npub fn maximum(arr: List[Int], k: Int) -> List[Int] {\n  let s = arr.sort()\n  let n = s.len()\n  let start = (n - k).max(0)\n  return s.slice(start, n)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_121_solution/klar/0": {
+  "text": "```\npub fn solution(lst: List[Int]) -> Int {\n  return lst.enumerate().filter(fn(p) => (p.index % 2 == 0) and (not p.value.is_even())).map(fn(p) => p.value).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_122_add_elements/klar/0": {
+  "text": "```\npub fn add_elements(arr: List[Int], k: Int) -> Int {\n  var total = 0\n  for i in range(0, k) {\n    let x = arr.get_or(i, 0)\n    if x.abs() < 100 {\n      total = total + x\n    }\n  }\n  return total\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_123_get_odd_collatz/klar/0": {
+  "text": "```\npub fn get_odd_collatz(n: Int) -> List[Int] {\n  if n < 1 {\n    return []\n  }\n  var odds: List[Int] = [1]\n  var x: Int = n\n  while x != 1 {\n    if x % 2 == 1 {\n      odds = odds.push(x)\n    }\n    if x % 2 == 0 {\n      x = x / 2\n    } else {\n      x = 3 * x + 1\n    }\n  }\n  return odds.unique().sort()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_124_valid_date/klar/0": {
+  "text": "```\n/// >>> assert valid_date(\"03-11-2000\")\n/// >>> assert not valid_date(\"06/04/2020\")\npub fn valid_date(date: Str) -> Bool {\n  if date.is_empty() {\n    return false\n  }\n  let parts = date.split(\"-\")\n  if parts.len() != 3 {\n    return false\n  }\n  let mm = parts.get(0).unwrap_or(\"\")\n  let dd = parts.get(1).unwrap_or(\"\")\n  let yy = parts.get(2).unwrap_or(\"\")\n  if mm.len() != 2 or dd.len() != 2 or yy.len() != 4 {\n    return false\n  }\n  if not (mm.is_numeric() and dd.is_numeric() and yy.is_numeric()) {\n    return false\n  }\n  let month = mm.to_int().unwrap_or(0)\n  let day = dd.to_int().unwrap_or(0)\n  if month < 1 or month > 12 {\n    return false\n  }\n  var max_day = 31\n  if month == 4 or month == 6 or month == 9 or month == 11 {\n    max_day = 30\n  }\n  if month == 2 {\n    max_day = 29\n  }\n  return day >= 1 and day <= max_day\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_126_is_sorted/klar/0": {
+  "text": "```\npub fn is_sorted(lst: List[Int]) -> Bool {\n  let ordered = lst.zip(lst.drop(1)).all(fn(p) => p.first <= p.second)\n  let limited = lst.all(fn(x) => lst.count(fn(y) => y == x) <= 2)\n  return ordered and limited\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_127_intersection/klar/0": {
+  "text": "```\nfn is_prime_len(n: Int) -> Bool {\n  if n < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= n {\n    if n % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n\npub fn intersection(interval1: Pair[Int, Int], interval2: Pair[Int, Int]) -> Str {\n  let lo = interval1.first.max(interval2.first)\n  let hi = interval1.second.min(interval2.second)\n  let length = hi - lo\n  if length > 0 and is_prime_len(length) {\n    return \"YES\"\n  }\n  return \"NO\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_128_prod_signs/klar/0": {
+  "text": "```\npub fn prod_signs(arr: List[Int]) -> Option[Int] {\n  if arr.is_empty() {\n    return None\n  }\n  var magnitude: Int = 0\n  var sign_product: Int = 1\n  for x in arr {\n    magnitude = magnitude + x.abs()\n    sign_product = sign_product * x.sign()\n  }\n  return Some(sign_product * magnitude)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_129_minPath/klar/0": {
+  "text": "```\n/// Flat indexes of the cells next to cell `p` in an n-by-n grid.\nfn neighbors(p: Int, n: Int) -> List[Int]\n  requires n != 0\n{\n  let r = p / n\n  let c = p % n\n  var out: List[Int] = []\n  if r > 0 {\n    out = out.push(p - n)\n  }\n  if r < n - 1 {\n    out = out.push(p + n)\n  }\n  if c > 0 {\n    out = out.push(p - 1)\n  }\n  if c < n - 1 {\n    out = out.push(p + 1)\n  }\n  return out\n}\n\n/// Starting from the cell holding 1, always step to the smallest neighbour.\n/// >>> assert minPath([[1, 2, 3], [4, 5, 6], [7, 8, 9]], 3) == [1, 2, 1]\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  let n = grid.len()\n  let flat = grid.flatten()\n  var p = flat.index_of(1).unwrap_or(0)\n  var out: List[Int] = [flat.get_or(p, 0)]\n  var step = 1\n  while step < k {\n    let best = neighbors(p, n).min_by(fn(q) => flat.get_or(q, 0)).unwrap_or(p)\n    p = best\n    out = out.push(flat.get_or(p, 0))\n    step = step + 1\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_12_longest/klar/0": {
+  "text": "```\npub fn longest(strings: List[Str]) -> Option[Str] {\n  if strings.is_empty() {\n    return None\n  }\n  var best = strings.get_or(0, \"\")\n  for s in strings {\n    if s.len() > best.len() {\n      best = s\n    }\n  }\n  return Some(best)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_130_tri/klar/0": {
+  "text": "```\npub fn tri(n: Int) -> List[Int] {\n  if n < 0 {\n    return []\n  }\n  if n == 0 {\n    return [1]\n  }\n  var out: List[Int] = [1, 3]\n  var i = 2\n  while i <= n {\n    if i % 2 == 0 {\n      out = out.push(1 + i / 2)\n    } else {\n      out = out.push(out.get_or(i - 1, 0) + out.get_or(i - 2, 0) + (1 + (i + 1) / 2))\n    }\n    i = i + 1\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_131_digits/klar/0": {
+  "text": "```\npub fn digits(n: Int) -> Int {\n  var m = n.abs()\n  var prod = 1\n  var any_odd = false\n  while m > 0 {\n    let d = m % 10\n    if d % 2 == 1 {\n      prod = prod * d\n      any_odd = true\n    }\n    m = m / 10\n  }\n  if not any_odd {\n    return 0\n  }\n  return prod\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/klar/0": {
+  "text": "```\npub fn is_nested(string: Str) -> Bool {\n  var openers: List[Int] = []\n  var closers: List[Int] = []\n  var pos: Int = 0\n  for c in string.chars() {\n    if c == \"[\" {\n      openers = openers.push(pos)\n    } else if c == \"]\" {\n      closers = closers.push(pos)\n    }\n    pos = pos + 1\n  }\n  let closers_desc = closers.reverse()\n  var used: Int = 0\n  var matched: Int = 0\n  for o in openers {\n    if used < closers_desc.len() and o < closers_desc.get_or(used, 0) {\n      matched = matched + 1\n      used = used + 1\n    }\n  }\n  return matched >= 2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/klar/1": {
+  "text": "```\npub fn is_nested(string: Str) -> Bool {\n  var opens: Int = 0\n  var closes_after: Int = 0\n  for c in string.chars() {\n    if c == \"[\" {\n      opens = opens + 1\n    } else if c == \"]\" {\n      if opens >= 2 {\n        closes_after = closes_after + 1\n      }\n    }\n  }\n  return closes_after >= 2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/klar/2": {
+  "text": "```\npub fn is_nested(string: Str) -> Bool {\n  var opens: Int = 0\n  var closes: Int = 0\n  for c in string.chars() {\n    if c == \"[\" {\n      opens = opens + 1\n    }\n    if c == \"]\" and opens >= 2 {\n      closes = closes + 1\n    }\n  }\n  return closes >= 2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_133_sum_squares/klar/0": {
+  "text": "```\n/// >>> assert sum_squares([1.4, 4.2, 0.0]) == 29\npub fn sum_squares(lst: List[Float]) -> Int {\n  return lst.map(fn(x) => x.ceil() * x.ceil()).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_134_check_if_last_char_is_a_letter/klar/0": {
+  "text": "```\npub fn check_if_last_char_is_a_letter(txt: Str) -> Bool {\n  let last = txt.split(\" \").last().unwrap_or(\"\")\n  if last.len() != 1 {\n    return false\n  }\n  let code = last.lower().codes().first().unwrap_or(0)\n  return (code >= 97) and (code <= 122)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_135_can_arrange/klar/0": {
+  "text": "```\npub fn can_arrange(arr: List[Int]) -> Int {\n  var result = -1\n  let n = arr.len()\n  for i in range(1, n) {\n    if arr.get_or(i, 0) <= arr.get_or(i - 1, 0) {\n      result = i\n    }\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_136_largest_smallest_integers/klar/0": {
+  "text": "```\npub fn largest_smallest_integers(lst: List[Int]) -> Pair[Option[Int], Option[Int]] {\n  let negatives = lst.filter(fn(x) => x < 0)\n  let positives = lst.filter(fn(x) => x > 0)\n  return Pair { first: negatives.max(), second: positives.min() }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_138_is_equal_to_sum_even/klar/0": {
+  "text": "```\n/// Sum of four positive even numbers: n must be even and at least 8.\n/// >>> assert is_equal_to_sum_even(8)\npub fn is_equal_to_sum_even(n: Int) -> Bool {\n  return n >= 8 and n % 2 == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_139_special_factorial/klar/0": {
+  "text": "```\npub fn special_factorial(n: Int) -> Int {\n  var result = 1\n  var f = 1\n  for k in range(1, n + 1) {\n    f = f * k\n    result = result * f\n  }\n  return result\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_13_greatest_common_divisor/klar/0": {
+  "text": "```\nuse std.math.{gcd}\n\npub fn greatest_common_divisor(a: Int, b: Int) -> Int {\n  return gcd(a, b)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_140_fix_spaces/klar/0": {
+  "text": "```\npub fn fix_spaces(text: Str) -> Str {\n  let cs = text.chars()\n  let n = cs.len()\n  var out = \"\"\n  var i = 0\n  while i < n {\n    let c = cs.get_or(i, \"\")\n    if c == \" \" {\n      var j = i\n      while j < n and cs.get_or(j, \"\") == \" \" {\n        j = j + 1\n      }\n      let run = j - i\n      if run > 2 {\n        out = out + \"-\"\n      } else {\n        out = out + \"_\".repeat(run)\n      }\n      i = j\n    } else {\n      out = out + c\n      i = i + 1\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_141_file_name_check/klar/0": {
+  "text": "```\npub fn file_name_check(file_name: Str) -> Str {\n  var digits: Int = 0\n  for c in file_name.codes() {\n    if c >= 48 and c <= 57 {\n      digits = digits + 1\n    }\n  }\n  if digits > 3 {\n    return \"No\"\n  }\n  let parts = file_name.split(\".\")\n  if parts.len() != 2 {\n    return \"No\"\n  }\n  let before = parts.get_or(0, \"\")\n  let after = parts.get_or(1, \"\")\n  let first = before.codes().first().unwrap_or(0)\n  let is_letter = (first >= 65 and first <= 90) or (first >= 97 and first <= 122)\n  if before.is_empty() or not is_letter {\n    return \"No\"\n  }\n  if after == \"txt\" or after == \"exe\" or after == \"dll\" {\n    return \"Yes\"\n  }\n  return \"No\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_142_sum_squares/klar/0": {
+  "text": "```\nfn adjust(i: Int, x: Int) -> Int {\n  if i % 3 == 0 {\n    return x * x\n  }\n  if i % 4 == 0 {\n    return x * x * x\n  }\n  return x\n}\n\n/// >>> assert sum_squares([1, 2, 3]) == 6\npub fn sum_squares(lst: List[Int]) -> Int {\n  return lst.enumerate().map(fn(p) => adjust(p.index, p.value)).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_143_words_in_sentence/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\nuse std.text.{words}\n\npub fn words_in_sentence(sentence: Str) -> Str {\n  return words(sentence).filter(fn(w) => is_prime(w.len())).join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_144_simplify/klar/0": {
+  "text": "```\npub fn simplify(x: Str, n: Str) -> Bool {\n  let xp = x.split(\"/\")\n  let np = n.split(\"/\")\n  let a = xp.get_or(0, \"1\").to_int().unwrap_or(1)\n  let b = xp.get_or(1, \"1\").to_int().unwrap_or(1)\n  let c = np.get_or(0, \"1\").to_int().unwrap_or(1)\n  let d = np.get_or(1, \"1\").to_int().unwrap_or(1)\n  let num = a * c\n  let den = b * d\n  if den == 0 {\n    return false\n  }\n  return num % den == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_145_order_by_points/klar/0": {
+  "text": "```\nfn digit_sum(n: Int) -> Int {\n  var m: Int = n.abs()\n  var total: Int = 0\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let big: Int = 1_000_000_000\n  var keys: List[Int] = []\n  var i: Int = 0\n  for n in nums {\n    keys = keys.push(digit_sum(n) * big + i)\n    i = i + 1\n  }\n  var out: List[Int] = []\n  for k in keys.sort() {\n    out = out.push(nums.get_or(k % big, 0))\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_145_order_by_points/klar/1": {
+  "text": "```\nfn signed_digit_sum(n: Int) -> Int {\n  var m: Int = n.abs()\n  var total: Int = 0\n  var first: Int = 0\n  while m > 0 {\n    let d = m % 10\n    total = total + d\n    first = d\n    m = m / 10\n  }\n  if n < 0 {\n    return total - 2 * first\n  }\n  return total\n}\n\npub fn order_by_points(nums: List[Int]) -> List[Int] {\n  let big: Int = 1_000_000_000\n  let offset: Int = 1_000_000\n  var keys: List[Int] = []\n  var i: Int = 0\n  for n in nums {\n    keys = keys.push((signed_digit_sum(n) + offset) * big + i)\n    i = i + 1\n  }\n  var out: List[Int] = []\n  for k in keys.sort() {\n    out = out.push(nums.get_or(k % big, 0))\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_146_specialFilter/klar/0": {
+  "text": "```\nfn is_odd_digit(c: Str) -> Bool {\n  return c == \"1\" or c == \"3\" or c == \"5\" or c == \"7\" or c == \"9\"\n}\n\nfn both_ends_odd(n: Int) -> Bool {\n  let cs = n.abs().to_str().chars()\n  let first = cs.first().unwrap_or(\"0\")\n  let last = cs.last().unwrap_or(\"0\")\n  return is_odd_digit(first) and is_odd_digit(last)\n}\n\n/// >>> assert specialFilter([15, -73, 14, -15]) == 1\npub fn specialFilter(nums: List[Int]) -> Int {\n  return nums.filter(fn(n) => n > 10 and both_ends_odd(n)).len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_147_get_max_triples/klar/0": {
+  "text": "```\nfn choose3(c: Int) -> Int {\n  return c * (c - 1) * (c - 2) / 6\n}\n\npub fn get_max_triples(n: Int) -> Int {\n  var c0 = 0\n  var c1 = 0\n  var c2 = 0\n  for i in range(1, n + 1) {\n    let r = (i * i - i + 1) % 3\n    if r == 0 {\n      c0 = c0 + 1\n    } else if r == 1 {\n      c1 = c1 + 1\n    } else {\n      c2 = c2 + 1\n    }\n  }\n  return choose3(c0) + choose3(c1) + choose3(c2) + c0 * c1 * c2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_149_sorted_list_sum/klar/0": {
+  "text": "```\npub fn sorted_list_sum(lst: List[Str]) -> List[Str] {\n  let even = lst.filter(fn(s: Str) -> Bool { return s.len() % 2 == 0 })\n  return even.sort_by(fn(s: Str) -> Str { return s.len().to_str().pad_left(8, \"0\") + s })\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_14_all_prefixes/klar/0": {
+  "text": "```\n/// >>> assert all_prefixes(\"abc\") == [\"a\", \"ab\", \"abc\"]\npub fn all_prefixes(string: Str) -> List[Str] {\n  let n = string.len()\n  return range(1, n + 1).map(fn(i) => string.slice(0, i))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_150_x_or_y/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\npub fn x_or_y(n: Int, x: Int, y: Int) -> Int {\n  if is_prime(n) {\n    return x\n  }\n  return y\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_152_compare/klar/0": {
+  "text": "```\n/// >>> assert compare([1, 2, 3, 4, 5, 1], [1, 2, 3, 4, 2, -2]) == [0, 0, 0, 0, 3, 3]\npub fn compare(game: List[Int], guess: List[Int]) -> List[Int] {\n  return game.zip(guess).map(fn(p) => (p.first - p.second).abs())\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_153_Strongest_Extension/klar/0": {
+  "text": "```\nfn strength(ext: Str) -> Int {\n  let cap = ext.chars().filter(fn(c) => c != c.lower()).len()\n  let sm = ext.chars().filter(fn(c) => c != c.upper()).len()\n  return cap - sm\n}\n\npub fn Strongest_Extension(class_name: Str, extensions: List[Str]) -> Str {\n  if extensions.is_empty() {\n    return class_name\n  }\n  var best = extensions.first().unwrap_or(\"\")\n  var best_strength = strength(best)\n  for e in extensions {\n    let s = strength(e)\n    if s > best_strength {\n      best = e\n      best_strength = s\n    }\n  }\n  return class_name + \".\" + best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_154_cycpattern_check/klar/0": {
+  "text": "```\npub fn cycpattern_check(a: Str, b: Str) -> Bool {\n  let m = b.len()\n  if m == 0 {\n    return true\n  }\n  for k in range(0, m) {\n    let rot = b.slice(k, m) + b.slice(0, k)\n    if a.contains(rot) {\n      return true\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_155_even_odd_count/klar/0": {
+  "text": "```\npub fn even_odd_count(num: Int) -> Pair[Int, Int] {\n  var m: Int = num.abs()\n  if m == 0 {\n    return Pair { first: 1, second: 0 }\n  }\n  var evens: Int = 0\n  var odds: Int = 0\n  while m > 0 {\n    let d = m % 10\n    if d % 2 == 0 {\n      evens = evens + 1\n    } else {\n      odds = odds + 1\n    }\n    m = m / 10\n  }\n  return Pair { first: evens, second: odds }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_156_int_to_mini_roman/klar/0": {
+  "text": "```\nuse std.numfmt.{to_roman}\n\n/// >>> assert int_to_mini_roman(19) == \"xix\"\npub fn int_to_mini_roman(number: Int) -> Str {\n  return to_roman(number).lower()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_157_right_angle_triangle/klar/0": {
+  "text": "```\npub fn right_angle_triangle(a: Int, b: Int, c: Int) -> Bool {\n  if (a <= 0) or (b <= 0) or (c <= 0) {\n    return false\n  }\n  let s = [a, b, c].sort()\n  let x = s.get_or(0, 0)\n  let y = s.get_or(1, 0)\n  let z = s.get_or(2, 0)\n  return x * x + y * y == z * z\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_158_find_max/klar/0": {
+  "text": "```\npub fn find_max(words: List[Str]) -> Str {\n  var best = \"\"\n  var best_count = -1\n  for w in words {\n    let cnt = w.chars().unique().len()\n    if cnt > best_count or (cnt == best_count and w < best) {\n      best = w\n      best_count = cnt\n    }\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_159_eat/klar/0": {
+  "text": "```\npub fn eat(number: Int, need: Int, remaining: Int) -> List[Int] {\n  if need <= remaining {\n    return [number + need, remaining - need]\n  }\n  return [number + remaining, 0]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_15_string_sequence/klar/0": {
+  "text": "```\npub fn string_sequence(n: Int) -> Str {\n  let nums: List[Str] = range(0, n + 1).map(fn(i) => i.to_str())\n  return nums.join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_160_do_algebra/klar/0": {
+  "text": "```\nuse std.time.{floor_div}\n\n/// Evaluates with the usual precedence: ** first, then * and //, then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var total = 0\n  var sign = 1\n  var cur = operand.get_or(0, 0)\n  var i = 0\n  while i < operator.len() {\n    let op = operator.get_or(i, \"+\")\n    let b = operand.get_or(i + 1, 0)\n    if op == \"**\" {\n      cur = cur.pow(b)\n    } else if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      cur = floor_div(cur, b)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = b\n    }\n    i = i + 1\n  }\n  return total + sign * cur\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_160_do_algebra/klar/1": {
+  "text": "```\n/// Floor division: rounds towards minus infinity.\nfn floor_quot(a: Int, b: Int) -> Int\n  requires b != 0\n{\n  let q = a / b\n  let r = a % b\n  if r != 0 and ((r < 0) != (b < 0)) {\n    return q - 1\n  }\n  return q\n}\n\n/// Evaluates with the usual precedence: ** first, then * and //, then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var total = 0\n  var sign = 1\n  var cur = operand.get_or(0, 0)\n  var i = 0\n  while i < operator.len() {\n    let op = operator.get_or(i, \"+\")\n    let b = operand.get_or(i + 1, 0)\n    if op == \"**\" {\n      cur = cur.pow(b)\n    } else if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      if b == 0 {\n        return 0\n      }\n      cur = floor_quot(cur, b)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = b\n    }\n    i = i + 1\n  }\n  return total + sign * cur\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_160_do_algebra/klar/2": {
+  "text": "```\n/// Floor division: rounds towards minus infinity.\nfn floor_quot(a: Int, b: Int) -> Int\n  requires b != 0\n{\n  let q = a / b\n  let r = a % b\n  if r != 0 and ((r < 0) != (b < 0)) {\n    return q - 1\n  }\n  return q\n}\n\n/// Evaluates with the usual precedence: ** first (right to left), then * and //,\n/// then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  // pass 1: collapse every ** (right to left, so a ** b ** c = a ** (b ** c))\n  var nums = operand\n  var ops = operator\n  var i = ops.len() - 1\n  while i >= 0 {\n    if ops.get_or(i, \"\") == \"**\" {\n      let p = nums.get_or(i, 0).pow(nums.get_or(i + 1, 0))\n      nums = nums.set(i, p).remove_at(i + 1)\n      ops = ops.remove_at(i)\n    }\n    i = i - 1\n  }\n  // pass 2: * and // left to right, + and - as signed terms\n  var total = 0\n  var sign = 1\n  var cur = nums.get_or(0, 0)\n  var j = 0\n  while j < ops.len() {\n    let op = ops.get_or(j, \"+\")\n    let b = nums.get_or(j + 1, 0)\n    if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      if b == 0 {\n        return 0\n      }\n      cur = floor_quot(cur, b)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = b\n    }\n    j = j + 1\n  }\n  return total + sign * cur\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_161_solve/klar/0": {
+  "text": "```\nfn swap_case(c: Str) -> Str {\n  if c != c.lower() {\n    return c.lower()\n  }\n  if c != c.upper() {\n    return c.upper()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => (c != c.lower()) or (c != c.upper()))\n  if has_letter {\n    return s.chars().map(fn(c) => swap_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_161_solve/klar/1": {
+  "text": "```\nfn is_cased(c: Str) -> Bool {\n  return (c != c.lower()) or (c != c.upper())\n}\n\n// A character counts as a letter when it has a case, or when it is a\n// non-ASCII character that is not a symbol, punctuation or emoji.\nfn is_letter(c: Str) -> Bool {\n  if is_cased(c) {\n    return true\n  }\n  let code = c.codes().first().unwrap_or(0)\n  if code < 128 {\n    return false\n  }\n  if (code >= 0x2000) and (code < 0x3100) {\n    return false\n  }\n  if code >= 0x1F000 {\n    return false\n  }\n  return true\n}\n\nfn swap_case(c: Str) -> Str {\n  if c != c.lower() {\n    return c.lower()\n  }\n  if c != c.upper() {\n    return c.upper()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => is_letter(c))\n  if has_letter {\n    return s.chars().map(fn(c) => swap_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_161_solve/klar/2": {
+  "text": "```\nfn is_cased(c: Str) -> Bool {\n  return (c != c.lower()) or (c != c.upper())\n}\n\n// A character counts as a letter when it has a case, or when it is a\n// non-ASCII character that is not a symbol, punctuation or emoji.\nfn is_letter(c: Str) -> Bool {\n  if is_cased(c) {\n    return true\n  }\n  let code = c.codes().first().unwrap_or(0)\n  if code < 128 {\n    return false\n  }\n  if (code >= 8192) and (code < 11264) {\n    return false\n  }\n  if (code >= 12288) and (code < 12352) {\n    return false\n  }\n  if code >= 126976 {\n    return false\n  }\n  return true\n}\n\nfn swap_case(c: Str) -> Str {\n  if c != c.lower() {\n    return c.lower()\n  }\n  if c != c.upper() {\n    return c.upper()\n  }\n  return c\n}\n\npub fn solve(s: Str) -> Str {\n  let has_letter = s.chars().any(fn(c) => is_letter(c))\n  if has_letter {\n    return s.chars().map(fn(c) => swap_case(c)).join(\"\")\n  }\n  return s.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_162_string_to_md5/klar/0": {
+  "text": "```\nconst MD_MASK: Int = 4294967295\n\nfn md_m32(x: Int) -> Int {\n  return x.bit_and(MD_MASK)\n}\n\nfn md_rotl(x: Int, c: Int) -> Int {\n  return md_m32(x.shift_left(c).bit_or(x.shift_right(32 - c)))\n}\n\nfn md_k(i: Int) -> Int {\n  let v = (i + 1).to_float().sin().abs()\n  return (v * 4294967296.0).floor()\n}\n\nfn md_shift(i: Int) -> Int {\n  let r = i / 16\n  let j = i % 4\n  if r == 0 {\n    return [7, 12, 17, 22].get_or(j, 0)\n  }\n  if r == 1 {\n    return [5, 9, 14, 20].get_or(j, 0)\n  }\n  if r == 2 {\n    return [4, 11, 16, 23].get_or(j, 0)\n  }\n  return [6, 10, 15, 21].get_or(j, 0)\n}\n\nfn md_index(i: Int) -> Int {\n  let r = i / 16\n  if r == 0 {\n    return i\n  }\n  if r == 1 {\n    return (5 * i + 1) % 16\n  }\n  if r == 2 {\n    return (3 * i + 5) % 16\n  }\n  return (7 * i) % 16\n}\n\nfn md_f(r: Int, b: Int, c: Int, d: Int) -> Int {\n  if r == 0 {\n    return b.bit_and(c).bit_or(b.bit_xor(MD_MASK).bit_and(d))\n  }\n  if r == 1 {\n    return d.bit_and(b).bit_or(d.bit_xor(MD_MASK).bit_and(c))\n  }\n  if r == 2 {\n    return b.bit_xor(c).bit_xor(d)\n  }\n  return c.bit_xor(b.bit_or(d.bit_xor(MD_MASK)))\n}\n\nfn md_block(h: List[Int], m: List[Int]) -> List[Int] {\n  let h0 = h.get_or(0, 0)\n  let h1 = h.get_or(1, 0)\n  let h2 = h.get_or(2, 0)\n  let h3 = h.get_or(3, 0)\n  var va = h0\n  var vb = h1\n  var vc = h2\n  var vd = h3\n  for i in range(0, 64) {\n    let r = i / 16\n    let f0 = md_f(r, vb, vc, vd)\n    let g = md_index(i)\n    let f = md_m32(f0 + va + md_k(i) + m.get_or(g, 0))\n    va = vd\n    vd = vc\n    vc = vb\n    vb = md_m32(vb + md_rotl(f, md_shift(i)))\n  }\n  return [md_m32(h0 + va), md_m32(h1 + vb), md_m32(h2 + vc), md_m32(h3 + vd)]\n}\n\nfn md_hex(d: Int) -> Str {\n  return \"0123456789abcdef\".slice(d, d + 1)\n}\n\npub fn string_to_md5(text: Str) -> Option[Str] {\n  if text.is_empty() {\n    return None\n  }\n  let raw = text.to_bytes().to_list()\n  let bit_len = raw.len() * 8\n  var msg = raw.push(128)\n  while msg.len() % 64 != 56 {\n    msg = msg.push(0)\n  }\n  for k1 in range(0, 8) {\n    msg = msg.push(bit_len.shift_right(8 * k1).bit_and(255))\n  }\n  var h = [1732584193, 4023233417, 2562383102, 271733878]\n  let blocks = msg.len() / 64\n  for blk in range(0, blocks) {\n    let base = blk * 64\n    var words: List[Int] = []\n    for j in range(0, 16) {\n      let p = base + 4 * j\n      let word = msg.get_or(p, 0).bit_or(msg.get_or(p + 1, 0).shift_left(8)).bit_or(msg.get_or(p + 2, 0).shift_left(16)).bit_or(msg.get_or(p + 3, 0).shift_left(24))\n      words = words.push(word)\n    }\n    h = md_block(h, words)\n  }\n  var out = \"\"\n  for w in h {\n    for k2 in range(0, 4) {\n      let octet = w.shift_right(8 * k2).bit_and(255)\n      out = out + md_hex(octet / 16) + md_hex(octet % 16)\n    }\n  }\n  return Some(out)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_162_string_to_md5/klar/1": {
+  "text": "```\nconst MD_MASK: Int = 4294967295\n\nfn md_m32(x: Int) -> Int {\n  return x.bit_and(MD_MASK)\n}\n\nfn md_rotl(x: Int, c: Int) -> Int {\n  return md_m32(x.shift_left(c).bit_or(x.shift_right(32 - c)))\n}\n\nfn md_k(i: Int) -> Int {\n  let v = (i + 1).to_float().sin().abs()\n  return (v * 4294967296.0).floor()\n}\n\nfn md_shift(i: Int) -> Int {\n  let r = i / 16\n  let j = i % 4\n  if r == 0 {\n    return [7, 12, 17, 22].get_or(j, 0)\n  }\n  if r == 1 {\n    return [5, 9, 14, 20].get_or(j, 0)\n  }\n  if r == 2 {\n    return [4, 11, 16, 23].get_or(j, 0)\n  }\n  return [6, 10, 15, 21].get_or(j, 0)\n}\n\nfn md_index(i: Int) -> Int {\n  let r = i / 16\n  if r == 0 {\n    return i\n  }\n  if r == 1 {\n    return (5 * i + 1) % 16\n  }\n  if r == 2 {\n    return (3 * i + 5) % 16\n  }\n  return (7 * i) % 16\n}\n\nfn md_f(r: Int, b: Int, c: Int, d: Int) -> Int {\n  if r == 0 {\n    return b.bit_and(c).bit_or(b.bit_xor(MD_MASK).bit_and(d))\n  }\n  if r == 1 {\n    return d.bit_and(b).bit_or(d.bit_xor(MD_MASK).bit_and(c))\n  }\n  if r == 2 {\n    return b.bit_xor(c).bit_xor(d)\n  }\n  return c.bit_xor(b.bit_or(d.bit_xor(MD_MASK)))\n}\n\nfn md_block(h: List[Int], m: List[Int]) -> List[Int] {\n  let h0 = h.get_or(0, 0)\n  let h1 = h.get_or(1, 0)\n  let h2 = h.get_or(2, 0)\n  let h3 = h.get_or(3, 0)\n  var va = h0\n  var vb = h1\n  var vc = h2\n  var vd = h3\n  for i in range(0, 64) {\n    let r = i / 16\n    let f0 = md_f(r: r, b: vb, c: vc, d: vd)\n    let g = md_index(i)\n    let f = md_m32(f0 + va + md_k(i) + m.get_or(g, 0))\n    va = vd\n    vd = vc\n    vc = vb\n    vb = md_m32(vb + md_rotl(f, md_shift(i)))\n  }\n  return [md_m32(h0 + va), md_m32(h1 + vb), md_m32(h2 + vc), md_m32(h3 + vd)]\n}\n\nfn md_hex(d: Int) -> Str {\n  return \"0123456789abcdef\".slice(d, d + 1)\n}\n\npub fn string_to_md5(text: Str) -> Option[Str] {\n  if text.is_empty() {\n    return None\n  }\n  let raw = text.to_bytes().to_list()\n  let bit_len = raw.len() * 8\n  var msg = raw.push(128)\n  while msg.len() % 64 != 56 {\n    msg = msg.push(0)\n  }\n  for k1 in range(0, 8) {\n    msg = msg.push(bit_len.shift_right(8 * k1).bit_and(255))\n  }\n  var h = [1732584193, 4023233417, 2562383102, 271733878]\n  let blocks = msg.len() / 64\n  for blk in range(0, blocks) {\n    let base = blk * 64\n    var words: List[Int] = []\n    for j in range(0, 16) {\n      let p = base + 4 * j\n      let word = msg.get_or(p, 0).bit_or(msg.get_or(p + 1, 0).shift_left(8)).bit_or(msg.get_or(p + 2, 0).shift_left(16)).bit_or(msg.get_or(p + 3, 0).shift_left(24))\n      words = words.push(word)\n    }\n    h = md_block(h, words)\n  }\n  var out = \"\"\n  for w in h {\n    for k2 in range(0, 4) {\n      let octet = w.shift_right(8 * k2).bit_and(255)\n      out = out + md_hex(octet / 16) + md_hex(octet % 16)\n    }\n  }\n  return Some(out)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_163_generate_integers/klar/0": {
+  "text": "```\npub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  var out: List[Int] = []\n  for d in range(lo, hi + 1) {\n    if d > 0 and d < 10 and d % 2 == 0 {\n      out = out.push(d)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_163_generate_integers/klar/1": {
+  "text": "```\npub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b)\n  let hi = a.max(b)\n  var out: List[Int] = []\n  for d in [2, 4, 6, 8] {\n    if d >= lo and d <= hi {\n      out = out.push(d)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_16_count_distinct_characters/klar/0": {
+  "text": "```\npub fn count_distinct_characters(string: Str) -> Int {\n  return string.lower().chars().unique().len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_17_parse_music/klar/0": {
+  "text": "```\npub fn parse_music(music_string: Str) -> List[Int] {\n  var out: List[Int] = []\n  for tok in music_string.split(\" \") {\n    if tok == \"o\" {\n      out = out.push(4)\n    } else if tok == \"o|\" {\n      out = out.push(2)\n    } else if tok == \".|\" {\n      out = out.push(1)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_18_how_many_times/klar/0": {
+  "text": "```\n/// >>> assert how_many_times(\"aaaa\", \"aa\") == 3\npub fn how_many_times(string: Str, substring: Str) -> Int {\n  let n = string.len()\n  let m = substring.len()\n  if m == 0 or m > n {\n    return 0\n  }\n  return range(0, n - m + 1).count(fn(i) => string.slice(i, i + m) == substring)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_19_sort_numbers/klar/0": {
+  "text": "```\nuse std.text.{words}\n\nfn digit_value(w: Str) -> Int {\n  return match w {\n    \"zero\" => 0,\n    \"one\" => 1,\n    \"two\" => 2,\n    \"three\" => 3,\n    \"four\" => 4,\n    \"five\" => 5,\n    \"six\" => 6,\n    \"seven\" => 7,\n    \"eight\" => 8,\n    \"nine\" => 9,\n    _ => 0,\n  }\n}\n\npub fn sort_numbers(numbers: Str) -> Str {\n  let sorted = words(numbers).sort_by(fn(w) => digit_value(w))\n  return sorted.join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_1_separate_paren_groups/klar/0": {
+  "text": "```\npub fn separate_paren_groups(paren_string: Str) -> List[Str] {\n  var groups: List[Str] = []\n  var current: Str = \"\"\n  var depth: Int = 0\n  for c in paren_string.chars() {\n    if c != \" \" {\n      current = current + c\n      if c == \"(\" {\n        depth = depth + 1\n      } else {\n        depth = depth - 1\n      }\n      if depth == 0 {\n        groups = groups.push(current)\n        current = \"\"\n      }\n    }\n  }\n  return groups\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_20_find_closest_elements/klar/0": {
+  "text": "```\npub fn find_closest_elements(numbers: List[Float]) -> Pair[Float, Float] {\n  let n = numbers.len()\n  var best_lo = numbers.get_or(0, 0.0)\n  var best_hi = numbers.get_or(1, 0.0)\n  if best_lo > best_hi {\n    let t = best_lo\n    best_lo = best_hi\n    best_hi = t\n  }\n  var best_d = (best_hi - best_lo).abs()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      let a = numbers.get_or(i, 0.0)\n      let b = numbers.get_or(j, 0.0)\n      let d = (a - b).abs()\n      if d < best_d {\n        best_d = d\n        if a <= b {\n          best_lo = a\n          best_hi = b\n        } else {\n          best_lo = b\n          best_hi = a\n        }\n      }\n    }\n  }\n  return Pair { first: best_lo, second: best_hi }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_21_rescale_to_unit/klar/0": {
+  "text": "```\npub fn rescale_to_unit(numbers: List[Float]) -> List[Float] {\n  let lo = match numbers.min() {\n    Some(v) => v,\n    None => { return [] },\n  }\n  let hi = match numbers.max() {\n    Some(v) => v,\n    None => { return [] },\n  }\n  let span = hi - lo\n  var out: List[Float] = []\n  for x in numbers {\n    out = out.push((x - lo) / span)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_23_strlen/klar/0": {
+  "text": "```\n/// >>> assert strlen(\"abc\") == 3\npub fn strlen(string: Str) -> Int {\n  return string.len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_24_largest_divisor/klar/0": {
+  "text": "```\npub fn largest_divisor(n: Int) -> Int {\n  var d = n - 1\n  while d > 0 {\n    if d != 0 {\n      if n % d == 0 {\n        return d\n      }\n    }\n    d = d - 1\n  }\n  return 1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_24_largest_divisor/klar/1": {
+  "text": "```\npub fn largest_divisor(n: Int) -> Int {\n  var i = 2\n  while i * i <= n {\n    if i != 0 {\n      if n % i == 0 {\n        return n / i\n      }\n    }\n    i = i + 1\n  }\n  return 1\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_25_factorize/klar/0": {
+  "text": "```\npub fn factorize(n: Int) -> List[Int] {\n  if n < 2 {\n    return []\n  }\n  var m = n\n  var d = 2\n  var out: List[Int] = []\n  while d * d <= m {\n    if d == 0 {\n      return out\n    }\n    if m % d == 0 {\n      out = out.push(d)\n      m = m / d\n    } else {\n      d = d + 1\n    }\n  }\n  if m > 1 {\n    out = out.push(m)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_26_remove_duplicates/klar/0": {
+  "text": "```\nuse std.list.{frequencies}\n\npub fn remove_duplicates(numbers: List[Int]) -> List[Int] {\n  let counts = frequencies(numbers)\n  var out: List[Int] = []\n  for n in numbers {\n    if counts.get(n).unwrap_or(0) == 1 {\n      out = out.push(n)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_27_flip_case/klar/0": {
+  "text": "```\nfn flip_char(c: Str) -> Str {\n  let up = c.upper()\n  if c == up {\n    return c.lower()\n  }\n  return up\n}\n\n/// >>> assert flip_case(\"Hello\") == \"hELLO\"\npub fn flip_case(string: Str) -> Str {\n  return string.chars().map(fn(c) => flip_char(c)).join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_28_concatenate/klar/0": {
+  "text": "```\npub fn concatenate(strings: List[Str]) -> Str {\n  return strings.join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_29_filter_by_prefix/klar/0": {
+  "text": "```\npub fn filter_by_prefix(strings: List[Str], prefix: Str) -> List[Str] {\n  return strings.filter(fn(s: Str) -> Bool { return s.starts_with(prefix) })\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_2_truncate_number/klar/0": {
+  "text": "```\n/// Return the decimal part of the number.\n/// >>> assert truncate_number(3.5) == 0.5\npub fn truncate_number(number: Float) -> Float {\n  return number - number.floor().to_float()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_30_get_positive/klar/0": {
+  "text": "```\npub fn get_positive(l: List[Int]) -> List[Int] {\n  return l.filter(fn(x) => x > 0)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_31_is_prime/klar/0": {
+  "text": "```\n/// >>> assert is_prime(101)\n/// >>> assert not is_prime(1)\npub fn is_prime(n: Int) -> Bool {\n  if n < 2 {\n    return false\n  }\n  var d = 2\n  while d * d <= n {\n    if n % d == 0 {\n      return false\n    }\n    d = d + 1\n  }\n  return true\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_33_sort_third/klar/0": {
+  "text": "```\npub fn sort_third(l: List[Int]) -> List[Int] {\n  let thirds = l.enumerate().filter(fn(p) => p.index % 3 == 0).map(fn(p) => p.value).sort()\n  var out: List[Int] = []\n  var k = 0\n  for i in range(0, l.len()) {\n    if i % 3 == 0 {\n      out = out.push(thirds.get_or(k, 0))\n      k = k + 1\n    } else {\n      out = out.push(l.get_or(i, 0))\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_34_unique/klar/0": {
+  "text": "```\npub fn unique(l: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  for x in l.sort() {\n    let fresh = match out.last() {\n      Some(v) => v != x,\n      None => true,\n    }\n    if fresh {\n      out = out.push(x)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_35_max_element/klar/0": {
+  "text": "```\npub fn max_element(l: List[Int]) -> Int {\n  return match l.max() {\n    Some(v) => v,\n    None => fail(\"max_element of an empty list\"),\n  }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_36_fizz_buzz/klar/0": {
+  "text": "```\n/// >>> assert fizz_buzz(78) == 2\npub fn fizz_buzz(n: Int) -> Int {\n  return range(0, n)\n    .filter(fn(i) => i % 11 == 0 or i % 13 == 0)\n    .map(fn(i) => i.to_str().count(\"7\"))\n    .sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_37_sort_even/klar/0": {
+  "text": "```\npub fn sort_even(l: List[Int]) -> List[Int] {\n  let evens = l.enumerate().filter(fn(p) => p.index % 2 == 0).map(fn(p) => p.value).sort()\n  var out: List[Int] = []\n  var k = 0\n  for i in range(0, l.len()) {\n    if i % 2 == 0 {\n      out = out.push(evens.get_or(k, 0))\n      k = k + 1\n    } else {\n      out = out.push(l.get_or(i, 0))\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_39_prime_fib/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\npub fn prime_fib(n: Int) -> Int {\n  var a = 0\n  var b = 1\n  var found = 0\n  var last = 0\n  while found < n {\n    if is_prime(a) {\n      found = found + 1\n      last = a\n    }\n    let next = a + b\n    a = b\n    b = next\n  }\n  return last\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_3_below_zero/klar/0": {
+  "text": "```\npub fn below_zero(operations: List[Int]) -> Bool {\n  var balance = 0\n  for op in operations {\n    balance = balance + op\n    if balance < 0 {\n      return true\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_40_triples_sum_to_zero/klar/0": {
+  "text": "```\npub fn triples_sum_to_zero(l: List[Int]) -> Bool {\n  let n = l.len()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      for k in range(j + 1, n) {\n        if l.get_or(i, 0) + l.get_or(j, 0) + l.get_or(k, 0) == 0 {\n          return true\n        }\n      }\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_41_car_race_collision/klar/0": {
+  "text": "```\n/// Every left-moving car meets every right-moving car exactly once.\n/// >>> assert car_race_collision(2) == 4\npub fn car_race_collision(n: Int) -> Int {\n  return n * n\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_42_incr_list/klar/0": {
+  "text": "```\npub fn incr_list(l: List[Int]) -> List[Int] {\n  return l.map(fn(x) => x + 1)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_43_pairs_sum_to_zero/klar/0": {
+  "text": "```\npub fn pairs_sum_to_zero(l: List[Int]) -> Bool {\n  let n = l.len()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      if l.get_or(i, 0) + l.get_or(j, 0) == 0 {\n        return true\n      }\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_44_change_base/klar/0": {
+  "text": "```\npub fn change_base(x: Int, base: Int) -> Str {\n  if base == 0 {\n    return \"\"\n  }\n  if base <= 1 {\n    return \"\"\n  }\n  if x == 0 {\n    return \"0\"\n  }\n  var n: Int = x\n  var digits: Str = \"\"\n  while n > 0 {\n    let d = n % base\n    digits = d.to_str() + digits\n    n = n / base\n  }\n  return digits\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_45_triangle_area/klar/0": {
+  "text": "```\n/// >>> assert triangle_area(5, 3) == 7.5\npub fn triangle_area(a: Int, h: Int) -> Float {\n  return a.to_float() * h.to_float() / 2.0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_46_fib4/klar/0": {
+  "text": "```\npub fn fib4(n: Int) -> Int {\n  if n <= 1 {\n    return 0\n  }\n  if n == 2 {\n    return 2\n  }\n  if n == 3 {\n    return 0\n  }\n  var a = 0\n  var b = 0\n  var c = 2\n  var d = 0\n  var i = 4\n  while i <= n {\n    let nxt = a + b + c + d\n    a = b\n    b = c\n    c = d\n    d = nxt\n    i = i + 1\n  }\n  return d\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_47_median/klar/0": {
+  "text": "```\npub fn median(l: List[Int]) -> Float {\n  if l.is_empty() {\n    return 0.0\n  }\n  let s = l.sort()\n  let n = s.len()\n  let mid = n / 2\n  if n % 2 == 1 {\n    return s.get_or(mid, 0).to_float()\n  }\n  let lo = s.get_or(mid - 1, 0)\n  let hi = s.get_or(mid, 0)\n  return (lo + hi).to_float() / 2.0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_48_is_palindrome/klar/0": {
+  "text": "```\npub fn is_palindrome(text: Str) -> Bool {\n  return text.reverse() == text\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_49_modp/klar/0": {
+  "text": "```\n/// Return 2^n modulo p.\n/// >>> assert modp(3, 5) == 3\npub fn modp(n: Int, p: Int) -> Int\n  requires p != 0\n{\n  let base = 2\n  return base.pow(n) % p\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_4_mean_absolute_deviation/klar/0": {
+  "text": "```\npub fn mean_absolute_deviation(numbers: List[Float]) -> Float {\n  if numbers.is_empty() {\n    return 0.0\n  }\n  let n = numbers.len().to_float()\n  let m = numbers.sum_float() / n\n  let devs = numbers.map(fn(x: Float) -> Float { return (x - m).abs() })\n  return devs.sum_float() / n\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_51_remove_vowels/klar/0": {
+  "text": "```\npub fn remove_vowels(text: Str) -> Str {\n  let vowels = [\"a\", \"e\", \"i\", \"o\", \"u\"]\n  return text.chars().filter(fn(c) => not vowels.contains(c.lower())).join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_52_below_threshold/klar/0": {
+  "text": "```\npub fn below_threshold(l: List[Int], t: Int) -> Bool {\n  return l.all(fn(x: Int) -> Bool { return x < t })\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_53_add/klar/0": {
+  "text": "```\npub fn add(x: Int, y: Int) -> Int {\n  return x + y\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_54_same_chars/klar/0": {
+  "text": "```\n/// >>> assert same_chars(\"abcd\", \"dddddddabc\")\n/// >>> assert not same_chars(\"eabcd\", \"dddddddabc\")\npub fn same_chars(s0: Str, s1: Str) -> Bool {\n  let a = s0.chars().unique().sort()\n  let b = s1.chars().unique().sort()\n  return a == b\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_55_fib/klar/0": {
+  "text": "```\npub fn fib(n: Int) -> Int {\n  if n <= 0 {\n    return 0\n  }\n  var a = 0\n  var b = 1\n  var i = 1\n  while i < n {\n    let nxt = a + b\n    a = b\n    b = nxt\n    i = i + 1\n  }\n  return b\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_56_correct_bracketing/klar/0": {
+  "text": "```\npub fn correct_bracketing(brackets: Str) -> Bool {\n  var depth = 0\n  for c in brackets.chars() {\n    if c == \"<\" {\n      depth = depth + 1\n    } else {\n      depth = depth - 1\n    }\n    if depth < 0 {\n      return false\n    }\n  }\n  return depth == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_57_monotonic/klar/0": {
+  "text": "```\npub fn monotonic(l: List[Int]) -> Bool {\n  var inc = true\n  var dec = true\n  let n = l.len()\n  for i in range(0, n - 1) {\n    let a = l.get_or(i, 0)\n    let b = l.get_or(i + 1, 0)\n    if a > b {\n      inc = false\n    }\n    if a < b {\n      dec = false\n    }\n  }\n  return inc or dec\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_58_common/klar/0": {
+  "text": "```\n/// >>> assert common([5, 3, 2, 8], [3, 2]) == [2, 3]\npub fn common(l1: List[Int], l2: List[Int]) -> List[Int] {\n  return l1.filter(fn(x) => l2.contains(x)).unique().sort()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_59_largest_prime_factor/klar/0": {
+  "text": "```\npub fn largest_prime_factor(n: Int) -> Int {\n  var m = n\n  var p = 2\n  var best = 1\n  while p * p <= m {\n    if p != 0 {\n      if m % p == 0 {\n        m = m / p\n        best = p\n      } else {\n        p = p + 1\n      }\n    } else {\n      p = p + 1\n    }\n  }\n  if m > 1 {\n    best = m\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_5_intersperse/klar/0": {
+  "text": "```\npub fn intersperse(numbers: List[Int], delimeter: Int) -> List[Int] {\n  var out: List[Int] = []\n  var first = true\n  for n in numbers {\n    if first {\n      first = false\n    } else {\n      out = out.push(delimeter)\n    }\n    out = out.push(n)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_60_sum_to_n/klar/0": {
+  "text": "```\npub fn sum_to_n(n: Int) -> Int {\n  if n <= 0 {\n    return 0\n  }\n  return n * (n + 1) / 2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_61_correct_bracketing/klar/0": {
+  "text": "```\npub fn correct_bracketing(brackets: Str) -> Bool {\n  var depth: Int = 0\n  for c in brackets.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n    } else if c == \")\" {\n      depth = depth - 1\n      if depth < 0 {\n        return false\n      }\n    }\n  }\n  return depth == 0\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_62_derivative/klar/0": {
+  "text": "```\n/// >>> assert derivative([1, 2, 3]) == [2, 6]\npub fn derivative(xs: List[Int]) -> List[Int] {\n  return xs.drop(1).enumerate().map(fn(p) => p.value * (p.index + 1))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_63_fibfib/klar/0": {
+  "text": "```\npub fn fibfib(n: Int) -> Int {\n  if n <= 0 {\n    return 0\n  }\n  if n == 1 {\n    return 0\n  }\n  if n == 2 {\n    return 1\n  }\n  var a = 0\n  var b = 0\n  var c = 1\n  var i = 3\n  while i <= n {\n    let nxt = a + b + c\n    a = b\n    b = c\n    c = nxt\n    i = i + 1\n  }\n  return c\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_64_vowels_count/klar/0": {
+  "text": "```\npub fn vowels_count(s: Str) -> Int {\n  let cs = s.lower().chars()\n  let n = cs.len()\n  var count = 0\n  for i in range(0, n) {\n    let c = cs.get_or(i, \"\")\n    if c == \"a\" or c == \"e\" or c == \"i\" or c == \"o\" or c == \"u\" {\n      count = count + 1\n    } else if c == \"y\" and i == n - 1 {\n      count = count + 1\n    }\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_65_circular_shift/klar/0": {
+  "text": "```\npub fn circular_shift(x: Int, shift: Int) -> Str {\n  let s = x.to_str()\n  let d = s.len()\n  if shift > d {\n    return s.reverse()\n  }\n  let cut = d - shift\n  return s.slice(cut, d) + s.slice(0, cut)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_66_digitSum/klar/0": {
+  "text": "```\nfn is_upper(c: Str) -> Bool {\n  return c == c.upper() and c != c.lower()\n}\n\n/// >>> assert digitSum(\"abAB\") == 131\npub fn digitSum(s: Str) -> Int {\n  return s.chars().filter(fn(c) => is_upper(c)).map(fn(c) => c.codes().sum()).sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_67_fruit_distribution/klar/0": {
+  "text": "```\nuse std.text.{words}\n\npub fn fruit_distribution(s: Str, n: Int) -> Int {\n  let counts = words(s).map(fn(w) => w.to_int()).filter(fn(o) => o.is_some()).map(fn(o) => o.unwrap_or(0))\n  return n - counts.sum()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_68_pluck/klar/0": {
+  "text": "```\npub fn pluck(arr: List[Int]) -> List[Int] {\n  var best_val = -1\n  var best_idx = -1\n  let n = arr.len()\n  for i in range(0, n) {\n    let v = arr.get_or(i, 0)\n    if v % 2 == 0 {\n      if best_idx == -1 or v < best_val {\n        best_val = v\n        best_idx = i\n      }\n    }\n  }\n  if best_idx == -1 {\n    return []\n  }\n  return [best_val, best_idx]\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_69_search/klar/0": {
+  "text": "```\nuse std.list.{frequencies}\n\npub fn search(lst: List[Int]) -> Int {\n  let counts = frequencies(lst)\n  var best: Int = -1\n  for n in lst {\n    if n > 0 and counts.get(n).unwrap_or(0) >= n and n > best {\n      best = n\n    }\n  }\n  return best\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_6_parse_nested_parens/klar/0": {
+  "text": "```\nfn group_depth(group: Str) -> Int {\n  var depth = 0\n  var best = 0\n  for c in group.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n      if depth > best {\n        best = depth\n      }\n    }\n    if c == \")\" {\n      depth = depth - 1\n    }\n  }\n  return best\n}\n\n/// >>> assert parse_nested_parens(\"(()()) ((())) () ((())()())\") == [2, 3, 1, 3]\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  let groups = paren_string.split(\" \").filter(fn(g) => not g.is_empty())\n  return groups.map(fn(g) => group_depth(g))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_70_strange_sort_list/klar/0": {
+  "text": "```\n/// >>> assert strange_sort_list([1, 2, 3, 4]) == [1, 4, 2, 3]\npub fn strange_sort_list(lst: List[Int]) -> List[Int] {\n  let s = lst.sort()\n  var lo = 0\n  var hi = s.len() - 1\n  var take_min = true\n  var out: List[Int] = []\n  while lo <= hi {\n    if take_min {\n      out = out.push(s.get_or(lo, 0))\n      lo = lo + 1\n    } else {\n      out = out.push(s.get_or(hi, 0))\n      hi = hi - 1\n    }\n    take_min = not take_min\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_71_triangle_area/klar/0": {
+  "text": "```\npub fn triangle_area(a: Int, b: Int, c: Int) -> Float {\n  if a <= 0 or b <= 0 or c <= 0 {\n    return -1.0\n  }\n  if a + b <= c or a + c <= b or b + c <= a {\n    return -1.0\n  }\n  let x = a.to_float()\n  let y = b.to_float()\n  let z = c.to_float()\n  let s = (x + y + z) / 2.0\n  let area = (s * (s - x) * (s - y) * (s - z)).sqrt()\n  return area.round_to(2)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_72_will_it_fly/klar/0": {
+  "text": "```\npub fn will_it_fly(q: List[Int], w: Int) -> Bool {\n  let n = q.len()\n  var balanced = true\n  for i in range(0, n) {\n    if q.get_or(i, 0) != q.get_or(n - 1 - i, 0) {\n      balanced = false\n    }\n  }\n  return balanced and q.sum() <= w\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_73_smallest_change/klar/0": {
+  "text": "```\npub fn smallest_change(arr: List[Int]) -> Int {\n  let n = arr.len()\n  var count: Int = 0\n  for i in range(0, n / 2) {\n    if arr.get_or(i, 0) != arr.get_or(n - 1 - i, 0) {\n      count = count + 1\n    }\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_74_total_match/klar/0": {
+  "text": "```\nfn total_chars(xs: List[Str]) -> Int {\n  return xs.map(fn(s) => s.len()).sum()\n}\n\n/// >>> assert total_match([\"hi\", \"admin\"], [\"hi\", \"hi\"]) == [\"hi\", \"hi\"]\npub fn total_match(lst1: List[Str], lst2: List[Str]) -> List[Str] {\n  if total_chars(lst1) <= total_chars(lst2) {\n    return lst1\n  }\n  return lst2\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_75_is_multiply_prime/klar/0": {
+  "text": "```\npub fn is_multiply_prime(a: Int) -> Bool {\n  var m = a\n  var p = 2\n  var count = 0\n  while p * p <= m {\n    if p != 0 {\n      if m % p == 0 {\n        m = m / p\n        count = count + 1\n      } else {\n        p = p + 1\n      }\n    } else {\n      p = p + 1\n    }\n  }\n  if m > 1 {\n    count = count + 1\n  }\n  return count == 3\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_76_is_simple_power/klar/0": {
+  "text": "```\npub fn is_simple_power(x: Int, n: Int) -> Bool {\n  if x == 1 {\n    return true\n  }\n  if n <= 1 or x <= 0 {\n    return false\n  }\n  var p = 1\n  while p < x {\n    p = p * n\n  }\n  return p == x\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_77_iscube/klar/0": {
+  "text": "```\npub fn iscube(a: Int) -> Bool {\n  let m = a.abs()\n  let r = m.to_float().pow(0.3333333333333333).round()\n  for c in range(r - 1, r + 2) {\n    if c >= 0 and c.pow(3) == m {\n      return true\n    }\n  }\n  return false\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_78_hex_key/klar/0": {
+  "text": "```\n/// >>> assert hex_key(\"AB\") == 1\npub fn hex_key(num: Str) -> Int {\n  return num.chars().count(fn(c) => c == \"2\" or c == \"3\" or c == \"5\" or c == \"7\" or c == \"B\" or c == \"D\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_79_decimal_to_binary/klar/0": {
+  "text": "```\npub fn decimal_to_binary(decimal: Int) -> Str {\n  if decimal == 0 {\n    return \"db0db\"\n  }\n  var n = decimal\n  var digits = \"\"\n  while n > 0 {\n    digits = (n % 2).to_str() + digits\n    n = n / 2\n  }\n  return \"db\" + digits + \"db\"\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_7_filter_by_substring/klar/0": {
+  "text": "```\npub fn filter_by_substring(strings: List[Str], substring: Str) -> List[Str] {\n  return strings.filter(fn(s) => s.contains(substring))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_80_is_happy/klar/0": {
+  "text": "```\npub fn is_happy(s: Str) -> Bool {\n  let cs = s.chars()\n  let n = cs.len()\n  if n < 3 {\n    return false\n  }\n  for i in range(0, n - 2) {\n    let a = cs.get_or(i, \"\")\n    let b = cs.get_or(i + 1, \"\")\n    let c = cs.get_or(i + 2, \"\")\n    if a == b or b == c or a == c {\n      return false\n    }\n  }\n  return true\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_81_numerical_letter_grade/klar/0": {
+  "text": "```\nfn letter_for(g: Float) -> Str {\n  if g == 4.0 {\n    return \"A+\"\n  } else if g > 3.7 {\n    return \"A\"\n  } else if g > 3.3 {\n    return \"A-\"\n  } else if g > 3.0 {\n    return \"B+\"\n  } else if g > 2.7 {\n    return \"B\"\n  } else if g > 2.3 {\n    return \"B-\"\n  } else if g > 2.0 {\n    return \"C+\"\n  } else if g > 1.7 {\n    return \"C\"\n  } else if g > 1.3 {\n    return \"C-\"\n  } else if g > 1.0 {\n    return \"D+\"\n  } else if g > 0.7 {\n    return \"D\"\n  } else if g > 0.0 {\n    return \"D-\"\n  }\n  return \"E\"\n}\n\npub fn numerical_letter_grade(grades: List[Float]) -> List[Str] {\n  return grades.map(fn(g) => letter_for(g))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_82_prime_length/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\n/// >>> assert prime_length(\"Hello\")\n/// >>> assert not prime_length(\"orange\")\npub fn prime_length(string: Str) -> Bool {\n  return is_prime(string.len())\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_83_starts_one_ends/klar/0": {
+  "text": "```\npub fn starts_one_ends(n: Int) -> Int {\n  if n <= 0 {\n    return 0\n  }\n  if n == 1 {\n    return 1\n  }\n  let ten = 10\n  return 18 * ten.pow(n - 2)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_84_solve/klar/0": {
+  "text": "```\npub fn solve(N: Int) -> Str {\n  var m = N\n  var total = 0\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  if total == 0 {\n    return \"0\"\n  }\n  var out = \"\"\n  var t = total\n  while t > 0 {\n    out = (t % 2).to_str() + out\n    t = t / 2\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_85_add/klar/0": {
+  "text": "```\npub fn add(lst: List[Int]) -> Int {\n  var total: Int = 0\n  for i in range(0, lst.len()) {\n    let x = lst.get_or(i, 0)\n    if i % 2 == 1 and x % 2 == 0 {\n      total = total + x\n    }\n  }\n  return total\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_86_anti_shuffle/klar/0": {
+  "text": "```\nfn sort_word(word: Str) -> Str {\n  return word.chars().sort().join(\"\")\n}\n\n/// >>> assert anti_shuffle(\"hello\") == \"ehllo\"\npub fn anti_shuffle(s: Str) -> Str {\n  return s.split(\" \").map(fn(w) => sort_word(w)).join(\" \")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_87_get_row/klar/0": {
+  "text": "```\npub fn get_row(lst: List[List[Int]], x: Int) -> List[Pair[Int, Int]] {\n  return lst.enumerate().flat_map(fn(r) => r.value.enumerate().filter(fn(c) => c.value == x).map(fn(c) => Pair { first: r.index, second: c.index }).reverse())\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_88_sort_array/klar/0": {
+  "text": "```\npub fn sort_array(array: List[Int]) -> List[Int] {\n  if array.is_empty() {\n    return []\n  }\n  let n = array.len()\n  let total = array.get_or(0, 0) + array.get_or(n - 1, 0)\n  let sorted = array.sort()\n  if total % 2 == 1 {\n    return sorted\n  }\n  return sorted.reverse()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_89_encrypt/klar/0": {
+  "text": "```\nfn shift_code(c: Int) -> Int {\n  if c >= 97 and c <= 122 {\n    return (c - 97 + 4) % 26 + 97\n  }\n  return c\n}\n\npub fn encrypt(s: Str) -> Str {\n  return s.codes().map(fn(c) => shift_code(c).to_char().unwrap_or(\"\")).join(\"\")\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_8_sum_product/klar/0": {
+  "text": "```\npub fn sum_product(numbers: List[Int]) -> Pair[Int, Int] {\n  let total = numbers.sum()\n  let prod = numbers.fold(1, fn(acc: Int, x: Int) -> Int { return acc * x })\n  return Pair { first: total, second: prod }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_90_next_smallest/klar/0": {
+  "text": "```\n/// >>> assert next_smallest([1, 1]) == None\npub fn next_smallest(lst: List[Int]) -> Option[Int] {\n  return lst.unique().sort().get(1)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_91_is_bored/klar/0": {
+  "text": "```\nuse std.text.{words}\n\npub fn is_bored(s: Str) -> Int {\n  let parts = s.replace(\"?\", \".\").replace(\"!\", \".\").split(\".\")\n  return parts.filter(fn(p) => words(p).first().unwrap_or(\"\") == \"I\").len()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_93_encode/klar/0": {
+  "text": "```\npub fn encode(message: Str) -> Str {\n  var out = \"\"\n  for c in message.chars() {\n    let lo = c.lower()\n    var base = c\n    if lo == \"a\" or lo == \"e\" or lo == \"i\" or lo == \"o\" or lo == \"u\" {\n      var m = \"c\"\n      if lo == \"e\" {\n        m = \"g\"\n      }\n      if lo == \"i\" {\n        m = \"k\"\n      }\n      if lo == \"o\" {\n        m = \"q\"\n      }\n      if lo == \"u\" {\n        m = \"w\"\n      }\n      if c != lo {\n        m = m.upper()\n      }\n      base = m\n    }\n    if base == base.upper() {\n      out = out + base.lower()\n    } else {\n      out = out + base.upper()\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_94_skjkasdkd/klar/0": {
+  "text": "```\nuse std.math.{is_prime}\n\npub fn skjkasdkd(lst: List[Int]) -> Int {\n  var best: Int = -1\n  for n in lst {\n    if n > best and is_prime(n) {\n      best = n\n    }\n  }\n  var total: Int = 0\n  var m: Int = best\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  return total\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_95_check_dict_case/klar/0": {
+  "text": "```\nfn is_lower_key(k: Str) -> Bool {\n  return k == k.lower() and k != k.upper()\n}\n\nfn is_upper_key(k: Str) -> Bool {\n  return k == k.upper() and k != k.lower()\n}\n\n/// >>> assert not check_dict_case(Map {})\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let keys = dict.keys()\n  if keys.is_empty() {\n    return false\n  }\n  return keys.all(fn(k) => is_lower_key(k)) or keys.all(fn(k) => is_upper_key(k))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_96_count_up_to/klar/0": {
+  "text": "```\nuse std.math.{primes_below}\n\npub fn count_up_to(n: Int) -> List[Int] {\n  return primes_below(n)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_97_multiply/klar/0": {
+  "text": "```\npub fn multiply(a: Int, b: Int) -> Int {\n  let da = a.abs() % 10\n  let db = b.abs() % 10\n  return da * db\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_98_count_upper/klar/0": {
+  "text": "```\npub fn count_upper(s: Str) -> Int {\n  var count: Int = 0\n  var i: Int = 0\n  for c in s.chars() {\n    if i % 2 == 0 and (c == \"A\" or c == \"E\" or c == \"I\" or c == \"O\" or c == \"U\") {\n      count = count + 1\n    }\n    i = i + 1\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_99_closest_integer/klar/0": {
+  "text": "```\n/// >>> assert closest_integer(\"15.3\") == 15\n/// >>> assert closest_integer(\"-14.5\") == -15\npub fn closest_integer(value: Str) -> Int {\n  let x = value.to_float().unwrap_or(0.0)\n  let fl = x.floor()\n  let diff = x - fl.to_float()\n  if diff > 0.5 {\n    return fl + 1\n  }\n  if diff < 0.5 {\n    return fl\n  }\n  if x > 0.0 {\n    return fl + 1\n  }\n  return fl\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_9_rolling_max/klar/0": {
+  "text": "```\npub fn rolling_max(numbers: List[Int]) -> List[Int] {\n  var out: List[Int] = []\n  var best: Option[Int] = None\n  for n in numbers {\n    match best {\n      None => { best = Some(n) },\n      Some(b) => { best = Some(b.max(n)) },\n    }\n    match best {\n      Some(v) => { out = out.push(v) },\n      None => { },\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_0_has_close_elements/python/0": {
+  "text": "```\ndef has_close_elements(numbers: list[float], threshold: float) -> bool:\n    s = sorted(numbers)\n    for i in range(1, len(s)):\n        if s[i] - s[i - 1] < threshold:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_100_make_a_pile/python/0": {
+  "text": "```\ndef make_a_pile(n: int) -> list[int]:\n    return [n + 2 * i for i in range(n)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_101_words_string/python/0": {
+  "text": "```\nimport re\n\n\ndef words_string(s: str) -> list[str]:\n    return [w for w in re.split(r\"[,\\s]+\", s) if w]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_102_choose_num/python/0": {
+  "text": "```\ndef choose_num(x: int, y: int) -> int:\n    if x > y:\n        return -1\n    if y % 2 == 0:\n        return y\n    if y - 1 >= x:\n        return y - 1\n    return -1\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_104_unique_digits/python/0": {
+  "text": "```\ndef unique_digits(x: list[int]) -> list[int]:\n    return sorted(n for n in x if all(int(d) % 2 == 1 for d in str(abs(n))))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_105_by_length/python/0": {
+  "text": "```\ndef by_length(arr: list[int]) -> list[str]:\n    names = [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", \"Six\", \"Seven\", \"Eight\", \"Nine\"]\n    digits = sorted((x for x in arr if 1 <= x <= 9), reverse=True)\n    return [names[x - 1] for x in digits]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_106_f/python/0": {
+  "text": "```\ndef f(n: int) -> list[int]:\n    result = []\n    fact = 1\n    total = 0\n    for i in range(1, n + 1):\n        fact *= i\n        total += i\n        result.append(fact if i % 2 == 0 else total)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_107_even_odd_palindrome/python/0": {
+  "text": "```\ndef even_odd_palindrome(n: int) -> tuple[int, int]:\n    even = 0\n    odd = 0\n    for i in range(1, n + 1):\n        s = str(i)\n        if s == s[::-1]:\n            if i % 2 == 0:\n                even += 1\n            else:\n                odd += 1\n    return (even, odd)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_108_count_nums/python/0": {
+  "text": "```\ndef count_nums(arr: list[int]) -> int:\n    count = 0\n    for n in arr:\n        digits = [int(d) for d in str(abs(n))]\n        if n < 0:\n            digits[0] = -digits[0]\n        if sum(digits) > 0:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_109_move_one_ball/python/0": {
+  "text": "```\ndef move_one_ball(arr: list[int]) -> bool:\n    n = len(arr)\n    if n <= 1:\n        return True\n    # Count cyclic descents; a rotation of a sorted array has at most one.\n    descents = 0\n    for i in range(n):\n        if arr[i] > arr[(i + 1) % n]:\n            descents += 1\n    return descents <= 1\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_10_make_palindrome/python/0": {
+  "text": "```\ndef make_palindrome(string: str) -> str:\n    if not string:\n        return ''\n    n = len(string)\n    for i in range(n):\n        suffix = string[i:]\n        if suffix == suffix[::-1]:\n            return string + string[:i][::-1]\n    return string\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_110_exchange/python/0": {
+  "text": "```\ndef exchange(lst1: list[int], lst2: list[int]) -> str:\n    odd1 = sum(1 for x in lst1 if x % 2 != 0)\n    even2 = sum(1 for x in lst2 if x % 2 == 0)\n    return \"YES\" if even2 >= odd1 else \"NO\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_111_histogram/python/0": {
+  "text": "```\nfrom collections import Counter\n\n\ndef histogram(test_value: str) -> dict[str, int]:\n    counts = Counter(test_value.split())\n    if not counts:\n        return {}\n    best = max(counts.values())\n    return {k: v for k, v in counts.items() if v == best}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_112_reverse_delete/python/0": {
+  "text": "```\ndef reverse_delete(s: str, c: str) -> tuple[str, bool]:\n    result = ''.join(ch for ch in s if ch not in c)\n    return (result, result == result[::-1])\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_113_odd_count/python/0": {
+  "text": "```\ndef odd_count(lst: list[str]) -> list[str]:\n    result = []\n    for s in lst:\n        k = sum(1 for ch in s if int(ch) % 2 == 1)\n        result.append(\n            f\"the number of odd elements {k}n the str{k}ng {k} of the {k}nput.\"\n        )\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_114_minSubArraySum/python/0": {
+  "text": "```\ndef minSubArraySum(nums: list[int]) -> int:\n    best = nums[0]\n    cur = nums[0]\n    for x in nums[1:]:\n        cur = min(x, cur + x)\n        best = min(best, cur)\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_115_max_fill/python/0": {
+  "text": "```\nimport math\n\n\ndef max_fill(grid: list[list[int]], capacity: int) -> int:\n    total = 0\n    for row in grid:\n        water = sum(row)\n        total += math.ceil(water / capacity)\n    return total\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_116_sort_array/python/0": {
+  "text": "```\ndef sort_array(arr: list[int]) -> list[int]:\n    return sorted(arr, key=lambda x: (bin(x).count('1'), x))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_117_select_words/python/0": {
+  "text": "```\ndef select_words(s: str, n: int) -> list[str]:\n    vowels = set('aeiouAEIOU')\n    result = []\n    for word in s.split():\n        consonants = sum(1 for ch in word if ch.isalpha() and ch not in vowels)\n        if consonants == n:\n            result.append(word)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_118_get_closest_vowel/python/0": {
+  "text": "```\ndef get_closest_vowel(word: str) -> str:\n    vowels = \"aeiouAEIOU\"\n    for i in range(len(word) - 2, 0, -1):\n        if word[i] in vowels and word[i - 1] not in vowels and word[i + 1] not in vowels:\n            return word[i]\n    return \"\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_119_match_parens/python/0": {
+  "text": "```\ndef match_parens(lst: list[str]) -> str:\n    def ok(s: str) -> bool:\n        depth = 0\n        for ch in s:\n            depth += 1 if ch == '(' else -1\n            if depth < 0:\n                return False\n        return depth == 0\n\n    a, b = lst[0], lst[1]\n    return 'Yes' if ok(a + b) or ok(b + a) else 'No'\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_11_string_xor/python/0": {
+  "text": "```\ndef string_xor(a: str, b: str) -> str:\n    return ''.join('1' if x != y else '0' for x, y in zip(a, b))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_120_maximum/python/0": {
+  "text": "```\ndef maximum(arr: list[int], k: int) -> list[int]:\n    if k <= 0:\n        return []\n    return sorted(arr)[-k:]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_121_solution/python/0": {
+  "text": "```\ndef solution(lst: list[int]) -> int:\n    return sum(x for i, x in enumerate(lst) if i % 2 == 0 and x % 2 == 1)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_122_add_elements/python/0": {
+  "text": "```\ndef add_elements(arr: list[int], k: int) -> int:\n    return sum(x for x in arr[:k] if -99 <= x <= 99)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_123_get_odd_collatz/python/0": {
+  "text": "```\ndef get_odd_collatz(n: int) -> list[int]:\n    odds = set()\n    while True:\n        if n % 2 == 1:\n            odds.add(n)\n        if n == 1:\n            break\n        n = n // 2 if n % 2 == 0 else 3 * n + 1\n    return sorted(odds)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_124_valid_date/python/0": {
+  "text": "```\nimport re\n\n\ndef valid_date(date: str) -> bool:\n    if not date:\n        return False\n    if not re.fullmatch(r'[0-9]{2}-[0-9]{2}-[0-9]{4}', date):\n        return False\n    month = int(date[0:2])\n    day = int(date[3:5])\n    if month < 1 or month > 12:\n        return False\n    if month in (1, 3, 5, 7, 8, 10, 12):\n        max_day = 31\n    elif month in (4, 6, 9, 11):\n        max_day = 30\n    else:\n        max_day = 29\n    return 1 <= day <= max_day\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_126_is_sorted/python/0": {
+  "text": "```\ndef is_sorted(lst: list[int]) -> bool:\n    for i in range(1, len(lst)):\n        if lst[i] < lst[i - 1]:\n            return False\n    counts = {}\n    for x in lst:\n        counts[x] = counts.get(x, 0) + 1\n        if counts[x] > 2:\n            return False\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_127_intersection/python/0": {
+  "text": "```\ndef intersection(interval1: tuple[int, int], interval2: tuple[int, int]) -> str:\n    start = max(interval1[0], interval2[0])\n    end = min(interval1[1], interval2[1])\n    length = end - start\n    if length < 2:\n        return \"NO\"\n    for d in range(2, int(length ** 0.5) + 1):\n        if length % d == 0:\n            return \"NO\"\n    return \"YES\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_128_prod_signs/python/0": {
+  "text": "```\ndef prod_signs(arr: list[int]) -> int | None:\n    if not arr:\n        return None\n    magnitude = sum(abs(x) for x in arr)\n    sign = 1\n    for x in arr:\n        if x == 0:\n            return 0\n        if x < 0:\n            sign = -sign\n    return sign * magnitude\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_129_minPath/python/0": {
+  "text": "```\ndef minPath(grid: list[list[int]], k: int) -> list[int]:\n    n = len(grid)\n    # locate the cell holding the value 1\n    r, c = 0, 0\n    for i in range(n):\n        for j in range(n):\n            if grid[i][j] == 1:\n                r, c = i, j\n    result = [grid[r][c]]\n    for _ in range(k - 1):\n        best = None\n        best_pos = None\n        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n            nr, nc = r + dr, c + dc\n            if 0 <= nr < n and 0 <= nc < n:\n                if best is None or grid[nr][nc] < best:\n                    best = grid[nr][nc]\n                    best_pos = (nr, nc)\n        result.append(best)\n        r, c = best_pos\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_12_longest/python/0": {
+  "text": "```\ndef longest(strings: list[str]) -> str | None:\n    if not strings:\n        return None\n    best = strings[0]\n    for s in strings[1:]:\n        if len(s) > len(best):\n            best = s\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_130_tri/python/0": {
+  "text": "```\ndef tri(n: int) -> list[int]:\n    def t(k: int) -> int:\n        if k == 0:\n            return 1\n        if k == 1:\n            return 3\n        if k % 2 == 0:\n            return 1 + k // 2\n        # odd k: tri(k+1) is even, so it can be computed directly\n        return t(k - 1) + t(k - 2) + (1 + (k + 1) // 2)\n\n    seq = [0] * (n + 1)\n    for k in range(n + 1):\n        seq[k] = t(k)\n    return seq\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_131_digits/python/0": {
+  "text": "```\ndef digits(n: int) -> int:\n    prod = 1\n    found = False\n    for ch in str(abs(n)):\n        d = int(ch)\n        if d % 2 == 1:\n            prod *= d\n            found = True\n    return prod if found else 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/python/0": {
+  "text": "```\ndef is_nested(string: str) -> bool:\n    openings = []\n    closings = []\n    for i, ch in enumerate(string):\n        if ch == '[':\n            openings.append(i)\n        else:\n            closings.append(i)\n    closings.reverse()\n    cnt = 0\n    i = 0\n    l = len(closings)\n    for idx in openings:\n        if i < l and idx < closings[i]:\n            cnt += 1\n            i += 1\n    return cnt >= 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/python/1": {
+  "text": "```\ndef is_nested(string: str) -> bool:\n    stack = []\n    pairs = []\n    for i, ch in enumerate(string):\n        if ch == '[':\n            stack.append(i)\n        elif ch == ']' and stack:\n            pairs.append((stack.pop(), i))\n    for i, j in pairs:\n        for k, l in pairs:\n            if k < i and j < l:\n                return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_133_sum_squares/python/0": {
+  "text": "```\nimport math\n\n\ndef sum_squares(lst: list[float]) -> int:\n    return sum(int(math.ceil(x)) ** 2 for x in lst)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_134_check_if_last_char_is_a_letter/python/0": {
+  "text": "```\ndef check_if_last_char_is_a_letter(txt: str) -> bool:\n    if not txt:\n        return False\n    last = txt[-1]\n    if not last.isalpha():\n        return False\n    if len(txt) == 1:\n        return True\n    return txt[-2] == ' '\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_135_can_arrange/python/0": {
+  "text": "```\ndef can_arrange(arr: list[int]) -> int:\n    result = -1\n    for i in range(1, len(arr)):\n        if arr[i] < arr[i - 1]:\n            result = i\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_136_largest_smallest_integers/python/0": {
+  "text": "```\ndef largest_smallest_integers(lst: list[int]) -> tuple[int | None, int | None]:\n    negs = [x for x in lst if x < 0]\n    poss = [x for x in lst if x > 0]\n    a = max(negs) if negs else None\n    b = min(poss) if poss else None\n    return (a, b)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_138_is_equal_to_sum_even/python/0": {
+  "text": "```\ndef is_equal_to_sum_even(n: int) -> bool:\n    return n >= 8 and n % 2 == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_139_special_factorial/python/0": {
+  "text": "```\ndef special_factorial(n: int) -> int:\n    result = 1\n    fact = 1\n    for k in range(1, n + 1):\n        fact *= k\n        result *= fact\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_13_greatest_common_divisor/python/0": {
+  "text": "```\ndef greatest_common_divisor(a: int, b: int) -> int:\n    a, b = abs(a), abs(b)\n    while b:\n        a, b = b, a % b\n    return a\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_140_fix_spaces/python/0": {
+  "text": "```\nimport re\n\n\ndef fix_spaces(text: str) -> str:\n    text = re.sub(r\" {3,}\", \"-\", text)\n    return text.replace(\" \", \"_\")\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_141_file_name_check/python/0": {
+  "text": "```\ndef file_name_check(file_name: str) -> str:\n    digits = sum(1 for ch in file_name if '0' <= ch <= '9')\n    if digits > 3:\n        return 'No'\n    parts = file_name.split('.')\n    if len(parts) != 2:\n        return 'No'\n    name, ext = parts\n    if not name:\n        return 'No'\n    if not (('a' <= name[0] <= 'z') or ('A' <= name[0] <= 'Z')):\n        return 'No'\n    if ext not in ('txt', 'exe', 'dll'):\n        return 'No'\n    return 'Yes'\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_142_sum_squares/python/0": {
+  "text": "```\ndef sum_squares(lst: list[int]) -> int:\n    total = 0\n    for i, x in enumerate(lst):\n        if i % 3 == 0:\n            total += x * x\n        elif i % 4 == 0:\n            total += x ** 3\n        else:\n            total += x\n    return total\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_143_words_in_sentence/python/0": {
+  "text": "```\ndef words_in_sentence(sentence: str) -> str:\n    def is_prime(k: int) -> bool:\n        if k < 2:\n            return False\n        d = 2\n        while d * d <= k:\n            if k % d == 0:\n                return False\n            d += 1\n        return True\n\n    return ' '.join(w for w in sentence.split() if is_prime(len(w)))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_144_simplify/python/0": {
+  "text": "```\ndef simplify(x: str, n: str) -> bool:\n    a, b = (int(v) for v in x.split(\"/\"))\n    c, d = (int(v) for v in n.split(\"/\"))\n    return (a * c) % (b * d) == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_145_order_by_points/python/0": {
+  "text": "```\ndef order_by_points(nums: list[int]) -> list[int]:\n    def digit_sum(n: int) -> int:\n        s = str(n)\n        if n < 0:\n            return -int(s[1]) + sum(int(d) for d in s[2:])\n        return sum(int(d) for d in s)\n\n    return sorted(nums, key=digit_sum)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_146_specialFilter/python/0": {
+  "text": "```\ndef specialFilter(nums: list[int]) -> int:\n    count = 0\n    for n in nums:\n        if n > 10:\n            s = str(abs(n))\n            if int(s[0]) % 2 == 1 and int(s[-1]) % 2 == 1:\n                count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_147_get_max_triples/python/0": {
+  "text": "```\ndef get_max_triples(n: int) -> int:\n    counts = [0, 0, 0]\n    for i in range(1, n + 1):\n        counts[(i * i - i + 1) % 3] += 1\n    c0, c1, c2 = counts\n\n    def comb3(c: int) -> int:\n        return c * (c - 1) * (c - 2) // 6\n\n    return comb3(c0) + comb3(c1) + comb3(c2) + c0 * c1 * c2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_149_sorted_list_sum/python/0": {
+  "text": "```\ndef sorted_list_sum(lst: list[str]) -> list[str]:\n    kept = [s for s in lst if len(s) % 2 == 0]\n    return sorted(kept, key=lambda s: (len(s), s))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_14_all_prefixes/python/0": {
+  "text": "```\ndef all_prefixes(string: str) -> list[str]:\n    return [string[:i] for i in range(1, len(string) + 1)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_150_x_or_y/python/0": {
+  "text": "```\ndef x_or_y(n: int, x: int, y: int) -> int:\n    if n < 2:\n        return y\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return y\n        i += 1\n    return x\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_152_compare/python/0": {
+  "text": "```\ndef compare(game: list[int], guess: list[int]) -> list[int]:\n    return [abs(g - s) for g, s in zip(game, guess)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_153_Strongest_Extension/python/0": {
+  "text": "```\ndef Strongest_Extension(class_name: str, extensions: list[str]) -> str:\n    best = None\n    best_strength = None\n    for ext in extensions:\n        cap = sum(1 for ch in ext if ch.isupper())\n        sm = sum(1 for ch in ext if ch.islower())\n        strength = cap - sm\n        if best_strength is None or strength > best_strength:\n            best = ext\n            best_strength = strength\n    if best is None:\n        return class_name\n    return f\"{class_name}.{best}\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_154_cycpattern_check/python/0": {
+  "text": "```\ndef cycpattern_check(a: str, b: str) -> bool:\n    n = len(b)\n    if n == 0:\n        return True\n    doubled = b + b\n    for i in range(n):\n        if doubled[i:i + n] in a:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_155_even_odd_count/python/0": {
+  "text": "```\ndef even_odd_count(num: int) -> tuple[int, int]:\n    even = 0\n    odd = 0\n    for ch in str(abs(num)):\n        if int(ch) % 2 == 0:\n            even += 1\n        else:\n            odd += 1\n    return (even, odd)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_156_int_to_mini_roman/python/0": {
+  "text": "```\ndef int_to_mini_roman(number: int) -> str:\n    vals = [\n        (1000, 'm'), (900, 'cm'), (500, 'd'), (400, 'cd'),\n        (100, 'c'), (90, 'xc'), (50, 'l'), (40, 'xl'),\n        (10, 'x'), (9, 'ix'), (5, 'v'), (4, 'iv'), (1, 'i'),\n    ]\n    result = []\n    n = number\n    for value, numeral in vals:\n        while n >= value:\n            result.append(numeral)\n            n -= value\n    return ''.join(result)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_157_right_angle_triangle/python/0": {
+  "text": "```\ndef right_angle_triangle(a: int, b: int, c: int) -> bool:\n    return a * a == b * b + c * c or b * b == a * a + c * c or c * c == a * a + b * b\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_158_find_max/python/0": {
+  "text": "```\ndef find_max(words: list[str]) -> str:\n    if not words:\n        return \"\"\n    return min(words, key=lambda w: (-len(set(w)), w))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_159_eat/python/0": {
+  "text": "```\ndef eat(number: int, need: int, remaining: int) -> list[int]:\n    if need <= remaining:\n        return [number + need, remaining - need]\n    return [number + remaining, 0]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_15_string_sequence/python/0": {
+  "text": "```\ndef string_sequence(n: int) -> str:\n    return ' '.join(str(i) for i in range(n + 1))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_160_do_algebra/python/0": {
+  "text": "```\ndef do_algebra(operator: list[str], operand: list[int]) -> int:\n    parts = [str(operand[0])]\n    for op, num in zip(operator, operand[1:]):\n        parts.append(op)\n        parts.append(str(num))\n    return eval(' '.join(parts))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_161_solve/python/0": {
+  "text": "```\ndef solve(s: str) -> str:\n    if not any(ch.isalpha() for ch in s):\n        return s[::-1]\n    return ''.join(ch.swapcase() if ch.isalpha() else ch for ch in s)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_162_string_to_md5/python/0": {
+  "text": "```\nimport hashlib\n\n\ndef string_to_md5(text: str) -> str | None:\n    if text == \"\":\n        return None\n    return hashlib.md5(text.encode(\"utf-8\")).hexdigest()\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_163_generate_integers/python/0": {
+  "text": "```\ndef generate_integers(a: int, b: int) -> list[int]:\n    lo, hi = min(a, b), max(a, b)\n    return [d for d in range(lo, hi + 1) if d % 2 == 0 and 0 <= d <= 9]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_163_generate_integers/python/1": {
+  "text": "```\ndef generate_integers(a: int, b: int) -> list[int]:\n    lo, hi = min(a, b), max(a, b)\n    return [d for d in (2, 4, 6, 8) if lo <= d <= hi]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_16_count_distinct_characters/python/0": {
+  "text": "```\ndef count_distinct_characters(string: str) -> int:\n    return len(set(string.lower()))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_17_parse_music/python/0": {
+  "text": "```\ndef parse_music(music_string: str) -> list[int]:\n    result = []\n    for tok in music_string.split():\n        if tok == 'o':\n            result.append(4)\n        elif tok == 'o|':\n            result.append(2)\n        elif tok == '.|':\n            result.append(1)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_18_how_many_times/python/0": {
+  "text": "```\ndef how_many_times(string: str, substring: str) -> int:\n    if not substring:\n        return 0\n    count = 0\n    for i in range(len(string) - len(substring) + 1):\n        if string[i:i + len(substring)] == substring:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_19_sort_numbers/python/0": {
+  "text": "```\ndef sort_numbers(numbers: str) -> str:\n    order = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine']\n    rank = {w: i for i, w in enumerate(order)}\n    words = numbers.split()\n    for w in words:\n        if w not in rank:\n            raise ValueError(f\"unknown number word: {w}\")\n    return ' '.join(sorted(words, key=lambda w: rank[w]))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_1_separate_paren_groups/python/0": {
+  "text": "```\ndef separate_paren_groups(paren_string: str) -> list[str]:\n    result = []\n    current = []\n    depth = 0\n    for ch in paren_string:\n        if ch.isspace():\n            continue\n        if ch == '(':\n            depth += 1\n            current.append(ch)\n        elif ch == ')':\n            depth -= 1\n            current.append(ch)\n            if depth == 0:\n                result.append(''.join(current))\n                current = []\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_20_find_closest_elements/python/0": {
+  "text": "```\ndef find_closest_elements(numbers: list[float]) -> tuple[float, float]:\n    s = sorted(numbers)\n    best = (s[0], s[1])\n    best_diff = s[1] - s[0]\n    for i in range(1, len(s) - 1):\n        d = s[i + 1] - s[i]\n        if d < best_diff:\n            best_diff = d\n            best = (s[i], s[i + 1])\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_21_rescale_to_unit/python/0": {
+  "text": "```\ndef rescale_to_unit(numbers: list[float]) -> list[float]:\n    lo = min(numbers)\n    hi = max(numbers)\n    span = hi - lo\n    if span == 0:\n        return [0.0 for _ in numbers]\n    return [(x - lo) / span for x in numbers]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_23_strlen/python/0": {
+  "text": "```\ndef strlen(string: str) -> int:\n    return len(string)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_24_largest_divisor/python/0": {
+  "text": "```\ndef largest_divisor(n: int) -> int:\n    n = abs(n)\n    for d in range(n // 2, 0, -1):\n        if n % d == 0:\n            return d\n    return 1\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_25_factorize/python/0": {
+  "text": "```\ndef factorize(n: int) -> list[int]:\n    factors = []\n    if n < 2:\n        return factors\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            factors.append(d)\n            n //= d\n        d += 1 if d == 2 else 2\n    if n > 1:\n        factors.append(n)\n    return factors\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_26_remove_duplicates/python/0": {
+  "text": "```\nfrom collections import Counter\n\n\ndef remove_duplicates(numbers: list[int]) -> list[int]:\n    counts = Counter(numbers)\n    return [n for n in numbers if counts[n] == 1]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_27_flip_case/python/0": {
+  "text": "```\ndef flip_case(string: str) -> str:\n    return string.swapcase()\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_28_concatenate/python/0": {
+  "text": "```\ndef concatenate(strings: list[str]) -> str:\n    return ''.join(strings)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_29_filter_by_prefix/python/0": {
+  "text": "```\ndef filter_by_prefix(strings: list[str], prefix: str) -> list[str]:\n    return [s for s in strings if s.startswith(prefix)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_2_truncate_number/python/0": {
+  "text": "```\ndef truncate_number(number: float) -> float:\n    return number - int(number)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_30_get_positive/python/0": {
+  "text": "```\ndef get_positive(l: list[int]) -> list[int]:\n    return [x for x in l if x > 0]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_31_is_prime/python/0": {
+  "text": "```\ndef is_prime(n: int) -> bool:\n    if n < 2:\n        return False\n    if n < 4:\n        return True\n    if n % 2 == 0 or n % 3 == 0:\n        return False\n    i = 5\n    while i * i <= n:\n        if n % i == 0 or n % (i + 2) == 0:\n            return False\n        i += 6\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_33_sort_third/python/0": {
+  "text": "```\ndef sort_third(l: list[int]) -> list[int]:\n    result = list(l)\n    thirds = sorted(l[i] for i in range(0, len(l), 3))\n    for k, i in enumerate(range(0, len(l), 3)):\n        result[i] = thirds[k]\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_34_unique/python/0": {
+  "text": "```\ndef unique(l: list[int]) -> list[int]:\n    return sorted(set(l))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_35_max_element/python/0": {
+  "text": "```\ndef max_element(l: list[int]) -> int:\n    return max(l)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_36_fizz_buzz/python/0": {
+  "text": "```\ndef fizz_buzz(n: int) -> int:\n    count = 0\n    for i in range(1, n):\n        if i % 11 == 0 or i % 13 == 0:\n            count += str(i).count('7')\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_37_sort_even/python/0": {
+  "text": "```\ndef sort_even(l: list[int]) -> list[int]:\n    result = list(l)\n    evens = sorted(l[i] for i in range(0, len(l), 2))\n    for k, i in enumerate(range(0, len(l), 2)):\n        result[i] = evens[k]\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_39_prime_fib/python/0": {
+  "text": "```\ndef _is_prime(n: int) -> bool:\n    if n < 2:\n        return False\n    small = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]\n    for p in small:\n        if n % p == 0:\n            return n == p\n    d = n - 1\n    s = 0\n    while d % 2 == 0:\n        d //= 2\n        s += 1\n    for a in small:\n        x = pow(a, d, n)\n        if x == 1 or x == n - 1:\n            continue\n        for _ in range(s - 1):\n            x = x * x % n\n            if x == n - 1:\n                break\n        else:\n            return False\n    return True\n\n\ndef prime_fib(n: int) -> int:\n    if n < 1:\n        raise ValueError(\"n must be at least 1\")\n    count = 0\n    a, b = 0, 1\n    while True:\n        a, b = b, a + b\n        if _is_prime(a):\n            count += 1\n            if count == n:\n                return a\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_3_below_zero/python/0": {
+  "text": "```\ndef below_zero(operations: list[int]) -> bool:\n    balance = 0\n    for op in operations:\n        balance += op\n        if balance < 0:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_40_triples_sum_to_zero/python/0": {
+  "text": "```\ndef triples_sum_to_zero(l: list[int]) -> bool:\n    n = len(l)\n    for i in range(n):\n        for j in range(i + 1, n):\n            for k in range(j + 1, n):\n                if l[i] + l[j] + l[k] == 0:\n                    return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_41_car_race_collision/python/0": {
+  "text": "```\ndef car_race_collision(n: int) -> int:\n    return n * n\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_42_incr_list/python/0": {
+  "text": "```\ndef incr_list(l: list[int]) -> list[int]:\n    return [x + 1 for x in l]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_43_pairs_sum_to_zero/python/0": {
+  "text": "```\ndef pairs_sum_to_zero(l: list[int]) -> bool:\n    seen = set()\n    for x in l:\n        if -x in seen:\n            return True\n        seen.add(x)\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_44_change_base/python/0": {
+  "text": "```\ndef change_base(x: int, base: int) -> str:\n    if x == 0:\n        return '0'\n    digits = []\n    n = x\n    while n > 0:\n        digits.append(str(n % base))\n        n //= base\n    return ''.join(reversed(digits))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_45_triangle_area/python/0": {
+  "text": "```\ndef triangle_area(a: int, h: int) -> float:\n    return a * h / 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_46_fib4/python/0": {
+  "text": "```\ndef fib4(n: int) -> int:\n    base = [0, 0, 2, 0]\n    if n < 4:\n        return base[n]\n    a, b, c, d = base\n    for _ in range(4, n + 1):\n        a, b, c, d = b, c, d, a + b + c + d\n    return d\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_47_median/python/0": {
+  "text": "```\ndef median(l: list[int]) -> float:\n    if not l:\n        raise ValueError(\"median of empty list\")\n    s = sorted(l)\n    n = len(s)\n    mid = n // 2\n    if n % 2 == 1:\n        return float(s[mid])\n    return (s[mid - 1] + s[mid]) / 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_48_is_palindrome/python/0": {
+  "text": "```\ndef is_palindrome(text: str) -> bool:\n    return text == text[::-1]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_49_modp/python/0": {
+  "text": "```\ndef modp(n: int, p: int) -> int:\n    return pow(2, n, p)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_4_mean_absolute_deviation/python/0": {
+  "text": "```\ndef mean_absolute_deviation(numbers: list[float]) -> float:\n    if not numbers:\n        return 0.0\n    m = sum(numbers) / len(numbers)\n    return sum(abs(x - m) for x in numbers) / len(numbers)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_51_remove_vowels/python/0": {
+  "text": "```\ndef remove_vowels(text: str) -> str:\n    return ''.join(ch for ch in text if ch.lower() not in 'aeiou')\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_52_below_threshold/python/0": {
+  "text": "```\ndef below_threshold(l: list[int], t: int) -> bool:\n    return all(x < t for x in l)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_53_add/python/0": {
+  "text": "```\ndef add(x: int, y: int) -> int:\n    return x + y\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_54_same_chars/python/0": {
+  "text": "```\ndef same_chars(s0: str, s1: str) -> bool:\n    return set(s0) == set(s1)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_55_fib/python/0": {
+  "text": "```\ndef fib(n: int) -> int:\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_56_correct_bracketing/python/0": {
+  "text": "```\ndef correct_bracketing(brackets: str) -> bool:\n    depth = 0\n    for ch in brackets:\n        if ch == \"<\":\n            depth += 1\n        elif ch == \">\":\n            depth -= 1\n            if depth < 0:\n                return False\n    return depth == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_57_monotonic/python/0": {
+  "text": "```\ndef monotonic(l: list[int]) -> bool:\n    inc = all(a <= b for a, b in zip(l, l[1:]))\n    dec = all(a >= b for a, b in zip(l, l[1:]))\n    return inc or dec\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_58_common/python/0": {
+  "text": "```\ndef common(l1: list[int], l2: list[int]) -> list[int]:\n    return sorted(set(l1) & set(l2))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_59_largest_prime_factor/python/0": {
+  "text": "```\ndef largest_prime_factor(n: int) -> int:\n    n = abs(n)\n    largest = 1\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            largest = d\n            n //= d\n        d += 1\n    if n > 1:\n        largest = max(largest, n)\n    return largest\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_5_intersperse/python/0": {
+  "text": "```\ndef intersperse(numbers: list[int], delimeter: int) -> list[int]:\n    result = []\n    for i, n in enumerate(numbers):\n        if i > 0:\n            result.append(delimeter)\n        result.append(n)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_60_sum_to_n/python/0": {
+  "text": "```\ndef sum_to_n(n: int) -> int:\n    if n <= 0:\n        return 0\n    return n * (n + 1) // 2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_61_correct_bracketing/python/0": {
+  "text": "```\ndef correct_bracketing(brackets: str) -> bool:\n    depth = 0\n    for ch in brackets:\n        if ch == '(':\n            depth += 1\n        elif ch == ')':\n            depth -= 1\n            if depth < 0:\n                return False\n    return depth == 0\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_62_derivative/python/0": {
+  "text": "```\ndef derivative(xs: list[int]) -> list[int]:\n    return [i * xs[i] for i in range(1, len(xs))]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_63_fibfib/python/0": {
+  "text": "```\ndef fibfib(n: int) -> int:\n    base = [0, 0, 1]\n    if n < 3:\n        return base[n]\n    a, b, c = base\n    for _ in range(3, n + 1):\n        a, b, c = b, c, a + b + c\n    return c\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_64_vowels_count/python/0": {
+  "text": "```\ndef vowels_count(s: str) -> int:\n    lower = s.lower()\n    count = sum(1 for ch in lower if ch in \"aeiou\")\n    if lower.endswith(\"y\"):\n        count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_65_circular_shift/python/0": {
+  "text": "```\ndef circular_shift(x: int, shift: int) -> str:\n    s = str(x)\n    n = len(s)\n    if shift > n:\n        return s[::-1]\n    if shift == 0:\n        return s\n    return s[-shift:] + s[:-shift]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_66_digitSum/python/0": {
+  "text": "```\ndef digitSum(s: str) -> int:\n    return sum(ord(c) for c in s if c.isupper())\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_67_fruit_distribution/python/0": {
+  "text": "```\ndef fruit_distribution(s: str, n: int) -> int:\n    total = 0\n    for part in s.split():\n        if part.isdigit():\n            total += int(part)\n    return n - total\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_68_pluck/python/0": {
+  "text": "```\ndef pluck(arr: list[int]) -> list[int]:\n    best_val = None\n    best_idx = -1\n    for i, v in enumerate(arr):\n        if v % 2 == 0 and (best_val is None or v < best_val):\n            best_val = v\n            best_idx = i\n    if best_val is None:\n        return []\n    return [best_val, best_idx]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_69_search/python/0": {
+  "text": "```\nfrom collections import Counter\n\n\ndef search(lst: list[int]) -> int:\n    counts = Counter(lst)\n    best = -1\n    for value, freq in counts.items():\n        if value > 0 and freq >= value and value > best:\n            best = value\n    return best\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_6_parse_nested_parens/python/0": {
+  "text": "```\ndef parse_nested_parens(paren_string: str) -> list[int]:\n    result = []\n    for group in paren_string.split():\n        depth = 0\n        max_depth = 0\n        for ch in group:\n            if ch == '(':\n                depth += 1\n                if depth > max_depth:\n                    max_depth = depth\n            elif ch == ')':\n                depth -= 1\n        result.append(max_depth)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_70_strange_sort_list/python/0": {
+  "text": "```\ndef strange_sort_list(lst: list[int]) -> list[int]:\n    s = sorted(lst)\n    result = []\n    lo, hi = 0, len(s) - 1\n    take_min = True\n    while lo <= hi:\n        if take_min:\n            result.append(s[lo])\n            lo += 1\n        else:\n            result.append(s[hi])\n            hi -= 1\n        take_min = not take_min\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_71_triangle_area/python/0": {
+  "text": "```\ndef triangle_area(a: int, b: int, c: int) -> float:\n    if a + b <= c or a + c <= b or b + c <= a:\n        return -1\n    s = (a + b + c) / 2\n    area = (s * (s - a) * (s - b) * (s - c)) ** 0.5\n    return round(area, 2)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_72_will_it_fly/python/0": {
+  "text": "```\ndef will_it_fly(q: list[int], w: int) -> bool:\n    return q == q[::-1] and sum(q) <= w\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_73_smallest_change/python/0": {
+  "text": "```\ndef smallest_change(arr: list[int]) -> int:\n    n = len(arr)\n    count = 0\n    for i in range(n // 2):\n        if arr[i] != arr[n - 1 - i]:\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_74_total_match/python/0": {
+  "text": "```\ndef total_match(lst1: list[str], lst2: list[str]) -> list[str]:\n    n1 = sum(len(s) for s in lst1)\n    n2 = sum(len(s) for s in lst2)\n    return lst1 if n1 <= n2 else lst2\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_75_is_multiply_prime/python/0": {
+  "text": "```\ndef is_multiply_prime(a: int) -> bool:\n    if a < 2:\n        return False\n    count = 0\n    n = a\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            count += 1\n            n //= d\n        d += 1\n    if n > 1:\n        count += 1\n    return count == 3\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_76_is_simple_power/python/0": {
+  "text": "```\ndef is_simple_power(x: int, n: int) -> bool:\n    if x == 1:\n        return True\n    if n == 0:\n        return x == 0\n    if n == 1:\n        return False\n    if n == -1:\n        return x == -1\n    p = 1\n    while abs(p) < abs(x):\n        p *= n\n    return p == x\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_77_iscube/python/0": {
+  "text": "```\ndef iscube(a: int) -> bool:\n    n = abs(a)\n    r = round(n ** (1.0 / 3))\n    for c in range(max(0, r - 2), r + 3):\n        if c * c * c == n:\n            return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_78_hex_key/python/0": {
+  "text": "```\ndef hex_key(num: str) -> int:\n    primes = set(\"2357BD\")\n    return sum(1 for c in num if c in primes)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_79_decimal_to_binary/python/0": {
+  "text": "```\ndef decimal_to_binary(decimal: int) -> str:\n    return \"db\" + bin(decimal)[2:] + \"db\"\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_7_filter_by_substring/python/0": {
+  "text": "```\ndef filter_by_substring(strings: list[str], substring: str) -> list[str]:\n    return [s for s in strings if substring in s]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_80_is_happy/python/0": {
+  "text": "```\ndef is_happy(s: str) -> bool:\n    if len(s) < 3:\n        return False\n    for i in range(len(s) - 2):\n        a, b, c = s[i], s[i + 1], s[i + 2]\n        if a == b or b == c or a == c:\n            return False\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_81_numerical_letter_grade/python/0": {
+  "text": "```\ndef numerical_letter_grade(grades: list[float]) -> list[str]:\n    result = []\n    for g in grades:\n        if g == 4.0:\n            result.append('A+')\n        elif g > 3.7:\n            result.append('A')\n        elif g > 3.3:\n            result.append('A-')\n        elif g > 3.0:\n            result.append('B+')\n        elif g > 2.7:\n            result.append('B')\n        elif g > 2.3:\n            result.append('B-')\n        elif g > 2.0:\n            result.append('C+')\n        elif g > 1.7:\n            result.append('C')\n        elif g > 1.3:\n            result.append('C-')\n        elif g > 1.0:\n            result.append('D+')\n        elif g > 0.7:\n            result.append('D')\n        elif g > 0.0:\n            result.append('D-')\n        else:\n            result.append('E')\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_82_prime_length/python/0": {
+  "text": "```\ndef prime_length(string: str) -> bool:\n    n = len(string)\n    if n < 2:\n        return False\n    i = 2\n    while i * i <= n:\n        if n % i == 0:\n            return False\n        i += 1\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_83_starts_one_ends/python/0": {
+  "text": "```\ndef starts_one_ends(n: int) -> int:\n    if n == 1:\n        return 1\n    # start with 1: 10^(n-1); end with 1: 9*10^(n-2); both: 10^(n-2)\n    return 10 ** (n - 1) + 8 * 10 ** (n - 2)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_84_solve/python/0": {
+  "text": "```\ndef solve(N: int) -> str:\n    total = sum(int(d) for d in str(abs(N)))\n    return bin(total)[2:]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_85_add/python/0": {
+  "text": "```\ndef add(lst: list[int]) -> int:\n    return sum(x for i, x in enumerate(lst) if i % 2 == 1 and x % 2 == 0)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_86_anti_shuffle/python/0": {
+  "text": "```\ndef anti_shuffle(s: str) -> str:\n    return ' '.join(''.join(sorted(word)) for word in s.split(' '))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_87_get_row/python/0": {
+  "text": "```\ndef get_row(lst: list[list[int]], x: int) -> list[tuple[int, int]]:\n    result = []\n    for r, row in enumerate(lst):\n        cols = [c for c, v in enumerate(row) if v == x]\n        for c in sorted(cols, reverse=True):\n            result.append((r, c))\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_88_sort_array/python/0": {
+  "text": "```\ndef sort_array(array: list[int]) -> list[int]:\n    if not array:\n        return []\n    total = array[0] + array[-1]\n    return sorted(array, reverse=(total % 2 == 0))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_89_encrypt/python/0": {
+  "text": "```\ndef encrypt(s: str) -> str:\n    out = []\n    for ch in s:\n        if 'a' <= ch <= 'z':\n            out.append(chr((ord(ch) - ord('a') + 4) % 26 + ord('a')))\n        elif 'A' <= ch <= 'Z':\n            out.append(chr((ord(ch) - ord('A') + 4) % 26 + ord('A')))\n        else:\n            out.append(ch)\n    return ''.join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_8_sum_product/python/0": {
+  "text": "```\ndef sum_product(numbers: list[int]) -> tuple[int, int]:\n    total = 0\n    prod = 1\n    for x in numbers:\n        total += x\n        prod *= x\n    return (total, prod)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_90_next_smallest/python/0": {
+  "text": "```\ndef next_smallest(lst: list[int]) -> int | None:\n    uniq = sorted(set(lst))\n    if len(uniq) < 2:\n        return None\n    return uniq[1]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_91_is_bored/python/0": {
+  "text": "```\nimport re\n\n\ndef is_bored(S: str) -> int:\n    count = 0\n    for sentence in re.split(r'[.?!]', S):\n        words = sentence.split()\n        if words and words[0] == 'I':\n            count += 1\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_93_encode/python/0": {
+  "text": "```\ndef encode(message: str) -> str:\n    vowels = \"aeiou\"\n    out = []\n    for ch in message:\n        if ch.isalpha():\n            lower = ch.lower()\n            if lower in vowels:\n                lower = chr(ord(lower) + 2)\n            out.append(lower.upper() if ch.islower() else lower.lower())\n        else:\n            out.append(ch)\n    return \"\".join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_94_skjkasdkd/python/0": {
+  "text": "```\ndef skjkasdkd(lst: list[int]) -> int:\n    def is_prime(n: int) -> bool:\n        if n < 2:\n            return False\n        if n < 4:\n            return True\n        if n % 2 == 0 or n % 3 == 0:\n            return False\n        i = 5\n        while i * i <= n:\n            if n % i == 0 or n % (i + 2) == 0:\n                return False\n            i += 6\n        return True\n\n    primes = [x for x in lst if is_prime(x)]\n    if not primes:\n        return 0\n    return sum(int(d) for d in str(max(primes)))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_95_check_dict_case/python/0": {
+  "text": "```\ndef check_dict_case(dict: dict[str, str]) -> bool:\n    if not dict:\n        return False\n    keys = list(dict.keys())\n    if all(isinstance(k, str) and k.islower() for k in keys):\n        return True\n    if all(isinstance(k, str) and k.isupper() for k in keys):\n        return True\n    return False\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_96_count_up_to/python/0": {
+  "text": "```\ndef count_up_to(n: int) -> list[int]:\n    primes = []\n    for k in range(2, n):\n        is_p = True\n        d = 2\n        while d * d <= k:\n            if k % d == 0:\n                is_p = False\n                break\n            d += 1\n        if is_p:\n            primes.append(k)\n    return primes\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_97_multiply/python/0": {
+  "text": "```\ndef multiply(a: int, b: int) -> int:\n    return (abs(a) % 10) * (abs(b) % 10)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_98_count_upper/python/0": {
+  "text": "```\ndef count_upper(s: str) -> int:\n    return sum(1 for i in range(0, len(s), 2) if s[i] in 'AEIOU')\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_99_closest_integer/python/0": {
+  "text": "```\nfrom decimal import Decimal, ROUND_HALF_UP\n\n\ndef closest_integer(value: str) -> int:\n    return int(Decimal(value.strip()).quantize(Decimal('1'), rounding=ROUND_HALF_UP))\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_9_rolling_max/python/0": {
+  "text": "```\ndef rolling_max(numbers: list[int]) -> list[int]:\n    result = []\n    best = None\n    for n in numbers:\n        if best is None or n > best:\n            best = n\n        result.append(best)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_0_has_close_elements/typescript/0": {
+  "text": "```\nexport function has_close_elements(numbers: number[], threshold: number): boolean {\n  for (let i = 0; i < numbers.length; i++) {\n    for (let j = i + 1; j < numbers.length; j++) {\n      if (Math.abs(numbers[i] - numbers[j]) < threshold) {\n        return true;\n      }\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_100_make_a_pile/typescript/0": {
+  "text": "```\nexport function make_a_pile(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i < n; i++) {\n    result.push(n + 2 * i);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_101_words_string/typescript/0": {
+  "text": "```\nexport function words_string(s: string): string[] {\n  return s.split(/[\\s,]+/).filter((w) => w.length > 0);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_102_choose_num/typescript/0": {
+  "text": "```\nexport function choose_num(x: number, y: number): number {\n  if (x > y) {\n    return -1;\n  }\n  const candidate = y % 2 === 0 ? y : y - 1;\n  return candidate >= x ? candidate : -1;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_104_unique_digits/typescript/0": {
+  "text": "```\nexport function unique_digits(x: number[]): number[] {\n  const result = x.filter((n) => {\n    const s = String(Math.abs(n));\n    for (let i = 0; i < s.length; i++) {\n      const d = s.charCodeAt(i) - 48;\n      if (d % 2 === 0) return false;\n    }\n    return true;\n  });\n  result.sort((a, b) => a - b);\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_105_by_length/typescript/0": {
+  "text": "```\nconst NAMES: string[] = [\n  \"One\",\n  \"Two\",\n  \"Three\",\n  \"Four\",\n  \"Five\",\n  \"Six\",\n  \"Seven\",\n  \"Eight\",\n  \"Nine\",\n];\n\nexport function by_length(arr: number[]): string[] {\n  const digits = arr.filter((x) => x >= 1 && x <= 9).sort((a, b) => a - b);\n  digits.reverse();\n  return digits.map((d) => NAMES[d - 1]);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_106_f/typescript/0": {
+  "text": "```\nexport function f(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 2 === 0) {\n      let fact = 1;\n      for (let k = 2; k <= i; k++) {\n        fact *= k;\n      }\n      result.push(fact);\n    } else {\n      let sum = 0;\n      for (let k = 1; k <= i; k++) {\n        sum += k;\n      }\n      result.push(sum);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_107_even_odd_palindrome/typescript/0": {
+  "text": "```\nexport function even_odd_palindrome(n: number): [number, number] {\n  let even = 0;\n  let odd = 0;\n  for (let i = 1; i <= n; i++) {\n    const s = String(i);\n    const reversed = s.split(\"\").reverse().join(\"\");\n    if (s === reversed) {\n      if (i % 2 === 0) {\n        even++;\n      } else {\n        odd++;\n      }\n    }\n  }\n  return [even, odd];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_108_count_nums/typescript/0": {
+  "text": "```\nexport function count_nums(arr: number[]): number {\n  let count = 0;\n  for (const n of arr) {\n    const s = String(Math.abs(n));\n    let sum = 0;\n    for (let i = 0; i < s.length; i++) {\n      sum += s.charCodeAt(i) - 48;\n    }\n    if (n < 0) {\n      sum -= 2 * (s.charCodeAt(0) - 48);\n    }\n    if (sum > 0) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_109_move_one_ball/typescript/0": {
+  "text": "```\nexport function move_one_ball(arr: number[]): boolean {\n  const n = arr.length;\n  if (n <= 1) {\n    return true;\n  }\n  let descents = 0;\n  for (let i = 0; i < n; i++) {\n    if (arr[i] > arr[(i + 1) % n]) {\n      descents++;\n    }\n  }\n  return descents <= 1;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_10_make_palindrome/typescript/0": {
+  "text": "```\nfunction isPalindrome(s: string): boolean {\n  let i = 0;\n  let j = s.length - 1;\n  while (i < j) {\n    if (s[i] !== s[j]) return false;\n    i++;\n    j--;\n  }\n  return true;\n}\n\nexport function make_palindrome(string: string): string {\n  for (let i = 0; i <= string.length; i++) {\n    if (isPalindrome(string.slice(i))) {\n      const prefix = string.slice(0, i);\n      return string + prefix.split(\"\").reverse().join(\"\");\n    }\n  }\n  return string;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_110_exchange/typescript/0": {
+  "text": "```\nexport function exchange(lst1: number[], lst2: number[]): string {\n  const oddInFirst = lst1.filter((x) => x % 2 !== 0).length;\n  const evenInSecond = lst2.filter((x) => x % 2 === 0).length;\n  return evenInSecond >= oddInFirst ? \"YES\" : \"NO\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_111_histogram/typescript/0": {
+  "text": "```\nexport function histogram(test_value: string): Record<string, number> {\n  const counts: Record<string, number> = {};\n  for (const token of test_value.split(\" \")) {\n    if (token === \"\") {\n      continue;\n    }\n    counts[token] = (counts[token] ?? 0) + 1;\n  }\n  let best = 0;\n  for (const key of Object.keys(counts)) {\n    if (counts[key] > best) {\n      best = counts[key];\n    }\n  }\n  const result: Record<string, number> = {};\n  for (const key of Object.keys(counts)) {\n    if (counts[key] === best) {\n      result[key] = best;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_112_reverse_delete/typescript/0": {
+  "text": "```\nexport function reverse_delete(s: string, c: string): [string, boolean] {\n  let result = \"\";\n  for (let i = 0; i < s.length; i++) {\n    const ch = s.charAt(i);\n    if (c.indexOf(ch) === -1) {\n      result += ch;\n    }\n  }\n  let i = 0;\n  let j = result.length - 1;\n  let isPal = true;\n  while (i < j) {\n    if (result.charAt(i) !== result.charAt(j)) {\n      isPal = false;\n      break;\n    }\n    i++;\n    j--;\n  }\n  return [result, isPal];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_113_odd_count/typescript/0": {
+  "text": "```\nexport function odd_count(lst: string[]): string[] {\n  return lst.map((s) => {\n    let odd = 0;\n    for (const ch of s) {\n      if ((ch.charCodeAt(0) - 48) % 2 === 1) {\n        odd++;\n      }\n    }\n    const d = String(odd);\n    return `the number of odd elements ${d}n the str${d}ng ${d} of the ${d}nput.`;\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_114_minSubArraySum/typescript/0": {
+  "text": "```\nexport function minSubArraySum(nums: number[]): number {\n  let best = nums[0];\n  let current = nums[0];\n  for (let i = 1; i < nums.length; i++) {\n    current = Math.min(nums[i], current + nums[i]);\n    best = Math.min(best, current);\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_115_max_fill/typescript/0": {
+  "text": "```\nexport function max_fill(grid: number[][], capacity: number): number {\n  let total = 0;\n  for (const row of grid) {\n    let water = 0;\n    for (const cell of row) {\n      water += cell;\n    }\n    total += Math.ceil(water / capacity);\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_116_sort_array/typescript/0": {
+  "text": "```\nfunction popcount(n: number): number {\n  let x = Math.abs(n);\n  let count = 0;\n  while (x > 0) {\n    count += x % 2;\n    x = Math.floor(x / 2);\n  }\n  return count;\n}\n\nexport function sort_array(arr: number[]): number[] {\n  return arr.slice().sort((a, b) => {\n    const pa = popcount(a);\n    const pb = popcount(b);\n    if (pa !== pb) return pa - pb;\n    return a - b;\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_117_select_words/typescript/0": {
+  "text": "```\nexport function select_words(s: string, n: number): string[] {\n  if (s.length === 0) {\n    return [];\n  }\n  const words = s.split(\" \").filter((w) => w.length > 0);\n  return words.filter((w) => {\n    let count = 0;\n    for (const ch of w.toLowerCase()) {\n      if (/[a-z]/.test(ch) && !\"aeiou\".includes(ch)) {\n        count++;\n      }\n    }\n    return count === n;\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_118_get_closest_vowel/typescript/0": {
+  "text": "```\nexport function get_closest_vowel(word: string): string {\n  const vowels = \"aeiouAEIOU\";\n  for (let i = word.length - 2; i >= 1; i--) {\n    if (vowels.includes(word[i]) && !vowels.includes(word[i + 1]) && !vowels.includes(word[i - 1])) {\n      return word[i];\n    }\n  }\n  return \"\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_119_match_parens/typescript/0": {
+  "text": "```\nfunction isBalancedFrom(s: string, startDepth: number): boolean {\n  let depth = startDepth;\n  for (const ch of s) {\n    if (ch === \"(\") {\n      depth++;\n    } else if (ch === \")\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n\nexport function match_parens(lst: string[]): string {\n  const [a, b] = lst;\n  const ab = isBalancedFrom(a + b, 0);\n  const ba = isBalancedFrom(b + a, 0);\n  return ab || ba ? \"Yes\" : \"No\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_11_string_xor/typescript/0": {
+  "text": "```\nexport function string_xor(a: string, b: string): string {\n  let result = \"\";\n  const n = Math.min(a.length, b.length);\n  for (let i = 0; i < n; i++) {\n    result += a[i] === b[i] ? \"0\" : \"1\";\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_120_maximum/typescript/0": {
+  "text": "```\nexport function maximum(arr: number[], k: number): number[] {\n  if (k <= 0) return [];\n  const sorted = arr.slice().sort((a, b) => a - b);\n  return sorted.slice(sorted.length - k);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_121_solution/typescript/0": {
+  "text": "```\nexport function solution(lst: number[]): number {\n  let sum = 0;\n  for (let i = 0; i < lst.length; i += 2) {\n    if (lst[i] % 2 !== 0) {\n      sum += lst[i];\n    }\n  }\n  return sum;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_122_add_elements/typescript/0": {
+  "text": "```\nexport function add_elements(arr: number[], k: number): number {\n  let total = 0;\n  for (let i = 0; i < k && i < arr.length; i++) {\n    if (Math.abs(arr[i]) < 100) {\n      total += arr[i];\n    }\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_123_get_odd_collatz/typescript/0": {
+  "text": "```\nexport function get_odd_collatz(n: number): number[] {\n  const odds = new Set<number>();\n  let x = n;\n  while (x !== 1) {\n    if (x % 2 === 1) {\n      odds.add(x);\n    }\n    x = x % 2 === 0 ? x / 2 : 3 * x + 1;\n  }\n  odds.add(1);\n  return Array.from(odds).sort((a, b) => a - b);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_124_valid_date/typescript/0": {
+  "text": "```\nexport function valid_date(date: string): boolean {\n  if (date.length === 0) return false;\n  const m = /^(\\d{2})-(\\d{2})-(\\d{4})$/.exec(date);\n  if (m === null) return false;\n  const month = parseInt(m[1], 10);\n  const day = parseInt(m[2], 10);\n  if (month < 1 || month > 12) return false;\n  if (day < 1) return false;\n  if ([1, 3, 5, 7, 8, 10, 12].indexOf(month) !== -1) {\n    return day <= 31;\n  }\n  if ([4, 6, 9, 11].indexOf(month) !== -1) {\n    return day <= 30;\n  }\n  return day <= 29;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_126_is_sorted/typescript/0": {
+  "text": "```\nexport function is_sorted(lst: number[]): boolean {\n  for (let i = 1; i < lst.length; i++) {\n    if (lst[i] < lst[i - 1]) {\n      return false;\n    }\n  }\n  const counts = new Map<number, number>();\n  for (const x of lst) {\n    const c = (counts.get(x) ?? 0) + 1;\n    if (c > 2) {\n      return false;\n    }\n    counts.set(x, c);\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_127_intersection/typescript/0": {
+  "text": "```\nexport function intersection(interval1: [number, number], interval2: [number, number]): string {\n  const start = Math.max(interval1[0], interval2[0]);\n  const end = Math.min(interval1[1], interval2[1]);\n  const length = end - start;\n  if (length < 2) {\n    return \"NO\";\n  }\n  for (let d = 2; d * d <= length; d++) {\n    if (length % d === 0) {\n      return \"NO\";\n    }\n  }\n  return \"YES\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_128_prod_signs/typescript/0": {
+  "text": "```\nexport function prod_signs(arr: number[]): number | null {\n  if (arr.length === 0) {\n    return null;\n  }\n  let magnitude = 0;\n  let negatives = 0;\n  let hasZero = false;\n  for (const x of arr) {\n    if (x === 0) {\n      hasZero = true;\n    } else if (x < 0) {\n      negatives++;\n    }\n    magnitude += Math.abs(x);\n  }\n  if (hasZero) {\n    return 0;\n  }\n  return negatives % 2 === 0 ? magnitude : -magnitude;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_129_minPath/typescript/0": {
+  "text": "```\nexport function minPath(grid: number[][], k: number): number[] {\n  const n = grid.length;\n  // Locate the cell holding the value 1: the lexicographically smallest path starts there.\n  let r = 0;\n  let c = 0;\n  for (let i = 0; i < n; i++) {\n    for (let j = 0; j < grid[i].length; j++) {\n      if (grid[i][j] === 1) {\n        r = i;\n        c = j;\n      }\n    }\n  }\n  const result: number[] = [grid[r][c]];\n  const dirs: number[][] = [\n    [-1, 0],\n    [1, 0],\n    [0, -1],\n    [0, 1],\n  ];\n  for (let step = 1; step < k; step++) {\n    let bestR = -1;\n    let bestC = -1;\n    let bestVal = Infinity;\n    for (const d of dirs) {\n      const nr = r + d[0];\n      const nc = c + d[1];\n      if (nr < 0 || nc < 0 || nr >= n || nc >= grid[0].length) continue;\n      if (grid[nr][nc] < bestVal) {\n        bestVal = grid[nr][nc];\n        bestR = nr;\n        bestC = nc;\n      }\n    }\n    r = bestR;\n    c = bestC;\n    result.push(bestVal);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_12_longest/typescript/0": {
+  "text": "```\nexport function longest(strings: string[]): string | null {\n  if (strings.length === 0) {\n    return null;\n  }\n  let best = strings[0];\n  for (const s of strings) {\n    if (s.length > best.length) {\n      best = s;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_130_tri/typescript/0": {
+  "text": "```\nfunction triValue(i: number): number {\n  if (i % 2 === 0) {\n    return 1 + i / 2;\n  }\n  return triValue(i - 1) + triValue(i - 2) + triValue(i + 1);\n}\n\nexport function tri(n: number): number[] {\n  if (n === 0) {\n    return [1];\n  }\n  // Odd terms reference the next term, which is always even and has a closed form.\n  const result: number[] = [1, 3];\n  for (let i = 2; i <= n; i++) {\n    if (i % 2 === 0) {\n      result.push(1 + i / 2);\n    } else {\n      const next = 1 + (i + 1) / 2;\n      result.push(result[i - 1] + result[i - 2] + next);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_131_digits/typescript/0": {
+  "text": "```\nexport function digits(n: number): number {\n  let product = 1;\n  let hasOdd = false;\n  for (const ch of String(Math.abs(n))) {\n    const d = Number(ch);\n    if (d % 2 === 1) {\n      product *= d;\n      hasOdd = true;\n    }\n  }\n  return hasOdd ? product : 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/typescript/0": {
+  "text": "```\nexport function is_nested(string: string): boolean {\n  const openings: number[] = [];\n  const closings: number[] = [];\n  for (let i = 0; i < string.length; i++) {\n    if (string[i] === \"[\") {\n      openings.push(i);\n    } else if (string[i] === \"]\") {\n      closings.push(i);\n    }\n  }\n  closings.reverse();\n  let cnt = 0;\n  let i = 0;\n  for (const idx of openings) {\n    if (i < closings.length && idx < closings[i]) {\n      cnt++;\n      i++;\n    }\n  }\n  return cnt >= 2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/typescript/1": {
+  "text": "```\nexport function is_nested(string: string): boolean {\n  // A nested valid subsequence exists iff the string contains \"[\", \"[\", \"]\", \"]\"\n  // as a subsequence (the four chars form \"[[]]\", which is valid and nested).\n  let stage = 0;\n  const pattern = [\"[\", \"[\", \"]\", \"]\"];\n  for (const ch of string) {\n    if (stage < pattern.length && ch === pattern[stage]) {\n      stage++;\n    }\n  }\n  return stage === pattern.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_132_is_nested/typescript/2": {
+  "text": "```\nexport function is_nested(string: string): boolean {\n  // Match brackets with a stack; the string is nested if some matched pair\n  // contains another matched pair inside it.\n  const stack: boolean[] = []; // each entry: does this open bracket contain a matched pair?\n  let nested = false;\n  for (const ch of string) {\n    if (ch === \"[\") {\n      stack.push(false);\n    } else if (ch === \"]\") {\n      if (stack.length > 0) {\n        const hadInner = stack.pop() as boolean;\n        if (hadInner) {\n          nested = true;\n        }\n        if (stack.length > 0) {\n          stack[stack.length - 1] = true;\n        }\n      }\n    }\n  }\n  return nested;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_133_sum_squares/typescript/0": {
+  "text": "```\nexport function sum_squares(lst: number[]): number {\n  let total = 0;\n  for (const x of lst) {\n    const c = Math.ceil(x);\n    total += c * c;\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_134_check_if_last_char_is_a_letter/typescript/0": {
+  "text": "```\nexport function check_if_last_char_is_a_letter(txt: string): boolean {\n  if (txt.length === 0) {\n    return false;\n  }\n  const last = txt[txt.length - 1];\n  if (!/[a-zA-Z]/.test(last)) {\n    return false;\n  }\n  if (txt.length === 1) {\n    return true;\n  }\n  // The last character must be a standalone word: preceded by a space (or nothing).\n  return txt[txt.length - 2] === \" \";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_135_can_arrange/typescript/0": {
+  "text": "```\nexport function can_arrange(arr: number[]): number {\n  let result = -1;\n  for (let i = 1; i < arr.length; i++) {\n    if (arr[i] < arr[i - 1]) {\n      result = i;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_136_largest_smallest_integers/typescript/0": {
+  "text": "```\nexport function largest_smallest_integers(lst: number[]): [number | null, number | null] {\n  let a: number | null = null;\n  let b: number | null = null;\n  for (const x of lst) {\n    if (x < 0 && (a === null || x > a)) {\n      a = x;\n    }\n    if (x > 0 && (b === null || x < b)) {\n      b = x;\n    }\n  }\n  return [a, b];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_138_is_equal_to_sum_even/typescript/0": {
+  "text": "```\nexport function is_equal_to_sum_even(n: number): boolean {\n  return n >= 8 && n % 2 === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_139_special_factorial/typescript/0": {
+  "text": "```\nexport function special_factorial(n: number): number {\n  let result = BigInt(1);\n  let f = BigInt(1);\n  for (let k = 1; k <= n; k++) {\n    f = f * BigInt(k);\n    result = result * f;\n  }\n  return Number(result);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_13_greatest_common_divisor/typescript/0": {
+  "text": "```\nexport function greatest_common_divisor(a: number, b: number): number {\n  let x = Math.abs(a);\n  let y = Math.abs(b);\n  while (y !== 0) {\n    const t = x % y;\n    x = y;\n    y = t;\n  }\n  return x;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_140_fix_spaces/typescript/0": {
+  "text": "```\nexport function fix_spaces(text: string): string {\n  return text.replace(/ {3,}| {1,2}/g, (run) => (run.length > 2 ? \"-\" : \"_\".repeat(run.length)));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_141_file_name_check/typescript/0": {
+  "text": "```\nexport function file_name_check(file_name: string): string {\n  const digits = (file_name.match(/[0-9]/g) ?? []).length;\n  if (digits > 3) {\n    return \"No\";\n  }\n  const parts = file_name.split(\".\");\n  if (parts.length !== 2) {\n    return \"No\";\n  }\n  const [before, after] = parts;\n  if (before.length === 0) {\n    return \"No\";\n  }\n  if (!/^[a-zA-Z]/.test(before)) {\n    return \"No\";\n  }\n  if (after !== \"txt\" && after !== \"exe\" && after !== \"dll\") {\n    return \"No\";\n  }\n  return \"Yes\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_142_sum_squares/typescript/0": {
+  "text": "```\nexport function sum_squares(lst: number[]): number {\n  let total = 0;\n  for (let i = 0; i < lst.length; i++) {\n    const x = lst[i];\n    if (i % 3 === 0) {\n      total += x * x;\n    } else if (i % 4 === 0) {\n      total += x * x * x;\n    } else {\n      total += x;\n    }\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_143_words_in_sentence/typescript/0": {
+  "text": "```\nfunction isPrime(n: number): boolean {\n  if (n < 2) {\n    return false;\n  }\n  for (let d = 2; d * d <= n; d++) {\n    if (n % d === 0) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function words_in_sentence(sentence: string): string {\n  return sentence\n    .split(\" \")\n    .filter((w) => w.length > 0 && isPrime(w.length))\n    .join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_144_simplify/typescript/0": {
+  "text": "```\nexport function simplify(x: string, n: string): boolean {\n  const [a, b] = x.split(\"/\").map(Number);\n  const [c, d] = n.split(\"/\").map(Number);\n  const numerator = a * c;\n  const denominator = b * d;\n  return numerator % denominator === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_145_order_by_points/typescript/0": {
+  "text": "```\nfunction digitsSum(n: number): number {\n  let neg = 1;\n  let value = n;\n  if (value < 0) {\n    value = -value;\n    neg = -1;\n  }\n  const digits = String(value).split(\"\").map((d) => Number(d));\n  digits[0] = digits[0] * neg;\n  return digits.reduce((acc, d) => acc + d, 0);\n}\n\nexport function order_by_points(nums: number[]): number[] {\n  return nums\n    .map((value, index) => ({ value, index, key: digitsSum(value) }))\n    .sort((a, b) => (a.key !== b.key ? a.key - b.key : a.index - b.index))\n    .map((entry) => entry.value);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_146_specialFilter/typescript/0": {
+  "text": "```\nexport function specialFilter(nums: number[]): number {\n  let count = 0;\n  for (const n of nums) {\n    if (n <= 10) continue;\n    const s = String(Math.abs(n));\n    const first = s.charCodeAt(0) - 48;\n    const last = s.charCodeAt(s.length - 1) - 48;\n    if (first % 2 === 1 && last % 2 === 1) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_147_get_max_triples/typescript/0": {
+  "text": "```\nfunction choose3(m: bigint): bigint {\n  if (m < BigInt(3)) {\n    return BigInt(0);\n  }\n  return (m * (m - BigInt(1)) * (m - BigInt(2))) / BigInt(6);\n}\n\nexport function get_max_triples(n: number): number {\n  // a[i] = i*i - i + 1 (1-based). Modulo 3 it is 1 when i % 3 is 0 or 1, and 0 when i % 3 is 2.\n  // Only residues 0 and 1 occur, so a valid triple is three values with residue 0\n  // or three values with residue 1.\n  let c0 = BigInt(0);\n  let c1 = BigInt(0);\n  for (let i = 1; i <= n; i++) {\n    const r = i % 3;\n    if (r === 2) {\n      c0 += BigInt(1);\n    } else {\n      c1 += BigInt(1);\n    }\n  }\n  return Number(choose3(c0) + choose3(c1));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_149_sorted_list_sum/typescript/0": {
+  "text": "```\nexport function sorted_list_sum(lst: string[]): string[] {\n  return lst\n    .filter((s) => s.length % 2 === 0)\n    .sort((a, b) => {\n      if (a.length !== b.length) {\n        return a.length - b.length;\n      }\n      return a < b ? -1 : a > b ? 1 : 0;\n    });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_14_all_prefixes/typescript/0": {
+  "text": "```\nexport function all_prefixes(string: string): string[] {\n  const result: string[] = [];\n  for (let i = 1; i <= string.length; i++) {\n    result.push(string.slice(0, i));\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_150_x_or_y/typescript/0": {
+  "text": "```\nexport function x_or_y(n: number, x: number, y: number): number {\n  if (n < 2) {\n    return y;\n  }\n  for (let i = 2; i * i <= n; i++) {\n    if (n % i === 0) {\n      return y;\n    }\n  }\n  return x;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_152_compare/typescript/0": {
+  "text": "```\nexport function compare(game: number[], guess: number[]): number[] {\n  return game.map((g, i) => Math.abs(g - guess[i]));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_153_Strongest_Extension/typescript/0": {
+  "text": "```\nexport function Strongest_Extension(class_name: string, extensions: string[]): string {\n  let best = extensions[0];\n  let bestStrength = Number.NEGATIVE_INFINITY;\n  for (const ext of extensions) {\n    let cap = 0;\n    let sm = 0;\n    for (const ch of ext) {\n      if (ch >= \"A\" && ch <= \"Z\") {\n        cap++;\n      } else if (ch >= \"a\" && ch <= \"z\") {\n        sm++;\n      }\n    }\n    const strength = cap - sm;\n    if (strength > bestStrength) {\n      bestStrength = strength;\n      best = ext;\n    }\n  }\n  return `${class_name}.${best}`;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_154_cycpattern_check/typescript/0": {
+  "text": "```\nexport function cycpattern_check(a: string, b: string): boolean {\n  if (b.length === 0) {\n    return true;\n  }\n  for (let i = 0; i < b.length; i++) {\n    const rotation = b.slice(i) + b.slice(0, i);\n    if (a.includes(rotation)) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_155_even_odd_count/typescript/0": {
+  "text": "```\nexport function even_odd_count(num: number): [number, number] {\n  let even = 0;\n  let odd = 0;\n  for (const ch of String(Math.abs(num))) {\n    if (Number(ch) % 2 === 0) {\n      even++;\n    } else {\n      odd++;\n    }\n  }\n  return [even, odd];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_156_int_to_mini_roman/typescript/0": {
+  "text": "```\nexport function int_to_mini_roman(number: number): string {\n  const values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];\n  const symbols = [\"m\", \"cm\", \"d\", \"cd\", \"c\", \"xc\", \"l\", \"xl\", \"x\", \"ix\", \"v\", \"iv\", \"i\"];\n  let n = number;\n  let out = \"\";\n  for (let i = 0; i < values.length; i++) {\n    while (n >= values[i]) {\n      out += symbols[i];\n      n -= values[i];\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_157_right_angle_triangle/typescript/0": {
+  "text": "```\nexport function right_angle_triangle(a: number, b: number, c: number): boolean {\n  const sides = [a, b, c].sort((x, y) => x - y);\n  const [x, y, z] = sides;\n  if (x <= 0 || x + y <= z) {\n    return false;\n  }\n  return x * x + y * y === z * z;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_158_find_max/typescript/0": {
+  "text": "```\nexport function find_max(words: string[]): string {\n  let best = \"\";\n  let bestCount = -1;\n  for (const w of words) {\n    const count = new Set(w).size;\n    if (\n      count > bestCount ||\n      (count === bestCount && w < best)\n    ) {\n      best = w;\n      bestCount = count;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_159_eat/typescript/0": {
+  "text": "```\nexport function eat(number: number, need: number, remaining: number): number[] {\n  if (remaining >= need) {\n    return [number + need, remaining - need];\n  }\n  return [number + remaining, 0];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_15_string_sequence/typescript/0": {
+  "text": "```\nexport function string_sequence(n: number): string {\n  const parts: string[] = [];\n  for (let i = 0; i <= n; i++) {\n    parts.push(String(i));\n  }\n  return parts.join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_160_do_algebra/typescript/0": {
+  "text": "```\nexport function do_algebra(operator: string[], operand: number[]): number {\n  const vals: number[] = operand.slice();\n  const ops: string[] = operator.slice();\n\n  // Pass 1: exponentiation, right-associative (process from the right).\n  for (let i = ops.length - 1; i >= 0; i--) {\n    if (ops[i] === \"**\") {\n      vals[i] = Math.pow(vals[i], vals[i + 1]);\n      vals.splice(i + 1, 1);\n      ops.splice(i, 1);\n    }\n  }\n\n  // Pass 2: multiplication and floor division, left to right.\n  let i = 0;\n  while (i < ops.length) {\n    if (ops[i] === \"*\" || ops[i] === \"//\") {\n      const a = vals[i];\n      const b = vals[i + 1];\n      vals[i] = ops[i] === \"*\" ? a * b : Math.floor(a / b);\n      vals.splice(i + 1, 1);\n      ops.splice(i, 1);\n    } else {\n      i++;\n    }\n  }\n\n  // Pass 3: addition and subtraction, left to right.\n  let result = vals[0];\n  for (let j = 0; j < ops.length; j++) {\n    if (ops[j] === \"+\") {\n      result += vals[j + 1];\n    } else {\n      result -= vals[j + 1];\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_161_solve/typescript/0": {
+  "text": "```\nexport function solve(s: string): string {\n  const hasLetter = /[a-zA-Z]/.test(s);\n  if (!hasLetter) {\n    return s.split(\"\").reverse().join(\"\");\n  }\n  let result = \"\";\n  for (const ch of s) {\n    const lower = ch.toLowerCase();\n    const upper = ch.toUpperCase();\n    if (ch === lower && ch !== upper) {\n      result += upper;\n    } else if (ch === upper && ch !== lower) {\n      result += lower;\n    } else {\n      result += ch;\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_161_solve/typescript/1": {
+  "text": "```\nexport function solve(s: string): string {\n  const chars = Array.from(s);\n  const hasLetter = chars.some((ch) => /\\p{L}/u.test(ch));\n  if (!hasLetter) {\n    return chars.reverse().join(\"\");\n  }\n  return chars\n    .map((ch) => {\n      const lower = ch.toLowerCase();\n      const upper = ch.toUpperCase();\n      if (ch === lower && upper !== lower) {\n        return upper;\n      }\n      if (ch === upper && lower !== upper) {\n        return lower;\n      }\n      return ch;\n    })\n    .join(\"\");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_162_string_to_md5/typescript/0": {
+  "text": "```\nconst MD5_S: number[] = [\n  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,\n  5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,\n  4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,\n  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,\n];\n\nconst MD5_K: number[] = [];\nfor (let i = 0; i < 64; i++) {\n  MD5_K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0;\n}\n\nfunction utf8Bytes(s: string): number[] {\n  const out: number[] = [];\n  for (let i = 0; i < s.length; i++) {\n    let cp = s.charCodeAt(i);\n    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < s.length) {\n      const lo = s.charCodeAt(i + 1);\n      if (lo >= 0xdc00 && lo <= 0xdfff) {\n        cp = (cp - 0xd800) * 0x400 + (lo - 0xdc00) + 0x10000;\n        i++;\n      }\n    }\n    if (cp < 0x80) {\n      out.push(cp);\n    } else if (cp < 0x800) {\n      out.push(0xc0 | (cp >> 6), 0x80 | (cp & 63));\n    } else if (cp < 0x10000) {\n      out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));\n    } else {\n      out.push(\n        0xf0 | (cp >> 18),\n        0x80 | ((cp >> 12) & 63),\n        0x80 | ((cp >> 6) & 63),\n        0x80 | (cp & 63)\n      );\n    }\n  }\n  return out;\n}\n\nfunction rotl(x: number, c: number): number {\n  return (x << c) | (x >>> (32 - c));\n}\n\nfunction wordToHexLE(x: number): string {\n  let out = \"\";\n  for (let i = 0; i < 4; i++) {\n    const byte = (x >>> (8 * i)) & 0xff;\n    out += (\"0\" + byte.toString(16)).slice(-2);\n  }\n  return out;\n}\n\nexport function string_to_md5(text: string): string | null {\n  if (text.length === 0) {\n    return null;\n  }\n\n  const msg = utf8Bytes(text);\n  const bitLen = msg.length * 8;\n  msg.push(0x80);\n  while (msg.length % 64 !== 56) {\n    msg.push(0);\n  }\n  const low = bitLen % 4294967296;\n  const high = Math.floor(bitLen / 4294967296);\n  for (let i = 0; i < 4; i++) {\n    msg.push((low >>> (8 * i)) & 0xff);\n  }\n  for (let i = 0; i < 4; i++) {\n    msg.push((high >>> (8 * i)) & 0xff);\n  }\n\n  let a0 = 0x67452301 | 0;\n  let b0 = 0xefcdab89 | 0;\n  let c0 = 0x98badcfe | 0;\n  let d0 = 0x10325476 | 0;\n\n  for (let off = 0; off < msg.length; off += 64) {\n    const M: number[] = [];\n    for (let j = 0; j < 16; j++) {\n      const p = off + j * 4;\n      M[j] = msg[p] | (msg[p + 1] << 8) | (msg[p + 2] << 16) | (msg[p + 3] << 24);\n    }\n\n    let A = a0;\n    let B = b0;\n    let C = c0;\n    let D = d0;\n\n    for (let i = 0; i < 64; i++) {\n      let F: number;\n      let g: number;\n      if (i < 16) {\n        F = (B & C) | (~B & D);\n        g = i;\n      } else if (i < 32) {\n        F = (B & D) | (C & ~D);\n        g = (5 * i + 1) % 16;\n      } else if (i < 48) {\n        F = B ^ C ^ D;\n        g = (3 * i + 5) % 16;\n      } else {\n        F = C ^ (B | ~D);\n        g = (7 * i) % 16;\n      }\n      F = (F + A + MD5_K[i] + M[g]) | 0;\n      A = D;\n      D = C;\n      C = B;\n      B = (B + rotl(F, MD5_S[i])) | 0;\n    }\n\n    a0 = (a0 + A) | 0;\n    b0 = (b0 + B) | 0;\n    c0 = (c0 + C) | 0;\n    d0 = (d0 + D) | 0;\n  }\n\n  return wordToHexLE(a0) + wordToHexLE(b0) + wordToHexLE(c0) + wordToHexLE(d0);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_163_generate_integers/typescript/0": {
+  "text": "```\nexport function generate_integers(a: number, b: number): number[] {\n  const lo = Math.min(a, b);\n  const hi = Math.max(a, b);\n  const result: number[] = [];\n  for (let d = Math.max(lo, 1); d <= Math.min(hi, 9); d++) {\n    if (d % 2 === 0) {\n      result.push(d);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_16_count_distinct_characters/typescript/0": {
+  "text": "```\nexport function count_distinct_characters(string: string): number {\n  return new Set(string.toLowerCase().split(\"\")).size;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_17_parse_music/typescript/0": {
+  "text": "```\nexport function parse_music(music_string: string): number[] {\n  const result: number[] = [];\n  for (const token of music_string.split(\" \")) {\n    if (token === \"\") {\n      continue;\n    }\n    if (token === \"o\") {\n      result.push(4);\n    } else if (token === \"o|\") {\n      result.push(2);\n    } else if (token === \".|\") {\n      result.push(1);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_18_how_many_times/typescript/0": {
+  "text": "```\nexport function how_many_times(string: string, substring: string): number {\n  if (substring.length === 0) return 0;\n  let count = 0;\n  for (let i = 0; i + substring.length <= string.length; i++) {\n    if (string.startsWith(substring, i)) count++;\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_19_sort_numbers/typescript/0": {
+  "text": "```\nconst NUMBER_WORDS: string[] = [\n  \"zero\",\n  \"one\",\n  \"two\",\n  \"three\",\n  \"four\",\n  \"five\",\n  \"six\",\n  \"seven\",\n  \"eight\",\n  \"nine\",\n];\n\nexport function sort_numbers(numbers: string): string {\n  const words = numbers.split(\" \").filter((w) => w.length > 0);\n  words.sort((a, b) => NUMBER_WORDS.indexOf(a) - NUMBER_WORDS.indexOf(b));\n  return words.join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_1_separate_paren_groups/typescript/0": {
+  "text": "```\nexport function separate_paren_groups(paren_string: string): string[] {\n  const result: string[] = [];\n  let current = \"\";\n  let depth = 0;\n  for (const ch of paren_string) {\n    if (ch === \" \") {\n      continue;\n    }\n    if (ch === \"(\") {\n      depth += 1;\n      current += ch;\n    } else if (ch === \")\") {\n      depth -= 1;\n      current += ch;\n      if (depth === 0) {\n        result.push(current);\n        current = \"\";\n      }\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_20_find_closest_elements/typescript/0": {
+  "text": "```\nexport function find_closest_elements(numbers: number[]): [number, number] {\n  const sorted = [...numbers].sort((a, b) => a - b);\n  let bestA = sorted[0];\n  let bestB = sorted[1];\n  let bestDiff = Math.abs(bestB - bestA);\n  for (let i = 1; i + 1 < sorted.length; i++) {\n    const diff = sorted[i + 1] - sorted[i];\n    if (diff < bestDiff) {\n      bestDiff = diff;\n      bestA = sorted[i];\n      bestB = sorted[i + 1];\n    }\n  }\n  return [bestA, bestB];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_21_rescale_to_unit/typescript/0": {
+  "text": "```\nexport function rescale_to_unit(numbers: number[]): number[] {\n  const lo = Math.min(...numbers);\n  const hi = Math.max(...numbers);\n  const range = hi - lo;\n  return numbers.map((x) => (range === 0 ? 0 : (x - lo) / range));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_23_strlen/typescript/0": {
+  "text": "```\nexport function strlen(string: string): number {\n  return string.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_24_largest_divisor/typescript/0": {
+  "text": "```\nexport function largest_divisor(n: number): number {\n  for (let d = Math.floor(n) - 1; d >= 1; d--) {\n    if (n % d === 0) {\n      return d;\n    }\n  }\n  return 1;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_25_factorize/typescript/0": {
+  "text": "```\nexport function factorize(n: number): number[] {\n  const factors: number[] = [];\n  let m = Math.abs(n);\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      factors.push(p);\n      m /= p;\n    }\n  }\n  if (m > 1) {\n    factors.push(m);\n  }\n  return factors;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_26_remove_duplicates/typescript/0": {
+  "text": "```\nexport function remove_duplicates(numbers: number[]): number[] {\n  const counts = new Map<number, number>();\n  for (const n of numbers) {\n    counts.set(n, (counts.get(n) ?? 0) + 1);\n  }\n  return numbers.filter((n) => counts.get(n) === 1);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_27_flip_case/typescript/0": {
+  "text": "```\nexport function flip_case(string: string): string {\n  let out = \"\";\n  for (const ch of string) {\n    const lower = ch.toLowerCase();\n    const upper = ch.toUpperCase();\n    if (ch === lower && ch !== upper) {\n      out += upper;\n    } else if (ch === upper && ch !== lower) {\n      out += lower;\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_28_concatenate/typescript/0": {
+  "text": "```\nexport function concatenate(strings: string[]): string {\n  return strings.join(\"\");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_29_filter_by_prefix/typescript/0": {
+  "text": "```\nexport function filter_by_prefix(strings: string[], prefix: string): string[] {\n  return strings.filter((s) => s.startsWith(prefix));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_2_truncate_number/typescript/0": {
+  "text": "```\nexport function truncate_number(number: number): number {\n  return number - Math.trunc(number);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_30_get_positive/typescript/0": {
+  "text": "```\nexport function get_positive(l: number[]): number[] {\n  return l.filter((x) => x > 0);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_31_is_prime/typescript/0": {
+  "text": "```\nexport function is_prime(n: number): boolean {\n  if (!Number.isInteger(n) || n < 2) return false;\n  if (n < 4) return true;\n  if (n % 2 === 0 || n % 3 === 0) return false;\n  for (let i = 5; i * i <= n; i += 6) {\n    if (n % i === 0 || n % (i + 2) === 0) return false;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_33_sort_third/typescript/0": {
+  "text": "```\nexport function sort_third(l: number[]): number[] {\n  const thirds: number[] = [];\n  for (let i = 0; i < l.length; i += 3) {\n    thirds.push(l[i]);\n  }\n  thirds.sort((a, b) => a - b);\n  const result = l.slice();\n  let k = 0;\n  for (let i = 0; i < result.length; i += 3) {\n    result[i] = thirds[k++];\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_34_unique/typescript/0": {
+  "text": "```\nexport function unique(l: number[]): number[] {\n  return [...new Set(l)].sort((a, b) => a - b);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_35_max_element/typescript/0": {
+  "text": "```\nexport function max_element(l: number[]): number {\n  let best = l[0];\n  for (const x of l) {\n    if (x > best) {\n      best = x;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_36_fizz_buzz/typescript/0": {
+  "text": "```\nexport function fizz_buzz(n: number): number {\n  let count = 0;\n  for (let i = 1; i < n; i++) {\n    if (i % 11 === 0 || i % 13 === 0) {\n      for (const ch of String(i)) {\n        if (ch === \"7\") count++;\n      }\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_37_sort_even/typescript/0": {
+  "text": "```\nexport function sort_even(l: number[]): number[] {\n  const evens: number[] = [];\n  for (let i = 0; i < l.length; i += 2) {\n    evens.push(l[i]);\n  }\n  evens.sort((a, b) => a - b);\n  const result = l.slice();\n  let k = 0;\n  for (let i = 0; i < result.length; i += 2) {\n    result[i] = evens[k++];\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_39_prime_fib/typescript/0": {
+  "text": "```\nfunction modPow(base: bigint, exp: bigint, mod: bigint): bigint {\n  let result = 1n;\n  base %= mod;\n  while (exp > 0n) {\n    if (exp & 1n) {\n      result = (result * base) % mod;\n    }\n    base = (base * base) % mod;\n    exp >>= 1n;\n  }\n  return result;\n}\n\nfunction isPrimeBig(n: bigint): boolean {\n  if (n < 2n) {\n    return false;\n  }\n  const smallPrimes = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n];\n  for (const p of smallPrimes) {\n    if (n === p) {\n      return true;\n    }\n    if (n % p === 0n) {\n      return false;\n    }\n  }\n  let d = n - 1n;\n  let r = 0;\n  while (d % 2n === 0n) {\n    d /= 2n;\n    r++;\n  }\n  for (const a of smallPrimes) {\n    let x = modPow(a, d, n);\n    if (x === 1n || x === n - 1n) {\n      continue;\n    }\n    let composite = true;\n    for (let i = 1; i < r; i++) {\n      x = (x * x) % n;\n      if (x === n - 1n) {\n        composite = false;\n        break;\n      }\n    }\n    if (composite) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function prime_fib(n: number): number {\n  if (!Number.isInteger(n) || n < 1) {\n    throw new Error(\"n must be a positive integer\");\n  }\n  let a = 0n;\n  let b = 1n;\n  let count = 0;\n  while (true) {\n    const next = a + b;\n    a = b;\n    b = next;\n    // a is the next Fibonacci number in sequence (1, 1, 2, 3, ...)\n    if (isPrimeBig(a)) {\n      count++;\n      if (count === n) {\n        return Number(a);\n      }\n    }\n  }\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_3_below_zero/typescript/0": {
+  "text": "```\nexport function below_zero(operations: number[]): boolean {\n  let balance = 0;\n  for (const op of operations) {\n    balance += op;\n    if (balance < 0) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_40_triples_sum_to_zero/typescript/0": {
+  "text": "```\nexport function triples_sum_to_zero(l: number[]): boolean {\n  const n = l.length;\n  for (let i = 0; i < n; i++) {\n    for (let j = i + 1; j < n; j++) {\n      for (let k = j + 1; k < n; k++) {\n        if (l[i] + l[j] + l[k] === 0) {\n          return true;\n        }\n      }\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_41_car_race_collision/typescript/0": {
+  "text": "```\nexport function car_race_collision(n: number): number {\n  return n * n;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_42_incr_list/typescript/0": {
+  "text": "```\nexport function incr_list(l: number[]): number[] {\n  return l.map((x) => x + 1);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_43_pairs_sum_to_zero/typescript/0": {
+  "text": "```\nexport function pairs_sum_to_zero(l: number[]): boolean {\n  for (let i = 0; i < l.length; i++) {\n    for (let j = i + 1; j < l.length; j++) {\n      if (l[i] + l[j] === 0) {\n        return true;\n      }\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_44_change_base/typescript/0": {
+  "text": "```\nexport function change_base(x: number, base: number): string {\n  if (x === 0) {\n    return \"0\";\n  }\n  let n = x;\n  let out = \"\";\n  while (n > 0) {\n    out = String(n % base) + out;\n    n = Math.floor(n / base);\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_45_triangle_area/typescript/0": {
+  "text": "```\nexport function triangle_area(a: number, h: number): number {\n  return (a * h) / 2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_46_fib4/typescript/0": {
+  "text": "```\nexport function fib4(n: number): number {\n  const base = [0, 0, 2, 0];\n  if (n < 4) {\n    return base[n];\n  }\n  let a = 0;\n  let b = 0;\n  let c = 2;\n  let d = 0;\n  for (let i = 4; i <= n; i++) {\n    const next = a + b + c + d;\n    a = b;\n    b = c;\n    c = d;\n    d = next;\n  }\n  return d;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_47_median/typescript/0": {
+  "text": "```\nexport function median(l: number[]): number {\n  if (l.length === 0) {\n    throw new Error(\"median of empty list\");\n  }\n  const sorted = [...l].sort((a, b) => a - b);\n  const mid = Math.floor(sorted.length / 2);\n  if (sorted.length % 2 === 1) {\n    return sorted[mid];\n  }\n  return (sorted[mid - 1] + sorted[mid]) / 2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_48_is_palindrome/typescript/0": {
+  "text": "```\nexport function is_palindrome(text: string): boolean {\n  let i = 0;\n  let j = text.length - 1;\n  while (i < j) {\n    if (text[i] !== text[j]) {\n      return false;\n    }\n    i++;\n    j--;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_49_modp/typescript/0": {
+  "text": "```\nfunction mulmod(a: number, b: number, p: number): number {\n  // Computes (a * b) mod p without losing precision for large values.\n  let result = 0;\n  let x = a % p;\n  let y = b % p;\n  while (y > 0) {\n    if (y % 2 === 1) {\n      result = (result + x) % p;\n    }\n    x = (x * 2) % p;\n    y = Math.floor(y / 2);\n  }\n  return result;\n}\n\nexport function modp(n: number, p: number): number {\n  if (p === 1) return 0;\n  let result = 1 % p;\n  let base = 2 % p;\n  let e = n;\n  while (e > 0) {\n    if (e % 2 === 1) {\n      result = mulmod(result, base, p);\n    }\n    base = mulmod(base, base, p);\n    e = Math.floor(e / 2);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_4_mean_absolute_deviation/typescript/0": {
+  "text": "```\nexport function mean_absolute_deviation(numbers: number[]): number {\n  if (numbers.length === 0) {\n    return NaN;\n  }\n  const mean = numbers.reduce((a, b) => a + b, 0) / numbers.length;\n  let total = 0;\n  for (const x of numbers) {\n    total += Math.abs(x - mean);\n  }\n  return total / numbers.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_51_remove_vowels/typescript/0": {
+  "text": "```\nexport function remove_vowels(text: string): string {\n  return text.replace(/[aeiouAEIOU]/g, \"\");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_52_below_threshold/typescript/0": {
+  "text": "```\nexport function below_threshold(l: number[], t: number): boolean {\n  return l.every((x) => x < t);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_53_add/typescript/0": {
+  "text": "```\nexport function add(x: number, y: number): number {\n  return x + y;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_54_same_chars/typescript/0": {
+  "text": "```\nexport function same_chars(s0: string, s1: string): boolean {\n  const set0 = new Set<string>(s0.split(\"\"));\n  const set1 = new Set<string>(s1.split(\"\"));\n  if (set0.size !== set1.size) return false;\n  for (const ch of set0) {\n    if (!set1.has(ch)) return false;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_55_fib/typescript/0": {
+  "text": "```\nexport function fib(n: number): number {\n  if (n <= 0) {\n    return 0;\n  }\n  let a = 0;\n  let b = 1;\n  for (let i = 1; i < n; i++) {\n    const next = a + b;\n    a = b;\n    b = next;\n  }\n  return b;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_56_correct_bracketing/typescript/0": {
+  "text": "```\nexport function correct_bracketing(brackets: string): boolean {\n  let depth = 0;\n  for (const c of brackets) {\n    if (c === \"<\") {\n      depth++;\n    } else if (c === \">\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_57_monotonic/typescript/0": {
+  "text": "```\nexport function monotonic(l: number[]): boolean {\n  let inc = true;\n  let dec = true;\n  for (let i = 1; i < l.length; i++) {\n    if (l[i] > l[i - 1]) {\n      dec = false;\n    }\n    if (l[i] < l[i - 1]) {\n      inc = false;\n    }\n  }\n  return inc || dec;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_58_common/typescript/0": {
+  "text": "```\nexport function common(l1: number[], l2: number[]): number[] {\n  const s2 = new Set<number>(l2);\n  const seen = new Set<number>();\n  const result: number[] = [];\n  for (const x of l1) {\n    if (s2.has(x) && !seen.has(x)) {\n      seen.add(x);\n      result.push(x);\n    }\n  }\n  result.sort((a, b) => a - b);\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_59_largest_prime_factor/typescript/0": {
+  "text": "```\nexport function largest_prime_factor(n: number): number {\n  let largest = 1;\n  let m = n;\n  while (m % 2 === 0) {\n    largest = 2;\n    m = m / 2;\n  }\n  for (let p = 3; p * p <= m; p += 2) {\n    while (m % p === 0) {\n      largest = p;\n      m = m / p;\n    }\n  }\n  if (m > 1) {\n    largest = m;\n  }\n  return largest;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_5_intersperse/typescript/0": {
+  "text": "```\nexport function intersperse(numbers: number[], delimeter: number): number[] {\n  const result: number[] = [];\n  for (let i = 0; i < numbers.length; i++) {\n    if (i > 0) {\n      result.push(delimeter);\n    }\n    result.push(numbers[i]);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_60_sum_to_n/typescript/0": {
+  "text": "```\nexport function sum_to_n(n: number): number {\n  let total = 0;\n  for (let i = 1; i <= n; i++) {\n    total += i;\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_61_correct_bracketing/typescript/0": {
+  "text": "```\nexport function correct_bracketing(brackets: string): boolean {\n  let depth = 0;\n  for (const ch of brackets) {\n    if (ch === \"(\") {\n      depth++;\n    } else if (ch === \")\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_62_derivative/typescript/0": {
+  "text": "```\nexport function derivative(xs: number[]): number[] {\n  const result: number[] = [];\n  for (let i = 1; i < xs.length; i++) {\n    result.push(xs[i] * i);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_63_fibfib/typescript/0": {
+  "text": "```\nexport function fibfib(n: number): number {\n  if (n <= 0) {\n    return 0;\n  }\n  if (n === 1) {\n    return 0;\n  }\n  if (n === 2) {\n    return 1;\n  }\n  let a = 0;\n  let b = 0;\n  let c = 1;\n  for (let i = 3; i <= n; i++) {\n    const next = a + b + c;\n    a = b;\n    b = c;\n    c = next;\n  }\n  return c;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_64_vowels_count/typescript/0": {
+  "text": "```\nexport function vowels_count(s: string): number {\n  const lower = s.toLowerCase();\n  let count = 0;\n  for (let i = 0; i < lower.length; i++) {\n    const c = lower[i];\n    if (\"aeiou\".includes(c)) {\n      count++;\n    } else if (c === \"y\" && i === lower.length - 1) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_65_circular_shift/typescript/0": {
+  "text": "```\nexport function circular_shift(x: number, shift: number): string {\n  const s = String(x);\n  const n = s.length;\n  if (shift > n) {\n    return s.split(\"\").reverse().join(\"\");\n  }\n  const k = n - shift;\n  return s.slice(k) + s.slice(0, k);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_66_digitSum/typescript/0": {
+  "text": "```\nexport function digitSum(s: string): number {\n  let total = 0;\n  for (let i = 0; i < s.length; i++) {\n    const code = s.charCodeAt(i);\n    if (code >= 65 && code <= 90) {\n      total += code;\n    }\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_67_fruit_distribution/typescript/0": {
+  "text": "```\nexport function fruit_distribution(s: string, n: number): number {\n  const matches = s.match(/\\d+/g) ?? [];\n  let total = 0;\n  for (const m of matches) {\n    total += parseInt(m, 10);\n  }\n  return n - total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_68_pluck/typescript/0": {
+  "text": "```\nexport function pluck(arr: number[]): number[] {\n  let bestVal = Infinity;\n  let bestIdx = -1;\n  for (let i = 0; i < arr.length; i++) {\n    const v = arr[i];\n    if (v % 2 === 0 && v < bestVal) {\n      bestVal = v;\n      bestIdx = i;\n    }\n  }\n  return bestIdx === -1 ? [] : [bestVal, bestIdx];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_69_search/typescript/0": {
+  "text": "```\nexport function search(lst: number[]): number {\n  const counts = new Map<number, number>();\n  for (const x of lst) {\n    counts.set(x, (counts.get(x) ?? 0) + 1);\n  }\n  let best = -1;\n  for (const [value, freq] of counts) {\n    if (value > 0 && freq >= value && value > best) {\n      best = value;\n    }\n  }\n  return best;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_6_parse_nested_parens/typescript/0": {
+  "text": "```\nexport function parse_nested_parens(paren_string: string): number[] {\n  return paren_string\n    .split(\" \")\n    .filter((g) => g.length > 0)\n    .map((group) => {\n      let depth = 0;\n      let maxDepth = 0;\n      for (const ch of group) {\n        if (ch === \"(\") {\n          depth++;\n          if (depth > maxDepth) maxDepth = depth;\n        } else if (ch === \")\") {\n          depth--;\n        }\n      }\n      return maxDepth;\n    });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_70_strange_sort_list/typescript/0": {
+  "text": "```\nexport function strange_sort_list(lst: number[]): number[] {\n  const sorted = lst.slice().sort((a, b) => a - b);\n  const result: number[] = [];\n  let lo = 0;\n  let hi = sorted.length - 1;\n  let takeMin = true;\n  while (lo <= hi) {\n    if (takeMin) {\n      result.push(sorted[lo]);\n      lo++;\n    } else {\n      result.push(sorted[hi]);\n      hi--;\n    }\n    takeMin = !takeMin;\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_71_triangle_area/typescript/0": {
+  "text": "```\nexport function triangle_area(a: number, b: number, c: number): number {\n  if (a + b <= c || a + c <= b || b + c <= a) {\n    return -1;\n  }\n  const s = (a + b + c) / 2;\n  const area = Math.sqrt(s * (s - a) * (s - b) * (s - c));\n  return Math.round(area * 100) / 100;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_72_will_it_fly/typescript/0": {
+  "text": "```\nexport function will_it_fly(q: number[], w: number): boolean {\n  let i = 0;\n  let j = q.length - 1;\n  while (i < j) {\n    if (q[i] !== q[j]) {\n      return false;\n    }\n    i++;\n    j--;\n  }\n  const total = q.reduce((a, b) => a + b, 0);\n  return total <= w;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_73_smallest_change/typescript/0": {
+  "text": "```\nexport function smallest_change(arr: number[]): number {\n  let changes = 0;\n  let i = 0;\n  let j = arr.length - 1;\n  while (i < j) {\n    if (arr[i] !== arr[j]) {\n      changes++;\n    }\n    i++;\n    j--;\n  }\n  return changes;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_74_total_match/typescript/0": {
+  "text": "```\nexport function total_match(lst1: string[], lst2: string[]): string[] {\n  let c1 = 0;\n  for (const s of lst1) c1 += s.length;\n  let c2 = 0;\n  for (const s of lst2) c2 += s.length;\n  return c1 <= c2 ? lst1 : lst2;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_75_is_multiply_prime/typescript/0": {
+  "text": "```\nexport function is_multiply_prime(a: number): boolean {\n  let m = a;\n  let count = 0;\n  if (m < 2) {\n    return false;\n  }\n  for (let p = 2; p * p <= m; p++) {\n    while (m % p === 0) {\n      m = m / p;\n      count++;\n    }\n  }\n  if (m > 1) {\n    count++;\n  }\n  return count === 3;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_76_is_simple_power/typescript/0": {
+  "text": "```\nexport function is_simple_power(x: number, n: number): boolean {\n  if (x === 1) {\n    return true;\n  }\n  if (n === 1 || n === 0 || n === -1) {\n    if (n === 1) {\n      return false;\n    }\n    if (n === 0) {\n      return x === 0;\n    }\n    // n === -1: powers are 1 and -1; 1 already handled above\n    return x === -1;\n  }\n  let p = n;\n  while (Math.abs(p) <= Math.abs(x)) {\n    if (p === x) {\n      return true;\n    }\n    p *= n;\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_77_iscube/typescript/0": {
+  "text": "```\nexport function iscube(a: number): boolean {\n  const r = Math.round(Math.cbrt(a));\n  for (const c of [r - 1, r, r + 1]) {\n    if (c * c * c === a) {\n      return true;\n    }\n  }\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_78_hex_key/typescript/0": {
+  "text": "```\nexport function hex_key(num: string): number {\n  const primes = \"2357BD\";\n  let count = 0;\n  for (let i = 0; i < num.length; i++) {\n    if (primes.indexOf(num.charAt(i)) !== -1) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_79_decimal_to_binary/typescript/0": {
+  "text": "```\nexport function decimal_to_binary(decimal: number): string {\n  return \"db\" + decimal.toString(2) + \"db\";\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_7_filter_by_substring/typescript/0": {
+  "text": "```\nexport function filter_by_substring(strings: string[], substring: string): string[] {\n  return strings.filter((s) => s.includes(substring));\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_80_is_happy/typescript/0": {
+  "text": "```\nexport function is_happy(s: string): boolean {\n  if (s.length < 3) {\n    return false;\n  }\n  for (let i = 0; i + 2 < s.length; i++) {\n    const a = s[i];\n    const b = s[i + 1];\n    const c = s[i + 2];\n    if (a === b || b === c || a === c) {\n      return false;\n    }\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_81_numerical_letter_grade/typescript/0": {
+  "text": "```\nexport function numerical_letter_grade(grades: number[]): string[] {\n  return grades.map((g) => {\n    if (g === 4.0) return \"A+\";\n    if (g > 3.7) return \"A\";\n    if (g > 3.3) return \"A-\";\n    if (g > 3.0) return \"B+\";\n    if (g > 2.7) return \"B\";\n    if (g > 2.3) return \"B-\";\n    if (g > 2.0) return \"C+\";\n    if (g > 1.7) return \"C\";\n    if (g > 1.3) return \"C-\";\n    if (g > 1.0) return \"D+\";\n    if (g > 0.7) return \"D\";\n    if (g > 0.0) return \"D-\";\n    return \"E\";\n  });\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_82_prime_length/typescript/0": {
+  "text": "```\nexport function prime_length(string: string): boolean {\n  const n = string.length;\n  if (n < 2) return false;\n  for (let i = 2; i * i <= n; i++) {\n    if (n % i === 0) return false;\n  }\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_83_starts_one_ends/typescript/0": {
+  "text": "```\nexport function starts_one_ends(n: number): number {\n  if (n <= 0) {\n    return 0;\n  }\n  if (n === 1) {\n    return 1;\n  }\n  // Starts with 1: 10^(n-1). Ends with 1: 9 * 10^(n-2). Both: 10^(n-2).\n  const ten = BigInt(10);\n  const k = BigInt(n - 2);\n  const startsWith = ten ** BigInt(n - 1);\n  const endsWith = BigInt(9) * ten ** k;\n  const both = ten ** k;\n  return Number(startsWith + endsWith - both);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_84_solve/typescript/0": {
+  "text": "```\nexport function solve(N: number): string {\n  let sum = 0;\n  for (const d of String(N)) {\n    sum += Number(d);\n  }\n  return sum.toString(2);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_85_add/typescript/0": {
+  "text": "```\nexport function add(lst: number[]): number {\n  let total = 0;\n  for (let i = 1; i < lst.length; i += 2) {\n    if (lst[i] % 2 === 0) {\n      total += lst[i];\n    }\n  }\n  return total;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_86_anti_shuffle/typescript/0": {
+  "text": "```\nexport function anti_shuffle(s: string): string {\n  return s\n    .split(\" \")\n    .map((word) => word.split(\"\").sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0)).join(\"\"))\n    .join(\" \");\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_87_get_row/typescript/0": {
+  "text": "```\nexport function get_row(lst: number[][], x: number): [number, number][] {\n  const result: [number, number][] = [];\n  for (let r = 0; r < lst.length; r++) {\n    const row = lst[r];\n    const cols: number[] = [];\n    for (let c = 0; c < row.length; c++) {\n      if (row[c] === x) {\n        cols.push(c);\n      }\n    }\n    cols.sort((a, b) => b - a);\n    for (const c of cols) {\n      result.push([r, c]);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_88_sort_array/typescript/0": {
+  "text": "```\nexport function sort_array(array: number[]): number[] {\n  const copy = [...array];\n  if (copy.length === 0) {\n    return copy;\n  }\n  const edgeSum = copy[0] + copy[copy.length - 1];\n  copy.sort((a, b) => a - b);\n  if (edgeSum % 2 === 0) {\n    copy.reverse();\n  }\n  return copy;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_89_encrypt/typescript/0": {
+  "text": "```\nexport function encrypt(s: string): string {\n  let out = \"\";\n  for (const ch of s) {\n    const code = ch.charCodeAt(0);\n    if (code >= 97 && code <= 122) {\n      out += String.fromCharCode(((code - 97 + 4) % 26) + 97);\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_8_sum_product/typescript/0": {
+  "text": "```\nexport function sum_product(numbers: number[]): [number, number] {\n  let sum = 0;\n  let product = 1;\n  for (const n of numbers) {\n    sum += n;\n    product *= n;\n  }\n  return [sum, product];\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_90_next_smallest/typescript/0": {
+  "text": "```\nexport function next_smallest(lst: number[]): number | null {\n  const sorted = lst.slice().sort((a, b) => a - b);\n  for (let i = 1; i < sorted.length; i++) {\n    if (sorted[i] !== sorted[0]) {\n      return sorted[i];\n    }\n  }\n  return null;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_91_is_bored/typescript/0": {
+  "text": "```\nexport function is_bored(S: string): number {\n  const sentences = S.split(/[.?!]/);\n  let count = 0;\n  for (const sentence of sentences) {\n    if (/^I\\s/.test(sentence.trimStart())) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_93_encode/typescript/0": {
+  "text": "```\nexport function encode(message: string): string {\n  const vowelShift: Record<string, string> = {\n    a: \"c\",\n    e: \"g\",\n    i: \"k\",\n    o: \"q\",\n    u: \"w\",\n  };\n  let out = \"\";\n  for (const ch of message) {\n    const lower = ch.toLowerCase();\n    let replaced = ch;\n    if (lower in vowelShift) {\n      const shifted = vowelShift[lower];\n      replaced = ch === lower ? shifted : shifted.toUpperCase();\n    }\n    const isUpper = replaced === replaced.toUpperCase() && replaced !== replaced.toLowerCase();\n    out += isUpper ? replaced.toLowerCase() : replaced.toUpperCase().length === 1 && replaced !== replaced.toUpperCase() ? replaced.toUpperCase() : replaced;\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_94_skjkasdkd/typescript/0": {
+  "text": "```\nfunction isPrime(n: number): boolean {\n  if (n < 2) {\n    return false;\n  }\n  if (n < 4) {\n    return true;\n  }\n  if (n % 2 === 0 || n % 3 === 0) {\n    return false;\n  }\n  for (let i = 5; i * i <= n; i += 6) {\n    if (n % i === 0 || n % (i + 2) === 0) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function skjkasdkd(lst: number[]): number {\n  let largest = -1;\n  for (const x of lst) {\n    if (x > largest && isPrime(x)) {\n      largest = x;\n    }\n  }\n  if (largest < 0) {\n    return 0;\n  }\n  let sum = 0;\n  for (const ch of String(largest)) {\n    sum += Number(ch);\n  }\n  return sum;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_95_check_dict_case/typescript/0": {
+  "text": "```\nfunction isLowerKey(k: string): boolean {\n  return k === k.toLowerCase() && k !== k.toUpperCase();\n}\n\nfunction isUpperKey(k: string): boolean {\n  return k === k.toUpperCase() && k !== k.toLowerCase();\n}\n\nexport function check_dict_case(dict: Record<string, string>): boolean {\n  const keys = Object.keys(dict);\n  if (keys.length === 0) return false;\n  if (keys.every(isLowerKey)) return true;\n  if (keys.every(isUpperKey)) return true;\n  return false;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_96_count_up_to/typescript/0": {
+  "text": "```\nexport function count_up_to(n: number): number[] {\n  const result: number[] = [];\n  for (let i = 2; i < n; i++) {\n    let isPrime = true;\n    for (let d = 2; d * d <= i; d++) {\n      if (i % d === 0) {\n        isPrime = false;\n        break;\n      }\n    }\n    if (isPrime) {\n      result.push(i);\n    }\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_97_multiply/typescript/0": {
+  "text": "```\nexport function multiply(a: number, b: number): number {\n  const unitA = Math.abs(a) % 10;\n  const unitB = Math.abs(b) % 10;\n  return unitA * unitB;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_98_count_upper/typescript/0": {
+  "text": "```\nexport function count_upper(s: string): number {\n  const vowels = \"AEIOU\";\n  let count = 0;\n  for (let i = 0; i < s.length; i += 2) {\n    if (vowels.includes(s[i])) {\n      count++;\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_99_closest_integer/typescript/0": {
+  "text": "```\nexport function closest_integer(value: string): number {\n  const x = parseFloat(value);\n  const f = Math.floor(x);\n  const diff = x - f;\n  let result: number;\n  if (diff > 0.5) {\n    result = f + 1;\n  } else if (diff < 0.5) {\n    result = f;\n  } else {\n    // Equidistant: round away from zero.\n    result = x > 0 ? f + 1 : f;\n  }\n  return result + 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "hep_9_rolling_max/typescript/0": {
+  "text": "```\nexport function rolling_max(numbers: number[]): number[] {\n  const result: number[] = [];\n  let best: number | undefined = undefined;\n  for (const n of numbers) {\n    if (best === undefined || n > best) {\n      best = n;\n    }\n    result.push(best);\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ }
+}

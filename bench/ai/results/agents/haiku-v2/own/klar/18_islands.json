@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn count_islands(grid: List[Str]) -> Int {\n  let h = grid.len()\n  let w = grid.get_or(0, \"\").len()\n  var cs = grid.join(\"\").chars()\n  var count = 0\n  for r in range(0, h) {\n    for c in range(0, w) {\n      if cs.get_or(r * w + c, \".\") == \"#\" {\n        count = count + 1\n        cs = cs.set(r * w + c, \".\")\n        var stack: List[Pair[Int, Int]] = [Pair { first: r, second: c }]\n        while not stack.is_empty() {\n          let cur = stack.last().unwrap_or(Pair { first: 0, second: 0 })\n          stack = stack.remove_at(stack.len() - 1)\n          let around = [\n            Pair { first: cur.first - 1, second: cur.second },\n            Pair { first: cur.first + 1, second: cur.second },\n            Pair { first: cur.first, second: cur.second - 1 },\n            Pair { first: cur.first, second: cur.second + 1 },\n          ]\n          for nb in around {\n            if nb.first >= 0 and nb.first < h and nb.second >= 0 and nb.second < w {\n              if cs.get_or(nb.first * w + nb.second, \".\") == \"#\" {\n                cs = cs.set(nb.first * w + nb.second, \".\")\n                stack = stack.push(nb)\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

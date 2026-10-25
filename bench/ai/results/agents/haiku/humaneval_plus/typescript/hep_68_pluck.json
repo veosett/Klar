@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function pluck(arr: number[]): number[] {\n  let bestVal = Infinity;\n  let bestIdx = -1;\n  for (let i = 0; i < arr.length; i++) {\n    const v = arr[i];\n    if (v % 2 === 0 && v < bestVal) {\n      bestVal = v;\n      bestIdx = i;\n    }\n  }\n  return bestIdx === -1 ? [] : [bestVal, bestIdx];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def digitSum(s: str) -> int:\n    return sum(ord(c) for c in s if 'A' <= c <= 'Z')\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

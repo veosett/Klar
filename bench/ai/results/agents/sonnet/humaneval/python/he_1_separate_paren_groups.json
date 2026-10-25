@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def separate_paren_groups(paren_string: str) -> list[str]:\n    res = []\n    cur = []\n    d = 0\n    for c in paren_string:\n        if c == '(':\n            d += 1\n            cur.append(c)\n        elif c == ')':\n            d -= 1\n            cur.append(c)\n            if d == 0:\n                res.append(''.join(cur))\n                cur = []\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

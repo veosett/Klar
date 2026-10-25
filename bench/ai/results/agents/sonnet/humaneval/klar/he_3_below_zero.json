@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn below_zero(operations: List[Int]) -> Bool {\n  var bal = 0\n  for op in operations {\n    bal = bal + op\n    if bal < 0 {\n      return true\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

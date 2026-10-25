@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function match_parens(lst: string[]): string {\n  const good = (s: string): boolean => {\n    let d = 0;\n    for (const c of s) {\n      d += c === \"(\" ? 1 : -1;\n      if (d < 0) return false;\n    }\n    return d === 0;\n  };\n  return good(lst[0] + lst[1]) || good(lst[1] + lst[0]) ? \"Yes\" : \"No\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

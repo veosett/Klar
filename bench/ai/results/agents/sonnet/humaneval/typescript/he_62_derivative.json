@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function derivative(xs: number[]): number[] {\n  return xs.slice(1).map((x, i) => x * (i + 1));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

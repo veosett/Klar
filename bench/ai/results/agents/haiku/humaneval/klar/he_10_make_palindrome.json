@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_pal(s: Str) -> Bool {\n  return s == s.reverse()\n}\n\n/// >>> assert make_palindrome(\"cat\") == \"catac\"\npub fn make_palindrome(string: Str) -> Str {\n  let n = string.len()\n  var i = 0\n  while i < n {\n    if is_pal(string.slice(i, n)) {\n      return string + string.slice(0, i).reverse()\n    }\n    i = i + 1\n  }\n  return string\n}\n\ntest \"make_palindrome\" {\n  assert make_palindrome(\"\") == \"\"\n  assert make_palindrome(\"cat\") == \"catac\"\n  assert make_palindrome(\"cata\") == \"catac\"\n  assert make_palindrome(\"x\") == \"x\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

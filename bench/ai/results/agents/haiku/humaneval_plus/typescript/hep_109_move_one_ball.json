@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function move_one_ball(arr: number[]): boolean {\n  const n = arr.length;\n  if (n <= 1) {\n    return true;\n  }\n  let descents = 0;\n  for (let i = 0; i < n; i++) {\n    if (arr[i] > arr[(i + 1) % n]) {\n      descents++;\n    }\n  }\n  return descents <= 1;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

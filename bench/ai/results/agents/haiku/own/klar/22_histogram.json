@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// One line per key, sorted by key: \"key: \" followed by one '*' per count.\npub fn histogram(counts: Map[Str, Int]) -> List[Str] {\n  let keys = counts.keys().sort()\n  return keys.map(fn(k) => k + \": \" + \"*\".repeat(counts.get(k).unwrap_or(0)))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

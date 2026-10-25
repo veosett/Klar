@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert is_equal_to_sum_even(8) == true\npub fn is_equal_to_sum_even(n: Int) -> Bool {\n  return n >= 8 and n % 2 == 0\n}\n\ntest \"is_equal_to_sum_even\" {\n  assert is_equal_to_sum_even(4) == false\n  assert is_equal_to_sum_even(6) == false\n  assert is_equal_to_sum_even(8) == true\n  assert is_equal_to_sum_even(9) == false\n  assert is_equal_to_sum_even(10) == true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

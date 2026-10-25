@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function file_name_check(file_name: string): string {\n  const parts = file_name.split(\".\");\n  if (parts.length !== 2) return \"No\";\n  if (!/^[a-zA-Z]/.test(parts[0])) return \"No\";\n  if (![\"txt\", \"exe\", \"dll\"].includes(parts[1])) return \"No\";\n  const digits = file_name.split(\"\").filter((c) => c >= \"0\" && c <= \"9\").length;\n  return digits > 3 ? \"No\" : \"Yes\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

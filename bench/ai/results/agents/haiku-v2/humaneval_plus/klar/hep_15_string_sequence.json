@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn string_sequence(n: Int) -> Str {\n  let nums = range(0, n + 1)\n  return nums.map(fn(i) => i.to_str()).join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

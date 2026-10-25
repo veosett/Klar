@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn max_depth(group: Str) -> Int {\n  var depth = 0\n  var best = 0\n  for c in group.chars() {\n    if c == \"(\" {\n      depth = depth + 1\n      if depth > best {\n        best = depth\n      }\n    } else if c == \")\" {\n      depth = depth - 1\n    }\n  }\n  return best\n}\n\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  let groups = paren_string.split(\" \").filter(fn(g) => g.len() > 0)\n  return groups.map(fn(g) => max_depth(g))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

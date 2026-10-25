@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_odd_collatz(n: Int) -> List[Int] {\n  if n < 1 {\n    return []\n  }\n  var out: List[Int] = [1]\n  var x = n\n  while x != 1 {\n    if x % 2 == 1 {\n      out = out.push(x)\n      x = 3 * x + 1\n    } else {\n      x = x / 2\n    }\n  }\n  return out.unique().sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

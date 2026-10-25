@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function eat(number: number, need: number, remaining: number): number[] {\n  const t = Math.min(need, remaining);\n  return [number + t, remaining - t];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

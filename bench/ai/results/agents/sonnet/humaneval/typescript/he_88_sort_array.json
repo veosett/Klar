@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sort_array(array: number[]): number[] {\n  if (array.length === 0) return [];\n  const s = [...array].sort((a, b) => a - b);\n  if ((array[0] + array[array.length - 1]) % 2 === 0) s.reverse();\n  return s;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

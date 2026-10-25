@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_numbers(numbers: str) -> str:\n    order = {\n        'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,\n        'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,\n    }\n    words = numbers.split()\n    words.sort(key=lambda w: order[w])\n    return ' '.join(words)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn solve(N: Int) -> Str {\n  var m: Int = N\n  var total: Int = 0\n  while m > 0 {\n    total = total + m % 10\n    m = m / 10\n  }\n  if total == 0 {\n    return \"0\"\n  }\n  var t: Int = total\n  var bits: Str = \"\"\n  while t > 0 {\n    bits = (t % 2).to_str() + bits\n    t = t / 2\n  }\n  return bits\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn even_odd_count(num: Int) -> Pair[Int, Int] {\n  var evens: Int = 0\n  var odds: Int = 0\n  for c in num.abs().to_str().chars() {\n    let d = \"0123456789\".index_of(c).unwrap_or(0)\n    if d % 2 == 0 {\n      evens = evens + 1\n    } else {\n      odds = odds + 1\n    }\n  }\n  return Pair { first: evens, second: odds }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

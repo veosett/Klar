@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn ones_pos(n: Int) -> Int {\n  if n <= 0 {\n    return 0\n  }\n  return n % 2 + ones_pos(n / 2)\n}\n\nfn ones(n: Int) -> Int {\n  return ones_pos(n.abs())\n}\n\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  let sorted = arr.sort()\n  let counts = arr.map(fn(x) => ones(x))\n  let top = counts.max().unwrap_or(0)\n  return range(0, top + 1).flat_map(fn(k) => sorted.filter(fn(x) => ones(x) == k))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

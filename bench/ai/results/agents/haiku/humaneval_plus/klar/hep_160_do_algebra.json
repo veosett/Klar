@@ -1,0 +1,20 @@
+{
+ "attempts": [
+  {
+   "code": "use std.time.{floor_div}\n\n/// Evaluates with the usual precedence: ** first, then * and //, then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var total = 0\n  var sign = 1\n  var cur = operand.get_or(0, 0)\n  var i = 0\n  while i < operator.len() {\n    let op = operator.get_or(i, \"+\")\n    let b = operand.get_or(i + 1, 0)\n    if op == \"**\" {\n      cur = cur.pow(b)\n    } else if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      cur = floor_div(cur, b)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = b\n    }\n    i = i + 1\n  }\n  return total + sign * cur\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "/// Floor division: rounds towards minus infinity.\nfn floor_quot(a: Int, b: Int) -> Int\n  requires b != 0\n{\n  let q = a / b\n  let r = a % b\n  if r != 0 and ((r < 0) != (b < 0)) {\n    return q - 1\n  }\n  return q\n}\n\n/// Evaluates with the usual precedence: ** first, then * and //, then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  var total = 0\n  var sign = 1\n  var cur = operand.get_or(0, 0)\n  var i = 0\n  while i < operator.len() {\n    let op = operator.get_or(i, \"+\")\n    let b = operand.get_or(i + 1, 0)\n    if op == \"**\" {\n      cur = cur.pow(b)\n    } else if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      if b == 0 {\n        return 0\n      }\n      cur = floor_quot(cur, b)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = b\n    }\n    i = i + 1\n  }\n  return total + sign * cur\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "/// Floor division: rounds towards minus infinity.\nfn floor_quot(a: Int, b: Int) -> Int\n  requires b != 0\n{\n  let q = a / b\n  let r = a % b\n  if r != 0 and ((r < 0) != (b < 0)) {\n    return q - 1\n  }\n  return q\n}\n\n/// Evaluates with the usual precedence: ** first (right to left), then * and //,\n/// then + and -.\n/// >>> assert do_algebra([\"+\", \"*\", \"-\"], [2, 3, 4, 5]) == 9\npub fn do_algebra(operator: List[Str], operand: List[Int]) -> Int {\n  // pass 1: collapse every ** (right to left, so a ** b ** c = a ** (b ** c))\n  var nums = operand\n  var ops = operator\n  var i = ops.len() - 1\n  while i >= 0 {\n    if ops.get_or(i, \"\") == \"**\" {\n      let p = nums.get_or(i, 0).pow(nums.get_or(i + 1, 0))\n      nums = nums.set(i, p).remove_at(i + 1)\n      ops = ops.remove_at(i)\n    }\n    i = i - 1\n  }\n  // pass 2: * and // left to right, + and - as signed terms\n  var total = 0\n  var sign = 1\n  var cur = nums.get_or(0, 0)\n  var j = 0\n  while j < ops.len() {\n    let op = ops.get_or(j, \"+\")\n    let b = nums.get_or(j + 1, 0)\n    if op == \"*\" {\n      cur = cur * b\n    } else if op == \"//\" {\n      if b == 0 {\n        return 0\n      }\n      cur = floor_quot(cur, b)\n    } else {\n      total = total + sign * cur\n      if op == \"-\" {\n        sign = -1\n      } else {\n        sign = 1\n      }\n      cur = b\n    }\n    j = j + 1\n  }\n  return total + sign * cur\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

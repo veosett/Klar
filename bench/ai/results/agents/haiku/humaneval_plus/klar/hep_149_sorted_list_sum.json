@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sorted_list_sum(lst: List[Str]) -> List[Str] {\n  let even = lst.filter(fn(s: Str) -> Bool { return s.len() % 2 == 0 })\n  return even.sort_by(fn(s: Str) -> Str { return s.len().to_str().pad_left(8, \"0\") + s })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

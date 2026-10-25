@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Counts the digit 7 in the numbers below n that are divisible by 11 or 13.\n/// >>> assert fizz_buzz(78) == 2\n/// >>> assert fizz_buzz(50) == 0\npub fn fizz_buzz(n: Int) -> Int {\n  var total = 0\n  for i in range(0, n) {\n    if i % 11 == 0 or i % 13 == 0 {\n      total = total + i.to_str().count(\"7\")\n    }\n  }\n  return total\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

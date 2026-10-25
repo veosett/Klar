@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn space_run_text(run: Int) -> Str {\n  if run == 0 {\n    return \"\"\n  }\n  if run > 2 {\n    return \"-\"\n  }\n  return \"_\".repeat(run)\n}\n\npub fn fix_spaces(text: Str) -> Str {\n  var out = \"\"\n  var run = 0\n  for c in text.chars() {\n    if c == \" \" {\n      run = run + 1\n    } else {\n      out = out + space_run_text(run) + c\n      run = 0\n    }\n  }\n  out = out + space_run_text(run)\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

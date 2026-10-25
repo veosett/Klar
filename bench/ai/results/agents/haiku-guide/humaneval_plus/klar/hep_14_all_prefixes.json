@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// All prefixes of the string, from shortest to longest.\n/// >>> assert all_prefixes(\"abc\") == [\"a\", \"ab\", \"abc\"]\npub fn all_prefixes(string: Str) -> List[Str] {\n  var out: List[Str] = []\n  let n = string.len()\n  for i in range(1, n + 1) {\n    out = out.push(string.slice(0, i))\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

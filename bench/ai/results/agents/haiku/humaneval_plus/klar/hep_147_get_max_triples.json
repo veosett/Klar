@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn choose3(c: Int) -> Int {\n  return c * (c - 1) * (c - 2) / 6\n}\n\npub fn get_max_triples(n: Int) -> Int {\n  var c0 = 0\n  var c1 = 0\n  var c2 = 0\n  for i in range(1, n + 1) {\n    let r = (i * i - i + 1) % 3\n    if r == 0 {\n      c0 = c0 + 1\n    } else if r == 1 {\n      c1 = c1 + 1\n    } else {\n      c2 = c2 + 1\n    }\n  }\n  return choose3(c0) + choose3(c1) + choose3(c2) + c0 * c1 * c2\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn derivative(xs: List[Int]) -> List[Int] {\n  return xs.enumerate().drop(1).map(fn(e) => e.index * e.value)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

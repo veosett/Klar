@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sum_squares(lst: number[]): number {\n  return lst.reduce((acc, x) => {\n    const c = Math.ceil(x);\n    return acc + c * c;\n  }, 0);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sort_third(l: List[Int]) -> List[Int] {\n  let thirds = l.enumerate().filter(fn(p) => p.index % 3 == 0).map(fn(p) => p.value).sort()\n  var out: List[Int] = []\n  var k: Int = 0\n  for p in l.enumerate() {\n    if p.index % 3 == 0 {\n      out = out.push(thirds.get_or(k, 0))\n      k = k + 1\n    } else {\n      out = out.push(p.value)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

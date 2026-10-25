@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fruit_distribution(s: str, n: int) -> int:\n    total = 0\n    for part in s.split():\n        if part.isdigit():\n            total += int(part)\n    return n - total\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

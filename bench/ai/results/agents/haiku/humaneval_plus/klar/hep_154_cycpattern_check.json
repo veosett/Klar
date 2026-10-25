@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn cycpattern_check(a: Str, b: Str) -> Bool {\n  let m = b.len()\n  if m == 0 {\n    return true\n  }\n  for k in range(0, m) {\n    let rot = b.slice(k, m) + b.slice(0, k)\n    if a.contains(rot) {\n      return true\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

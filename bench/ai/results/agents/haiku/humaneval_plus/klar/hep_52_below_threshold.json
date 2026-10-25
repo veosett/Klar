@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn below_threshold(l: List[Int], t: Int) -> Bool {\n  return l.all(fn(x: Int) -> Bool { return x < t })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

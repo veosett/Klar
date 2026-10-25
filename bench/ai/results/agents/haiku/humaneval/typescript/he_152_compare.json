@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function compare(game: number[], guess: number[]): number[] {\n  return game.map((score, i) => Math.abs(score - guess[i]));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

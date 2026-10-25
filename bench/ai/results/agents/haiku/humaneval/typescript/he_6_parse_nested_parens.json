@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function parse_nested_parens(paren_string: string): number[] {\n  return paren_string\n    .split(\" \")\n    .filter((g) => g.length > 0)\n    .map((group) => {\n      let depth = 0;\n      let maxDepth = 0;\n      for (const ch of group) {\n        if (ch === \"(\") {\n          depth++;\n          if (depth > maxDepth) maxDepth = depth;\n        } else if (ch === \")\") {\n          depth--;\n        }\n      }\n      return maxDepth;\n    });\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

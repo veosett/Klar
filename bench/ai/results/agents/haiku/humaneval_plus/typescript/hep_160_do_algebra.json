@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function do_algebra(operator: string[], operand: number[]): number {\n  const vals: number[] = operand.slice();\n  const ops: string[] = operator.slice();\n\n  // Pass 1: exponentiation, right-associative (process from the right).\n  for (let i = ops.length - 1; i >= 0; i--) {\n    if (ops[i] === \"**\") {\n      vals[i] = Math.pow(vals[i], vals[i + 1]);\n      vals.splice(i + 1, 1);\n      ops.splice(i, 1);\n    }\n  }\n\n  // Pass 2: multiplication and floor division, left to right.\n  let i = 0;\n  while (i < ops.length) {\n    if (ops[i] === \"*\" || ops[i] === \"//\") {\n      const a = vals[i];\n      const b = vals[i + 1];\n      vals[i] = ops[i] === \"*\" ? a * b : Math.floor(a / b);\n      vals.splice(i + 1, 1);\n      ops.splice(i, 1);\n    } else {\n      i++;\n    }\n  }\n\n  // Pass 3: addition and subtraction, left to right.\n  let result = vals[0];\n  for (let j = 0; j < ops.length; j++) {\n    if (ops[j] === \"+\") {\n      result += vals[j + 1];\n    } else {\n      result -= vals[j + 1];\n    }\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

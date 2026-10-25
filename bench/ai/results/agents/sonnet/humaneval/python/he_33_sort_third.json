@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sort_third(l: list[int]) -> list[int]:\n    r = list(l)\n    r[::3] = sorted(l[::3])\n    return r\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

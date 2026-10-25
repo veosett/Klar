@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function find_max(words: string[]): string {\n  let best = \"\";\n  let bestCount = -1;\n  for (const w of words) {\n    const count = new Set(w).size;\n    if (\n      count > bestCount ||\n      (count === bestCount && w < best)\n    ) {\n      best = w;\n      bestCount = count;\n    }\n  }\n  return best;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

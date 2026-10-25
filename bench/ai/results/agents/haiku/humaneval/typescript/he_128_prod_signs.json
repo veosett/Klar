@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function prod_signs(arr: number[]): number | null {\n  if (arr.length === 0) {\n    return null;\n  }\n  let magnitude = 0;\n  let sign = 1;\n  for (const n of arr) {\n    magnitude += Math.abs(n);\n    if (n === 0) {\n      sign = 0;\n    } else if (n < 0 && sign !== 0) {\n      sign = -sign;\n    }\n  }\n  return magnitude * sign;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

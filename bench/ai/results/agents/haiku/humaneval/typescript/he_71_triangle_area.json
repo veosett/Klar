@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function triangle_area(a: number, b: number, c: number): number {\n  if (a + b <= c || a + c <= b || b + c <= a) {\n    return -1;\n  }\n  const s = (a + b + c) / 2;\n  const area = Math.sqrt(s * (s - a) * (s - b) * (s - c));\n  return Math.round(area * 100) / 100;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

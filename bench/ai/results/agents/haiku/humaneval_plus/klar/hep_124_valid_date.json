@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert valid_date(\"03-11-2000\")\n/// >>> assert not valid_date(\"06/04/2020\")\npub fn valid_date(date: Str) -> Bool {\n  if date.is_empty() {\n    return false\n  }\n  let parts = date.split(\"-\")\n  if parts.len() != 3 {\n    return false\n  }\n  let mm = parts.get(0).unwrap_or(\"\")\n  let dd = parts.get(1).unwrap_or(\"\")\n  let yy = parts.get(2).unwrap_or(\"\")\n  if mm.len() != 2 or dd.len() != 2 or yy.len() != 4 {\n    return false\n  }\n  if not (mm.is_numeric() and dd.is_numeric() and yy.is_numeric()) {\n    return false\n  }\n  let month = mm.to_int().unwrap_or(0)\n  let day = dd.to_int().unwrap_or(0)\n  if month < 1 or month > 12 {\n    return false\n  }\n  var max_day = 31\n  if month == 4 or month == 6 or month == 9 or month == 11 {\n    max_day = 30\n  }\n  if month == 2 {\n    max_day = 29\n  }\n  return day >= 1 and day <= max_day\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function below_zero(operations: number[]): boolean {\n  let b = 0;\n  for (const o of operations) {\n    b += o;\n    if (b < 0) return true;\n  }\n  return false;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

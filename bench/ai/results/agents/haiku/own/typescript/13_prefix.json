@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function common_prefix(words: string[]): string {\n  if (words.length === 0) return \"\";\n  let prefix = words[0];\n  for (const w of words.slice(1)) {\n    let i = 0;\n    while (i < prefix.length && i < w.length && prefix[i] === w[i]) i++;\n    prefix = prefix.slice(0, i);\n    if (prefix === \"\") break;\n  }\n  return prefix;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

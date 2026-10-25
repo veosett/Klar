@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn monotonic(l: List[Int]) -> Bool {\n  return l == l.sort() or l == l.sort().reverse()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

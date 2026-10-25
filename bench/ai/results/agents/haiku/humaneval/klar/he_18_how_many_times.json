@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert how_many_times(\"aaaa\", \"aa\") == 3\npub fn how_many_times(string: Str, substring: Str) -> Int {\n  let n = string.len()\n  let m = substring.len()\n  if m == 0 {\n    return 0\n  }\n  if m > n {\n    return 0\n  }\n  return range(0, n - m + 1).count(fn(i: Int) => string.slice(i, i + m) == substring)\n}\n\ntest \"how_many_times\" {\n  assert how_many_times(\"\", \"a\") == 0\n  assert how_many_times(\"aaa\", \"a\") == 3\n  assert how_many_times(\"aaaa\", \"aa\") == 3\n  assert how_many_times(\"xyxyxyx\", \"x\") == 4\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

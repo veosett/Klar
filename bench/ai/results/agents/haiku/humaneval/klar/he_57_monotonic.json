@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn monotonic(l: List[Int]) -> Bool {\n  let pairs = l.zip(l.drop(1))\n  let increasing = pairs.all(fn(p) => p.first <= p.second)\n  let decreasing = pairs.all(fn(p) => p.first >= p.second)\n  return increasing or decreasing\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

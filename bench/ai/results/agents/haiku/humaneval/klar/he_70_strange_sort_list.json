@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert strange_sort_list([1, 2, 3, 4]) == [1, 4, 2, 3]\npub fn strange_sort_list(lst: List[Int]) -> List[Int] {\n  var rest = lst.sort()\n  var out: List[Int] = []\n  var take_min = true\n  while not rest.is_empty() {\n    if take_min {\n      out = out.push(rest.first().unwrap_or(0))\n      rest = rest.drop(1)\n    } else {\n      out = out.push(rest.last().unwrap_or(0))\n      rest = rest.take(rest.len() - 1)\n    }\n    take_min = not take_min\n  }\n  return out\n}\n\ntest \"strange_sort_list\" {\n  assert strange_sort_list([1, 2, 3, 4]) == [1, 4, 2, 3]\n  assert strange_sort_list([5, 5, 5, 5]) == [5, 5, 5, 5]\n  assert strange_sort_list([]) == []\n  assert strange_sort_list([5, 6, 7, 8, 9]) == [5, 9, 6, 8, 7]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

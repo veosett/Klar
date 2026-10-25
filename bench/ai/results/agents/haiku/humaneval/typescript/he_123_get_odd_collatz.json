@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function get_odd_collatz(n: number): number[] {\n  const odds = new Set<number>();\n  let x = n;\n  while (true) {\n    if (x % 2 === 1) {\n      odds.add(x);\n    }\n    if (x === 1) {\n      break;\n    }\n    x = x % 2 === 0 ? x / 2 : 3 * x + 1;\n  }\n  return Array.from(odds).sort((a, b) => a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

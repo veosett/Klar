@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function check_dict_case(dict: Record<string, string>): boolean {\n  const keys = Object.keys(dict);\n  if (keys.length === 0) return false;\n  const lower = keys.every(k => k === k.toLowerCase() && k !== k.toUpperCase());\n  const upper = keys.every(k => k === k.toUpperCase() && k !== k.toLowerCase());\n  return lower || upper;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

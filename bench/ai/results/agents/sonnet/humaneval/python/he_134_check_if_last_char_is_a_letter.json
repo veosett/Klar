@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def check_if_last_char_is_a_letter(txt: str) -> bool:\n    w = txt.split(' ')[-1]\n    return len(w) == 1 and w.isalpha()\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

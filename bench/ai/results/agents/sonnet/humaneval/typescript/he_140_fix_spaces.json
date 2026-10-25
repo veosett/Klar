@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function fix_spaces(text: string): string {\n  return text.replace(/ +/g, (m) => (m.length > 2 ? \"-\" : \"_\".repeat(m.length)));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

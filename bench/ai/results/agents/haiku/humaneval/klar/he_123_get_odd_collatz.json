@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_odd_collatz(n: Int) -> List[Int] {\n  var odds: List[Int] = []\n  var x: Int = n\n  while x != 1 {\n    if x % 2 == 1 {\n      odds = odds.push(x)\n      x = 3 * x + 1\n    } else {\n      x = x / 2\n    }\n  }\n  return odds.push(1).sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

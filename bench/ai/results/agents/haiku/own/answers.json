@@ -1,0 +1,372 @@
+{
+ "01_word_freq/klar/0": {
+  "text": "```\n/// Counts how often each word occurs in `text` (case-insensitive keys).\npub fn word_freq(text: Str) -> Map[Str, Int] {\n  var counts: Map[Str, Int] = Map {}\n  for w in text.split(\" \") {\n    if not w.is_empty() {\n      let k = w.lower()\n      let n = match counts.get(k) {\n        Some(c) => c + 1,\n        None => 1,\n      }\n      counts = counts.set(k, n)\n    }\n  }\n  return counts\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "02_average/klar/0": {
+  "text": "```\n/// The arithmetic mean of `xs` as a Float, or None for an empty list.\npub fn average(xs: List[Int]) -> Option[Float] {\n  if xs.is_empty() {\n    return None\n  }\n  let total = xs.sum().to_float()\n  return Some(total / xs.len().to_float())\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "03_rle/klar/0": {
+  "text": "```\n/// Run-length encodes `s`: each run becomes the character followed by its length.\npub fn rle(s: Str) -> Str {\n  var out = \"\"\n  var cur = \"\"\n  var n = 0\n  for c in s.chars() {\n    if c == cur {\n      n = n + 1\n    } else {\n      if n > 0 {\n        out = out + cur + n.to_str()\n      }\n      cur = c\n      n = 1\n    }\n  }\n  if n > 0 {\n    out = out + cur + n.to_str()\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "04_balanced/klar/0": {
+  "text": "```\n/// Whether the brackets ()[]{} in `s` are balanced and correctly nested.\npub fn is_balanced(s: Str) -> Bool {\n  var stack: List[Str] = []\n  for c in s.chars() {\n    if c == \"(\" or c == \"[\" or c == \"{\" {\n      stack = stack.push(c)\n    } else if c == \")\" or c == \"]\" or c == \"}\" {\n      let want = match c {\n        \")\" => \"(\",\n        \"]\" => \"[\",\n        _ => \"{\",\n      }\n      match stack.last() {\n        Some(top) => {\n          if top != want {\n            return false\n          }\n          stack = stack.remove_at(stack.len() - 1)\n        },\n        None => { return false },\n      }\n    }\n  }\n  return stack.is_empty()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "04_balanced/klar/1": {
+  "text": "```\n/// Whether the brackets ()[]{} in `s` are balanced and correctly nested.\npub fn is_balanced(s: Str) -> Bool {\n  var stack: List[Str] = []\n  for c in s.chars() {\n    if c == \"(\" or c == \"[\" or c == \"\\{\" {\n      stack = stack.push(c)\n    } else if c == \")\" or c == \"]\" or c == \"\\}\" {\n      let want = match c {\n        \")\" => \"(\",\n        \"]\" => \"[\",\n        _ => \"\\{\",\n      }\n      match stack.last() {\n        Some(top) => {\n          if top != want {\n            return false\n          }\n          stack = stack.remove_at(stack.len() - 1)\n        },\n        None => { return false },\n      }\n    }\n  }\n  return stack.is_empty()\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "05_fizzbuzz/klar/0": {
+  "text": "```\n/// FizzBuzz for 1..n: Fizz, Buzz, FizzBuzz or the number as text.\npub fn fizzbuzz(n: Int) -> List[Str] {\n  var out: List[Str] = []\n  for i in range(1, n + 1) {\n    let s = match i % 15 == 0 {\n      true => \"FizzBuzz\",\n      false => match i % 3 == 0 {\n        true => \"Fizz\",\n        false => match i % 5 == 0 {\n          true => \"Buzz\",\n          false => i.to_str(),\n        },\n      },\n    }\n    out = out.push(s)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "06_top_k/klar/0": {
+  "text": "```\n/// The k most frequent words, most frequent first, ties in alphabetical order.\npub fn top_k(words: List[Str], k: Int) -> List[Str] {\n  var counts: Map[Str, Int] = Map {}\n  for w in words {\n    let n = match counts.get(w) {\n      Some(c) => c + 1,\n      None => 1,\n    }\n    counts = counts.set(w, n)\n  }\n  var left: List[Str] = words.unique().sort()\n  var out: List[Str] = []\n  var taken = 0\n  while taken < k and not left.is_empty() {\n    var best_word = \"\"\n    var best_count = 0\n    for w in left {\n      let c = counts.get(w).unwrap_or(0)\n      if c > best_count {\n        best_word = w\n        best_count = c\n      }\n    }\n    let chosen = best_word\n    out = out.push(chosen)\n    left = left.filter(fn(w) => w != chosen)\n    taken = taken + 1\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "07_transpose/klar/0": {
+  "text": "```\n/// Transposes a rectangular matrix: rows become columns.\npub fn transpose(m: List[List[Int]]) -> List[List[Int]] {\n  let width = match m.first() {\n    Some(row) => row.len(),\n    None => 0,\n  }\n  var out: List[List[Int]] = []\n  for j in range(0, width) {\n    let col = j\n    let column = m.map(fn(row) => row.get_or(col, 0))\n    out = out.push(column)\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "08_roman/klar/0": {
+  "text": "```\n/// The Roman numeral of `n` (1..3999), or an error outside that range.\npub fn to_roman(n: Int) -> Result[Str, Str] {\n  if n < 1 or n > 3999 {\n    return Err(\"out of range\")\n  }\n  let vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]\n  let syms = [\"M\", \"CM\", \"D\", \"CD\", \"C\", \"XC\", \"L\", \"XL\", \"X\", \"IX\", \"V\", \"IV\", \"I\"]\n  var rest = n\n  var out = \"\"\n  for i in range(0, 13) {\n    let v = vals.get_or(i, 0)\n    let s = syms.get_or(i, \"\")\n    while rest >= v {\n      out = out + s\n      rest = rest - v\n    }\n  }\n  return Ok(out)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "09_search/klar/0": {
+  "text": "```\n/// Binary search: the index of `target` in the ascending list `sorted`, or None.\npub fn find_index(sorted: List[Int], target: Int) -> Option[Int] {\n  var lo = 0\n  var hi = sorted.len() - 1\n  while lo <= hi {\n    let mid = (lo + hi) / 2\n    let v = sorted.get_or(mid, 0)\n    if v == target {\n      return Some(mid)\n    } else if v < target {\n      lo = mid + 1\n    } else {\n      hi = mid - 1\n    }\n  }\n  return None\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "10_intervals/klar/0": {
+  "text": "```\n/// Merges overlapping (and touching) [start, end] intervals, sorted by start.\npub fn merge_intervals(xs: List[List[Int]]) -> List[List[Int]] {\n  let sorted = xs.sort_by(fn(iv) => iv.get_or(0, 0))\n  var out: List[List[Int]] = []\n  var cur_s = 0\n  var cur_e = 0\n  var have = false\n  for iv in sorted {\n    let s = iv.get_or(0, 0)\n    let e = iv.get_or(1, 0)\n    if not have {\n      cur_s = s\n      cur_e = e\n      have = true\n    } else if s <= cur_e {\n      if e > cur_e {\n        cur_e = e\n      }\n    } else {\n      out = out.push([cur_s, cur_e])\n      cur_s = s\n      cur_e = e\n    }\n  }\n  if have {\n    out = out.push([cur_s, cur_e])\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "11_bank/klar/0": {
+  "text": "```\n/// Applies \"deposit N\" / \"withdraw N\" operations to a balance starting at 0.\npub fn run_ops(ops: List[Str]) -> Result[Int, Str] {\n  var bal = 0\n  for i in range(0, ops.len()) {\n    let pos = i + 1\n    let parts = ops.get_or(i, \"\").split(\" \")\n    if parts.len() != 2 {\n      return Err(\"bad op at op {pos}\")\n    }\n    let kind = parts.get_or(0, \"\")\n    let amount = match parts.get_or(1, \"\").to_int() {\n      Some(n) => n,\n      None => -1,\n    }\n    if amount < 0 {\n      return Err(\"bad op at op {pos}\")\n    }\n    if kind == \"deposit\" {\n      bal = bal + amount\n    } else if kind == \"withdraw\" {\n      if amount > bal {\n        return Err(\"insufficient funds at op {pos}\")\n      }\n      bal = bal - amount\n    } else {\n      return Err(\"bad op at op {pos}\")\n    }\n  }\n  return Ok(bal)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "12_caesar/klar/0": {
+  "text": "```\n/// Shifts each ASCII letter by `shift` places, wrapping and keeping case.\npub fn caesar(text: Str, shift: Int) -> Str {\n  let k = ((shift % 26) + 26) % 26\n  var out = \"\"\n  for c in text.chars() {\n    let code = c.codes().get_or(0, 0)\n    if code >= 65 and code <= 90 {\n      let n = (code - 65 + k) % 26 + 65\n      out = out + match n.to_char() {\n        Some(x) => x,\n        None => c,\n      }\n    } else if code >= 97 and code <= 122 {\n      let n = (code - 97 + k) % 26 + 97\n      out = out + match n.to_char() {\n        Some(x) => x,\n        None => c,\n      }\n    } else {\n      out = out + c\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "13_prefix/klar/0": {
+  "text": "```\n/// The longest common prefix of all words (\"\" for an empty list).\npub fn common_prefix(words: List[Str]) -> Str {\n  var prefix = words.first().unwrap_or(\"\")\n  for w in words {\n    while not w.starts_with(prefix) and not prefix.is_empty() {\n      prefix = prefix.slice(0, prefix.len() - 1)\n    }\n  }\n  return prefix\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "14_anagrams/klar/0": {
+  "text": "```\n/// Groups anagrams; words sorted inside each group, groups sorted by their first word.\npub fn group_anagrams(words: List[Str]) -> List[List[Str]] {\n  let groups = words.group_by(fn(w) => w.chars().sort().join(\"\"))\n  let sorted_groups = groups.values().map(fn(g) => g.sort())\n  return sorted_groups.sort_by(fn(g) => g.get_or(0, \"\"))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "15_csv/klar/0": {
+  "text": "```\n/// True for a double-quote character (code 34).\nfn is_quote(c: Str) -> Bool {\n  return c.codes().get_or(0, 0) == 34\n}\n\n/// Splits one CSV line into fields; quoted fields may hold commas and \"\" escapes.\npub fn parse_csv_line(line: Str) -> Result[List[Str], Str] {\n  let chars = line.chars()\n  let n = chars.len()\n  var fields: List[Str] = []\n  var cur = \"\"\n  var in_q = false\n  var i = 0\n  while i < n {\n    let c = chars.get_or(i, \"\")\n    if in_q {\n      if is_quote(c) {\n        if i + 1 < n and is_quote(chars.get_or(i + 1, \"\")) {\n          cur = cur + c\n          i = i + 2\n        } else {\n          in_q = false\n          i = i + 1\n        }\n      } else {\n        cur = cur + c\n        i = i + 1\n      }\n    } else if is_quote(c) {\n      in_q = true\n      i = i + 1\n    } else if c == \",\" {\n      fields = fields.push(cur)\n      cur = \"\"\n      i = i + 1\n    } else {\n      cur = cur + c\n      i = i + 1\n    }\n  }\n  if in_q {\n    return Err(\"unterminated quote\")\n  }\n  fields = fields.push(cur)\n  return Ok(fields)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "16_primes/klar/0": {
+  "text": "```\n/// All primes from 2 to `n` inclusive, ascending (trial division).\npub fn primes_up_to(n: Int) -> List[Int] {\n  var out: List[Int] = []\n  for k in range(2, n + 1) {\n    var is_p = true\n    var d = 2\n    while d * d <= k {\n      if k % d == 0 {\n        is_p = false\n        break\n      }\n      d = d + 1\n    }\n    if is_p {\n      out = out.push(k)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "17_safe_div/klar/0": {
+  "text": "```\n/// Divides xs[i] by ys[i] (truncating); fails at the first zero divisor.\npub fn divide_all(xs: List[Int], ys: List[Int]) -> Result[List[Int], Str] {\n  var out: List[Int] = []\n  for i in range(0, xs.len()) {\n    let x = xs.get_or(i, 0)\n    let y = ys.get_or(i, 0)\n    if y == 0 {\n      return Err(\"division by zero at index {i}\")\n    }\n    out = out.push(x / y)\n  }\n  return Ok(out)\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "18_islands/klar/0": {
+  "text": "```\n/// True when (r, c) is inside the grid and holds land ('#').\nfn is_land_at(cells: List[List[Str]], r: Int, c: Int) -> Bool {\n  if r < 0 or c < 0 {\n    return false\n  }\n  return match cells.get(r) {\n    Some(row) => row.get_or(c, \".\") == \"#\",\n    None => false,\n  }\n}\n\n/// Counts islands: groups of '#' cells connected horizontally or vertically.\npub fn count_islands(grid: List[Str]) -> Int {\n  let cells: List[List[Str]] = grid.map(fn(row) => row.chars())\n  let rows = cells.len()\n  let cols = match cells.get(0) {\n    Some(row) => row.len(),\n    None => 0,\n  }\n  let dr = [-1, 1, 0, 0]\n  let dc = [0, 0, -1, 1]\n  var seen: Map[Str, Bool] = Map {}\n  var count = 0\n  for r in range(0, rows) {\n    for c in range(0, cols) {\n      let key = \"{r},{c}\"\n      if is_land_at(cells, r, c) and not seen.has(key) {\n        count = count + 1\n        seen = seen.set(key, true)\n        var stack: List[List[Int]] = [[r, c]]\n        while not stack.is_empty() {\n          let top = match stack.last() {\n            Some(t) => t,\n            None => [0, 0],\n          }\n          stack = stack.remove_at(stack.len() - 1)\n          let cr = top.get_or(0, 0)\n          let cc = top.get_or(1, 0)\n          for d in range(0, 4) {\n            let nr = cr + dr.get_or(d, 0)\n            let nc = cc + dc.get_or(d, 0)\n            let nk = \"{nr},{nc}\"\n            if is_land_at(cells, nr, nc) and not seen.has(nk) {\n              seen = seen.set(nk, true)\n              stack = stack.push([nr, nc])\n            }\n          }\n        }\n      }\n    }\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "18_islands/klar/1": {
+  "text": "```\n/// True when (r, c) is inside the grid and holds land ('#').\nfn is_land_at(cells: List[List[Str]], r: Int, c: Int) -> Bool {\n  if r < 0 or c < 0 {\n    return false\n  }\n  return match cells.get(r) {\n    Some(row) => row.get_or(c, \".\") == \"#\",\n    None => false,\n  }\n}\n\n/// Counts islands: groups of '#' cells connected horizontally or vertically.\npub fn count_islands(grid: List[Str]) -> Int {\n  let cells: List[List[Str]] = grid.map(fn(row) => row.chars())\n  let rows = cells.len()\n  let cols = match cells.get(0) {\n    Some(row) => row.len(),\n    None => 0,\n  }\n  let dr = [-1, 1, 0, 0]\n  let dc = [0, 0, -1, 1]\n  var seen: Map[Str, Bool] = Map {}\n  var count = 0\n  for r in range(0, rows) {\n    for c in range(0, cols) {\n      let key = \"{r},{c}\"\n      if is_land_at(cells: cells, r: r, c: c) and not seen.has(key) {\n        count = count + 1\n        seen = seen.set(key, true)\n        var stack: List[List[Int]] = [[r, c]]\n        while not stack.is_empty() {\n          let top = match stack.last() {\n            Some(t) => t,\n            None => [0, 0],\n          }\n          stack = stack.remove_at(stack.len() - 1)\n          let cr = top.get_or(0, 0)\n          let cc = top.get_or(1, 0)\n          for d in range(0, 4) {\n            let nr = cr + dr.get_or(d, 0)\n            let nc = cc + dc.get_or(d, 0)\n            let nk = \"{nr},{nc}\"\n            if is_land_at(cells: cells, r: nr, c: nc) and not seen.has(nk) {\n              seen = seen.set(nk, true)\n              stack = stack.push([nr, nc])\n            }\n          }\n        }\n      }\n    }\n  }\n  return count\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "19_snake/klar/0": {
+  "text": "```\n/// Converts camelCase or PascalCase to snake_case.\npub fn camel_to_snake(s: Str) -> Str {\n  var out = \"\"\n  var i = 0\n  for c in s.chars() {\n    let code = c.codes().get_or(0, 0)\n    if code >= 65 and code <= 90 {\n      if i > 0 {\n        out = out + \"_\"\n      }\n      out = out + c.lower()\n    } else {\n      out = out + c\n    }\n    i = i + 1\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "20_fib_mod/klar/0": {
+  "text": "```\n/// The n-th Fibonacci number modulo m (fib(0) = 0, fib(1) = 1), in linear time.\npub fn fib_mod(n: Int, m: Int) -> Int {\n  if m == 0 {\n    return 0\n  }\n  var a = 0\n  var b = 1 % m\n  var i = 0\n  while i < n {\n    let t = (a + b) % m\n    a = b\n    b = t\n    i = i + 1\n  }\n  return a\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "21_dedupe/klar/0": {
+  "text": "```\n/// The elements of `xs` without repetitions, keeping first occurrences in order.\npub fn dedupe(xs: List[Int]) -> List[Int] {\n  var seen: Map[Int, Bool] = Map {}\n  var out: List[Int] = []\n  for x in xs {\n    if not seen.has(x) {\n      seen = seen.set(x, true)\n      out = out.push(x)\n    }\n  }\n  return out\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "22_histogram/klar/0": {
+  "text": "```\n/// One line per key, sorted by key: \"key: \" followed by one '*' per count.\npub fn histogram(counts: Map[Str, Int]) -> List[Str] {\n  let keys = counts.keys().sort()\n  return keys.map(fn(k) => k + \": \" + \"*\".repeat(counts.get(k).unwrap_or(0)))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "23_email/klar/0": {
+  "text": "```\n/// Whether `s` is a valid e-mail address by the simple rules of the task.\npub fn is_valid_email(s: Str) -> Bool {\n  if s.count(\"@\") != 1 {\n    return false\n  }\n  if s.contains(\" \") {\n    return false\n  }\n  let parts = s.split(\"@\")\n  let local = parts.get_or(0, \"\")\n  let domain = parts.get_or(1, \"\")\n  if local.is_empty() {\n    return false\n  }\n  if not domain.contains(\".\") {\n    return false\n  }\n  if domain.starts_with(\".\") or domain.ends_with(\".\") {\n    return false\n  }\n  if domain.contains(\"..\") {\n    return false\n  }\n  return true\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "24_eval_rpn/klar/0": {
+  "text": "```\n/// Evaluates a reverse Polish expression of integers and + - * / (space separated).\npub fn eval_rpn(expr: Str) -> Result[Int, Str] {\n  let tokens = expr.split(\" \").filter(fn(t) => not t.is_empty())\n  var stack: List[Int] = []\n  for tok in tokens {\n    if tok == \"+\" or tok == \"-\" or tok == \"*\" or tok == \"/\" {\n      if stack.len() < 2 {\n        return Err(\"stack underflow\")\n      }\n      let b = stack.get_or(stack.len() - 1, 0)\n      stack = stack.remove_at(stack.len() - 1)\n      let a = stack.get_or(stack.len() - 1, 0)\n      stack = stack.remove_at(stack.len() - 1)\n      var r = 0\n      if tok == \"+\" {\n        r = a + b\n      } else if tok == \"-\" {\n        r = a - b\n      } else if tok == \"*\" {\n        r = a * b\n      } else {\n        if b == 0 {\n          return Err(\"division by zero\")\n        }\n        r = a / b\n      }\n      stack = stack.push(r)\n    } else {\n      match tok.to_int() {\n        Some(v) => {\n          stack = stack.push(v)\n        },\n        None => {\n          return Err(\"bad token {tok}\")\n        },\n      }\n    }\n  }\n  if stack.len() != 1 {\n    return Err(\"bad expression\")\n  }\n  return Ok(stack.get_or(0, 0))\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "01_word_freq/python/0": {
+  "text": "```\ndef word_freq(text: str) -> dict[str, int]:\n    counts: dict[str, int] = {}\n    for word in text.split(\" \"):\n        if word == \"\":\n            continue\n        key = word.lower()\n        counts[key] = counts.get(key, 0) + 1\n    return counts\n```",
+  "in": 0,
+  "out": 0
+ },
+ "02_average/python/0": {
+  "text": "```\ndef average(xs: list[int]) -> float | None:\n    if not xs:\n        return None\n    return sum(xs) / len(xs)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "03_rle/python/0": {
+  "text": "```\ndef rle(s: str) -> str:\n    out = []\n    i = 0\n    n = len(s)\n    while i < n:\n        j = i\n        while j < n and s[j] == s[i]:\n            j += 1\n        out.append(f\"{s[i]}{j - i}\")\n        i = j\n    return \"\".join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "04_balanced/python/0": {
+  "text": "```\ndef is_balanced(s: str) -> bool:\n    pairs = {\")\": \"(\", \"]\": \"[\", \"}\": \"{\"}\n    stack: list[str] = []\n    for ch in s:\n        if ch in \"([{\":\n            stack.append(ch)\n        elif ch in pairs:\n            if not stack or stack.pop() != pairs[ch]:\n                return False\n    return not stack\n```",
+  "in": 0,
+  "out": 0
+ },
+ "05_fizzbuzz/python/0": {
+  "text": "```\ndef fizzbuzz(n: int) -> list[str]:\n    result: list[str] = []\n    for i in range(1, n + 1):\n        if i % 15 == 0:\n            result.append(\"FizzBuzz\")\n        elif i % 3 == 0:\n            result.append(\"Fizz\")\n        elif i % 5 == 0:\n            result.append(\"Buzz\")\n        else:\n            result.append(str(i))\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "06_top_k/python/0": {
+  "text": "```\nfrom collections import Counter\n\n\ndef top_k(words: list[str], k: int) -> list[str]:\n    counts = Counter(words)\n    ordered = sorted(counts.keys(), key=lambda w: (-counts[w], w))\n    if k <= 0:\n        return []\n    return ordered[:k]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "07_transpose/python/0": {
+  "text": "```\ndef transpose(m: list[list[int]]) -> list[list[int]]:\n    if not m:\n        return []\n    return [list(col) for col in zip(*m)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "08_roman/python/0": {
+  "text": "```\ndef to_roman(n: int) -> str:\n    if n < 1 or n > 3999:\n        raise ValueError(\"out of range\")\n    table = [\n        (1000, \"M\"), (900, \"CM\"), (500, \"D\"), (400, \"CD\"),\n        (100, \"C\"), (90, \"XC\"), (50, \"L\"), (40, \"XL\"),\n        (10, \"X\"), (9, \"IX\"), (5, \"V\"), (4, \"IV\"), (1, \"I\"),\n    ]\n    out = []\n    for value, symbol in table:\n        while n >= value:\n            out.append(symbol)\n            n -= value\n    return \"\".join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "09_search/python/0": {
+  "text": "```\ndef find_index(sorted: list[int], target: int) -> int | None:\n    lo, hi = 0, len(sorted) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if sorted[mid] == target:\n            return mid\n        if sorted[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return None\n```",
+  "in": 0,
+  "out": 0
+ },
+ "10_intervals/python/0": {
+  "text": "```\ndef merge_intervals(xs: list[list[int]]) -> list[list[int]]:\n    result: list[list[int]] = []\n    for start, end in sorted(([a, b] for a, b in xs), key=lambda p: p[0]):\n        if result and start <= result[-1][1]:\n            if end > result[-1][1]:\n                result[-1][1] = end\n        else:\n            result.append([start, end])\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "11_bank/python/0": {
+  "text": "```\ndef run_ops(ops: list[str]) -> int:\n    balance = 0\n    for i, op in enumerate(ops, start=1):\n        parts = op.split()\n        if len(parts) != 2 or not parts[1].isdigit():\n            raise ValueError(f\"bad op at op {i}\")\n        verb, amount = parts[0], int(parts[1])\n        if verb == \"deposit\":\n            balance += amount\n        elif verb == \"withdraw\":\n            if balance - amount < 0:\n                raise ValueError(f\"insufficient funds at op {i}\")\n            balance -= amount\n        else:\n            raise ValueError(f\"bad op at op {i}\")\n    return balance\n```",
+  "in": 0,
+  "out": 0
+ },
+ "12_caesar/python/0": {
+  "text": "```\ndef caesar(text: str, shift: int) -> str:\n    out = []\n    for ch in text:\n        if \"a\" <= ch <= \"z\":\n            out.append(chr((ord(ch) - ord(\"a\") + shift) % 26 + ord(\"a\")))\n        elif \"A\" <= ch <= \"Z\":\n            out.append(chr((ord(ch) - ord(\"A\") + shift) % 26 + ord(\"A\")))\n        else:\n            out.append(ch)\n    return \"\".join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "13_prefix/python/0": {
+  "text": "```\ndef common_prefix(words: list[str]) -> str:\n    if not words:\n        return \"\"\n    prefix = words[0]\n    for w in words[1:]:\n        i = 0\n        limit = min(len(prefix), len(w))\n        while i < limit and prefix[i] == w[i]:\n            i += 1\n        prefix = prefix[:i]\n        if not prefix:\n            break\n    return prefix\n```",
+  "in": 0,
+  "out": 0
+ },
+ "14_anagrams/python/0": {
+  "text": "```\ndef group_anagrams(words: list[str]) -> list[list[str]]:\n    groups: dict[str, list[str]] = {}\n    for w in words:\n        groups.setdefault(\"\".join(sorted(w)), []).append(w)\n    result = [sorted(g) for g in groups.values()]\n    result.sort(key=lambda g: g[0])\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "15_csv/python/0": {
+  "text": "```\ndef parse_csv_line(line: str) -> list[str]:\n    fields: list[str] = []\n    current: list[str] = []\n    i = 0\n    n = len(line)\n    at_field_start = True\n    while True:\n        if at_field_start and i < n and line[i] == '\"':\n            # quoted field\n            i += 1\n            closed = False\n            while i < n:\n                ch = line[i]\n                if ch == '\"':\n                    if i + 1 < n and line[i + 1] == '\"':\n                        current.append('\"')\n                        i += 2\n                        continue\n                    closed = True\n                    i += 1\n                    break\n                current.append(ch)\n                i += 1\n            if not closed:\n                raise ValueError(\"unterminated quote\")\n            # any stray characters up to the next comma are kept literally\n            while i < n and line[i] != \",\":\n                current.append(line[i])\n                i += 1\n        else:\n            while i < n and line[i] != \",\":\n                current.append(line[i])\n                i += 1\n        fields.append(\"\".join(current))\n        current = []\n        if i >= n:\n            break\n        # line[i] is a comma; move past it and start a new field\n        i += 1\n        at_field_start = True\n        if i >= n:\n            fields.append(\"\")\n            break\n    return fields\n```",
+  "in": 0,
+  "out": 0
+ },
+ "16_primes/python/0": {
+  "text": "```\ndef primes_up_to(n: int) -> list[int]:\n    if n < 2:\n        return []\n    sieve = [True] * (n + 1)\n    sieve[0] = sieve[1] = False\n    p = 2\n    while p * p <= n:\n        if sieve[p]:\n            for m in range(p * p, n + 1, p):\n                sieve[m] = False\n        p += 1\n    return [i for i in range(2, n + 1) if sieve[i]]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "17_safe_div/python/0": {
+  "text": "```\ndef divide_all(xs: list[int], ys: list[int]) -> list[int]:\n    result: list[int] = []\n    for i, (a, b) in enumerate(zip(xs, ys)):\n        if b == 0:\n            raise ValueError(f\"division by zero at index {i}\")\n        q = abs(a) // abs(b)\n        result.append(q if (a < 0) == (b < 0) else -q)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "18_islands/python/0": {
+  "text": "```\ndef count_islands(grid: list[str]) -> int:\n    if not grid:\n        return 0\n    rows = len(grid)\n    cols = len(grid[0])\n    seen = [[False] * cols for _ in range(rows)]\n    count = 0\n    for r in range(rows):\n        for c in range(cols):\n            if grid[r][c] != \"#\" or seen[r][c]:\n                continue\n            count += 1\n            stack = [(r, c)]\n            seen[r][c] = True\n            while stack:\n                y, x = stack.pop()\n                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):\n                    ny, nx = y + dy, x + dx\n                    if 0 <= ny < rows and 0 <= nx < cols and not seen[ny][nx] and grid[ny][nx] == \"#\":\n                        seen[ny][nx] = True\n                        stack.append((ny, nx))\n    return count\n```",
+  "in": 0,
+  "out": 0
+ },
+ "19_snake/python/0": {
+  "text": "```\ndef camel_to_snake(s: str) -> str:\n    out = []\n    for i, ch in enumerate(s):\n        if \"A\" <= ch <= \"Z\":\n            if i == 0:\n                out.append(ch.lower())\n            else:\n                out.append(\"_\" + ch.lower())\n        else:\n            out.append(ch)\n    return \"\".join(out)\n```",
+  "in": 0,
+  "out": 0
+ },
+ "20_fib_mod/python/0": {
+  "text": "```\ndef fib_mod(n: int, m: int) -> int:\n    # fast doubling: returns (F(k) mod m, F(k+1) mod m)\n    def fd(k: int) -> tuple[int, int]:\n        if k == 0:\n            return 0, 1 % m\n        a, b = fd(k >> 1)\n        c = (a * ((2 * b - a) % m)) % m\n        d = (a * a + b * b) % m\n        if k & 1:\n            return d, (c + d) % m\n        return c, d\n\n    return fd(n)[0] % m\n```",
+  "in": 0,
+  "out": 0
+ },
+ "21_dedupe/python/0": {
+  "text": "```\ndef dedupe(xs: list[int]) -> list[int]:\n    seen: set[int] = set()\n    result: list[int] = []\n    for x in xs:\n        if x not in seen:\n            seen.add(x)\n            result.append(x)\n    return result\n```",
+  "in": 0,
+  "out": 0
+ },
+ "22_histogram/python/0": {
+  "text": "```\ndef histogram(counts: dict[str, int]) -> list[str]:\n    return [f\"{key}: {'*' * counts[key]}\" for key in sorted(counts)]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "23_email/python/0": {
+  "text": "```\ndef is_valid_email(s: str) -> bool:\n    if \" \" in s:\n        return False\n    if s.count(\"@\") != 1:\n        return False\n    local, domain = s.split(\"@\")\n    if local == \"\":\n        return False\n    if \".\" not in domain:\n        return False\n    if domain.startswith(\".\") or domain.endswith(\".\"):\n        return False\n    if \"..\" in domain:\n        return False\n    return True\n```",
+  "in": 0,
+  "out": 0
+ },
+ "24_eval_rpn/python/0": {
+  "text": "```\ndef eval_rpn(expr: str) -> int:\n    stack: list[int] = []\n    for tok in expr.split():\n        if tok in (\"+\", \"-\", \"*\", \"/\"):\n            if len(stack) < 2:\n                raise ValueError(\"stack underflow\")\n            b = stack.pop()\n            a = stack.pop()\n            if tok == \"+\":\n                stack.append(a + b)\n            elif tok == \"-\":\n                stack.append(a - b)\n            elif tok == \"*\":\n                stack.append(a * b)\n            else:\n                if b == 0:\n                    raise ValueError(\"division by zero\")\n                q = abs(a) // abs(b)\n                stack.append(q if (a < 0) == (b < 0) else -q)\n        else:\n            digits = tok[1:] if tok.startswith(\"-\") else tok\n            if digits == \"\" or not all(\"0\" <= ch <= \"9\" for ch in digits):\n                raise ValueError(f\"bad token {tok}\")\n            stack.append(int(tok))\n    if len(stack) != 1:\n        raise ValueError(\"bad expression\")\n    return stack[0]\n```",
+  "in": 0,
+  "out": 0
+ },
+ "01_word_freq/typescript/0": {
+  "text": "```\nexport function word_freq(text: string): Record<string, number> {\n  const result: Record<string, number> = {};\n  for (const raw of text.split(\" \")) {\n    if (raw === \"\") continue;\n    const word = raw.toLowerCase();\n    result[word] = (result[word] ?? 0) + 1;\n  }\n  return result;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "02_average/typescript/0": {
+  "text": "```\nexport function average(xs: number[]): number | null {\n  if (xs.length === 0) return null;\n  let sum = 0;\n  for (const x of xs) sum += x;\n  return sum / xs.length;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "03_rle/typescript/0": {
+  "text": "```\nexport function rle(s: string): string {\n  let out = \"\";\n  let i = 0;\n  while (i < s.length) {\n    const ch = s[i];\n    let j = i;\n    while (j < s.length && s[j] === ch) j++;\n    out += ch + String(j - i);\n    i = j;\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "04_balanced/typescript/0": {
+  "text": "```\nexport function is_balanced(s: string): boolean {\n  const pairs: Record<string, string> = { \")\": \"(\", \"]\": \"[\", \"}\": \"{\" };\n  const stack: string[] = [];\n  for (const ch of s) {\n    if (ch === \"(\" || ch === \"[\" || ch === \"{\") {\n      stack.push(ch);\n    } else if (ch in pairs) {\n      if (stack.length === 0 || stack.pop() !== pairs[ch]) return false;\n    }\n  }\n  return stack.length === 0;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "05_fizzbuzz/typescript/0": {
+  "text": "```\nexport function fizzbuzz(n: number): string[] {\n  const out: string[] = [];\n  for (let i = 1; i <= n; i++) {\n    if (i % 15 === 0) out.push(\"FizzBuzz\");\n    else if (i % 3 === 0) out.push(\"Fizz\");\n    else if (i % 5 === 0) out.push(\"Buzz\");\n    else out.push(String(i));\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "06_top_k/typescript/0": {
+  "text": "```\nexport function top_k(words: string[], k: number): string[] {\n  const counts = new Map<string, number>();\n  for (const w of words) counts.set(w, (counts.get(w) ?? 0) + 1);\n  const entries = [...counts.entries()];\n  entries.sort((a, b) => {\n    if (b[1] !== a[1]) return b[1] - a[1];\n    return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;\n  });\n  return entries.slice(0, Math.max(0, k)).map(([w]) => w);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "07_transpose/typescript/0": {
+  "text": "```\nexport function transpose(m: number[][]): number[][] {\n  if (m.length === 0) return [];\n  const cols = m[0].length;\n  const out: number[][] = [];\n  for (let c = 0; c < cols; c++) {\n    const col: number[] = [];\n    for (const row of m) col.push(row[c]);\n    out.push(col);\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "08_roman/typescript/0": {
+  "text": "```\nexport function to_roman(n: number): string {\n  if (!Number.isInteger(n) || n < 1 || n > 3999) {\n    throw new Error(\"out of range\");\n  }\n  const table: [number, string][] = [\n    [1000, \"M\"], [900, \"CM\"], [500, \"D\"], [400, \"CD\"],\n    [100, \"C\"], [90, \"XC\"], [50, \"L\"], [40, \"XL\"],\n    [10, \"X\"], [9, \"IX\"], [5, \"V\"], [4, \"IV\"], [1, \"I\"],\n  ];\n  let rest = n;\n  let out = \"\";\n  for (const [value, sym] of table) {\n    while (rest >= value) {\n      out += sym;\n      rest -= value;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "09_search/typescript/0": {
+  "text": "```\nexport function find_index(sorted: number[], target: number): number | null {\n  let lo = 0;\n  let hi = sorted.length - 1;\n  while (lo <= hi) {\n    const mid = Math.floor((lo + hi) / 2);\n    if (sorted[mid] === target) return mid;\n    if (sorted[mid] < target) lo = mid + 1;\n    else hi = mid - 1;\n  }\n  return null;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "10_intervals/typescript/0": {
+  "text": "```\nexport function merge_intervals(xs: number[][]): number[][] {\n  const sorted = xs.map((iv) => [iv[0], iv[1]]).sort((a, b) => a[0] - b[0]);\n  const out: number[][] = [];\n  for (const iv of sorted) {\n    const last = out[out.length - 1];\n    if (last !== undefined && iv[0] <= last[1]) {\n      last[1] = Math.max(last[1], iv[1]);\n    } else {\n      out.push([iv[0], iv[1]]);\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "11_bank/typescript/0": {
+  "text": "```\nexport function run_ops(ops: string[]): number {\n  let balance = 0;\n  for (let i = 0; i < ops.length; i++) {\n    const pos = i + 1;\n    const m = /^(deposit|withdraw) (\\d+)$/.exec(ops[i]);\n    if (m === null) {\n      throw new Error(`bad op at op ${pos}`);\n    }\n    const amount = Number(m[2]);\n    if (m[1] === \"deposit\") {\n      balance += amount;\n    } else {\n      if (balance - amount < 0) {\n        throw new Error(`insufficient funds at op ${pos}`);\n      }\n      balance -= amount;\n    }\n  }\n  return balance;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "12_caesar/typescript/0": {
+  "text": "```\nexport function caesar(text: string, shift: number): string {\n  const s = ((shift % 26) + 26) % 26;\n  let out = \"\";\n  for (const ch of text) {\n    const code = ch.charCodeAt(0);\n    if (code >= 65 && code <= 90) {\n      out += String.fromCharCode(((code - 65 + s) % 26) + 65);\n    } else if (code >= 97 && code <= 122) {\n      out += String.fromCharCode(((code - 97 + s) % 26) + 97);\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "13_prefix/typescript/0": {
+  "text": "```\nexport function common_prefix(words: string[]): string {\n  if (words.length === 0) return \"\";\n  let prefix = words[0];\n  for (const w of words.slice(1)) {\n    let i = 0;\n    while (i < prefix.length && i < w.length && prefix[i] === w[i]) i++;\n    prefix = prefix.slice(0, i);\n    if (prefix === \"\") break;\n  }\n  return prefix;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "14_anagrams/typescript/0": {
+  "text": "```\nexport function group_anagrams(words: string[]): string[][] {\n  const groups = new Map<string, string[]>();\n  for (const w of words) {\n    const key = w.split(\"\").sort().join(\"\");\n    const g = groups.get(key);\n    if (g) g.push(w);\n    else groups.set(key, [w]);\n  }\n  const out: string[][] = [];\n  for (const g of groups.values()) {\n    g.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));\n    out.push(g);\n  }\n  out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "15_csv/typescript/0": {
+  "text": "```\nexport function parse_csv_line(line: string): string[] {\n  const fields: string[] = [];\n  let cur = \"\";\n  let i = 0;\n  const n = line.length;\n  while (true) {\n    if (i < n && line[i] === '\"' && cur === \"\") {\n      // quoted field\n      i++;\n      let closed = false;\n      while (i < n) {\n        if (line[i] === '\"') {\n          if (i + 1 < n && line[i + 1] === '\"') {\n            cur += '\"';\n            i += 2;\n          } else {\n            closed = true;\n            i++;\n            break;\n          }\n        } else {\n          cur += line[i];\n          i++;\n        }\n      }\n      if (!closed) throw new Error(\"unterminated quote\");\n      // after closing quote, consume until comma or end\n      while (i < n && line[i] !== \",\") {\n        cur += line[i];\n        i++;\n      }\n    } else {\n      while (i < n && line[i] !== \",\") {\n        cur += line[i];\n        i++;\n      }\n    }\n    fields.push(cur);\n    cur = \"\";\n    if (i >= n) break;\n    // line[i] is a comma\n    i++;\n    if (i >= n) {\n      fields.push(\"\");\n      break;\n    }\n  }\n  return fields;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "16_primes/typescript/0": {
+  "text": "```\nexport function primes_up_to(n: number): number[] {\n  if (n < 2) return [];\n  const limit = Math.floor(n);\n  const sieve = new Array<boolean>(limit + 1).fill(true);\n  sieve[0] = false;\n  sieve[1] = false;\n  for (let p = 2; p * p <= limit; p++) {\n    if (sieve[p]) {\n      for (let m = p * p; m <= limit; m += p) sieve[m] = false;\n    }\n  }\n  const out: number[] = [];\n  for (let i = 2; i <= limit; i++) if (sieve[i]) out.push(i);\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "17_safe_div/typescript/0": {
+  "text": "```\nexport function divide_all(xs: number[], ys: number[]): number[] {\n  for (let i = 0; i < ys.length; i++) {\n    if (ys[i] === 0) {\n      throw new Error(`division by zero at index ${i}`);\n    }\n  }\n  const out: number[] = [];\n  for (let i = 0; i < xs.length; i++) {\n    out.push(Math.trunc(xs[i] / ys[i]) || 0);\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "18_islands/typescript/0": {
+  "text": "```\nexport function count_islands(grid: string[]): number {\n  const rows = grid.length;\n  if (rows === 0) return 0;\n  const seen: boolean[][] = grid.map((r) => new Array<boolean>(r.length).fill(false));\n  let count = 0;\n  for (let r = 0; r < rows; r++) {\n    for (let c = 0; c < grid[r].length; c++) {\n      if (grid[r][c] !== \"#\" || seen[r][c]) continue;\n      count++;\n      const stack: [number, number][] = [[r, c]];\n      seen[r][c] = true;\n      while (stack.length > 0) {\n        const [y, x] = stack.pop()!;\n        const neighbors: [number, number][] = [\n          [y - 1, x], [y + 1, x], [y, x - 1], [y, x + 1],\n        ];\n        for (const [ny, nx] of neighbors) {\n          if (\n            ny >= 0 && ny < rows &&\n            nx >= 0 && nx < grid[ny].length &&\n            grid[ny][nx] === \"#\" && !seen[ny][nx]\n          ) {\n            seen[ny][nx] = true;\n            stack.push([ny, nx]);\n          }\n        }\n      }\n    }\n  }\n  return count;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "19_snake/typescript/0": {
+  "text": "```\nexport function camel_to_snake(s: string): string {\n  let out = \"\";\n  for (let i = 0; i < s.length; i++) {\n    const ch = s[i];\n    const isUpper = ch >= \"A\" && ch <= \"Z\";\n    if (isUpper) {\n      if (i > 0) out += \"_\";\n      out += ch.toLowerCase();\n    } else {\n      out += ch;\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "20_fib_mod/typescript/0": {
+  "text": "```\nexport function fib_mod(n: number, m: number): number {\n  const mod = BigInt(m);\n  if (n === 0) return 0 % m;\n  let a = 0n;\n  let b = 1n % mod;\n  for (let i = 1; i < n; i++) {\n    const next = (a + b) % mod;\n    a = b;\n    b = next;\n  }\n  return Number(b % mod);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "21_dedupe/typescript/0": {
+  "text": "```\nexport function dedupe(xs: number[]): number[] {\n  const seen = new Set<number>();\n  const out: number[] = [];\n  for (const x of xs) {\n    if (!seen.has(x)) {\n      seen.add(x);\n      out.push(x);\n    }\n  }\n  return out;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "22_histogram/typescript/0": {
+  "text": "```\nexport function histogram(counts: Record<string, number>): string[] {\n  const keys = Object.keys(counts).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));\n  return keys.map((k) => `${k}: ${\"*\".repeat(counts[k])}`);\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "23_email/typescript/0": {
+  "text": "```\nexport function is_valid_email(s: string): boolean {\n  if (s.includes(\" \")) return false;\n  const parts = s.split(\"@\");\n  if (parts.length !== 2) return false;\n  const [local, domain] = parts;\n  if (local.length === 0) return false;\n  if (!domain.includes(\".\")) return false;\n  if (domain.startsWith(\".\") || domain.endsWith(\".\")) return false;\n  if (domain.includes(\"..\")) return false;\n  return true;\n}\n```",
+  "in": 0,
+  "out": 0
+ },
+ "24_eval_rpn/typescript/0": {
+  "text": "```\nexport function eval_rpn(expr: string): number {\n  const tokens = expr.split(\" \").filter((t) => t !== \"\");\n  const stack: number[] = [];\n  for (const tok of tokens) {\n    if (/^-?\\d+$/.test(tok)) {\n      stack.push(Number(tok));\n      continue;\n    }\n    if (tok === \"+\" || tok === \"-\" || tok === \"*\" || tok === \"/\") {\n      if (stack.length < 2) throw new Error(\"stack underflow\");\n      const b = stack.pop() as number;\n      const a = stack.pop() as number;\n      let r: number;\n      if (tok === \"+\") r = a + b;\n      else if (tok === \"-\") r = a - b;\n      else if (tok === \"*\") r = a * b;\n      else {\n        if (b === 0) throw new Error(\"division by zero\");\n        r = Math.trunc(a / b) || 0;\n      }\n      stack.push(r);\n      continue;\n    }\n    throw new Error(`bad token ${tok}`);\n  }\n  if (stack.length !== 1) throw new Error(\"bad expression\");\n  return stack[0];\n}\n```",
+  "in": 0,
+  "out": 0
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def hex_key(num: str) -> int:\n    primes = set(\"2357BD\")\n    return sum(1 for c in num if c in primes)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

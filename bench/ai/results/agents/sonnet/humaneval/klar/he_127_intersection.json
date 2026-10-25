@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn intersection(interval1: Pair[Int, Int], interval2: Pair[Int, Int]) -> Str {\n  let lo = interval1.first.max(interval2.first)\n  let hi = interval1.second.min(interval2.second)\n  let len = hi - lo\n  if len >= 2 and is_prime(len) {\n    return \"YES\"\n  }\n  return \"NO\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

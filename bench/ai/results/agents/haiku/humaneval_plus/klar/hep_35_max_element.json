@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn max_element(l: List[Int]) -> Int {\n  return match l.max() {\n    Some(v) => v,\n    None => fail(\"max_element of an empty list\"),\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

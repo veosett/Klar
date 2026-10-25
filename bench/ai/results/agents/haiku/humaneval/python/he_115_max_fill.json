@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "def max_fill(grid: list[list[int]], capacity: int) -> int:\n    total = sum(sum(row) for row in grid)\n    return -(-total // capacity)\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "def max_fill(grid: list[list[int]], capacity: int) -> int:\n    total = 0\n    for row in grid:\n        water = sum(row)\n        total += -(-water // capacity)\n    return total\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -52,7 +52,10 @@ def tokenize_line(line):
         elif c.isdigit():
             j = i
             while j < n and (line[j].isalnum() or line[j] == "_" or
-                             (line[j] == "." and j + 1 < n and line[j + 1].isdigit())):
+                             (line[j] == "." and j + 1 < n and line[j + 1].isdigit()) or
+                             # the sign of an exponent (1e-5); not in hexadecimal (0x1e-5 is a subtraction)
+                             (line[j] in "+-" and line[j - 1] in "eE" and j + 1 < n and line[j + 1].isdigit() and
+                              line[i + 1:i + 2] not in ("x", "X"))):
                 j += 1
             toks.append(Tok("num", line[i:j]))
             i = j

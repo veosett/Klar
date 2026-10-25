@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn unique(l: List[Int]) -> List[Int] {\n  var res: List[Int] = []\n  for x in l.sort() {\n    if not res.contains(x) {\n      res = res.push(x)\n    }\n  }\n  return res\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

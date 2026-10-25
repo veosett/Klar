@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def unique(l: list[int]) -> list[int]:\n    return sorted(set(l))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

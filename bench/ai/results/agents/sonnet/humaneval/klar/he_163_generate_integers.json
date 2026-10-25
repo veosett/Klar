@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn generate_integers(a: Int, b: Int) -> List[Int] {\n  let lo = a.min(b).max(2)\n  let hi = a.max(b).min(8)\n  return range(lo, hi + 1).filter(fn(x) => x.is_even())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

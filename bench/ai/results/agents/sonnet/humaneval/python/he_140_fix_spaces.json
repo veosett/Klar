@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fix_spaces(text: str) -> str:\n    out = []\n    i = 0\n    n = len(text)\n    while i < n:\n        if text[i] == \" \":\n            j = i\n            while j < n and text[j] == \" \":\n                j += 1\n            run = j - i\n            out.append(\"-\" if run > 2 else \"_\" * run)\n            i = j\n        else:\n            out.append(text[i])\n            i += 1\n    return \"\".join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

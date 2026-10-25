@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn shift_code(c: Int) -> Int {\n  if c >= 97 and c <= 122 {\n    return (c - 97 + 4) % 26 + 97\n  }\n  return c\n}\n\npub fn encrypt(s: Str) -> Str {\n  var out = \"\"\n  for code in s.codes() {\n    out = out + shift_code(code).to_char().unwrap_or(\"\")\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn largest_prime_factor(n: Int) -> Int {\n  var m = n\n  var best = 1\n  var f = 2\n  while f * f <= m {\n    while m % f == 0 {\n      best = f\n      m = m / f\n    }\n    f = f + 1\n  }\n  if m > 1 {\n    return m\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

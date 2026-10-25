@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn anti_shuffle(s: Str) -> Str {\n  let words = s.split(\" \")\n  return words.map(fn(w) => w.chars().sort().join(\"\")).join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

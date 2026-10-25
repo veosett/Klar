@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def triangle_area(a: int, b: int, c: int) -> float:\n    if a + b <= c or a + c <= b or b + c <= a:\n        return -1\n    s = (a + b + c) / 2\n    area = (s * (s - a) * (s - b) * (s - c)) ** 0.5\n    return round(area, 2)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

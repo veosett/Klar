@@ -627,6 +627,10 @@ fn parse_primary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
     }
     return Ok(Got { value: Expr.Name(span: start, name: t.text), pos: j })
   }
+  if t.kind == TokKind.Op and t.text == "\{" and not p.no_struct {
+    // `\{"a": 1\}`: a map, as `Map \{"a": 1\}` (Python and JSON write it so)
+    return parse_map_from(p: p, brace: i, start: span_of(t))
+  }
   if t.kind == TokKind.Op and LINE_START_OPS.contains(t.text) {
     return bad_h(t: t, message: "expected an expression, found {describe(t)}",
       hint: "a line cannot start with `{t.text}`: to continue an expression on the next line, " +
@@ -665,9 +669,13 @@ fn string_node(t: Token) -> Result[Expr, ParseError] {
 }
 
 fn parse_map_lit(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+  return parse_map_from(p: p, brace: next(p, i), start: span_of(tk(p, i)))
+}
+
+/// The entries of a map literal from its `\{` (`Map \{"a": 1\}`, or `\{"a": 1\}` alone).
+fn parse_map_from(p: Ps, brace: Int, start: Span) -> Result[Got[Expr], ParseError] {
   let q = p with { no_struct: false }
-  let start = span_of(tk(q, i))
-  var j = expect_op(p: q, i: next(q, i), v: "\{", ctx: "")?
+  var j = expect_op(p: q, i: brace, v: "\{", ctx: "")?
   var entries: List[MapEntry] = []
   j = skip_nl(q, j)
   while not is_op(tk(q, j), "\}") {
@@ -828,13 +836,11 @@ fn parse_lambda(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   }
   let q = p with { no_struct: false }
   if is_op(tk(q, j), "=>") {
-    let arrow = tk(q, j)
-    if is_op(tk(q, j + 1), "\{") {
-      let brace = tk(q, j + 1)
-      let e = error_at(t: arrow, code: "E0003", message: "a lambda with a block body has no `=>`")
-      return Err(e with { hint: Some("write `fn(x) \{ return value \}` (statements on their own lines), or keep `=>` " +
-          "with one expression: `fn(x) => x * 2`"), fix: Some(ParseFix { span: Span { line: arrow.line, col: arrow.col,
-          end_line: brace.line, end_col: brace.col }, text: "" }) })
+    // `fn(x) => \{ ... \}` is a block body too (as in JavaScript and Rust): the `=>` is not needed but harmless
+    if is_op(tk(q, next(q, j)), "\{") {
+      let b = parse_block(q, next(q, j))?
+      return Ok(Got { value: Expr.Lambda(span: span_from(p: q, start: start, i: b.pos), params: params.value, ret: ret,
+        body: Body.BlockBody(block: b.value)), pos: b.pos })
     }
     let e = parse_expr(q, next(q, j))?
     return Ok(Got { value: Expr.Lambda(span: span_from(p: q, start: start, i: e.pos), params: params.value, ret: ret,

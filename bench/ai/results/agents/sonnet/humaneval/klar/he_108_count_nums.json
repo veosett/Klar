@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn signed_sum(n: Int) -> Int {\n  let ds = n.abs().to_str().codes().map(fn(c) => c - 48)\n  let total = ds.sum()\n  if n < 0 {\n    return total - 2 * ds.get_or(0, 0)\n  }\n  return total\n}\n\npub fn count_nums(arr: List[Int]) -> Int {\n  return arr.count(fn(n) => signed_sum(n) > 0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

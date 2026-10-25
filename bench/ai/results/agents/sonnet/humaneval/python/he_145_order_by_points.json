@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def order_by_points(nums: list[int]) -> list[int]:\n    def ds(n):\n        s = str(abs(n))\n        t = sum(int(c) for c in s)\n        if n < 0:\n            t -= 2 * int(s[0])\n        return t\n    return sorted(nums, key=ds)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

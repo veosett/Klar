@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert total_match([\"hi\", \"admin\"], [\"hi\", \"hi\"]) == [\"hi\", \"hi\"]\npub fn total_match(lst1: List[Str], lst2: List[Str]) -> List[Str] {\n  let n1 = lst1.fold(0, fn(acc: Int, s: Str) -> Int { return acc + s.len() })\n  let n2 = lst2.fold(0, fn(acc: Int, s: Str) -> Int { return acc + s.len() })\n  if n1 <= n2 {\n    return lst1\n  }\n  return lst2\n}\n\ntest \"total_match\" {\n  assert total_match([], []) == []\n  assert total_match([\"hi\", \"admin\"], [\"hI\", \"Hi\"]) == [\"hI\", \"Hi\"]\n  assert total_match([\"hi\", \"admin\"], [\"hi\", \"hi\", \"admin\", \"project\"]) == [\"hi\", \"admin\"]\n  assert total_match([\"hi\", \"admin\"], [\"hI\", \"hi\", \"hi\"]) == [\"hI\", \"hi\", \"hi\"]\n  assert total_match([\"4\"], [\"1\", \"2\", \"3\", \"4\", \"5\"]) == [\"4\"]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

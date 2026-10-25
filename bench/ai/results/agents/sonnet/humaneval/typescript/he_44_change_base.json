@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function change_base(x: number, base: number): string {\n  if (x === 0) return \"0\";\n  let s = \"\";\n  while (x > 0) {\n    s = String(x % base) + s;\n    x = Math.floor(x / base);\n  }\n  return s;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

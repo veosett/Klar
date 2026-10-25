@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import math\n\ndef closest_integer(value: str) -> int:\n    x = float(value)\n    if x >= 0:\n        return int(math.floor(x + 0.5))\n    return -int(math.floor(-x + 0.5))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

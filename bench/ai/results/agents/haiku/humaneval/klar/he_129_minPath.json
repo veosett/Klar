@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The smallest path always starts at the cell holding 1 and then\n/// greedily steps to the smallest neighbour, since the values are unique.\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  let n = grid.len()\n  if n == 0 {\n    return []\n  }\n  let flat = grid.flatten()\n  var cur = flat.index_of(1).unwrap_or(0)\n  var out: List[Int] = [1]\n  while out.len() < k {\n    let r = cur / n\n    let c = cur % n\n    var nxt = cur\n    var nv = n * n + 1\n    if r > 0 {\n      let v1 = flat.get_or(cur - n, 0)\n      if v1 < nv {\n        nv = v1\n        nxt = cur - n\n      }\n    }\n    if r < n - 1 {\n      let v2 = flat.get_or(cur + n, 0)\n      if v2 < nv {\n        nv = v2\n        nxt = cur + n\n      }\n    }\n    if c > 0 {\n      let v3 = flat.get_or(cur - 1, 0)\n      if v3 < nv {\n        nv = v3\n        nxt = cur - 1\n      }\n    }\n    if c < n - 1 {\n      let v4 = flat.get_or(cur + 1, 0)\n      if v4 < nv {\n        nv = v4\n        nxt = cur + 1\n      }\n    }\n    cur = nxt\n    out = out.push(nv)\n  }\n  return out\n}\n\ntest \"minPath\" {\n  assert minPath([[1, 2, 3], [4, 5, 6], [7, 8, 9]], 3) == [1, 2, 1]\n  assert minPath([[5, 9, 3], [4, 1, 6], [7, 8, 2]], 1) == [1]\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

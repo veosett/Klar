@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn popcount(n: Int) -> Int {\n  var x = n.abs()\n  var c = 0\n  while x > 0 {\n    if x % 2 == 1 {\n      c = c + 1\n    }\n    x = x / 2\n  }\n  return c\n}\n\n/// Sort by number of one bits, then by value.\n/// >>> assert sort_array([1, 5, 2, 3, 4]) == [1, 2, 4, 3, 5]\npub fn sort_array(arr: List[Int]) -> List[Int] {\n  let sorted = arr.sort()\n  let top = arr.map(fn(n) => popcount(n)).max().unwrap_or(0)\n  return range(0, top + 1).flat_map(fn(k) => sorted.filter(fn(n) => popcount(n) == k))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

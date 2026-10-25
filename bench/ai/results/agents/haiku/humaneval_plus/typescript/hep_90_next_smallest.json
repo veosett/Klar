@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function next_smallest(lst: number[]): number | null {\n  const sorted = lst.slice().sort((a, b) => a - b);\n  for (let i = 1; i < sorted.length; i++) {\n    if (sorted[i] !== sorted[0]) {\n      return sorted[i];\n    }\n  }\n  return null;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

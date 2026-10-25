@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert derivative([1, 2, 3]) == [2, 6]\npub fn derivative(xs: List[Int]) -> List[Int] {\n  return xs.drop(1).enumerate().map(fn(p) => p.value * (p.index + 1))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

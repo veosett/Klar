@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function below_threshold(l: number[], t: number): boolean {\n  return l.every((x) => x < t);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

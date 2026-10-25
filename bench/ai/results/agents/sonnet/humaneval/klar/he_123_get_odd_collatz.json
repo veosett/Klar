@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_odd_collatz(n: Int) -> List[Int] {\n  var out: List[Int] = []\n  var x: Int = n\n  while x > 1 {\n    if x.is_even() {\n      x = x / 2\n    } else {\n      out = out.push(x)\n      x = 3 * x + 1\n    }\n  }\n  out = out.push(1)\n  return out.sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

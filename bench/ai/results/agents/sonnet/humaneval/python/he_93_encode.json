@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def encode(message: str) -> str:\n    out = []\n    for c in message:\n        if c.lower() in \"aeiou\":\n            c = chr(ord(c) + 2)\n        out.append(c.swapcase())\n    return \"\".join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

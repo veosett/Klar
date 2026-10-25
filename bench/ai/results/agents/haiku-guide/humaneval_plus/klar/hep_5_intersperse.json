@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn intersperse(numbers: List[Int], delimeter: Int) -> List[Int] {\n  var out: List[Int] = []\n  var first = true\n  for n in numbers {\n    if first {\n      first = false\n    } else {\n      out = out.push(delimeter)\n    }\n    out = out.push(n)\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

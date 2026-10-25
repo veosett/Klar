@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function isBalanced(s: string): boolean {\n  let depth = 0;\n  for (const ch of s) {\n    if (ch === \"(\") {\n      depth++;\n    } else if (ch === \")\") {\n      depth--;\n      if (depth < 0) {\n        return false;\n      }\n    }\n  }\n  return depth === 0;\n}\n\nexport function match_parens(lst: string[]): string {\n  const [a, b] = lst;\n  return isBalanced(a + b) || isBalanced(b + a) ? \"Yes\" : \"No\";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

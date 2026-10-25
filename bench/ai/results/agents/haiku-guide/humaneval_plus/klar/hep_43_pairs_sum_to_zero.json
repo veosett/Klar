@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn has_partner(x: Int, rest: List[Int]) -> Bool {\n  return rest.any(fn(y) => x + y == 0)\n}\n\npub fn pairs_sum_to_zero(l: List[Int]) -> Bool {\n  var found = false\n  for e in l.enumerate() {\n    if has_partner(e.value, l.drop(e.index + 1)) {\n      found = true\n    }\n  }\n  return found\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

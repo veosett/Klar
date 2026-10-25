@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def to_roman(n: int) -> str:\n    if n < 1 or n > 3999:\n        raise ValueError(\"out of range\")\n    table = [\n        (1000, \"M\"), (900, \"CM\"), (500, \"D\"), (400, \"CD\"),\n        (100, \"C\"), (90, \"XC\"), (50, \"L\"), (40, \"XL\"),\n        (10, \"X\"), (9, \"IX\"), (5, \"V\"), (4, \"IV\"), (1, \"I\"),\n    ]\n    out = []\n    for value, symbol in table:\n        while n >= value:\n            out.append(symbol)\n            n -= value\n    return \"\".join(out)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

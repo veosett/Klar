@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def change_base(x: int, base: int) -> str:\n    if x == 0:\n        return '0'\n    digits = []\n    n = x\n    while n > 0:\n        digits.append(str(n % base))\n        n //= base\n    return ''.join(reversed(digits))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

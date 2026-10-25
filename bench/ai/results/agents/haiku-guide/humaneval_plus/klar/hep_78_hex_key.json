@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Counts the hexadecimal digits that are prime: 2, 3, 5, 7, B, D.\n/// >>> assert hex_key(\"AB\") == 1\n/// >>> assert hex_key(\"\") == 0\npub fn hex_key(num: Str) -> Int {\n  var count = 0\n  for c in num.chars() {\n    if c == \"2\" or c == \"3\" or c == \"5\" or c == \"7\" or c == \"B\" or c == \"D\" {\n      count = count + 1\n    }\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

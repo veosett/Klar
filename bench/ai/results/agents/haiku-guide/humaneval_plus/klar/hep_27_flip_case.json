@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Swaps the case of every letter.\n/// >>> assert flip_case(\"Hello\") == \"hELLO\"\npub fn flip_case(string: Str) -> Str {\n  var out = \"\"\n  for c in string.chars() {\n    if c == c.upper() {\n      out = out + c.lower()\n    } else {\n      out = out + c.upper()\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

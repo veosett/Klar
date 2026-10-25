@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The k largest numbers of arr, sorted in ascending order.\n/// >>> assert maximum([-3, -4, 5], 3) == [-4, -3, 5]\n/// >>> assert maximum([4, -4, 4], 2) == [4, 4]\npub fn maximum(arr: List[Int], k: Int) -> List[Int] {\n  let s = arr.sort()\n  return s.drop(s.len() - k)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function isPrime(x: number): boolean {\n  if (x < 2) {\n    return false;\n  }\n  for (let d = 2; d * d <= x; d++) {\n    if (x % d === 0) {\n      return false;\n    }\n  }\n  return true;\n}\n\nexport function prime_fib(n: number): number {\n  let count = 0;\n  let a = 0;\n  let b = 1;\n  while (true) {\n    const next = a + b;\n    a = b;\n    b = next;\n    if (isPrime(a)) {\n      count++;\n      if (count === n) {\n        return a;\n      }\n    }\n  }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

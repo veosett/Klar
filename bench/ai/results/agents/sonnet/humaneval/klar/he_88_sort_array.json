@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sort_array(array: List[Int]) -> List[Int] {\n  if array.is_empty() {\n    return []\n  }\n  let t = array.get_or(0, 0) + array.last().unwrap_or(0)\n  let s = array.sort()\n  if t % 2 == 1 {\n    return s\n  }\n  return s.reverse()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fib4(n: Int) -> Int {\n  if n == 2 {\n    return 2\n  }\n  if n < 4 {\n    return 0\n  }\n  var a: Int = 0\n  var b: Int = 0\n  var c: Int = 2\n  var d: Int = 0\n  var i: Int = 3\n  while i < n {\n    let e = a + b + c + d\n    a = b\n    b = c\n    c = d\n    d = e\n    i = i + 1\n  }\n  return d\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

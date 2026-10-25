@@ -32,6 +32,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 TASKS = os.path.join(HERE, "tasks", "tasks.json")
 REFS = os.path.join(HERE, "tasks", "ref")
+# outside suites (bench/ai/build_suites.py): HumanEval and MBPP from MultiPL-E, the same tests in every language
+SUITES = {"own": (TASKS, REFS)}
+for _name in ("humaneval", "mbpp", "humaneval_plus"):
+    SUITES[_name] = (os.path.join(HERE, "suites", _name, "tasks.json"), os.path.join(HERE, "suites", _name, "ref"))
 LANGS = ("klar", "python", "typescript")
 EXT = {"klar": "klar", "python": "py", "typescript": "ts"}
 
@@ -63,20 +67,38 @@ def py_type(t):
     h, a = t
     return {"Int": "int", "Float": "float", "Str": "str", "Bool": "bool"}.get(h) or {
         "List": lambda: f"list[{py_type(a[0])}]", "Map": lambda: f"dict[{py_type(a[0])}, {py_type(a[1])}]",
-        "Option": lambda: f"{py_type(a[0])} | None", "Result": lambda: py_type(a[0])}[h]()
+        "Option": lambda: f"{py_type(a[0])} | None", "Result": lambda: py_type(a[0]),
+        "Pair": lambda: f"tuple[{py_type(a[0])}, {py_type(a[1])}]"}[h]()
 
 
 def ts_type(t):
     h, a = t
     return {"Int": "number", "Float": "number", "Str": "string", "Bool": "boolean"}.get(h) or {
         "List": lambda: f"{ts_type(a[0])}[]", "Map": lambda: f"Record<{ts_type(a[0])}, {ts_type(a[1])}>",
-        "Option": lambda: f"{ts_type(a[0])} | null", "Result": lambda: ts_type(a[0])}[h]()
+        "Option": lambda: f"{ts_type(a[0])} | null", "Result": lambda: ts_type(a[0]),
+        "Pair": lambda: f"[{ts_type(a[0])}, {ts_type(a[1])}]"}[h]()
 
 
 # ---- values as literals ----------------------------------------------------------------------------------------------
 def klar_str(s):
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("{", "\\{").replace("}", "\\}") \
-        .replace("\n", "\\n").replace("\t", "\\t") + '"'
+    """A Klar string literal; other control characters (Klar has escapes for \\n, \\t, \\r and \\0) are joined in
+    as `(13).to_char().unwrap_or("")`."""
+    parts, cur = [], ""
+    for c in s:
+        if ord(c) < 32 and c not in "\n\t\r\0":
+            parts += ['"' + cur + '"', f'({ord(c)}).to_char().unwrap_or("")']
+            cur = ""
+            continue
+        cur += {"\\": "\\\\", '"': '\\"', "{": "\\{", "}": "\\}", "\n": "\\n", "\t": "\\t", "\r": "\\r", "\0": "\\0"}.get(c, c)
+    parts.append('"' + cur + '"')
+    return parts[0] if len(parts) == 1 else "(" + " + ".join(p for p in parts if p != '""') + ")"
+
+
+def klar_float(v):
+    """A Klar Float literal: digits and a point, no exponent (`1e-05` is `0.00001`)."""
+    from decimal import Decimal
+    text = format(Decimal(repr(float(v))), "f")
+    return text if "." in text else text + ".0"
 
 
 def klar_lit(v, t):
@@ -84,7 +106,7 @@ def klar_lit(v, t):
     if h == "Int":
         return str(v)
     if h == "Float":
-        return repr(float(v))
+        return klar_float(v)
     if h == "Bool":
         return "true" if v else "false"
     if h == "Str":
@@ -97,6 +119,8 @@ def klar_lit(v, t):
         return "None" if v is None else f"Some({klar_lit(v, a[0])})"
     if h == "Result":
         return f"Ok({klar_lit(v['ok'], a[0])})" if "ok" in v else f"Err({klar_lit(v['err'], a[1])})"
+    if h == "Pair":
+        return f"Pair {{ first: {klar_lit(v[0], a[0])}, second: {klar_lit(v[1], a[1])} }}"
     raise ValueError(h)
 
 
@@ -107,6 +131,10 @@ def py_lit(v, t):
         return "[" + ", ".join(py_lit(x, t[1][0]) for x in v) + "]"
     if t[0] == "Map":
         return "{" + ", ".join(f"{py_lit(k, t[1][0])}: {py_lit(x, t[1][1])}" for k, x in v.items()) + "}"
+    if t[0] == "Option":
+        return "None" if v is None else py_lit(v, t[1][0])
+    if t[0] == "Pair":
+        return f"({py_lit(v[0], t[1][0])}, {py_lit(v[1], t[1][1])})"
     return repr(v)
 
 
@@ -151,7 +179,10 @@ def tests_klar(task):
     params = [parse_type(t) for _, t in task["params"]]
     out = [f"use solution.{{{task['fn']}}}", ""]
     for i, (args, want) in enumerate(task["tests"]):
-        call = f"{task['fn']}({', '.join(klar_lit(a, t) for a, t in zip(args, params))})"
+        lits = [klar_lit(a, t) for a, t in zip(args, params)]
+        if len(lits) >= 3:      # Klar names the arguments of a call with three or more
+            lits = [f"{n}: {x}" for (n, _), x in zip(task["params"], lits)]
+        call = f"{task['fn']}({', '.join(lits)})"
         out += [f"test {klar_str(f'case {i + 1}: {call}')} {{",
                 f"  assert {call} == {klar_lit(want, ret)}", "}", ""]
     return "\n".join(out)
@@ -253,7 +284,10 @@ def evaluate(task, lang, code):
             try:
                 data = json.loads(out[out.index("{"):])
             except ValueError:
-                return {"ok": False, "stage": "compile", "feedback": out[-3000:]}
+                # no report: a crash or a timeout of the tests, unless the program does not even type-check
+                code2, text = run([sys.executable, "-m", "klar", "check", "check.klar"], d)
+                stage = "compile" if code2 != 0 else "test"
+                return {"ok": False, "stage": stage, "feedback": (text if code2 != 0 else out)[-3000:]}
             if data.get("stage") == "check":
                 code2, text = run([sys.executable, "-m", "klar", "check", "check.klar"], d)
                 return {"ok": False, "stage": "compile", "feedback": text[-3000:]}
@@ -318,9 +352,49 @@ def openai(model, messages):
     return r["choices"][0]["message"]["content"], u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
 
 
-def reference(task, lang):
-    with open(os.path.join(REFS, lang, f"{task['id']}.{EXT[lang]}"), encoding="utf-8") as f:
+def reference(task, lang, refs=REFS):
+    path = os.path.join(refs, lang, f"{task['id']}.{EXT[lang]}")
+    if not os.path.exists(path):
+        return "(no reference solution)", 0, 0
+    with open(path, encoding="utf-8") as f:
         return "```\n" + f.read() + "```", 0, 0
+
+
+def stub(task, lang):
+    """A solution that only has the signature: the tests must type-check against it (`--validate`)."""
+    if lang == "klar":
+        return signature(task, lang) + " {\n  todo(\"stub\")\n}\n"
+    if lang == "python":
+        return signature(task, lang) + "\n    raise NotImplementedError\n"
+    return signature(task, lang) + " {\n  throw new Error(\"stub\");\n}\n"
+
+
+def validate(tasks, langs):
+    """Every test file type-checks against a stub in every language: the suite is expressible everywhere."""
+    bad = 0
+    for task in tasks:
+        for lang in langs:
+            with tempfile.TemporaryDirectory() as d:
+                with open(os.path.join(d, f"solution.{EXT[lang]}"), "w", encoding="utf-8") as f:
+                    f.write(stub(task, lang))
+                if lang == "klar":
+                    with open(os.path.join(d, "check.klar"), "w", encoding="utf-8") as f:
+                        f.write(tests_klar(task))
+                    code, out = run([sys.executable, "-m", "klar", "check", "check.klar"], d)
+                elif lang == "python":
+                    with open(os.path.join(d, "check.py"), "w", encoding="utf-8") as f:
+                        f.write(tests_python(task))
+                    code, out = run([sys.executable, "-m", "py_compile", "check.py"], d)
+                else:
+                    with open(os.path.join(d, "check.ts"), "w", encoding="utf-8") as f:
+                        f.write(tests_typescript(task))
+                    code, out = run([shutil.which("tsc") or "tsc", "--strict", "--noEmit", "--target", "es2020",
+                                     "--module", "commonjs", "check.ts", "solution.ts"], d)
+                if code != 0:
+                    bad += 1
+                    print(f"BAD {task['id']} {lang}: {out[:600]}")
+    print(f"validate: {len(tasks) * len(langs) - bad}/{len(tasks) * len(langs)} test files type-check")
+    return 1 if bad else 0
 
 
 # ---- the benchmark ------------------------------------------------------------------------------------------------------
@@ -396,9 +470,16 @@ def main(argv=None):
     ap.add_argument("--attempts", type=int, default=3)
     ap.add_argument("--replay", help="a results directory to re-score (with --provider replay)")
     ap.add_argument("--name", help="results/<name> (default: provider-model)")
+    ap.add_argument("--suite", choices=sorted(SUITES), default="own",
+                    help="own: tasks/tasks.json; humaneval, mbpp: from MultiPL-E (bench/ai/build_suites.py)")
+    ap.add_argument("--validate", action="store_true",
+                    help="no model: check that every test file type-checks against a stub in every language")
     args = ap.parse_args(argv)
-    with open(TASKS, encoding="utf-8") as f:
+    tasks_path, refs = SUITES[args.suite]
+    with open(tasks_path, encoding="utf-8") as f:
         tasks = [t for t in json.load(f) if not args.filter or args.filter in t["id"]]
+    if args.validate:
+        return validate(tasks, args.lang)
     saved = None
     if args.provider == "replay":
         with open(os.path.join(args.replay, "answers.json"), encoding="utf-8") as f:
@@ -411,7 +492,7 @@ def main(argv=None):
             return openai(args.model, messages)
     else:
         def ask(task, lang, messages):
-            return reference(task, lang)
+            return reference(task, lang, refs)
     spec = klar_spec() if "klar" in args.lang else ""
     records = []
     for task in tasks:
@@ -424,6 +505,8 @@ def main(argv=None):
     rows = summary(records, args.lang)
     name = args.name or (args.provider if args.provider in ("reference", "replay") else
                          f"{args.provider}-{args.model}")
+    if args.suite != "own":
+        name = f"{args.suite}-{name}"
     title = f"LLM benchmark: {name} ({len(tasks)} tasks, up to {args.attempts} attempts)"
     print("\n" + markdown(rows, title))
     out_dir = os.path.join(HERE, "results", re.sub(r"[^A-Za-z0-9._-]", "_", name))

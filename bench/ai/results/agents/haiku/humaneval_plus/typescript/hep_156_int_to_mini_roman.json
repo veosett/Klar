@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function int_to_mini_roman(number: number): string {\n  const values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];\n  const symbols = [\"m\", \"cm\", \"d\", \"cd\", \"c\", \"xc\", \"l\", \"xl\", \"x\", \"ix\", \"v\", \"iv\", \"i\"];\n  let n = number;\n  let out = \"\";\n  for (let i = 0; i < values.length; i++) {\n    while (n >= values[i]) {\n      out += symbols[i];\n      n -= values[i];\n    }\n  }\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

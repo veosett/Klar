@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{primes_below}\n\npub fn count_up_to(n: Int) -> List[Int] {\n  return primes_below(n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

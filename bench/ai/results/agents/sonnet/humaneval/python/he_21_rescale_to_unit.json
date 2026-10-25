@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def rescale_to_unit(numbers: list[float]) -> list[float]:\n    lo = min(numbers)\n    hi = max(numbers)\n    return [(x - lo) / (hi - lo) for x in numbers]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

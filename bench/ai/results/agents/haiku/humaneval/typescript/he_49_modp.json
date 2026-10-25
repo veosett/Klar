@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function modp(n: number, p: number): number {\n  let result = 1 % p;\n  for (let i = 0; i < n; i++) {\n    result = (result * 2) % p;\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

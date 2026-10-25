@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function average(xs: number[]): number | null {\n  if (xs.length === 0) return null;\n  let sum = 0;\n  for (const x of xs) sum += x;\n  return sum / xs.length;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

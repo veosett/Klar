@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fruit_distribution(s: Str, n: Int) -> Int {\n  let fruit = s.split(\" \")\n    .filter(fn(w) => w.is_numeric())\n    .map(fn(w) => w.to_int().unwrap_or(0))\n    .sum()\n  return n - fruit\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

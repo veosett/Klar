@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function eval_rpn(expr: string): number {\n  const tokens = expr.split(\" \").filter((t) => t !== \"\");\n  const stack: number[] = [];\n  for (const tok of tokens) {\n    if (/^-?\\d+$/.test(tok)) {\n      stack.push(Number(tok));\n      continue;\n    }\n    if (tok === \"+\" || tok === \"-\" || tok === \"*\" || tok === \"/\") {\n      if (stack.length < 2) throw new Error(\"stack underflow\");\n      const b = stack.pop() as number;\n      const a = stack.pop() as number;\n      let r: number;\n      if (tok === \"+\") r = a + b;\n      else if (tok === \"-\") r = a - b;\n      else if (tok === \"*\") r = a * b;\n      else {\n        if (b === 0) throw new Error(\"division by zero\");\n        r = Math.trunc(a / b) || 0;\n      }\n      stack.push(r);\n      continue;\n    }\n    throw new Error(`bad token ${tok}`);\n  }\n  if (stack.length !== 1) throw new Error(\"bad expression\");\n  return stack[0];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

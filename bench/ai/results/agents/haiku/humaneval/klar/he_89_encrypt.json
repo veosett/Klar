@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn rot4(code: Int) -> Int {\n  if code >= 97 and code <= 122 {\n    return (code - 97 + 4) % 26 + 97\n  }\n  return code\n}\n\npub fn encrypt(s: Str) -> Str {\n  let shifted = s.codes().map(fn(c) => rot4(c))\n  return shifted.fold(\"\", fn(acc, code) => acc + code.to_char().unwrap_or(\"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

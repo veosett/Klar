@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_multiply_prime(a: int) -> bool:\n    if a < 2:\n        return False\n    count = 0\n    f = 2\n    while f * f <= a:\n        while a % f == 0:\n            a //= f\n            count += 1\n        f += 1\n    if a > 1:\n        count += 1\n    return count == 3\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

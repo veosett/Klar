@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function same_chars(s0: string, s1: string): boolean {\n  const a = new Set(s0.split(\"\"));\n  const b = new Set(s1.split(\"\"));\n  if (a.size !== b.size) return false;\n  for (const ch of a) {\n    if (!b.has(ch)) return false;\n  }\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn f(n: Int) -> List[Int] {\n  var res: List[Int] = []\n  var fact: Int = 1\n  for i in range(1, n + 1) {\n    fact = fact * i\n    if i % 2 == 0 {\n      res = res.push(fact)\n    } else {\n      res = res.push(i * (i + 1) / 2)\n    }\n  }\n  return res\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

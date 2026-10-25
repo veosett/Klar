@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn digitSum(s: Str) -> Int {\n  return s.codes().filter(fn(c) => c >= 65 and c <= 90).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

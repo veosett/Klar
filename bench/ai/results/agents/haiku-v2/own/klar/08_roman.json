@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn to_roman(n: Int) -> Result[Str, Str] {\n  if n < 1 or n > 3999 {\n    return Err(\"out of range\")\n  }\n  let vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]\n  let syms = [\"M\", \"CM\", \"D\", \"CD\", \"C\", \"XC\", \"L\", \"XL\", \"X\", \"IX\", \"V\", \"IV\", \"I\"]\n  var rem = n\n  var out = \"\"\n  for i in range(0, 13) {\n    let v = vals.get_or(i, 0)\n    let s = syms.get_or(i, \"\")\n    while rem >= v {\n      out = out + s\n      rem = rem - v\n    }\n  }\n  return Ok(out)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def get_row(lst: list[list[int]], x: int) -> list[tuple[int, int]]:\n    result = []\n    for r, row in enumerate(lst):\n        cols = [c for c, v in enumerate(row) if v == x]\n        cols.sort(reverse=True)\n        for c in cols:\n            result.append((r, c))\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

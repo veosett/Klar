@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def add(lst: list[int]) -> int:\n    return sum(x for i, x in enumerate(lst) if i % 2 == 1 and x % 2 == 0)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

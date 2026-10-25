@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import math\n\n\ndef sum_squares(lst: list[float]) -> int:\n    return sum(int(math.ceil(x)) ** 2 for x in lst)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

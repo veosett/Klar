@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function check_if_last_char_is_a_letter(txt: string): boolean {\n  if (txt.length === 0) {\n    return false;\n  }\n  const last = txt[txt.length - 1];\n  if (!/[a-zA-Z]/.test(last)) {\n    return false;\n  }\n  if (txt.length === 1) {\n    return true;\n  }\n  // The last character must be a standalone word: preceded by a space (or nothing).\n  return txt[txt.length - 2] === \" \";\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

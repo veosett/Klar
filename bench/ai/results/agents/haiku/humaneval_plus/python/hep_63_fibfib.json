@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def fibfib(n: int) -> int:\n    base = [0, 0, 1]\n    if n < 3:\n        return base[n]\n    a, b, c = base\n    for _ in range(3, n + 1):\n        a, b, c = b, c, a + b + c\n    return c\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

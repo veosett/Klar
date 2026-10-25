@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function string_xor(a: string, b: string): string {\n  let r = \"\";\n  for (let i = 0; i < a.length; i++) r += a[i] === b[i] ? \"0\" : \"1\";\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

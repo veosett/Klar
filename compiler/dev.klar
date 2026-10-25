@@ -10,7 +10,7 @@ use jsonout.{J, compact}
 use link.{write_elf, write_macho, write_pe}
 use contracts.{with_contracts}
 use loader.{Ld, load_program, load_runtime}
-use lower.{Lw, fnv1a, lower_program}
+use lower.{Lw, fnv1a, lower_program, lower_program_allow}
 use report.{user_diags}
 
 /// A test of the main file (a `test` block, a doc test or a property): its name, whether it is a property, and its
@@ -96,6 +96,42 @@ pub fn image_of(w: Lw, target: Str) -> Bytes {
 }
 
 /// The executable of a checked program (`tests`: the one that runs test #argv[1]).
+/// The rights of an `--allow` value (klar/sandbox.py), or the problem with an unknown one.
+pub fn parse_allow(spec: Str) -> Result[List[Str], Str] {
+  var out: List[Str] = []
+  for raw in spec.split(",") {
+    let r = raw.trim()
+    if r != "" {
+      let kind = r.split(":").get_or(0, "")
+      let has_colon = r.contains(":")
+      let arg = match r.index_of(":") {
+        Some(k) => r.slice(k + 1, r.len()),
+        None => "",
+      }
+      let known = ["io", "time", "rand", "net", "fs", "proc"].contains(kind)
+      if not known or (arg != "" and kind != "fs" and kind != "proc") or (has_colon and arg == "") {
+        return Err("unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME)")
+      }
+      out = out.push(r)
+    }
+  }
+  return Ok(out)
+}
+
+/// The rights of `--allow` among the arguments: Ok(None) without it (klar/cli.py `sandbox_of`).
+pub fn allow_of(args: List[Str]) -> Result[Option[List[Str]], Str] {
+  if not args.contains("--allow") {
+    return Ok(None)
+  }
+  let r = parse_allow(str_flag(args, "--allow"))?
+  return Ok(Some(r))
+}
+
+/// The executable of a program with the rights of `--allow` built in.
+pub fn native_image_allow(ld: Ld, main_path: Str, target: Str, tests: Bool, allow: Option[List[Str]]) -> Bytes {
+  return image_of(lower_program_allow(ld: ld, main_path: main_path, tests: tests, allow: allow), target)
+}
+
 pub fn native_image(ld: Ld, main_path: Str, target: Str, tests: Bool) -> Bytes {
   return image_of(lower_program(ld: ld, main_path: main_path, tests: tests), target)
 }
@@ -343,7 +379,7 @@ fn str_flag(args: List[Str], name: Str) -> Str {
 
 /// The file argument: the first one that is neither an option nor an option's value.
 fn file_arg(args: List[Str]) -> Str {
-  let with_value = ["--lib", "--runs", "--stdin", "--max-output", "--max-warnings"]
+  let with_value = ["--lib", "--runs", "--stdin", "--max-output", "--max-warnings", "--allow"]
   var i = 0
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -377,6 +413,13 @@ pub fn dev_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
   let json = args.contains("--json")
   let max_output = int_flag(args: args, name: "--max-output", default: 2000)
   let max_warnings = int_flag(args: args, name: "--max-warnings", default: 10)
+  let rights = match allow_of(args) {
+    Ok(r) => r,
+    Err(e) => {
+      eprint("error: " + e)
+      return 2
+    },
+  }
   let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
   let ld = load_runtime(load_program(file, lib))
   let diags = user_diags(ld, shown)
@@ -434,7 +477,7 @@ pub fn dev_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
   var run_failed = false
   if has_main(ld, file) and not args.contains("--no-run") {
     let exe = temp_path(file, "dev-run")
-    match save_exe(exe, native_image(ld: ld, main_path: file, target: host_target(), tests: false)) {
+    match save_exe(exe, native_image_allow(ld: ld, main_path: file, target: host_target(), tests: false, allow: rights)) {
       Ok(_) => {},
       Err(e) => {
         eprint("klarc: {e}")

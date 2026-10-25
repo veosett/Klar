@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn divide_all(xs: List[Int], ys: List[Int]) -> Result[List[Int], Str] {\n  var out: List[Int] = []\n  var i = 0\n  for x in xs {\n    let y = ys.get_or(i, 0)\n    if y == 0 {\n      return Err(\"division by zero at index {i}\")\n    }\n    out = out.push(x / y)\n    i = i + 1\n  }\n  return Ok(out)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

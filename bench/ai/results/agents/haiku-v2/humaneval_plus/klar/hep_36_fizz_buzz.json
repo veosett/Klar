@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn fizz_buzz(n: Int) -> Int {\n  let picked = range(0, n).filter(fn(i) => i % 11 == 0 or i % 13 == 0)\n  return picked.map(fn(i) => i.to_str().count(\"7\")).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

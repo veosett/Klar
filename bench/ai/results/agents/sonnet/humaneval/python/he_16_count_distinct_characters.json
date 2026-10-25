@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def count_distinct_characters(string: str) -> int:\n    return len(set(string.lower()))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

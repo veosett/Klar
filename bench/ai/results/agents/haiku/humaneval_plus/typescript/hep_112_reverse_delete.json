@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function reverse_delete(s: string, c: string): [string, boolean] {\n  let result = \"\";\n  for (let i = 0; i < s.length; i++) {\n    const ch = s.charAt(i);\n    if (c.indexOf(ch) === -1) {\n      result += ch;\n    }\n  }\n  let i = 0;\n  let j = result.length - 1;\n  let isPal = true;\n  while (i < j) {\n    if (result.charAt(i) !== result.charAt(j)) {\n      isPal = false;\n      break;\n    }\n    i++;\n    j--;\n  }\n  return [result, isPal];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

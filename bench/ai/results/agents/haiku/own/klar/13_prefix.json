@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The longest common prefix of all words (\"\" for an empty list).\npub fn common_prefix(words: List[Str]) -> Str {\n  var prefix = words.first().unwrap_or(\"\")\n  for w in words {\n    while not w.starts_with(prefix) and not prefix.is_empty() {\n      prefix = prefix.slice(0, prefix.len() - 1)\n    }\n  }\n  return prefix\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

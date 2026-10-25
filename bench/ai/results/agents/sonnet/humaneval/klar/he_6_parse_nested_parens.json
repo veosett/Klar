@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn depth_of(g: Str) -> Int {\n  var d = 0\n  var best = 0\n  for c in g.chars() {\n    if c == \"(\" {\n      d = d + 1\n      if d > best {\n        best = d\n      }\n    } else if c == \")\" {\n      d = d - 1\n    }\n  }\n  return best\n}\n\npub fn parse_nested_parens(paren_string: Str) -> List[Int] {\n  return paren_string.split(\" \").filter(fn(g) => not g.is_empty()).map(fn(g) => depth_of(g))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

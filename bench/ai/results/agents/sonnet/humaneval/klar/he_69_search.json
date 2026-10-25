@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn search(lst: List[Int]) -> Int {\n  let good = lst.filter(fn(x) => x > 0 and lst.count(fn(y) => y == x) >= x)\n  return good.max().unwrap_or(-1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

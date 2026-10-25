@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_balanced(s: string): boolean {\n  const pairs: Record<string, string> = { \")\": \"(\", \"]\": \"[\", \"}\": \"{\" };\n  const stack: string[] = [];\n  for (const ch of s) {\n    if (ch === \"(\" || ch === \"[\" || ch === \"{\") {\n      stack.push(ch);\n    } else if (ch in pairs) {\n      if (stack.length === 0 || stack.pop() !== pairs[ch]) return false;\n    }\n  }\n  return stack.length === 0;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

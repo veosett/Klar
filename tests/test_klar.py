@@ -1,4 +1,5 @@
 """Compiler test-suite. Run: python -m unittest discover -s tests"""
+import contextlib
 import io
 import json
 import os
@@ -1851,6 +1852,51 @@ class LlmBenchmark(unittest.TestCase):
         self.assertIn("E0204", bench.evaluate(rle, "klar", broken["klar"])["feedback"])
         self.assertEqual(bench.extract_code("text\n```klar\nfn f() {}\n```\nmore"), "fn f() {}\n")
 
+    def test_outside_suites(self):
+        """HumanEval and MBPP (bench/ai/build_suites.py): a sample type-checks in Klar against a stub, and the
+        canonical Python solutions pass their tests (the whole suites: `llm_bench.py --suite X --validate` and
+        `--provider reference`)."""
+        bench, _ = self.bench()
+        for suite, ids in (("humaneval", ("he_0_", "he_111_", "he_155_")), ("mbpp", ("mbpp_257_", "mbpp_783_"))):
+            tasks_path, refs = bench.SUITES[suite]
+            with open(tasks_path, encoding="utf-8") as f:
+                tasks = [t for t in json.load(f) if t["id"].startswith(ids)]
+            self.assertEqual(len(tasks), len(ids), suite)
+            self.assertEqual(bench.validate(tasks, ["klar"]), 0, suite)
+            for task in tasks:
+                code = bench.extract_code(bench.reference(task, "python", refs)[0])
+                result = bench.evaluate(task, "python", code)
+                self.assertTrue(result["ok"], f"{task['id']}: {result['feedback']}")
+
+
+class AgentBench(unittest.TestCase):
+    """bench/ai/agent_bench.py: an agent gets the prompt, hands in files, and every attempt is recorded."""
+
+    def test_prompt_submit_and_statistics(self):
+        sys.path.insert(0, os.path.join(ROOT, "bench", "ai"))
+        import agent_bench as A
+        self.assertEqual([round(x, 1) for x in A.wilson(9, 10)], [59.6, 98.2])
+        self.assertEqual(A.mcnemar({"a": True, "b": False, "c": False}, {"a": False, "b": True, "c": True}),
+                         (1, 2, 1.0))
+        with tempfile.TemporaryDirectory() as d:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                A.main(["prompt", "--suite", "own", "--lang", "klar", "--id", "03_rle"])
+            self.assertIn("klar_spec.md", out.getvalue())
+            self.assertIn("pub fn rle(s: Str) -> Str", out.getvalue())
+            sol = os.path.join(d, "s.klar")
+            for code, want in (("pub fn rle(s: Str) -> Str {\n  return s\n}\n", "That did not work (2 attempt"),
+                               (open(os.path.join(ROOT, "bench", "ai", "tasks", "ref", "klar", "03_rle.klar"),
+                                     encoding="utf-8").read(), "PASSED")):
+                with open(sol, "w", encoding="utf-8") as f:
+                    f.write(code)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    A.main(["submit", "--run", d, "--suite", "own", "--lang", "klar", "--id", "03_rle", "--file", sol])
+                self.assertIn(want, out.getvalue())
+            st = A.load_state(A.state_path(d, "own", "klar", "03_rle"))
+            self.assertEqual(([x["stage"] for x in st["attempts"]], st["solved"]), (["test", "pass"], True))
+
 
 class RecordReplay(unittest.TestCase):
     """`klar run --record T` / `klar replay T`: a run happens again byte for byte without its files, clock or input."""
@@ -1940,9 +1986,8 @@ class ContractProperties(unittest.TestCase):
                                                                      "t.klar")))
 
 
-class Sandbox(unittest.TestCase):
-    """`klar run --allow RIGHTS`: effects become rights at run time (R0016 outside them) — the same answers in the
-    interpreter, the Python backend and native code for every target that can run here."""
+class SandboxDirs:
+    """A directory with data/, data/sub/, data2/, other.txt and the links data/out -> .. and data/in -> sub."""
     SRC = """fn main() uses io, fs, time, rand, proc {
   let step = cli_args().get_or(0, "")
   if step == "read" {
@@ -1967,6 +2012,14 @@ class Sandbox(unittest.TestCase):
     print(run_capture(["klar-not-a-program"], "", "").is_err())
   } else if step == "bytes" {
     print(read_bytes("data/a.txt").map(fn(b) => b.len()))
+  } else if step == "link" {
+    print(read_file("data/out/other.txt"))
+  } else if step == "link-up" {
+    print(read_file("data/out/../{name}/other.txt"))
+  } else if step == "link-in" {
+    print(read_file("data/in/b.txt"))
+  } else if step == "similar" {
+    print(read_file("data2/c.txt"))
   }
 }
 """
@@ -1975,17 +2028,29 @@ class Sandbox(unittest.TestCase):
              ("cwd", "fs:data"), ("cwd", "time"), ("time", "time"), ("time", "fs"), ("rand", "rand"),
              ("rand", "time"), ("proc", "fs"), ("proc", "proc"), ("proc", "proc:klar-not-a-program"),
              ("proc", "proc:git"), ("capture", "proc:git"), ("capture", "proc"), ("bytes", "fs:data"),
-             ("bytes", "proc")]
+             ("bytes", "proc"), ("similar", "fs:data")]
+    # symbolic links (docs/THREATS.md T1, T2): data/out -> the directory above data, data/in -> data/sub
+    LINK_CASES = [("link", "fs:data"), ("link-up", "fs:data"), ("link-in", "fs:data"), ("link", "fs")]
 
     def setUp(self):
-        self.dir = tempfile.mkdtemp()
-        os.makedirs(os.path.join(self.dir, "data"))
-        for name, text in (("data/a.txt", "hi"), ("other.txt", "secret")):
+        self.dir = os.path.realpath(tempfile.mkdtemp())
+        for d in ("data", "data/sub", "data2"):
+            os.makedirs(os.path.join(self.dir, d))
+        for name, text in (("data/a.txt", "hi"), ("other.txt", "secret"), ("data/sub/b.txt", "inner"),
+                           ("data2/c.txt", "next door")):
             with open(os.path.join(self.dir, name), "w", encoding="utf-8") as f:
                 f.write(text)
+        self.links = False
+        if os.name != "nt":
+            try:
+                os.symlink("..", os.path.join(self.dir, "data", "out"))
+                os.symlink("sub", os.path.join(self.dir, "data", "in"))
+                self.links = True
+            except OSError:
+                pass
         self.path = os.path.join(self.dir, "p.klar")
         with open(self.path, "w", encoding="utf-8") as f:
-            f.write(self.SRC)
+            f.write(self.SRC.replace("{name}", os.path.basename(self.dir)))
         self.old = os.getcwd()
         os.chdir(self.dir)
 
@@ -1995,11 +2060,19 @@ class Sandbox(unittest.TestCase):
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def answer(self, backend, step, allow):
-        code, out, err = cli("run", backend, "-q", "--allow", allow, self.path, step)
+        code, out, err = cli("run", *([backend] if backend else []), "-q", "--allow", allow, self.path, step)
         return code, out, re.sub(r"\n  note: call stack.*", "", err)
 
+    def cases(self):
+        return self.CASES + (self.LINK_CASES if self.links else [])
+
+
+class Sandbox(SandboxDirs, unittest.TestCase):
+    """`klar run --allow RIGHTS`: effects become rights at run time (R0016 outside them) — the same answers in the
+    interpreter, the Python backend and native code for every target that can run here."""
+
     def test_rights_in_the_python_backends(self):
-        for step, allow in self.CASES:
+        for step, allow in self.cases():
             with self.subTest(step=step, allow=allow):
                 want = self.answer("--interp", step, allow)
                 self.assertEqual(self.answer("--py", step, allow), want)
@@ -2027,14 +2100,16 @@ class Sandbox(unittest.TestCase):
                    (t == "macos" and host_target() == "linux")]
         if not targets:
             self.skipTest("no native target runs here")
-        rights = sorted({a for _, a in self.CASES})
         for target in targets:
+            # Windows does not resolve links (docs/THREATS.md T4), and wine shows the Linux links to it
+            cases = self.CASES if target == "windows" else self.cases()
+            rights = sorted({a for _, a in cases})
             suffix = {"windows": ".exe", "linux-arm64": ".a64", "macos": ".macho"}.get(target, "")
             for allow in rights:
                 exe = os.path.join(self.dir, f"p{rights.index(allow)}{suffix}")
                 from klar.sandbox import parse_allow
                 build(self.path, out=exe, target=target, allow=parse_allow(allow))
-                for step, a in self.CASES:
+                for step, a in cases:
                     if a != allow:
                         continue
                     with self.subTest(target=target, step=step, allow=allow):
@@ -2043,6 +2118,77 @@ class Sandbox(unittest.TestCase):
                         err = re.sub(r"\n  note: call stack.*", "", p.stderr.replace("\r\n", "\n"))
                         self.assertEqual((p.returncode != 0, p.stdout.replace("\r\n", "\n"), err),
                                          (want[0] != 0, want[1], want[2]))
+
+
+class SandboxThreats(SandboxDirs, unittest.TestCase):
+    """docs/THREATS.md: each threat to a sandboxed run of a model's code, with what it does now."""
+
+    def denied(self, step, allow):
+        code, out, err = self.answer("--interp", step, allow)
+        self.assertEqual(self.answer("--py", step, allow), (code, out, err))
+        self.assertEqual(self.answer("", step, allow)[:2], (code, out))          # native code
+        return code != 0 and "R0016" in err
+
+    def test_symlink_out_of_the_directory(self):          # T1
+        if not self.links:
+            self.skipTest("no symbolic links here")
+        self.assertTrue(self.denied("link", "fs:data"))
+        self.assertFalse(self.denied("link", "fs"))
+        self.assertFalse(self.denied("link-in", "fs:data"))   # a link that stays inside is fine
+
+    def test_dotdot_after_a_symlink(self):                # T2: `..` applies to the target of the link
+        if not self.links:
+            self.skipTest("no symbolic links here")
+        self.assertTrue(self.denied("link-up", "fs:data"))
+
+    def test_dotdot_and_similar_names(self):              # T3
+        self.assertTrue(self.denied("up", "fs:data"))
+        self.assertTrue(self.denied("similar", "fs:data"))
+        self.assertFalse(self.denied("read", "fs:data"))
+
+    def test_proc_name_is_exact(self):                    # T6: `proc:git` is git only, by its name as written
+        self.assertTrue(self.denied("proc", "proc:git"))
+        self.assertFalse(self.denied("proc", "proc:klar-not-a-program"))
+
+    def test_env_is_readable_under_allow(self):           # T8 (open): env_var is `io`, always allowed
+        src = os.path.join(self.dir, "env.klar")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write('fn main() uses io {\n  print(env_var("KLAR_THREAT_TEST"))\n}\n')
+        os.environ["KLAR_THREAT_TEST"] = "token"
+        try:
+            code, out, _ = cli("run", "-q", "--interp", "--allow", "", src)
+        finally:
+            del os.environ["KLAR_THREAT_TEST"]
+        self.assertEqual((code, out), (0, 'Some("token")\n'))
+
+    def test_mcp_runs_the_models_code_with_no_rights(self):      # T5: klar_dev / klar_eval get `klar mcp --allow`
+        from klar.tools.mcp import call_tool
+        src = os.path.join(self.dir, "dev.klar")
+        made = os.path.join(self.dir, "made-by-main.txt")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write('fn main() uses io, fs {\n  print(write_file("made-by-main.txt", "x"))\n}\n')
+        res = call_tool("klar_dev", {"file": src})                   # the default of `klar mcp`: io only
+        self.assertTrue(res["isError"])
+        self.assertIn("R0016", res["content"][0]["text"])
+        res = call_tool("klar_eval", {"expression": 'write_file("made-by-main.txt", "x")'})
+        self.assertIn("R0016", res["content"][0]["text"])
+        self.assertFalse(os.path.exists(made))
+        res = call_tool("klar_dev", {"file": src}, allow="fs:.")      # `klar mcp --allow fs:.`
+        self.assertFalse(res["isError"], res)
+        self.assertTrue(os.path.exists(made))
+        os.remove(made)
+        code, out, _ = cli("dev", "--json", "--allow", "time", src)  # `klar dev --allow` on the command line
+        self.assertIn("R0016", out)
+        self.assertFalse(os.path.exists(made))
+
+    def test_strings_cannot_break_out_of_generated_python(self):    # T10
+        src = os.path.join(self.dir, "inj.klar")
+        with open(src, "w", encoding="utf-8") as f:
+            f.write('fn main() uses io {\n  print("\\"\\"\\" + __import__(\'os\').getcwd() + \\"\\"\\"")\n'
+                    '  print("\'\'\' \\\\ \\0 \\{x\\}")\n}\n')
+        want = cli("run", "-q", "--interp", src)
+        self.assertEqual(cli("run", "-q", "--py", src), want)
+        self.assertIn("__import__('os').getcwd()", want[1])
 
 
 def shutil_which(name):
@@ -2193,6 +2339,36 @@ class Diagnostics(unittest.TestCase):
 
     def test_calls(self):
         self.check_code("fn g(a: Int, b: Int, c: Int) -> Int { return a }\nfn f() -> Int { return g(1, 2, 3) }", "E0208")
+
+    def test_what_models_write_out_of_habit(self):
+        """A map without `Map`, `=> {` before a lambda block, a `{` that cannot start an interpolation: accepted,
+        with the meaning a model means (bench/ai: each cost a first attempt)."""
+        src = ('fn main() uses io {\n  let m: Map[Str, Int] = {"a": 1}\n  let f = fn(x: Int) => {\n    return x\n  }\n'
+               '  print("{" + "{}" + "{\\"a\\": {f(2)}}")\n  print(m.get("a"))\n}\n')
+        loaded = load_source(src, "t.klar")
+        self.assertEqual([d.code for d in loaded.diags if d.severity == "error"], [])
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(src)
+            self.assertEqual(cli("run", "-q", "--interp", path)[1], '{{}{"a": 2}\nSome(1)\n')
+
+    def test_positional_arguments_that_cannot_be_swapped(self):
+        """E0208 asks for names only where same-typed arguments could be swapped unnoticed (bench/ai: the rule cost
+        models the most first attempts while most of its calls could not be wrong)."""
+        cell = "fn cell(g: List[Int], r: Int, c: Int) -> Int { return g.len() + r + c }\n"
+        ok = ["cell(g, r, c)", "cell(g, nr, nc)", "cell(g, r - 1, c + 1)", "cell(g, p.r, p.c)", "cell(g, r, 0)"]
+        for call in ok:
+            src = cell + f"fn f(g: List[Int], r: Int, c: Int, nr: Int, nc: Int, p: P) -> Int {{ return {call} }}\n" \
+                "type P { r: Int, c: Int }\n"
+            loaded = load_source(src, "t.klar")
+            self.assertEqual([d.code for d in loaded.diags if d.severity == "error"], [], call)
+        mixed = "fn h(ops: List[Str], nums: List[Int], k: Int) -> Int { return k }\nfn f() -> Int { return h([], [], 0) }"
+        self.assertEqual([d.code for d in load_source(mixed, "t.klar").diags if d.severity == "error"], [])
+        self.check_code(cell + "fn f(g: List[Int]) -> Int { return cell(g, 0, 1) }", "E0208")
+        self.check_code(cell + "fn f(g: List[Int], i: Int, j: Int) -> Int { return cell(g, i, j) }", "E0208")
+        swapped = load_source(cell + "fn f(g: List[Int], r: Int, c: Int) -> Int { return cell(g, c, r) }", "t.klar")
+        self.assertIn("look swapped: `c` is passed as `r`", " ".join(d.message for d in swapped.diags))
         self.check_code("fn g(a: Int) -> Int { return a }\nfn f() -> Int { return g(1, 2) }", "E0206")
         self.check_code("fn g(a: Int) -> Int { return a }\nfn f() -> Int { return g(b: 1) }", "E0209")
         self.check_code("type P { x: Int, y: Int }\nfn f() -> P { return P { x: 1 } }", "E0209")

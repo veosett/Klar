@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def exchange(lst1: list[int], lst2: list[int]) -> str:\n    odd = sum(1 for x in lst1 if x % 2 != 0)\n    even = sum(1 for x in lst2 if x % 2 == 0)\n    return \"YES\" if even >= odd else \"NO\"\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

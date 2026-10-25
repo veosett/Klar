@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def do_algebra(operator: list[str], operand: list[int]) -> int:\n    nums = list(operand)\n    ops = list(operator)\n\n    # exponentiation first, right to left (right-associative)\n    i = len(ops) - 1\n    while i >= 0:\n        if ops[i] == '**':\n            nums[i] = nums[i] ** nums[i + 1]\n            del nums[i + 1]\n            del ops[i]\n        i -= 1\n\n    # multiplication and floor division, left to right\n    i = 0\n    while i < len(ops):\n        if ops[i] == '*':\n            nums[i] = nums[i] * nums[i + 1]\n            del nums[i + 1]\n            del ops[i]\n        elif ops[i] == '//':\n            nums[i] = nums[i] // nums[i + 1]\n            del nums[i + 1]\n            del ops[i]\n        else:\n            i += 1\n\n    # addition and subtraction, left to right\n    result = nums[0]\n    for op, val in zip(ops, nums[1:]):\n        if op == '+':\n            result += val\n        else:\n            result -= val\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

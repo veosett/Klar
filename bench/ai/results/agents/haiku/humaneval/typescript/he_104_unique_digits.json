@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function unique_digits(x: number[]): number[] {\n  return x\n    .filter((n) => String(n).split(\"\").every((d) => Number(d) % 2 === 1))\n    .sort((a, b) => a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

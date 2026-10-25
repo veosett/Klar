@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn how_many_times(string: Str, substring: Str) -> Int {\n  let m = substring.len()\n  let n = string.len()\n  var count = 0\n  var i = 0\n  while i + m <= n {\n    if string.slice(i, i + m) == substring {\n      count = count + 1\n    }\n    i = i + 1\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

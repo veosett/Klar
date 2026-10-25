@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Run-length encodes `s`: each run becomes the character followed by its length.\npub fn rle(s: Str) -> Str {\n  var out = \"\"\n  var cur = \"\"\n  var n = 0\n  for c in s.chars() {\n    if c == cur {\n      n = n + 1\n    } else {\n      if n > 0 {\n        out = out + cur + n.to_str()\n      }\n      cur = c\n      n = 1\n    }\n  }\n  if n > 0 {\n    out = out + cur + n.to_str()\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

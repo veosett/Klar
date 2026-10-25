@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sum_squares(lst: number[]): number {\n  let t = 0;\n  lst.forEach((x, i) => {\n    if (i % 3 === 0) t += x * x;\n    else if (i % 4 === 0) t += x * x * x;\n    else t += x;\n  });\n  return t;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

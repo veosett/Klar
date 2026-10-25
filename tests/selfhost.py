@@ -41,7 +41,8 @@ ERROR_SNIPPETS = [
     "let x = a && b\n", "x || y\n", "i++\n", "a += 1\n", "Color::Red\n", "if !x {}\n", "f(x);\n", "let s = 'a'\n",
     "x & y\n", "x | y\n", "x ^ y\n", "~x\n", "x << 2\n", "x >> 2\n", "# comment\n", "@decorator\n", "`code`\n",
     "\"unterminated\n", "\"bad \\q escape\"\n", "\"open {interp\n", "\"{\"nested\"}\"\n", "\"{ }\"\n", "12px\n",
-    "1.5e3\n", "3_000x\n", "let é = 1 ∑\n", "\"\\", "a;b\n",
+    "1.5e3\n", "3_000x\n", "let é = 1 ∑\n", "\"\\", "a;b\n", "0x\n", "0xfg\n", "0b102\n", "0o9\n", "1e\n", "1e+\n",
+    "2.5E-3x\n", "0x1e-5\n",
 ]
 
 PARSE_SNIPPETS = [
@@ -1207,7 +1208,8 @@ def check_profile(klarc):
     executions of each line (times differ: native code; built-ins are listed only by klar)."""
     bad = runs = 0
     for path in lowering_files():
-        if os.sep + "compiler" + os.sep in path or os.sep + "bench" + os.sep in path:
+        # (not the compiler, and not the scripts that write files or run other programs: bench/, tools/, the fuzzer)
+        if any(os.sep + d + os.sep in path for d in ("compiler", "bench", "tools")) or path.endswith("fuzz.klar"):
             continue
         runs += 1
         want = cli_output(["profile", path, "--json", "--top", "1000"])

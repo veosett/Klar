@@ -170,6 +170,12 @@ def main():
                     bad += 1
                     print(f"DIFF {os.path.basename(tool[0])} replay of {os.path.basename(trace)}: "
                           f"{got.stdout[:200]!r} {got.stderr[:300]!r} / recorded {rec.stdout[:200]!r}")
+        # every command and flag of `klar` is in klarc too (tools/parity.klar, ROADMAP item 29)
+        got = run([stage[2], "run", os.path.join("tools", "parity.klar"), "--lib", LIB, "--", "--klarc", stage[2],
+                   "--python", sys.executable, "--out", os.path.join(d, "parity.md"), "--check"])
+        if got.returncode != 0:
+            bad += 1
+            print(f"DIFF klar and klarc differ in commands or flags (tools/parity.klar): {got.stdout}{got.stderr}")
         # and reports errors
         proc = run([stage[2], "check", os.path.join("examples", "mistakes.klar"), "--lib", LIB])
         if proc.returncode != 1 or "error[E" not in proc.stdout:

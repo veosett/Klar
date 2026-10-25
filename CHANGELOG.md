@@ -29,8 +29,57 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   on source nested thousands of brackets deep: expressions and types nested more than 200 levels are E0003 in
   `klar` and `klarc` (the Python parser also runs in a thread with a large stack: on Windows with Python 3.10 the
   test crashed the process).
+- `--allow fs:DIR` could be left through a symbolic link: a link inside DIR that points outside (`data/out -> ..`)
+  gave access to where it leads, and `data/out/../x` was checked as `data/x` while the system opened the file next
+  to the link's target. Paths are now resolved the way the system opens them, part by part with links followed
+  (`os.path.realpath`; in native code the new `os_readlink` intrinsic on Linux x86-64 and arm64 and macOS; Windows
+  does not resolve links yet). In all four backends and every native target.
+- The MCP tools `klar_dev` and `klar_eval` ran the model's code with every right (`main` could run programs and
+  write files). They get the rights of `klar mcp --allow RIGHTS` / `klarc mcp --allow RIGHTS` now, by default
+  none but `io`; `klar dev` and `klar eval` take `--allow` too. `docs/THREATS.md` lists every threat to a sandboxed
+  run of a model's code with its test (`SandboxThreats` in tests/test_klar.py) and what is still open (environment
+  variables, resource limits, links on Windows, programs found through PATH).
+
+### Changed
+- E0208 asks for named arguments only where they could be swapped unnoticed. With 3+ parameters, positional
+  arguments are fine when the parameters have different types, or when among same-typed parameters every argument
+  but at most one carries its parameter's name (`cell(grid, r, c)`, `cell(grid, nr, c - 1)`, `p.r`); `f(200, 20,
+  10)` and `cell(g, i, j)` still need names, and `cell(g, c, r)` is reported as swapped. In the agent benchmark the
+  old rule was half of all Klar compile failures, and 15 of its 17 calls could not have been wrong.
+- What models write out of habit is accepted with the meaning they mean: `{"a": 1}` is a map (as `Map {"a": 1}`),
+  `fn(x) => { ... }` a block lambda, and a `{` that cannot start an interpolation (`"{"`, `"{}"`, `"{\"a\": 1}"`)
+  a literal brace — all three were errors.
 
 ### Added
+- Number literals the way models write them (found by the agent benchmark, ROADMAP 20): hexadecimal, binary and
+  octal integers (`0xFF`, `0b1010`, `0o17`, underscores between digits) and Floats with an exponent (`1e-9`,
+  `2.5E10`), in `klar` and `klarc`, `klar fmt` (`0x1e-5` stays a subtraction) and the VS Code grammar.
+  `std.math.floor_div` and `floor_mod` round like Python's `//` and `%` (Klar's `/` truncates). The `\r` escape
+  is listed in the E0004 hint and the reference.
+- The LLM benchmark with agents as the model (ROADMAP 20): `bench/ai/agent_bench.py` hands an agent (a Claude Code
+  subagent of a given model) the same prompts, hidden tests, feedback and attempts as `llm_bench.py`, records every
+  attempt and scores the run by a deterministic replay; `report` gives first-try and total rates with 95% Wilson
+  intervals and exact McNemar tests between the languages. A first run — Sonnet and Haiku, HumanEval, HumanEval+ and
+  the own tasks, 1 458 solutions — is in `bench/ai/results/agents/` and summed up in `bench/ai/README.md`: the
+  suites are saturated, and on the first try Klar is slightly behind Python (97.7% against 99.4%, p = 0.02), mostly
+  because of the named-arguments rule (E0208). HumanEval+ (`--suite humaneval_plus`, EvalPlus's extra inputs with
+  its canonical results, up to 60 tests per problem) joins the suites.
+- Outside task suites for the LLM benchmark (ROADMAP 19): HumanEval and MBPP as MultiPL-E ships them, turned into
+  the task format of `bench/ai/llm_bench.py` by `bench/ai/build_suites.py` — 154 of 161 HumanEval and 334 of 400
+  MBPP problems, 2 111 test cases, each checked against the canonical Python solution called with the typed
+  arguments (which found 6 problems where MultiPL-E's typing contradicts the problem, e.g. HumanEval/92 and /151,
+  and HumanEval/111's parameter `test`, a Klar keyword). `llm_bench.py --suite humaneval|mbpp`, `--validate` (every
+  test file type-checks against a stub in Klar, Python and TypeScript: all do), a `Pair` type for two-element
+  tuples; the references pass every test (`--provider reference -l python`).
+- `tools/inventory.klar` (ROADMAP 27): the Python code of the repository from its primary sources — `git ls-files`,
+  the import graph, the Klar counterpart of each module, how often both change in one commit (`git log`) and test
+  coverage (coverage.py JSON) — into `docs/PYTHON_INVENTORY.md`.
+- `tools/parity.klar` (ROADMAP 29): every command and flag of `klar` against `klarc`, read from the tools themselves
+  (`--help`, the usage text, the compiler's literals); `tests/bootstrap.py` fails when klarc lacks one. It found
+  `klarc view --open` and `klarc lsp --stdio` missing and `klarc context` absent from the usage: added.
+- `tests/fuzz.klar` (ROADMAP 23, 31): differential fuzzing — random programs, well-typed by construction (Int, Bool,
+  Str, List, Option, helper functions, bounded loops, lambdas, guarded division), run by the interpreter, the Python
+  backend, native code from `klar` and native code from `klarc`; a disagreement or a rejected program is kept.
 - The benchmark runners are written in Klar: `bench/run_bench.klar` (speed against C, C++, Rust, Go, Java, JavaScript
   and Python) and `bench/ai/run_ai_bench.klar` (when each language catches typical AI mistakes) replace the Python
   scripts; run them with `klarc run` (no Python needed) or `klar run`.

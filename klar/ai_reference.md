@@ -86,8 +86,11 @@ assert x > 0, "message"
 ```
 
 ## Expressions
-- Literals: `1`, `1_000`, `2.5`, `true`, `"s"`, `()` (Unit), `[1, 2]`, `Map { "a": 1 }`, `Map {}`.
-- Arithmetic `+ - * / %` only on same types: Int with Int, Float with Float (`/` on Int truncates). `+` joins Str.
+- Literals: `1`, `1_000`, `0xFF`, `0b101`, `2.5`, `1e-9`, `true`, `"s"` (escapes `\n \t \r \0 \\ \" \{ \}`), `()` (Unit),
+  `[1, 2]`, `Map { "a": 1 }` (or `{"a": 1}`), `Map {}`. A `{` before `"`, `\` or `}` in a string is a literal brace:
+  `"{"`, `"{}"`, `"{\"a\": {n}}"`; `{name}` interpolates.
+- Arithmetic `+ - * / %` only on same types: Int with Int, Float with Float (`/` on Int truncates towards zero and
+  `%` has the sign of the left side; Python's `//` and `%` are `floor_div`/`floor_mod` in std.math). `+` joins Str.
 - IEEE-754 bits of a Float: `x.to_bits()` (signed 64-bit Int), back with `float_from_bits(n)`.
   No implicit conversions: `n.to_float()`, `f.round()`, `x.to_str()`.
 - No bit operators: `a.bit_and(b)`, `bit_or`, `bit_xor`, `a.bit_not()`, `a.shift_left(n)`, `a.shift_right(n)`
@@ -100,9 +103,11 @@ assert x > 0, "message"
 - Enum values: `Shape.Circle(radius: 1.0)`, `Shape.Empty` — always qualified.
 - Option: `Some(v)`, `None`. Result: `Ok(v)`, `Err(e)`. No null, no exceptions.
 - `expr?` unwraps Some/Ok, otherwise returns None/Err from the current function (same error type).
-- Lambdas: `fn(x) => x * 2`, `fn(x: Int) -> Int { return x * 2 }` (no `=>` before a block). Param types may be
+- Lambdas: `fn(x) => x * 2`, `fn(x: Int) -> Int { return x * 2 }` (a block may follow `=>` too). Param types may be
   inferred. Lambdas may capture `let` values but not a `var` (E0216): snapshot it (`let n_now = n`) or use `fold`.
-- Calls: `f(a, b)`; functions with 3+ parameters REQUIRE named args: `f(a: 1, b: 2, c: 3)`.
+- Calls: `f(a, b)`. With 3+ parameters, name the arguments (`f(a: 1, b: 2, c: 3)`) unless they cannot be swapped:
+  parameters of different types, or same-typed arguments named like their parameters (`cell(grid, r, c)`,
+  `cell(grid, nr, c - 1)`); `cell(grid, 0, 1)` and `cell(grid, i, j)` must be named (E0208).
 - Method syntax works for any function on its first parameter: `acc.deposit(10)` == `deposit(acc, 10)`.
 - `match` is an expression and must be exhaustive:
 ```klar

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The shortest palindrome that begins with the given string.\n/// >>> assert make_palindrome(\"cata\") == \"catac\"\npub fn make_palindrome(string: Str) -> Str {\n  let n = string.len()\n  for i in range(0, n) {\n    let suffix = string.slice(i, n)\n    if suffix == suffix.reverse() {\n      return string + string.slice(0, i).reverse()\n    }\n  }\n  return string\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

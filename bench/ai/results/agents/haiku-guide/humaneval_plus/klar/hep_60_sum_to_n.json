@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sum_to_n(n: Int) -> Int {\n  return range(1, n + 1).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

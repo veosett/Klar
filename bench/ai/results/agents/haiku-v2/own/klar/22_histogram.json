@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn histogram(counts: Map[Str, Int]) -> List[Str] {\n  return counts.keys().sort().map(fn(k: Str) -> Str {\n    let n = counts.get(k).unwrap_or(0)\n    return k + \": \" + \"*\".repeat(n)\n  })\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

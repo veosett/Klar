@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn odd_message(s: Str) -> Str {\n  let k = s.chars().filter(fn(c) => \"13579\".contains(c)).len().to_str()\n  return \"the number of odd elements {k}n the str{k}ng {k} of the {k}nput.\"\n}\n\npub fn odd_count(lst: List[Str]) -> List[Str] {\n  return lst.map(fn(s) => odd_message(s))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

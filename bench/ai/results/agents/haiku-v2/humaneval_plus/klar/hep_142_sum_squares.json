@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn transform(i: Int, v: Int) -> Int {\n  if i % 3 == 0 {\n    return v * v\n  }\n  if i % 4 == 0 {\n    return v * v * v\n  }\n  return v\n}\n\npub fn sum_squares(lst: List[Int]) -> Int {\n  return lst.enumerate().map(fn(p) => transform(p.index, p.value)).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

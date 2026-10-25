@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The closest integer to a number given as text; halves are rounded away from zero.\n/// >>> assert closest_integer(\"15.3\") == 15\n/// >>> assert closest_integer(\"14.5\") == 15\n/// >>> assert closest_integer(\"-14.5\") == -15\npub fn closest_integer(value: Str) -> Int {\n  let x = value.to_float().unwrap_or(0.0)\n  let fl = x.floor()\n  let frac = x - fl.to_float()\n  if x >= 0.0 {\n    if frac >= 0.5 {\n      return fl + 1\n    }\n    return fl\n  }\n  if frac > 0.5 {\n    return fl + 1\n  }\n  return fl\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

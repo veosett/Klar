@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function simplify(x: string, n: string): boolean {\n  const [a, b] = x.split(\"/\").map(Number);\n  const [c, d] = n.split(\"/\").map(Number);\n  return (a * c) % (b * d) === 0;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

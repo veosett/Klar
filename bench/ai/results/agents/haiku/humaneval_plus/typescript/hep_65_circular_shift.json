@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function circular_shift(x: number, shift: number): string {\n  const s = String(x);\n  const n = s.length;\n  if (shift > n) {\n    return s.split(\"\").reverse().join(\"\");\n  }\n  const k = n - shift;\n  return s.slice(k) + s.slice(0, k);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

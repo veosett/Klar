@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn all_prefixes(string: Str) -> List[Str] {\n  return range(1, string.len() + 1).map(fn(i) => string.slice(0, i))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

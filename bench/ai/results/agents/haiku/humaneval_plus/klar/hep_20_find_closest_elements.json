@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn find_closest_elements(numbers: List[Float]) -> Pair[Float, Float] {\n  let n = numbers.len()\n  var best_lo = numbers.get_or(0, 0.0)\n  var best_hi = numbers.get_or(1, 0.0)\n  if best_lo > best_hi {\n    let t = best_lo\n    best_lo = best_hi\n    best_hi = t\n  }\n  var best_d = (best_hi - best_lo).abs()\n  for i in range(0, n) {\n    for j in range(i + 1, n) {\n      let a = numbers.get_or(i, 0.0)\n      let b = numbers.get_or(j, 0.0)\n      let d = (a - b).abs()\n      if d < best_d {\n        best_d = d\n        if a <= b {\n          best_lo = a\n          best_hi = b\n        } else {\n          best_lo = b\n          best_hi = a\n        }\n      }\n    }\n  }\n  return Pair { first: best_lo, second: best_hi }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

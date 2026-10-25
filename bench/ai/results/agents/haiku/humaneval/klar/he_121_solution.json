@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn solution(lst: List[Int]) -> Int {\n  let picked = lst.enumerate().filter(fn(q) => q.index % 2 == 0).map(fn(q) => q.value)\n  return picked.filter(fn(x) => x % 2 != 0).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

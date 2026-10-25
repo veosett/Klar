@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function x_or_y(n: number, x: number, y: number): number {\n  if (n < 2) return y;\n  for (let i = 2; i * i <= n; i++) if (n % i === 0) return y;\n  return x;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

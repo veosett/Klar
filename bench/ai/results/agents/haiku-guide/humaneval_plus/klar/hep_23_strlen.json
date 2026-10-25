@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The length of a string.\n/// >>> assert strlen(\"abc\") == 3\npub fn strlen(string: Str) -> Int {\n  return string.len()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

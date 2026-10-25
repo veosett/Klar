@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn get_closest_vowel(word: Str) -> Str {\n  let cs = word.chars()\n  let n = cs.len()\n  let vowels = [\"a\", \"e\", \"i\", \"o\", \"u\", \"A\", \"E\", \"I\", \"O\", \"U\"]\n  for i in range(1, n - 1).reverse() {\n    let c = cs.get_or(i, \"\")\n    let left = cs.get_or(i - 1, \"\")\n    let right = cs.get_or(i + 1, \"\")\n    if vowels.contains(c) and not vowels.contains(left) and not vowels.contains(right) {\n      return c\n    }\n  }\n  return \"\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

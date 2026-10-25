@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_bored(S: Str) -> Int {\n  let t = S.replace(\"?\", \".\").replace(\"!\", \".\")\n  return t.split(\".\").count(fn(p) => p.trim_start().starts_with(\"I \"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

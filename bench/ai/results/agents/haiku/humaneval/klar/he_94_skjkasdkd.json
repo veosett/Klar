@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn skjkasdkd(lst: List[Int]) -> Int {\n  let primes = lst.filter(fn(x) => is_prime(x))\n  let biggest = primes.max().unwrap_or(0)\n  let digits = biggest.to_str().chars()\n  return digits.map(fn(c) => c.to_int().unwrap_or(0)).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def common(l1: list[int], l2: list[int]) -> list[int]:\n    return sorted(set(l1) & set(l2))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

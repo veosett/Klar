@@ -1,0 +1,20 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var opens: List[Int] = []\n  var closes: List[Int] = []\n  for item in string.chars().enumerate() {\n    if item.value == \"[\" {\n      opens = opens.push(item.index)\n    } else {\n      closes = closes.push(item.index)\n    }\n  }\n  let rev = closes.reverse()\n  let total = rev.len()\n  var cnt: Int = 0\n  var ptr: Int = 0\n  for idx in opens {\n    if ptr < total {\n      let c = rev.get_or(ptr, 0)\n      if idx < c {\n        cnt = cnt + 1\n        ptr = ptr + 1\n      }\n    }\n  }\n  return cnt >= 2\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var opens: Int = 0\n  var closes_after: Int = 0\n  for c in string.chars() {\n    if opens >= 2 and c == \"]\" {\n      closes_after = closes_after + 1\n    }\n    if c == \"[\" {\n      opens = opens + 1\n    }\n  }\n  return closes_after >= 2\n}\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "pub fn is_nested(string: Str) -> Bool {\n  var opens: Int = 0\n  var closes_after: Int = 0\n  for c in string.chars() {\n    if opens >= 2 and c == \"]\" {\n      closes_after = closes_after + 1\n    }\n    if c == \"[\" {\n      opens = opens + 1\n    }\n  }\n  return closes_after >= 2\n}\n",
+   "stage": "test",
+   "ok": false
+  }
+ ],
+ "solved": false
+}

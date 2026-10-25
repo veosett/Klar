@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The sorted numbers whose digits are all odd.\n/// >>> assert unique_digits([15, 33, 1422, 1]) == [1, 15, 33]\n/// >>> assert unique_digits([152, 323, 1422, 10]) == []\npub fn unique_digits(x: List[Int]) -> List[Int] {\n  let odd = [\"1\", \"3\", \"5\", \"7\", \"9\"]\n  return x.filter(fn(n) => n.abs().to_str().chars().all(fn(c) => odd.contains(c))).sort()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

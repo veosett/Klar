@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function word_freq(text: string): Record<string, number> {\n  const result: Record<string, number> = {};\n  for (const raw of text.split(\" \")) {\n    if (raw === \"\") continue;\n    const word = raw.toLowerCase();\n    result[word] = (result[word] ?? 0) + 1;\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

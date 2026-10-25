@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def group_anagrams(words: list[str]) -> list[list[str]]:\n    groups: dict[str, list[str]] = {}\n    for w in words:\n        groups.setdefault(\"\".join(sorted(w)), []).append(w)\n    result = [sorted(g) for g in groups.values()]\n    result.sort(key=lambda g: g[0])\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

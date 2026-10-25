@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def Strongest_Extension(class_name: str, extensions: list[str]) -> str:\n    def strength(e):\n        return sum(c.isupper() for c in e) - sum(c.islower() for c in e)\n    best = extensions[0]\n    for e in extensions[1:]:\n        if strength(e) > strength(best):\n            best = e\n    return class_name + \".\" + best\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function multiply(a: number, b: number): number {\n  const unitA = Math.abs(a) % 10;\n  const unitB = Math.abs(b) % 10;\n  return unitA * unitB;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

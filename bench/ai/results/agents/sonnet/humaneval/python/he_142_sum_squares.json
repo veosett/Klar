@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sum_squares(lst: list[int]) -> int:\n    t = 0\n    for i, x in enumerate(lst):\n        if i % 3 == 0:\n            t += x * x\n        elif i % 4 == 0:\n            t += x ** 3\n        else:\n            t += x\n    return t\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

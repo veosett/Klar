@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sorted_list_sum(lst: string[]): string[] {\n  return lst\n    .filter((s) => s.length % 2 === 0)\n    .sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

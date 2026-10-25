@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn find_closest_elements(numbers: List[Float]) -> Pair[Float, Float] {\n  var found = false\n  var best_a = 0.0\n  var best_b = 0.0\n  var best_d = 0.0\n  for e in numbers.enumerate() {\n    for f in numbers.drop(e.index + 1) {\n      let d = (e.value - f).abs()\n      if (not found) or d < best_d {\n        found = true\n        best_a = e.value.min(f)\n        best_b = e.value.max(f)\n        best_d = d\n      }\n    }\n  }\n  return Pair { first: best_a, second: best_b }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

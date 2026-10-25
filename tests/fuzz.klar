@@ -1,0 +1,420 @@
+// Differential fuzzing (ROADMAP items 23 and 31): random programs that are well-typed by construction, run by every
+// way Klar has to run a program — the reference interpreter, the Python backend, native code built by `klar` and
+// native code built by `klarc` — which must all print the same and exit the same. A program that `klar check`
+// rejects is a bug too (of the checker or of this generator); either way it is kept for a look.
+//
+//     klarc run tests/fuzz.klar -- [-n 50] [--seed 1] [--klarc build/klarc] [--python python3] [--keep DIR]
+//
+// Run it from the repository root. Every failing program is written to DIR (default: fuzz-failures) with what each
+// backend printed. The programs use Int (arbitrary precision), Bool, Str, List[Int] and Option[Int], helper
+// functions that call earlier ones, bounded loops and lambdas; every division is guarded, so a correct
+// implementation never fails at run time.
+
+type FuzzOpts { count: Int, seed: Int, klarc: Str, python: Str, keep: Str }
+
+/// The generator's state: the random number state, the next fresh name and the variables in scope by type.
+type Gen { state: Int, next: Int, ints: List[Str], bools: List[Str], strs: List[Str], lists: List[Str],
+  opts: List[Str], fns: List[Pair[Str, Int]] }
+
+/// A piece of generated code and the generator after it.
+type Code { text: Str, g: Gen }
+
+const LCG_A: Int = 6364136223846793005
+const LCG_C: Int = 1442695040888963407
+const LCG_M: Int = 18446744073709551616
+
+fn rnd(g: Gen, n: Int) -> Pair[Int, Gen] {
+  let s = (g.state * LCG_A + LCG_C) % LCG_M
+  let v = s.shift_right(33) % n.max(1)
+  return Pair { first: v, second: g with { state: s } }
+}
+
+fn fresh(g: Gen, prefix: Str) -> Pair[Str, Gen] {
+  return Pair { first: "{prefix}{g.next}", second: g with { next: g.next + 1 } }
+}
+
+fn pick(g: Gen, xs: List[Str]) -> Pair[Str, Gen] {
+  let r = rnd(g, xs.len())
+  return Pair { first: xs.get_or(r.first, "0"), second: r.second }
+}
+
+const WORDS: List[Str] = ["", "a", "ab", "Klar", "x y", "  pad ", "42", "-7", "é", "ok,no"]
+
+fn int_lit(g: Gen) -> Code {
+  let r = rnd(g, 10)
+  let v = rnd(r.second, 2000)
+  let text = match r.first {
+    0 => "0",
+    1 => "1",
+    2 => "(-{v.first})",
+    3 => "{v.first}000000000000",
+    _ => "{v.first % 50}",
+  }
+  return Code { text: text, g: v.second }
+}
+
+fn str_lit(g: Gen) -> Code {
+  let w = pick(g, WORDS)
+  return Code { text: "\"" + w.first + "\"", g: w.second }
+}
+
+/// An Int expression of at most `depth` levels.
+fn gen_int(g: Gen, depth: Int) -> Code {
+  let r = rnd(g, 14)
+  let g1 = r.second
+  if depth <= 0 or r.first < 3 {
+    if not g1.ints.is_empty() and r.first % 2 == 0 {
+      let p = pick(g1, g1.ints)
+      return Code { text: p.first, g: p.second }
+    }
+    return int_lit(g1)
+  }
+  let a = gen_int(g: g1, depth: depth - 1)
+  let b = gen_int(g: a.g, depth: depth - 1)
+  return match r.first {
+    3 => Code { text: "({a.text} + {b.text})", g: b.g },
+    4 => Code { text: "({a.text} - {b.text})", g: b.g },
+    5 => Code { text: "({a.text} * {b.text})", g: b.g },
+    6 => Code { text: "safe_div({a.text}, {b.text})", g: b.g },
+    7 => Code { text: "safe_mod({a.text}, {b.text})", g: b.g },
+    8 => Code { text: "{a.text}.abs()", g: b.g },
+    9 => {
+      let l = gen_list(g: b.g, depth: depth - 1)
+      return Code { text: "{l.text}.len()", g: l.g }
+    },
+    10 => {
+      let l = gen_list(g: b.g, depth: depth - 1)
+      return Code { text: "{l.text}.sum()", g: l.g }
+    },
+    11 => {
+      let o = gen_opt(g: b.g, depth: depth - 1)
+      return Code { text: "{o.text}.unwrap_or({a.text})", g: o.g }
+    },
+    12 => {
+      let c = gen_bool(g: b.g, depth: depth - 1)
+      return Code { text: "pick_int(c: {c.text}, a: {a.text}, b: {b.text})", g: c.g }
+    },
+    _ => {
+      if b.g.fns.is_empty() {
+        return Code { text: "{a.text}.max({b.text})", g: b.g }
+      }
+      let f = rnd(b.g, b.g.fns.len())
+      let fname = b.g.fns.get(f.first).map(fn(p) => p.first).unwrap_or("f")
+      return Code { text: "{fname}({a.text}, {b.text})", g: f.second }
+    },
+  }
+}
+
+fn gen_bool(g: Gen, depth: Int) -> Code {
+  let r = rnd(g, 9)
+  let g1 = r.second
+  if depth <= 0 or r.first < 2 {
+    if not g1.bools.is_empty() and r.first == 0 {
+      let p = pick(g1, g1.bools)
+      return Code { text: p.first, g: p.second }
+    }
+    return match r.first % 2 {
+      0 => Code { text: "true", g: g1 },
+      _ => Code { text: "false", g: g1 },
+    }
+  }
+  let a = gen_int(g: g1, depth: depth - 1)
+  let b = gen_int(g: a.g, depth: depth - 1)
+  return match r.first {
+    2 => Code { text: "({a.text} < {b.text})", g: b.g },
+    3 => Code { text: "({a.text} == {b.text})", g: b.g },
+    4 => {
+      let c = gen_bool(g: b.g, depth: depth - 1)
+      let d = gen_bool(g: c.g, depth: depth - 1)
+      return Code { text: "({c.text} and {d.text})", g: d.g }
+    },
+    5 => {
+      let c = gen_bool(g: b.g, depth: depth - 1)
+      return Code { text: "(not {c.text})", g: c.g }
+    },
+    6 => {
+      let l = gen_list(g: b.g, depth: depth - 1)
+      return Code { text: "{l.text}.contains({a.text})", g: l.g }
+    },
+    7 => {
+      let s = gen_str(g: b.g, depth: depth - 1)
+      let t = str_lit(s.g)
+      return Code { text: "{s.text}.starts_with({t.text})", g: t.g }
+    },
+    _ => {
+      let o = gen_opt(g: b.g, depth: depth - 1)
+      return Code { text: "({o.text} == None)", g: o.g }
+    },
+  }
+}
+
+fn gen_str(g: Gen, depth: Int) -> Code {
+  let r = rnd(g, 8)
+  let g1 = r.second
+  if depth <= 0 or r.first < 2 {
+    if not g1.strs.is_empty() and r.first == 0 {
+      let p = pick(g1, g1.strs)
+      return Code { text: p.first, g: p.second }
+    }
+    return str_lit(g1)
+  }
+  let a = gen_str(g: g1, depth: depth - 1)
+  return match r.first {
+    2 => {
+      let b = gen_str(g: a.g, depth: depth - 1)
+      return Code { text: "({a.text} + {b.text})", g: b.g }
+    },
+    3 => {
+      let n = gen_int(g: a.g, depth: depth - 1)
+      return Code { text: "{n.text}.to_str()", g: n.g }
+    },
+    4 => Code { text: "{a.text}.upper()", g: a.g },
+    5 => Code { text: "{a.text}.trim()", g: a.g },
+    6 => {
+      let l = gen_list(g: a.g, depth: depth - 1)
+      return Code { text: "{l.text}.map(fn(v) => v.to_str()).join(\",\")", g: l.g }
+    },
+    _ => {
+      let t = str_lit(a.g)
+      return Code { text: "{a.text}.replace(\"a\", {t.text})", g: t.g }
+    },
+  }
+}
+
+fn gen_list(g: Gen, depth: Int) -> Code {
+  let r = rnd(g, 10)
+  let g1 = r.second
+  if depth <= 0 or r.first < 3 {
+    if not g1.lists.is_empty() and r.first == 0 {
+      let p = pick(g1, g1.lists)
+      return Code { text: p.first, g: p.second }
+    }
+    let n = rnd(g1, 4)
+    var cur = n.second
+    var items: List[Str] = []
+    for _k in range(0, n.first) {
+      let x = int_lit(cur)
+      items = items.push(x.text)
+      cur = x.g
+    }
+    return match items.is_empty() {
+      true => Code { text: "empty_ints()", g: cur },
+      false => Code { text: "[" + items.join(", ") + "]", g: cur },
+    }
+  }
+  let a = gen_list(g: g1, depth: depth - 1)
+  let k = int_lit(a.g)
+  return match r.first {
+    3 => Code { text: "{a.text}.push({k.text})", g: k.g },
+    4 => {
+      let b = gen_list(g: k.g, depth: depth - 1)
+      return Code { text: "{a.text}.concat({b.text})", g: b.g }
+    },
+    5 => Code { text: "{a.text}.map(fn(v) => v * {k.text})", g: k.g },
+    6 => Code { text: "{a.text}.filter(fn(v) => v > {k.text})", g: k.g },
+    7 => Code { text: "{a.text}.sort()", g: k.g },
+    8 => Code { text: "{a.text}.reverse()", g: k.g },
+    _ => {
+      let n = rnd(k.g, 6)
+      return Code { text: "range(0, {n.first})", g: n.second }
+    },
+  }
+}
+
+fn gen_opt(g: Gen, depth: Int) -> Code {
+  let r = rnd(g, 6)
+  let g1 = r.second
+  if not g1.opts.is_empty() and r.first == 0 {
+    let p = pick(g1, g1.opts)
+    return Code { text: p.first, g: p.second }
+  }
+  return match r.first {
+    1 => {
+      let a = gen_int(g: g1, depth: depth - 1)
+      return Code { text: "Some({a.text})", g: a.g }
+    },
+    2 => Code { text: "no_int()", g: g1 },
+    3 => {
+      let l = gen_list(g: g1, depth: depth - 1)
+      let i = gen_int(g: l.g, depth: depth - 1)
+      return Code { text: "{l.text}.get(safe_mod({i.text}.abs(), 7))", g: i.g }
+    },
+    4 => {
+      let s = gen_str(g: g1, depth: depth - 1)
+      return Code { text: "{s.text}.to_int()", g: s.g }
+    },
+    _ => {
+      let l = gen_list(g: g1, depth: depth - 1)
+      return Code { text: "{l.text}.first()", g: l.g }
+    },
+  }
+}
+
+/// A `let` of a random type, printed; the variable joins the scope.
+fn gen_let(g: Gen, indent: Str) -> Code {
+  let r = rnd(g, 5)
+  let nm = fresh(r.second, "v")
+  let name = nm.first
+  let c = match r.first {
+    0 => gen_int(g: nm.second, depth: 3),
+    1 => gen_bool(g: nm.second, depth: 3),
+    2 => gen_str(g: nm.second, depth: 3),
+    3 => gen_list(g: nm.second, depth: 3),
+    _ => gen_opt(g: nm.second, depth: 3),
+  }
+  let ty = match r.first {
+    0 => "Int",
+    1 => "Bool",
+    2 => "Str",
+    3 => "List[Int]",
+    _ => "Option[Int]",
+  }
+  let g2 = match r.first {
+    0 => c.g with { ints: c.g.ints.push(name) },
+    1 => c.g with { bools: c.g.bools.push(name) },
+    2 => c.g with { strs: c.g.strs.push(name) },
+    3 => c.g with { lists: c.g.lists.push(name) },
+    _ => c.g with { opts: c.g.opts.push(name) },
+  }
+  return Code { text: "{indent}let {name}: {ty} = {c.text}\n{indent}print({name})\n", g: g2 }
+}
+
+/// A helper `fn fN(a: Int, b: Int) -> Int` with a bounded loop; it may call the helpers before it.
+fn gen_fn(g: Gen) -> Code {
+  let nm = fresh(g, "f")
+  let a = fresh(nm.second, "p")
+  let b = fresh(a.second, "p")
+  let acc = fresh(b.second, "acc")
+  let i = fresh(acc.second, "i")
+  // inside: the parameters only (the variables of main are not in scope)
+  let inner = i.second with { ints: [a.first, b.first], bools: [], strs: [], lists: [], opts: [] }
+  let start = gen_int(g: inner, depth: 2)
+  let step = gen_int(g: start.g with { ints: [a.first, b.first, acc.first, i.first] }, depth: 2)
+  let n = rnd(step.g, 5)
+  let cond = gen_bool(g: n.second, depth: 2)
+  let text = "pub fn {nm.first}({a.first}: Int, {b.first}: Int) -> Int \{\n" + "  var {acc.first} = {start.text}\n" +
+    "  var {i.first} = 0\n" + "  while {i.first} < {n.first} \{\n" + "    if {cond.text} \{\n" +
+    "      {acc.first} = {step.text}\n" + "    \}\n" + "    {i.first} = {i.first} + 1\n" + "  \}\n" +
+    "  return {acc.first}\n" + "\}\n\n"
+  // back to the outer scope, with the new helper callable
+  let out = cond.g with { ints: g.ints, bools: g.bools, strs: g.strs, lists: g.lists, opts: g.opts, fns: g.fns.push(
+    Pair { first: nm.first, second: 2 }) }
+  return Code { text: text, g: out }
+}
+
+const PRELUDE: Str = "pub fn safe_div(a: Int, b: Int) -> Int \{\n  if b == 0 \{\n    return 0\n  \}\n  return a / b\n\}\n\n" +
+  "pub fn safe_mod(a: Int, b: Int) -> Int \{\n  if b == 0 \{\n    return 0\n  \}\n  return a % b\n\}\n\n" +
+  "pub fn pick_int(c: Bool, a: Int, b: Int) -> Int \{\n  return match c \{\n    true => a,\n    false => b,\n  \}\n\}\n\n" +
+  "pub fn empty_ints() -> List[Int] \{\n  return []\n\}\n\n" + "pub fn no_int() -> Option[Int] \{\n  return None\n\}\n\n"
+
+fn program(seed: Int) -> Str {
+  var g = Gen { state: seed * 7919 + 17, next: 0, ints: [], bools: [], strs: [], lists: [], opts: [], fns: [] }
+  var text = PRELUDE
+  let nf = rnd(g, 4)
+  g = nf.second
+  for _k in range(0, nf.first) {
+    let f = gen_fn(g)
+    text = text + f.text
+    g = f.g
+  }
+  text = text + "fn main() uses io \{\n"
+  let nl = rnd(g, 8)
+  g = nl.second
+  for _k in range(0, nl.first + 3) {
+    let l = gen_let(g: g, indent: "  ")
+    text = text + l.text
+    g = l.g
+  }
+  return text + "\}\n"
+}
+
+fn parse_fuzz_opts(args: List[Str]) -> FuzzOpts uses io {
+  let py = match env_var("OS") == Some("Windows_NT") {
+    true => "python",
+    false => "python3",
+  }
+  var o = FuzzOpts { count: 50, seed: 1, klarc: "build/klarc", python: py, keep: "fuzz-failures" }
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    let v = args.get_or(i + 1, "")
+    if a == "-n" {
+      o = o with { count: v.to_int().unwrap_or(50) }
+    } else if a == "--seed" {
+      o = o with { seed: v.to_int().unwrap_or(1) }
+    } else if a == "--klarc" {
+      o = o with { klarc: v }
+    } else if a == "--python" {
+      o = o with { python: v }
+    } else if a == "--keep" {
+      o = o with { keep: v }
+    }
+    i = i + 2
+  }
+  return o
+}
+
+/// What one way of running printed: exit code, standard output and standard error.
+fn run_one(cmd: List[Str]) -> List[Str] uses proc {
+  return match run_capture(cmd, "", "") {
+    Ok(r) => r,
+    Err(e) => ["-1", "", e],
+  }
+}
+
+fn temp_dir() -> Str uses io {
+  return env_var("TEMP").unwrap_or(env_var("TMPDIR").unwrap_or("/tmp"))
+}
+
+fn main() uses io, fs, proc {
+  let o = parse_fuzz_opts(cli_args())
+  let dir = temp_dir() + "/klar-fuzz"
+  let _ = make_dir(dir)
+  let lib = current_dir() + "/klar"
+  var failures = 0
+  for k in range(0, o.count) {
+    let seed = o.seed + k
+    let src = program(seed)
+    let path = "{dir}/p{seed}.klar"
+    let _ = write_file(path, src)
+    let check = run_one([o.python, "-m", "klar", "check", path])
+    var problem = ""
+    var report = ""
+    if check.get_or(0, "1") != "0" {
+      problem = "klar check rejects it"
+      report = check.get_or(1, "") + check.get_or(2, "")
+    } else {
+      let ways = [Pair { first: "interp", second: [o.python, "-m", "klar", "run", "-q", "--interp", path] }, Pair {
+        first: "py", second: [o.python, "-m", "klar", "run", "-q", "--py", path] }, Pair { first: "native (klar)",
+          second: [o.python, "-m", "klar", "run", "-q", path] }, Pair { first: "native (klarc)", second: [o.klarc,
+            "run", path, "--lib", lib] }]
+      let outs = ways.map(fn(w) => Pair { first: w.first, second: run_one(w.second) })
+      let base = outs.first().map(fn(p) => p.second).unwrap_or([])
+      for w in outs {
+        let r = w.second
+        let code = r.get_or(0, "?")
+        let printed = r.get_or(1, "") + r.get_or(2, "")
+        report = report + "== {w.first}: exit {code}\n{printed}\n"
+        if r.get_or(0, "") != base.get_or(0, "") or r.get_or(1, "") != base.get_or(1, "") {
+          problem = "the backends differ"
+        }
+      }
+      if problem == "" and base.get_or(0, "") != "0" {
+        problem = "it fails at run time"
+      }
+    }
+    if problem == "" {
+      let _ = remove_file(path)
+    } else {
+      failures = failures + 1
+      let _ = make_dir(o.keep)
+      let _ = write_file("{o.keep}/p{seed}.klar", src)
+      let _ = write_file("{o.keep}/p{seed}.txt", problem + "\n\n" + report)
+      print("FAIL seed {seed}: {problem} -> {o.keep}/p{seed}.klar")
+    }
+  }
+  print("fuzz: {o.count - failures}/{o.count} programs agree in all four backends (seeds {o.seed}..{o.seed + o.count - 1})")
+  if failures > 0 {
+    exit(1)
+  }
+}

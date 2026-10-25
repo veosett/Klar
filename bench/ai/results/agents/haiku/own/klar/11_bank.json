@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Applies \"deposit N\" / \"withdraw N\" operations to a balance starting at 0.\npub fn run_ops(ops: List[Str]) -> Result[Int, Str] {\n  var bal = 0\n  for i in range(0, ops.len()) {\n    let pos = i + 1\n    let parts = ops.get_or(i, \"\").split(\" \")\n    if parts.len() != 2 {\n      return Err(\"bad op at op {pos}\")\n    }\n    let kind = parts.get_or(0, \"\")\n    let amount = match parts.get_or(1, \"\").to_int() {\n      Some(n) => n,\n      None => -1,\n    }\n    if amount < 0 {\n      return Err(\"bad op at op {pos}\")\n    }\n    if kind == \"deposit\" {\n      bal = bal + amount\n    } else if kind == \"withdraw\" {\n      if amount > bal {\n        return Err(\"insufficient funds at op {pos}\")\n      }\n      bal = bal - amount\n    } else {\n      return Err(\"bad op at op {pos}\")\n    }\n  }\n  return Ok(bal)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

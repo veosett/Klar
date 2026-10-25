@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn incr_list(l: List[Int]) -> List[Int] {\n  return l.map(fn(x) => x + 1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

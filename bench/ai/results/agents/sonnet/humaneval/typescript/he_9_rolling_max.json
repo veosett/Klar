@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function rolling_max(numbers: number[]): number[] {\n  const r: number[] = [];\n  let m = -Infinity;\n  for (const n of numbers) {\n    if (n > m) m = n;\n    r.push(m);\n  }\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

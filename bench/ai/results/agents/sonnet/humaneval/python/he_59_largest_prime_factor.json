@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def largest_prime_factor(n: int) -> int:\n    f = 2\n    last = 1\n    while f * f <= n:\n        while n % f == 0:\n            last = f\n            n //= f\n        f += 1\n    if n > 1:\n        last = max(last, n)\n    return last\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

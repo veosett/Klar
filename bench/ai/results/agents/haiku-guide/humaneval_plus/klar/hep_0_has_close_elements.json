@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn any_close(x: Float, rest: List[Float], threshold: Float) -> Bool {\n  return rest.any(fn(y) => (x - y).abs() < threshold)\n}\n\npub fn has_close_elements(numbers: List[Float], threshold: Float) -> Bool {\n  var found = false\n  for e in numbers.enumerate() {\n    if any_close(e.value, numbers.drop(e.index + 1), threshold) {\n      found = true\n    }\n  }\n  return found\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn any_close(x: Float, rest: List[Float], threshold: Float) -> Bool {\n  return rest.any(fn(y) => (x - y).abs() < threshold)\n}\n\npub fn has_close_elements(numbers: List[Float], threshold: Float) -> Bool {\n  var found = false\n  for e in numbers.enumerate() {\n    if any_close(x: e.value, rest: numbers.drop(e.index + 1), threshold: threshold) {\n      found = true\n    }\n  }\n  return found\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

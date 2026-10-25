@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let ks = dict.keys()\n  if ks.is_empty() {\n    return false\n  }\n  let all_lower = ks.all(fn(k) => k.lower() == k and k.upper() != k)\n  let all_upper = ks.all(fn(k) => k.upper() == k and k.lower() != k)\n  return all_lower or all_upper\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

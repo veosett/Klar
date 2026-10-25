@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_nums(arr: number[]): number {\n  let count = 0;\n  for (const n of arr) {\n    const s = String(Math.abs(n));\n    let sum = 0;\n    for (let i = 0; i < s.length; i++) {\n      sum += s.charCodeAt(i) - 48;\n    }\n    if (n < 0) {\n      sum -= 2 * (s.charCodeAt(0) - 48);\n    }\n    if (sum > 0) count++;\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

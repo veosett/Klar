@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function concatenate(strings: string[]): string {\n  return strings.join(\"\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

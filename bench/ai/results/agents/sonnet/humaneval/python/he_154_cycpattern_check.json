@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def cycpattern_check(a: str, b: str) -> bool:\n    for i in range(max(len(b), 1)):\n        if (b[i:] + b[:i]) in a:\n            return True\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

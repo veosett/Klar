@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_prime(n: number): boolean {\n  if (n < 2) return false;\n  for (let i = 2; i * i <= n; i++) if (n % i === 0) return false;\n  return true;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

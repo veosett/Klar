@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def concatenate(strings: list[str]) -> str:\n    return ''.join(strings)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

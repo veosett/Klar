@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\n/// >>> assert prime_length(\"Hello\")\n/// >>> assert not prime_length(\"orange\")\npub fn prime_length(string: Str) -> Bool {\n  return is_prime(string.len())\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

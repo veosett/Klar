@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn largest_smallest_integers(lst: List[Int]) -> Pair[Option[Int], Option[Int]] {\n  let a = lst.filter(fn(x) => x < 0).max()\n  let b = lst.filter(fn(x) => x > 0).min()\n  return Pair { first: a, second: b }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

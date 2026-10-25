@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert reverse_delete(\"abcde\", \"ae\") == Pair { first: \"bcd\", second: false }\npub fn reverse_delete(s: Str, c: Str) -> Pair[Str, Bool] {\n  let kept = s.chars().filter(fn(ch) => not c.chars().contains(ch)).join(\"\")\n  let is_pal = kept == kept.reverse()\n  return Pair { first: kept, second: is_pal }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

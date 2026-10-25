@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Flat indexes of the cells next to cell `p` in an n-by-n grid.\nfn neighbors(p: Int, n: Int) -> List[Int]\n  requires n != 0\n{\n  let r = p / n\n  let c = p % n\n  var out: List[Int] = []\n  if r > 0 {\n    out = out.push(p - n)\n  }\n  if r < n - 1 {\n    out = out.push(p + n)\n  }\n  if c > 0 {\n    out = out.push(p - 1)\n  }\n  if c < n - 1 {\n    out = out.push(p + 1)\n  }\n  return out\n}\n\n/// Starting from the cell holding 1, always step to the smallest neighbour.\n/// >>> assert minPath([[1, 2, 3], [4, 5, 6], [7, 8, 9]], 3) == [1, 2, 1]\npub fn minPath(grid: List[List[Int]], k: Int) -> List[Int] {\n  let n = grid.len()\n  let flat = grid.flatten()\n  var p = flat.index_of(1).unwrap_or(0)\n  var out: List[Int] = [flat.get_or(p, 0)]\n  var step = 1\n  while step < k {\n    let best = neighbors(p, n).min_by(fn(q) => flat.get_or(q, 0)).unwrap_or(p)\n    p = best\n    out = out.push(flat.get_or(p, 0))\n    step = step + 1\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

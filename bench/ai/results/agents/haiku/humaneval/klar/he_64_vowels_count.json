@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn vowels_count(s: Str) -> Int {\n  let cs = s.lower().chars()\n  let last = cs.len() - 1\n  var count: Int = 0\n  for c in cs.enumerate() {\n    if [\"a\", \"e\", \"i\", \"o\", \"u\"].contains(c.value) {\n      count = count + 1\n    } else if c.value == \"y\" and c.index == last {\n      count = count + 1\n    }\n  }\n  return count\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

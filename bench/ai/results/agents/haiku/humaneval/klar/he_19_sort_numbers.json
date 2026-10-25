@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn digit_value(w: Str) -> Int {\n  match w {\n    \"zero\" => { return 0 },\n    \"one\" => { return 1 },\n    \"two\" => { return 2 },\n    \"three\" => { return 3 },\n    \"four\" => { return 4 },\n    \"five\" => { return 5 },\n    \"six\" => { return 6 },\n    \"seven\" => { return 7 },\n    \"eight\" => { return 8 },\n    \"nine\" => { return 9 },\n    _ => { return 10 },\n  }\n}\n\npub fn sort_numbers(numbers: Str) -> Str {\n  let words = numbers.split(\" \").filter(fn(w) => not w.is_empty())\n  let sorted = words.sort_by(fn(w) => digit_value(w))\n  return sorted.join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def flip_case(string: str) -> str:\n    return string.swapcase()\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

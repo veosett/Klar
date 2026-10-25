@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn count_upper(s: Str) -> Int {\n  var n: Int = 0\n  for p in s.chars().enumerate() {\n    if p.index.is_even() and \"AEIOU\".contains(p.value) {\n      n = n + 1\n    }\n  }\n  return n\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

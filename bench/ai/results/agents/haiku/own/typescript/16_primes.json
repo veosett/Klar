@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function primes_up_to(n: number): number[] {\n  if (n < 2) return [];\n  const limit = Math.floor(n);\n  const sieve = new Array<boolean>(limit + 1).fill(true);\n  sieve[0] = false;\n  sieve[1] = false;\n  for (let p = 2; p * p <= limit; p++) {\n    if (sieve[p]) {\n      for (let m = p * p; m <= limit; m += p) sieve[m] = false;\n    }\n  }\n  const out: number[] = [];\n  for (let i = 2; i <= limit; i++) if (sieve[i]) out.push(i);\n  return out;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

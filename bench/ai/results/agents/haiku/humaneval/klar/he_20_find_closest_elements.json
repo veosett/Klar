@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn find_closest_elements(numbers: List[Float]) -> Pair[Float, Float] {\n  let sorted = numbers.sort()\n  var best_a = sorted.get_or(0, 0.0)\n  var best_b = sorted.get_or(1, 0.0)\n  var best_d = best_b - best_a\n  for x in sorted.enumerate() {\n    if x.index + 1 < sorted.len() {\n      let a = x.value\n      let b = sorted.get_or(x.index + 1, 0.0)\n      let d = b - a\n      if d < best_d {\n        best_d = d\n        best_a = a\n        best_b = b\n      }\n    }\n  }\n  return Pair { first: best_a, second: best_b }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

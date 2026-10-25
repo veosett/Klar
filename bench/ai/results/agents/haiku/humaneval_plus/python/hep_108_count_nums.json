@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def count_nums(arr: list[int]) -> int:\n    count = 0\n    for n in arr:\n        digits = [int(d) for d in str(abs(n))]\n        if n < 0:\n            digits[0] = -digits[0]\n        if sum(digits) > 0:\n            count += 1\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

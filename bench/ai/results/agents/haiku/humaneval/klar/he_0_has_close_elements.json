@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn has_close_elements(numbers: List[Float], threshold: Float) -> Bool {\n  for x in numbers.enumerate() {\n    for y in numbers.enumerate() {\n      if x.index < y.index {\n        if (x.value - y.value).abs() < threshold {\n          return true\n        }\n      }\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

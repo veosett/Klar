@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Whether two words use exactly the same set of characters.\n/// >>> assert same_chars(\"abcd\", \"dddddddabc\") == true\n/// >>> assert same_chars(\"eabcd\", \"dddddddabc\") == false\npub fn same_chars(s0: Str, s1: Str) -> Bool {\n  let a = s0.chars().unique().sort()\n  let b = s1.chars().unique().sort()\n  return a == b\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

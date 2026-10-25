@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sort_even(l: number[]): number[] {\n  const evens: number[] = [];\n  for (let i = 0; i < l.length; i += 2) {\n    evens.push(l[i]);\n  }\n  evens.sort((a, b) => a - b);\n  const result = l.slice();\n  let k = 0;\n  for (let i = 0; i < result.length; i += 2) {\n    result[i] = evens[k++];\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

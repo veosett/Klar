@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert closest_integer(\"15.3\") == 15\npub fn closest_integer(value: Str) -> Int {\n  let x = value.to_float().unwrap_or(0.0)\n  let a = x.abs()\n  let r = (a + 0.5).floor()\n  if x < 0.0 {\n    return 0 - r\n  }\n  return r\n}\n\ntest \"closest_integer\" {\n  assert closest_integer(\"10\") == 10\n  assert closest_integer(\"15.3\") == 15\n  assert closest_integer(\"14.5\") == 15\n  assert closest_integer(\"-14.5\") == -15\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

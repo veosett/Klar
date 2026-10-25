@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn remove_duplicates(numbers: List[Int]) -> List[Int] {\n  return numbers.filter(fn(x) => numbers.count(fn(y) => y == x) == 1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

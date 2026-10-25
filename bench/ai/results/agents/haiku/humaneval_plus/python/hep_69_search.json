@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from collections import Counter\n\n\ndef search(lst: list[int]) -> int:\n    counts = Counter(lst)\n    best = -1\n    for value, freq in counts.items():\n        if value > 0 and freq >= value and value > best:\n            best = value\n    return best\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

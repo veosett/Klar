@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn x_or_y(n: Int, x: Int, y: Int) -> Int {\n  if n >= 2 and is_prime(n) {\n    return x\n  }\n  return y\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

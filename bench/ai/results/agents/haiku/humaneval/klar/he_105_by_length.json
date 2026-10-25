@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn by_length(arr: List[Int]) -> List[Str] {\n  let names = [\"One\", \"Two\", \"Three\", \"Four\", \"Five\", \"Six\", \"Seven\", \"Eight\", \"Nine\"]\n  let digits = arr.filter(fn(x) => x >= 1 and x <= 9).sort().reverse()\n  return digits.map(fn(x) => names.get_or(x - 1, \"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

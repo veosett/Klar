@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn iscube(a: Int) -> Bool {\n  let r = a.abs().to_float().pow(0.3333333333333333).round()\n  return range(0 - r - 2, r + 3).any(fn(k) => k * k * k == a)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

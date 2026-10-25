@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function digitsSum(n: number): number {\n  let neg = 1;\n  let value = n;\n  if (value < 0) {\n    value = -value;\n    neg = -1;\n  }\n  const digits = String(value).split(\"\").map((d) => Number(d));\n  digits[0] = digits[0] * neg;\n  return digits.reduce((acc, d) => acc + d, 0);\n}\n\nexport function order_by_points(nums: number[]): number[] {\n  return nums\n    .map((value, index) => ({ value, index, key: digitsSum(value) }))\n    .sort((a, b) => (a.key !== b.key ? a.key - b.key : a.index - b.index))\n    .map((entry) => entry.value);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

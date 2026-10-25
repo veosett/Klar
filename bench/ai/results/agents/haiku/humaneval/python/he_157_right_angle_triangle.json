@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def right_angle_triangle(a: int, b: int, c: int) -> bool:\n    x, y, z = sorted((a, b, c))\n    if x <= 0:\n        return False\n    return x * x + y * y == z * z\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "function popcount(n: number): number {\n  let x = Math.abs(n);\n  let count = 0;\n  while (x > 0) {\n    count += x % 2;\n    x = Math.floor(x / 2);\n  }\n  return count;\n}\n\nexport function sort_array(arr: number[]): number[] {\n  return [...arr].sort((a, b) => {\n    const diff = popcount(a) - popcount(b);\n    return diff !== 0 ? diff : a - b;\n  });\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

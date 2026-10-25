@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "def is_nested(string: str) -> bool:\n    openings = []\n    closings = []\n    for i, ch in enumerate(string):\n        if ch == '[':\n            openings.append(i)\n        else:\n            closings.append(i)\n    closings.reverse()\n    cnt = 0\n    i = 0\n    l = len(closings)\n    for idx in openings:\n        if i < l and idx < closings[i]:\n            cnt += 1\n            i += 1\n    return cnt >= 2\n",
+   "stage": "test",
+   "ok": false
+  },
+  {
+   "code": "def is_nested(string: str) -> bool:\n    stack = []\n    pairs = []\n    for i, ch in enumerate(string):\n        if ch == '[':\n            stack.append(i)\n        elif ch == ']' and stack:\n            pairs.append((stack.pop(), i))\n    for i, j in pairs:\n        for k, l in pairs:\n            if k < i and j < l:\n                return True\n    return False\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

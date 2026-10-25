@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_lower_key(k: Str) -> Bool {\n  return k == k.lower() and k != k.upper()\n}\n\nfn is_upper_key(k: Str) -> Bool {\n  return k == k.upper() and k != k.lower()\n}\n\n/// >>> assert not check_dict_case(Map {})\npub fn check_dict_case(dict: Map[Str, Str]) -> Bool {\n  let keys = dict.keys()\n  if keys.is_empty() {\n    return false\n  }\n  return keys.all(fn(k) => is_lower_key(k)) or keys.all(fn(k) => is_upper_key(k))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

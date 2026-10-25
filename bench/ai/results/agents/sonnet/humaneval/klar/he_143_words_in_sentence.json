@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.math.{is_prime}\n\npub fn words_in_sentence(sentence: Str) -> Str {\n  return sentence.split(\" \").filter(fn(w) => is_prime(w.len())).join(\" \")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

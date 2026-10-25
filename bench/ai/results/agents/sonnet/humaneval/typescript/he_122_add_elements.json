@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function add_elements(arr: number[], k: number): number {\n  let s = 0;\n  for (let i = 0; i < k && i < arr.length; i++) {\n    if (Math.abs(arr[i]) < 100) s += arr[i];\n  }\n  return s;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

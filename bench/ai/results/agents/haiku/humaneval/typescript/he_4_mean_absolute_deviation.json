@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function mean_absolute_deviation(numbers: number[]): number {\n  const mean = numbers.reduce((acc, x) => acc + x, 0) / numbers.length;\n  const total = numbers.reduce((acc, x) => acc + Math.abs(x - mean), 0);\n  return total / numbers.length;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

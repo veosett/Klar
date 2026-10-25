@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn digits_rec(n: Int, base: Int) -> Str {\n  if base == 0 {\n    return \"\"\n  }\n  if n == 0 {\n    return \"\"\n  }\n  return digits_rec(n / base, base) + (n % base).to_str()\n}\n\npub fn change_base(x: Int, base: Int) -> Str {\n  if x == 0 {\n    return \"0\"\n  }\n  return digits_rec(x, base)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

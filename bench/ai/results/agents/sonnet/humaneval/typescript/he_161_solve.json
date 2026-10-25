@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function solve(s: string): string {\n  let has = false;\n  let r = \"\";\n  for (const ch of s) {\n    if (/[a-zA-Z]/.test(ch)) {\n      has = true;\n      r += ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase();\n    } else r += ch;\n  }\n  return has ? r : s.split(\"\").reverse().join(\"\");\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

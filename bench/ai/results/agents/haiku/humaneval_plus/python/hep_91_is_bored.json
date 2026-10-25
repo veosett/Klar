@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import re\n\n\ndef is_bored(S: str) -> int:\n    count = 0\n    for sentence in re.split(r'[.?!]', S):\n        words = sentence.split()\n        if words and words[0] == 'I':\n            count += 1\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

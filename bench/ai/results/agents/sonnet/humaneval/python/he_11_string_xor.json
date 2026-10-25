@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def string_xor(a: str, b: str) -> str:\n    return ''.join('0' if x == y else '1' for x, y in zip(a, b))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

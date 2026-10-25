@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn hex_key(num: Str) -> Int {\n  return num.chars().count(fn(c) => \"2357BD\".contains(c))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

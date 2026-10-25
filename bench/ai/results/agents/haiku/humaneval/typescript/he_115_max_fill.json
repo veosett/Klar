@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function max_fill(grid: number[][], capacity: number): number {\n  let total = 0;\n  for (const row of grid) {\n    const units = row.reduce((a, b) => a + b, 0);\n    total += Math.ceil(units / capacity);\n  }\n  return total;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

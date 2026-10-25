@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function get_row(lst: number[][], x: number): [number, number][] {\n  const r: [number, number][] = [];\n  for (let i = 0; i < lst.length; i++) {\n    for (let j = lst[i].length - 1; j >= 0; j--) {\n      if (lst[i][j] === x) r.push([i, j]);\n    }\n  }\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

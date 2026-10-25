@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "use std.list.{rotate}\n\npub fn move_one_ball(arr: List[Int]) -> Bool {\n  if arr.is_empty() {\n    return true\n  }\n  let sorted = arr.sort()\n  for k in range(0, arr.len()) {\n    if rotate(arr, k) == sorted {\n      return true\n    }\n  }\n  return false\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

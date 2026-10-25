@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def digits(n: int) -> int:\n    p = 1\n    found = False\n    for c in str(n):\n        d = int(c)\n        if d % 2 == 1:\n            p *= d\n            found = True\n    return p if found else 0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def factorize(n: int) -> list[int]:\n    res = []\n    d = 2\n    while d * d <= n:\n        while n % d == 0:\n            res.append(d)\n            n //= d\n        d += 1\n    if n > 1:\n        res.append(n)\n    return res\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

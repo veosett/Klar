@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_nums(arr: number[]): number {\n  let count = 0;\n  for (const n of arr) {\n    const digits = String(Math.abs(n)).split(\"\").map(Number);\n    if (n < 0) digits[0] = -digits[0];\n    const sum = digits.reduce((a, b) => a + b, 0);\n    if (sum > 0) count++;\n  }\n  return count;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

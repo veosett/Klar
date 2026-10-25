@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function unique(l: number[]): number[] {\n  return Array.from(new Set(l)).sort((a, b) => a - b);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

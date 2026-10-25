@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn file_name_check(file_name: Str) -> Str {\n  let pieces = file_name.split(\".\")\n  if pieces.len() != 2 {\n    return \"No\"\n  }\n  let before = pieces.get_or(0, \"\")\n  let after = pieces.get_or(1, \"\")\n  let digits = \"0123456789\"\n  let letters = \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"\n  let extensions: List[Str] = [\"txt\", \"exe\", \"dll\"]\n  let digit_count = file_name.chars().filter(fn(c) => digits.contains(c)).len()\n  let starts_ok = before.chars().first().map(fn(c) => letters.contains(c)).unwrap_or(false)\n  let ext_ok = extensions.contains(after)\n  if digit_count <= 3 and starts_ok and ext_ok {\n    return \"Yes\"\n  }\n  return \"No\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

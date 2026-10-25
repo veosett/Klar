@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def is_balanced(s: str) -> bool:\n    pairs = {\")\": \"(\", \"]\": \"[\", \"}\": \"{\"}\n    stack: list[str] = []\n    for ch in s:\n        if ch in \"([{\":\n            stack.append(ch)\n        elif ch in pairs:\n            if not stack or stack.pop() != pairs[ch]:\n                return False\n    return not stack\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

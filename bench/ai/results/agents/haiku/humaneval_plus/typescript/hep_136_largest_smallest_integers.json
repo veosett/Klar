@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function largest_smallest_integers(lst: number[]): [number | null, number | null] {\n  let a: number | null = null;\n  let b: number | null = null;\n  for (const x of lst) {\n    if (x < 0 && (a === null || x > a)) {\n      a = x;\n    }\n    if (x > 0 && (b === null || x < b)) {\n      b = x;\n    }\n  }\n  return [a, b];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

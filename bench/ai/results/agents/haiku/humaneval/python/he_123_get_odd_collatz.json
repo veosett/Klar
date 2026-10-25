@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def get_odd_collatz(n: int) -> list[int]:\n    odds = set()\n    x = n\n    while True:\n        if x % 2 == 1:\n            odds.add(x)\n        if x == 1:\n            break\n        x = x // 2 if x % 2 == 0 else 3 * x + 1\n    return sorted(odds)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

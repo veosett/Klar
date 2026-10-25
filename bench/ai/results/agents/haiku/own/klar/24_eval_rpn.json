@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// Evaluates a reverse Polish expression of integers and + - * / (space separated).\npub fn eval_rpn(expr: Str) -> Result[Int, Str] {\n  let tokens = expr.split(\" \").filter(fn(t) => not t.is_empty())\n  var stack: List[Int] = []\n  for tok in tokens {\n    if tok == \"+\" or tok == \"-\" or tok == \"*\" or tok == \"/\" {\n      if stack.len() < 2 {\n        return Err(\"stack underflow\")\n      }\n      let b = stack.get_or(stack.len() - 1, 0)\n      stack = stack.remove_at(stack.len() - 1)\n      let a = stack.get_or(stack.len() - 1, 0)\n      stack = stack.remove_at(stack.len() - 1)\n      var r = 0\n      if tok == \"+\" {\n        r = a + b\n      } else if tok == \"-\" {\n        r = a - b\n      } else if tok == \"*\" {\n        r = a * b\n      } else {\n        if b == 0 {\n          return Err(\"division by zero\")\n        }\n        r = a / b\n      }\n      stack = stack.push(r)\n    } else {\n      match tok.to_int() {\n        Some(v) => {\n          stack = stack.push(v)\n        },\n        None => {\n          return Err(\"bad token {tok}\")\n        },\n      }\n    }\n  }\n  if stack.len() != 1 {\n    return Err(\"bad expression\")\n  }\n  return Ok(stack.get_or(0, 0))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

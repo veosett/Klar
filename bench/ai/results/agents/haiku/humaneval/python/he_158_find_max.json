@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def find_max(words: list[str]) -> str:\n    return min(words, key=lambda w: (-len(set(w)), w))\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

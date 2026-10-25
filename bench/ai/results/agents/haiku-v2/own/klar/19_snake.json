@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn camel_to_snake(s: Str) -> Str {\n  var out = \"\"\n  var i = 0\n  for c in s.chars() {\n    let code = c.codes().get_or(0, 0)\n    if code >= 65 and code <= 90 {\n      if i > 0 {\n        out = out + \"_\"\n      }\n      out = out + c.lower()\n    } else {\n      out = out + c\n    }\n    i = i + 1\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def right_angle_triangle(a: int, b: int, c: int) -> bool:\n    return a * a + b * b == c * c or a * a + c * c == b * b or b * b + c * c == a * a\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// >>> assert truncate_number(3.5) == 0.5\npub fn truncate_number(number: Float) -> Float {\n  return number - number.floor().to_float()\n}\n\ntest \"truncate_number\" {\n  assert truncate_number(3.5) == 0.5\n  assert truncate_number(1.25) == 0.25\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

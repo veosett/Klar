@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function is_simple_power(x: number, n: number): boolean {\n  if (x === 1) {\n    return true;\n  }\n  if (n === 1 || n === 0 || n === -1) {\n    if (n === 1) {\n      return false;\n    }\n    if (n === 0) {\n      return x === 0;\n    }\n    // n === -1: powers are 1 and -1; 1 already handled above\n    return x === -1;\n  }\n  let p = n;\n  while (Math.abs(p) <= Math.abs(x)) {\n    if (p === x) {\n      return true;\n    }\n    p *= n;\n  }\n  return false;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

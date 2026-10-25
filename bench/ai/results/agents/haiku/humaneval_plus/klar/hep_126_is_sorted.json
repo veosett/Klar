@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn is_sorted(lst: List[Int]) -> Bool {\n  let ordered = lst.zip(lst.drop(1)).all(fn(p) => p.first <= p.second)\n  let limited = lst.all(fn(x) => lst.count(fn(y) => y == x) <= 2)\n  return ordered and limited\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

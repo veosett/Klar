@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "/// The value at index i: squared when i is a multiple of 3, cubed when a multiple of 4 only.\nfn adjust(i: Int, v: Int) -> Int {\n  if i % 3 == 0 {\n    return v * v\n  }\n  if i % 4 == 0 {\n    return v * v * v\n  }\n  return v\n}\n\n/// Sum of the list after squaring/cubing entries at indexes that are multiples of 3 or 4.\n/// >>> assert sum_squares([1, 2, 3]) == 6\n/// >>> assert sum_squares([-1, -5, 2, -1, -5]) == -126\npub fn sum_squares(lst: List[Int]) -> Int {\n  return lst.enumerate().map(fn(e) => adjust(e.index, e.value)).sum()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

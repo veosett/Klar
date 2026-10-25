@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn can_arrange(arr: List[Int]) -> Int {\n  var result: Int = -1\n  for x in arr.enumerate() {\n    if x.index > 0 {\n      let prev = arr.get_or(x.index - 1, 0)\n      if x.value < prev {\n        result = x.index\n      }\n    }\n  }\n  return result\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

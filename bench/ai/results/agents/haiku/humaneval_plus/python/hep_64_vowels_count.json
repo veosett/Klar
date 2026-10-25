@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def vowels_count(s: str) -> int:\n    lower = s.lower()\n    count = sum(1 for ch in lower if ch in \"aeiou\")\n    if lower.endswith(\"y\"):\n        count += 1\n    return count\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

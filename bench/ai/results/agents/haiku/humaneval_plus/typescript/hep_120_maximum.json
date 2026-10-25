@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function maximum(arr: number[], k: number): number[] {\n  if (k <= 0) return [];\n  const sorted = arr.slice().sort((a, b) => a - b);\n  return sorted.slice(sorted.length - k);\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

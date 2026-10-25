@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn triples_sum_to_zero(l: List[Int]) -> Bool {\n  var found: Bool = false\n  let n = l.len()\n  for i in range(0, n) {\n    for j in range(0, n) {\n      for k in range(0, n) {\n        if i < j and j < k {\n          let total = l.get_or(i, 0) + l.get_or(j, 0) + l.get_or(k, 0)\n          if total == 0 {\n            found = true\n          }\n        }\n      }\n    }\n  }\n  return found\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

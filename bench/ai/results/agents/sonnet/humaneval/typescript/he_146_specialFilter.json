@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function specialFilter(nums: number[]): number {\n  let c = 0;\n  for (const n of nums) {\n    if (n > 10) {\n      const s = String(n);\n      if (parseInt(s[0], 10) % 2 === 1 && parseInt(s[s.length - 1], 10) % 2 === 1) c++;\n    }\n  }\n  return c;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

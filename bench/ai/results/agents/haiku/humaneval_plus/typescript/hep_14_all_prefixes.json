@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function all_prefixes(string: string): string[] {\n  const result: string[] = [];\n  for (let i = 1; i <= string.length; i++) {\n    result.push(string.slice(0, i));\n  }\n  return result;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

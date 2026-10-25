@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn file_name_check(file_name: Str) -> Str {\n  let digits = file_name.codes().filter(fn(c) => c >= 48 and c <= 57).len()\n  if digits > 3 {\n    return \"No\"\n  }\n  if file_name.count(\".\") != 1 {\n    return \"No\"\n  }\n  let parts = file_name.split(\".\")\n  let before = parts.get_or(0, \"\")\n  let after = parts.get_or(1, \"\")\n  if before.is_empty() {\n    return \"No\"\n  }\n  let first = before.codes().get_or(0, 0)\n  let is_letter = (first >= 97 and first <= 122) or (first >= 65 and first <= 90)\n  if not is_letter {\n    return \"No\"\n  }\n  if after == \"txt\" or after == \"exe\" or after == \"dll\" {\n    return \"Yes\"\n  }\n  return \"No\"\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

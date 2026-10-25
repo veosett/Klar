@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function sum_product(numbers: number[]): [number, number] {\n  let sum = 0;\n  let product = 1;\n  for (const n of numbers) {\n    sum += n;\n    product *= n;\n  }\n  return [sum, product];\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

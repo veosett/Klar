@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "export function count_up_to(n: number): number[] {\n  const r: number[] = [];\n  for (let i = 2; i < n; i++) {\n    let p = true;\n    for (let j = 2; j * j <= i; j++) if (i % j === 0) { p = false; break; }\n    if (p) r.push(i);\n  }\n  return r;\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

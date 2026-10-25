@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn sum_product(numbers: List[Int]) -> Pair[Int, Int] {\n  return Pair { first: numbers.sum(), second: numbers.fold(1, fn(acc, x) => acc * x) }\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

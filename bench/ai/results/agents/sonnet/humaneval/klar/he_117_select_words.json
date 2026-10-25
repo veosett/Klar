@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn select_words(s: Str, n: Int) -> List[Str] {\n  let v = [\"a\", \"e\", \"i\", \"o\", \"u\"]\n  return s.split(\" \").filter(fn(w) => not w.is_empty() and w.chars().count(fn(c) => not v.contains(c.lower())) == n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}
