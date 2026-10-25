@@ -1323,8 +1323,10 @@ fn lower_function(w0: Lw, item: QItem) -> Lw {
     let keep = names_of(d.post.flat_map(walk_expr))
     w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of(sig.params.map(fn(p) =>
       p.first), Body.BlockBody(block: b)), no_move: keep, b: b) }
+    // the profiler label first: a later read of `w` would make `str_obj` copy the whole state (and its data section)
+    let where = d.name + " (" + w.file + ":" + d.span.line.to_str() + ")"
     let s = str_obj(w, d.name)
-    w = prof_enter_call(emit(s.w, [op("enter"), KV.S(s: s.v)]), d.name + " (" + w.file + ":" + d.span.line.to_str() + ")")
+    w = prof_enter_call(emit(s.w, [op("enter"), KV.S(s: s.v)]), where)
   }
   w = w with { decl: Some(d) }
   for c in d.pre {
@@ -1397,7 +1399,8 @@ fn do_return(w0: Lw, v: V) -> Lw {
   let o = own(w0, v)
   var w = o.w
   if not w.posts.is_empty() {
-    w = declare(w: push_scope(w), name: "result", rg: o.v, t: w.ret_t, owned: false)
+    let ret_t = w.ret_t
+    w = declare(w: push_scope(w), name: "result", rg: o.v, t: ret_t, owned: false)
     match w.decl {
       Some(d) => {
         for en in w.posts {
@@ -2001,7 +2004,8 @@ fn x_name(w: Lw, e: Expr, name: Str) -> LR[V] {
       let d = reg(w)
       let slot = const_slot(w: d.w, module_name: c.first, cname: c.second)
       let a = addr(slot.w, slot.v)
-      return vv(w: emit(a.w, [op("load"), r(d.v), r(a.v), r(0)]), rg: d.v, t: ty(a.w, e), owned: false)
+      let ct = ty(a.w, e)
+      return vv(w: emit(a.w, [op("load"), r(d.v), r(a.v), r(0)]), rg: d.v, t: ct, owned: false)
     },
     None => {},
   }
@@ -2420,7 +2424,8 @@ fn user_call(w0: Lw, e: Expr, sig: Sig, info: CallInfo, recv: Option[Expr]) -> L
   }
   w = site(w, expr_span(e))
   let d = call(w: w, target: target.v, args: regs)
-  return vv(w: drop_all(d.w, keep), rg: d.v, t: ty(d.w, e), owned: true)
+  let rt = ty(d.w, e)
+  return vv(w: drop_all(d.w, keep), rg: d.v, t: rt, owned: true)
 }
 
 /// The extra arguments a runtime function declares after the real ones: the result's type descriptor (`rtd`), the
@@ -3166,7 +3171,8 @@ fn intrinsic(w0: Lw, e: Expr, name: Str) -> LR[V] {
     return vv(w: emit(w, [op("mov"), r(d), r(a0)]), rg: d, t: con("Word"), owned: false)
   }
   if name == "unbits" or name == "ffrom" {
-    return vv(w: emit(w, [op("mov"), r(d), r(a0)]), rg: d, t: ty(w, e), owned: false)
+    let mt = ty(w, e)
+    return vv(w: emit(w, [op("mov"), r(d), r(a0)]), rg: d, t: mt, owned: false)
   }
   if name == "tag" {
     let two = konst(w, 1)
@@ -3229,7 +3235,8 @@ fn intrinsic(w0: Lw, e: Expr, name: Str) -> LR[V] {
     return vv(w: w, rg: d, t: unit_t(), owned: false)
   }
   if name.starts_with("os_") {
-    return vv(w: emit(w, [op("call"), r(d), KV.S(s: name), KV.L(regs: regs)]), rg: d, t: ty(w, e), owned: false)
+    let ct = ty(w, e)
+    return vv(w: emit(w, [op("call"), r(d), KV.S(s: name), KV.L(regs: regs)]), rg: d, t: ct, owned: false)
   }
   return fail("native: intrinsic {name}")
 }

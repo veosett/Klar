@@ -15,6 +15,19 @@ from .regalloc import CALLER_SAVED
 from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, XMM0, XMM1)
 
 MAX_DEPTH = 10000
+
+
+def out_area(code):
+    """Bytes for the outgoing arguments of a function's calls (its largest call, rounded up to 16)."""
+    n = 0
+    for ins in code:
+        if ins[0] in ("call", "callind"):
+            n = max(n, len(ins[3]))
+        elif ins[0] == "fpow":
+            n = max(n, 2)
+        elif ins[0] == "fun" and ins[1] != "sqrt":
+            n = max(n, 1)
+    return align16(8 * n)
 SOFT = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft_exp"}
 
 OS_FUNCS = ["os_write", "os_read", "os_exit", "os_alloc", "os_time_ns", "os_wall_ns", "os_open", "os_close",
@@ -94,6 +107,7 @@ class Emitter:
         self.call_sites = []       # (return-address label, span symbol or None) inside those functions
         self.user = False
         self.cur_site = None
+        self.out_area = 0          # bytes for outgoing arguments at [rsp], reserved once in the frame
 
     # ---- locations ---------------------------------------------------------------
     # A vreg lives either in a machine register (self.loc[v]) or in its stack slot.
@@ -143,6 +157,7 @@ class Emitter:
         enter = next((ins for ins in fn.code if ins[0] == "enter"), None)
         self.user = enter is not None
         self.cur_site = None
+        a.align(16)
         a.label(fn.name)
         a.push(RBP)
         a.mov_rr(RBP, RSP)
@@ -161,7 +176,11 @@ class Emitter:
         first = first - 8 * len(csave)
         self.allsave_off = {r: first - 8 * k for k, r in enumerate(self.caller_used)}
         self.cur_saves = ()
+        # the outgoing arguments of the function's calls live at the bottom of the frame: a call stores them at
+        # [rsp] without moving rsp (only a call with more arguments, e.g. a runtime call on a cold path, still does)
+        self.out_area = out_area(fn.code)
         frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used) + len(csave) + len(self.caller_used)))
+        frame += self.out_area
         a.alu_ri("sub", RSP, frame)
         for r, off in zip(self.saved, self.save_off):
             a.store(RBP, off, r)
@@ -174,6 +193,7 @@ class Emitter:
             nxt = code[k + 1] if k + 1 < len(code) else None
             self.next_label = nxt[1] if nxt is not None and nxt[0] == "label" else None
             self.cur_saves = sorted(self.call_saves.get(k, ()))
+            a.fz = (-1, -1)         # a jcc never fuses with an instruction of the KIR instruction before (emit.klar chunks)
             n_cold = len(self.cold)
             getattr(self, "i_" + ins[0])(fn, *ins[1:])
             if self.cur_saves:
@@ -189,6 +209,7 @@ class Emitter:
         a.ud2()
         self.next_label = None
         for emit_cold in self.cold:
+            a.fz = (-1, -1)
             emit_cold()
         a.ud2()
         if self.user:
@@ -213,12 +234,19 @@ class Emitter:
         for r in self.cur_saves:
             self.a.load(r, RBP, self.csave_off[r])
 
+    def arg_area(self, n):
+        """Room for n outgoing arguments at [rsp]: the frame's area when they fit (returns 0), else rsp moves down
+        (returns the bytes to add back after the call)."""
+        area = align16(8 * n)
+        if area <= self.out_area:
+            return 0
+        self.a.alu_ri("sub", RSP, area)
+        return area
+
     def emit_call(self, fn, target, args, indirect_reg_of=None):
         a = self.a
         self.save_live()
-        area = align16(8 * len(args))
-        if area:
-            a.alu_ri("sub", RSP, area)
+        area = self.arg_area(len(args))
         for i, v in enumerate(args):
             a.store(RSP, 8 * i, self.src(fn, v, RAX))
         if indirect_reg_of is not None:
@@ -246,9 +274,7 @@ class Emitter:
         for x, off in zip(self.xmm_used, self.xsave_off):
             a.movsd_store(RBP, off, x)
         self.save_live()
-        area = align16(8 * len(regs_values))
-        if area:
-            a.alu_ri("sub", RSP, area)
+        area = self.arg_area(len(regs_values))
         for i, r in enumerate(regs_values):
             a.store(RSP, 8 * i, r)
         a.call(self.rt[name])
@@ -574,13 +600,13 @@ class Emitter:
             a.movsd_store(RBP, off, x)
         for r in self.caller_used:
             a.store(RBP, self.allsave_off[r], r)
-        area = align16(8 * len(args))
-        a.alu_ri("sub", RSP, area)
+        area = self.arg_area(len(args))
         for i, v in enumerate(args):
             a.store(RSP, 8 * i, self.bits_of(fn, v, RAX))
         a.call(self.rt[helper])
         self.note_site()
-        a.alu_ri("add", RSP, area)
+        if area:
+            a.alu_ri("add", RSP, area)
         for r in self.caller_used:
             a.load(r, RBP, self.allsave_off[r])
         for x, off in zip(self.xmm_used, self.xsave_off):
@@ -602,7 +628,10 @@ class Emitter:
 
     # ---- tagged Int fast paths ------------------------------------------------------
     # Fast paths stay inline; the bignum / error paths are emitted out of line ("cold").
-    def int_slow(self, fn, op, d, x, y_reg_loader, done):
+    def int_slow(self, fn, op, d, x, y_reg_loader, done, rel=0, y=None):
+        """rel (opt.py `fuse_int_releases`): the operands released after the op. Small Ints on the fast path, so
+        only this path releases them. Their registers are dead after the op (not saved around the call), so the
+        operands and the result go through their frame slots."""
         slow = self.a.new_label("islow")
 
         def cold():
@@ -610,11 +639,38 @@ class Emitter:
             a.label(slow)
             self.ld(RAX, fn, x)
             y_reg_loader()
+            if rel & 1:
+                a.store(RBP, self.slot(fn, x), RAX)
+            if rel & 2:
+                a.store(RBP, self.slot(fn, y), RCX)
             self.call_rt(fn, "int_" + op, [RAX, RCX])
+            if rel:
+                a.store(RBP, self.slot(fn, d), RAX)
+                if rel & 1:
+                    self.release_slot(fn, self.slot(fn, x))
+                if rel & 2:
+                    self.release_slot(fn, self.slot(fn, y))
+                a.load(RAX, RBP, self.slot(fn, d))
             self.st(fn, d, RAX)
             a.jmp(done)
         self.cold.append(cold)
         return slow
+
+    def release_slot(self, fn, off):
+        """Release the Int in the frame slot at rbp+off (on a cold path: the free call is inline)."""
+        a = self.a
+        skip = a.new_label("rl")
+        a.load(RAX, RBP, off)
+        a.test_ri8(RAX, 1)
+        a.jcc("ne", skip)
+        a.load(RCX, RAX, 0)
+        a.test_rr(RCX, RCX)
+        a.jcc("s", skip)
+        a.alu_ri("sub", RCX, 1)
+        a.store(RAX, 0, RCX)
+        a.jcc("ne", skip)
+        self.call_rt(fn, "free", [RAX])
+        a.label(skip)
 
     def div_check(self, fn, span, divisor_reg):
         a = self.a
@@ -632,10 +688,10 @@ class Emitter:
             a.ud2()
         self.cold.append(cold)
 
-    def i_iop(self, fn, op, d, x, y, span=None):
+    def i_iop(self, fn, op, d, x, y, span=None, rel=0):
         a = self.a
         done = a.new_label("idone")
-        slow = self.int_slow(fn, op, d, x, lambda: self.ld(RCX, fn, y), done)
+        slow = self.int_slow(fn, op, d, x, lambda: self.ld(RCX, fn, y), done, rel, y)
         self.ld(RAX, fn, x)
         self.ld(RCX, fn, y)
         if op in ("div", "mod"):
@@ -671,11 +727,11 @@ class Emitter:
         self.st(fn, d, RAX)
         a.label(done)
 
-    def i_iopi(self, fn, op, d, x, t, span=None):
+    def i_iopi(self, fn, op, d, x, t, span=None, rel=0):
         """Tagged Int op with the constant small Int t (already tagged: 2c+1)."""
         a = self.a
         done = a.new_label("idone")
-        slow = self.int_slow(fn, op, d, x, lambda: a.mov_ri(RCX, t), done)
+        slow = self.int_slow(fn, op, d, x, lambda: a.mov_ri(RCX, t), done, rel)
         rx = self.src(fn, x, RAX)
         a.test_ri8(rx, 1)
         a.jcc("e", slow)

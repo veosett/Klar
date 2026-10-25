@@ -34,19 +34,119 @@ pub type Lab { name: Str, pos: Int }
 /// A call inside a Klar function: its return-address label and source span symbol ("" when unknown).
 pub type Site { label: Str, span: Str }
 
-/// The chunk being assembled; `n` numbers the generated labels of the whole program.
-pub type Asm { code: Bytes, labels: List[Lab], fixups: List[Fix], sites: List[Site], n: Int }
+/// The chunk being assembled; `n` numbers the generated labels of the whole program. `org` is where the chunk will
+/// start in the code section (jumps are kept clear of 32-byte boundaries, see `branch_room`); [fz0, fz1) is the
+/// last ALU/test instruction of the chunk, which fuses with a jcc right after it (-1: none).
+pub type Asm { code: Bytes, labels: List[Lab], fixups: List[Fix], sites: List[Site], n: Int, org: Int, fz0: Int, fz1: Int }
 
 /// A new label name together with the assembler that made it.
 pub type AL { a: Asm, l: Str }
 
 pub fn new_asm(n: Int) -> Asm {
-  return Asm { code: bytes_of([]), labels: [], fixups: [], sites: [], n: n }
+  return new_asm_at(n, 0)
 }
 
-/// The same assembler with an empty chunk (the label counter carries on).
+/// An empty chunk that will start at offset org of the code section.
+pub fn new_asm_at(n: Int, org: Int) -> Asm {
+  return Asm { code: bytes_of([]), labels: [], fixups: [], sites: [], n: n, org: org, fz0: -1, fz1: -1 }
+}
+
+/// The same assembler with an empty chunk that follows this one (the label counter carries on).
 pub fn fresh(a: Asm) -> Asm {
-  return new_asm(a.n)
+  return new_asm_at(a.n, a.org + a.code.len())
+}
+
+/// Forget the last ALU instruction: a jcc after this point is not fused with it (the start of a KIR instruction).
+pub fn reset_fz(a: Asm) -> Asm {
+  return a with { fz0: -1, fz1: -1 }
+}
+
+fn fused_at(a: Asm, start: Int) -> Asm {
+  return a with { fz0: start, fz1: a.code.len() }
+}
+
+/// Multi-byte NOPs (Intel SDM, "Recommended Multi-Byte Sequence of NOP Instruction"), up to 8 bytes each.
+fn nop_bytes(n0: Int) -> List[Int] {
+  var out: List[Int] = []
+  var n = n0
+  while n > 0 {
+    let k = n.min(8)
+    out = out.concat(match k {
+      1 => [144],
+      2 => [102, 144],
+      3 => [15, 31, 0],
+      4 => [15, 31, 64, 0],
+      5 => [15, 31, 68, 0, 0],
+      6 => [102, 15, 31, 68, 0, 0],
+      7 => [15, 31, 128, 0, 0, 0, 0],
+      _ => [15, 31, 132, 0, 0, 0, 0, 0],
+    })
+    n = n - k
+  }
+  return out
+}
+
+/// Intel's JCC erratum (Skylake to Cascade Lake): a jump, or an ALU instruction and the jcc it fuses with, that
+/// crosses or ends at a 32-byte boundary is not cached as decoded micro-ops, and a hot loop or call with it runs up
+/// to 2x slower. NOPs before it move it into the next 32 bytes (GCC's and LLVM's -mbranches-within-32B-boundaries).
+/// Mirrors klar/native/x64.py `branch_room`.
+fn branch_room(a: Asm, size: Int, fused: Bool) -> Asm {
+  let at_end = a.code.len()
+  var start = at_end
+  if fused and a.fz1 == at_end and a.fz0 >= 0 {
+    start = a.fz0
+  }
+  let s_abs = a.org + start
+  let e_abs = a.org + at_end + size
+  if s_abs.shift_right(5) == (e_abs - 1).shift_right(5) and e_abs % 32 != 0 {
+    return a
+  }
+  let pad = nop_bytes(32 - s_abs % 32)
+  let np = pad.len()
+  var c = a.code.slice(0, start)
+  for x in pad {
+    c = c.push(x)
+  }
+  var k = start
+  while k < at_end {
+    c = c.push(a.code.get_or(k, 0))
+    k = k + 1
+  }
+  // labels after start and fixups at or after it move with the code (a label at start now names the NOPs)
+  var labels = a.labels
+  var j = labels.len() - 1
+  var moving = true
+  while moving and j >= 0 {
+    let l = labels.get_or(j, Lab { name: "", pos: 0 })
+    if l.pos > start {
+      labels = labels.set(j, l with { pos: l.pos + np })
+      j = j - 1
+    } else {
+      moving = false
+    }
+  }
+  var fixups = a.fixups
+  var q = fixups.len() - 1
+  var shifting = true
+  while shifting and q >= 0 {
+    let f = fixups.get_or(q, Fix { pos: 0, target: "", add: 0, kind: "" })
+    if f.pos >= start {
+      fixups = fixups.set(q, f with { pos: f.pos + np })
+      q = q - 1
+    } else {
+      shifting = false
+    }
+  }
+  return a with { code: c, labels: labels, fixups: fixups, fz0: -1, fz1: -1 }
+}
+
+/// Pad with int3 up to a multiple of n of the code section (between functions: never executed).
+pub fn align_code(code0: Bytes, n: Int) -> Bytes requires n != 0 {
+  var code = code0
+  while code.len() % n != 0 {
+    code = code.push(204)
+  }
+  return code
 }
 
 fn cc_code(cc: Str) -> Int {
@@ -259,24 +359,28 @@ pub fn store_rip(a: Asm, target: Str, src: Int) -> Asm {
 // ---- arithmetic -----------------------------------------------------------------------------------------------
 
 pub fn alu_rr(a: Asm, op: Str, dst: Int, src: Int) -> Asm {
-  return modrm_rr(a: b(rex(a: a, w: 1, r: src, base: dst, force: false), alu_opcode(op)), reg: src, rm: dst)
+  let s = a.code.len()
+  return fused_at(modrm_rr(a: b(rex(a: a, w: 1, r: src, base: dst, force: false), alu_opcode(op)), reg: src, rm: dst), s)
 }
 
 pub fn alu_ri(a: Asm, op: Str, dst: Int, imm: Int) -> Asm {
+  let s = a.code.len()
   let a1 = rex(a: a, w: 1, r: 0, base: dst, force: false)
   if imm >= -128 and imm < 128 {
-    return imm8(modrm_rr(a: b(a1, 131), reg: alu_ext(op), rm: dst), imm)
+    return fused_at(imm8(modrm_rr(a: b(a1, 131), reg: alu_ext(op), rm: dst), imm), s)
   }
-  return d32(modrm_rr(a: b(a1, 129), reg: alu_ext(op), rm: dst), imm)
+  return fused_at(d32(modrm_rr(a: b(a1, 129), reg: alu_ext(op), rm: dst), imm), s)
 }
 
 pub fn test_rr(a: Asm, x: Int, y: Int) -> Asm {
-  return modrm_rr(a: b(rex(a: a, w: 1, r: y, base: x, force: false), 133), reg: y, rm: x)
+  let s = a.code.len()
+  return fused_at(modrm_rr(a: b(rex(a: a, w: 1, r: y, base: x, force: false), 133), reg: y, rm: x), s)
 }
 
 /// test reg8, imm8 (low byte)
 pub fn test_ri8(a: Asm, reg: Int, imm: Int) -> Asm {
-  return imm8(modrm_rr(a: b(rex(a: a, w: 0, r: 0, base: reg, force: reg >= 4), 246), reg: 0, rm: reg), imm)
+  let s = a.code.len()
+  return fused_at(imm8(modrm_rr(a: b(rex(a: a, w: 0, r: 0, base: reg, force: reg >= 4), 246), reg: 0, rm: reg), imm), s)
 }
 
 pub fn imul_rr(a: Asm, dst: Int, src: Int) -> Asm {
@@ -341,28 +445,33 @@ pub fn setcc(a: Asm, cc: Str, r: Int) -> Asm {
 // ---- control flow ---------------------------------------------------------------------------------------------
 
 pub fn jmp(a: Asm, target: Str) -> Asm {
-  return rel32(a: b(a, 233), target: target, add: 0)
+  return rel32(a: b(branch_room(a: a, size: 5, fused: false), 233), target: target, add: 0)
 }
 
 pub fn jcc(a: Asm, cc: Str, target: Str) -> Asm {
-  return rel32(a: bs(a, [15, 128 + cc_code(cc)]), target: target, add: 0)
+  return rel32(a: bs(branch_room(a: a, size: 6, fused: true), [15, 128 + cc_code(cc)]), target: target, add: 0)
 }
 
 pub fn call(a: Asm, target: Str) -> Asm {
-  return rel32(a: b(a, 232), target: target, add: 0)
+  return rel32(a: b(branch_room(a: a, size: 5, fused: false), 232), target: target, add: 0)
 }
 
 pub fn call_r(a: Asm, r: Int) -> Asm {
-  return modrm_rr(a: b(rex(a: a, w: 0, r: 0, base: r, force: false), 255), reg: 2, rm: r)
+  let size = match r >= 8 {
+    true => 3,
+    false => 2,
+  }
+  let a1 = branch_room(a: a, size: size, fused: false)
+  return modrm_rr(a: b(rex(a: a1, w: 0, r: 0, base: r, force: false), 255), reg: 2, rm: r)
 }
 
 /// call qword [rip+target] (PE import slots)
 pub fn call_rip(a: Asm, target: Str) -> Asm {
-  return modrm_rip(a: b(a, 255), reg: 2, target: target, add: 0)
+  return modrm_rip(a: b(branch_room(a: a, size: 6, fused: false), 255), reg: 2, target: target, add: 0)
 }
 
 pub fn ret(a: Asm) -> Asm {
-  return b(a, 195)
+  return b(branch_room(a: a, size: 1, fused: false), 195)
 }
 
 pub fn push(a: Asm, r: Int) -> Asm {

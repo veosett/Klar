@@ -12,6 +12,20 @@ XMM0, XMM1, XMM2, XMM3 = range(4)
 CC = {"o": 0, "no": 1, "b": 2, "ae": 3, "e": 4, "ne": 5, "be": 6, "a": 7, "s": 8, "ns": 9,
       "p": 10, "np": 11, "l": 12, "ge": 13, "le": 14, "g": 15}
 
+# multi-byte NOPs (Intel SDM, "Recommended Multi-Byte Sequence of NOP Instruction")
+NOPS = [b"", b"\x90", b"\x66\x90", b"\x0f\x1f\x00", b"\x0f\x1f\x40\x00", b"\x0f\x1f\x44\x00\x00",
+        b"\x66\x0f\x1f\x44\x00\x00", b"\x0f\x1f\x80\x00\x00\x00\x00", b"\x0f\x1f\x84\x00\x00\x00\x00\x00"]
+
+
+def nops(n):
+    out = b""
+    while n > 0:
+        k = min(n, 8)
+        out += NOPS[k]
+        n -= k
+    return out
+
+
 ALU = {"add": (0x01, 0), "or": (0x09, 1), "and": (0x21, 4), "sub": (0x29, 5), "xor": (0x31, 6), "cmp": (0x39, 7)}
 
 
@@ -21,6 +35,7 @@ class Asm:
         self.labels = {}           # local label -> offset
         self.fixups = []           # (pos, target, addend): rel32 to a label or external symbol
         self._n = 0
+        self.fz = (-1, -1)         # [start, end) of the last ALU/test instruction (macro-fuses with a jcc after it)
 
     # ---- labels -----------------------------------------------------------
     def new_label(self, hint="L"):
@@ -146,12 +161,15 @@ class Asm:
 
     # ---- arithmetic -----------------------------------------------------------
     def alu_rr(self, op, dst, src):
+        s = len(self.code)
         opc, _ = ALU[op]
         self.rex(1, src, 0, dst)
         self.b(opc)
         self.modrm_rr(src, dst)
+        self.fz = (s, len(self.code))
 
     def alu_ri(self, op, dst, imm):
+        s = len(self.code)
         _, ext = ALU[op]
         self.rex(1, 0, 0, dst)
         if -128 <= imm < 128:
@@ -162,17 +180,50 @@ class Asm:
             self.b(0x81)
             self.modrm_rr(ext, dst)
             self.d32(imm)
+        self.fz = (s, len(self.code))
 
     def test_rr(self, a, b):
+        s = len(self.code)
         self.rex(1, b, 0, a)
         self.b(0x85)
         self.modrm_rr(b, a)
+        self.fz = (s, len(self.code))
 
     def test_ri8(self, reg, imm):              # test reg8, imm8 (low byte)
+        s = len(self.code)
         self.rex(0, 0, 0, reg, force=reg >= 4)
         self.b(0xF6)
         self.modrm_rr(0, reg)
         self.b(imm & 0xFF)
+        self.fz = (s, len(self.code))
+
+    def align(self, n):
+        """Pad with int3 up to a multiple of n (between functions: never executed)."""
+        while len(self.code) % n:
+            self.code.append(0xCC)
+
+    def branch_room(self, size, fused):
+        """Intel's JCC erratum (Skylake to Cascade Lake): a jump, or an ALU instruction and the jcc it fuses with,
+        that crosses or ends at a 32-byte boundary is not cached as decoded micro-ops, and a hot loop or call
+        with it runs up to 2x slower. NOPs before it move it into the next 32 bytes (what GCC's and LLVM's
+        -mbranches-within-32B-boundaries do). The code is laid out from offset 0 of a 32-aligned section."""
+        here = len(self.code)
+        start = self.fz[0] if fused and self.fz[1] == here else here
+        end = here + size
+        if start >> 5 == (end - 1) >> 5 and end & 31:
+            return
+        pad = 32 - (start & 31)
+        self.code[start:start] = nops(pad)
+        for name in reversed(self.labels):     # labels after start and fixups at or after it move with the code
+            if self.labels[name] <= start:     # (a label at start now names the NOPs)
+                break
+            self.labels[name] += pad
+        for k in range(len(self.fixups) - 1, -1, -1):
+            pos, target, addend = self.fixups[k]
+            if pos < start:
+                break
+            self.fixups[k] = (pos + pad, target, addend)
+        self.fz = (-1, -1)
 
     def imul_rr(self, dst, src):
         self.rex(1, dst, 0, src)
@@ -251,27 +302,33 @@ class Asm:
 
     # ---- control flow -------------------------------------------------------------
     def jmp(self, target):
+        self.branch_room(5, False)
         self.b(0xE9)
         self.rel32(target)
 
     def jcc(self, cc, target):
+        self.branch_room(6, True)
         self.b(0x0F, 0x80 + CC[cc])
         self.rel32(target)
 
     def call(self, target):
+        self.branch_room(5, False)
         self.b(0xE8)
         self.rel32(target)
 
     def call_r(self, r):
+        self.branch_room(3 if r >= 8 else 2, False)
         self.rex(0, 0, 0, r)
         self.b(0xFF)
         self.modrm_rr(2, r)
 
     def call_rip(self, target):                  # call qword [rip+target] (PE import slots)
+        self.branch_room(6, False)
         self.b(0xFF)
         self.modrm_rip(2, target)
 
     def ret(self):
+        self.branch_room(1, False)
         self.b(0xC3)
 
     def push(self, r):

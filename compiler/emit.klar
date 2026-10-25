@@ -15,7 +15,8 @@ use regalloc.{Alloc, allocate, x64_regs}
 use x64.{AL, Asm, Fix, R10, R11, R12, R13, R14, R15, R8, R9, RAX, RBP, RBX, RCX, RDI, RDX, RSI, RSP, Site, XMM0, XMM1, alu_ri}
 use x64.{alu_rr, call, call_r, call_rip, cqo, cvtsi2sd, cvttsd2si, div, fresh, idiv, imul1, imul_rr}
 use x64.{imul_rri, jcc, jmp, label, lea, lea_rip, load, load32, load8, load_rip, mov_ri, mov_rr, movapd, movq_rx}
-use x64.{movq_xr, movsd_load, movsd_store, mul, neg, new_asm, new_label, pop, push, ret, setcc, shift_cl, shift_i}
+use x64.{movq_xr, movsd_load, movsd_store, mul, neg, new_asm, new_asm_at, new_label, pop, push, reset_fz, ret, setcc}
+use x64.{align_code, shift_cl, shift_i}
 use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_rr, ucomisd, ud2}
 
 pub const MAX_DEPTH: Int = 10000
@@ -161,6 +162,22 @@ pub fn sat(ins: Ins, k: Int) -> Str {
 }
 
 /// A name field that may be missing (None in Python): "".
+/// Field 6 of `iop`/`iopi`: the operands it releases (bit 1: x, bit 2: y), 0 when absent.
+pub fn rel_of(ins: Ins) -> Int {
+  return match ins.get(6) {
+    Some(KV.I(v)) => v,
+    _ => 0,
+  }
+}
+
+/// The vreg of a slow-path operand (-1 for a constant).
+pub fn yl_reg(y: YL) -> Int {
+  return match y {
+    YL.Reg(v) => v,
+    YL.Imm(_) => -1,
+  }
+}
+
 pub fn sat_or(ins: Ins, k: Int) -> Str {
   return match ins.get(k) {
     Some(KV.S(s)) => s,
@@ -198,7 +215,8 @@ pub enum Then {
 
 /// Out-of-line code, emitted after the function body.
 pub enum Cold {
-  ISlow(lab: Str, opn: Str, d: Int, x: Int, y: YL, done: Str),
+  /// rel: the operands released after the op (opt.klar `fuse_int_releases`), on this path only
+  ISlow(lab: Str, opn: Str, d: Int, x: Int, y: YL, done: Str, rel: Int),
   DivZero(lab: Str, span: Str),
   NegSlow(lab: Str, d: Int, x: Int, done: Str),
   CSlow(lab: Str, x: Int, y: YL, then: Then),
@@ -226,6 +244,8 @@ type Em {
   /// caller-saved registers in use, saved around software math calls (in functions that make them), and where
   caller_used: List[Int],
   allsave_off: Map[Int, Int],
+  /// bytes for outgoing arguments at [rsp], reserved once in the frame (klar/native/emit.py `out_area`)
+  out_area: Int,
   slot_needed: Map[Int, Bool],
   user: Bool,
   site: Str,
@@ -342,9 +362,34 @@ fn xmm_load_all(a0: Asm, e: Em) -> Asm {
 }
 
 /// A call with the arguments in vregs; `ind` >= 0 calls the function pointer held in that vreg.
+/// Bytes for the outgoing arguments of a function's calls (its largest call, rounded up to 16).
+fn out_area(code: List[Ins]) -> Int {
+  var n = 0
+  for ins in code {
+    let o = sat(ins, 0)
+    if o == "call" or o == "callind" {
+      n = n.max(lat(ins, 3).len())
+    } else if o == "fpow" {
+      n = n.max(2)
+    } else if o == "fun" and sat(ins, 1) != "sqrt" {
+      n = n.max(1)
+    }
+  }
+  return align16(8 * n)
+}
+
+/// Room for n outgoing arguments at [rsp]: the frame's area when they fit (0), else rsp moves down by the result.
+fn arg_area(e: Em, n: Int) -> Int {
+  let area = align16(8 * n)
+  return match area <= e.out_area {
+    true => 0,
+    false => area,
+  }
+}
+
 fn emit_call(e: Em, target: Str, args: List[Int], ind: Int) -> Asm {
   var a = save_live(e.a, e)
-  let area = align16(8 * args.len())
+  let area = arg_area(e, args.len())
   if area > 0 {
     a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
   }
@@ -377,7 +422,7 @@ fn rt_target(e: Em, name: Str) -> Str {
 /// also save and restore the XMM registers holding floats.
 fn call_rt(a0: Asm, e: Em, name: Str, regs: List[Int]) -> Asm {
   var a = save_live(xmm_store_all(a0, e), e)
-  let area = align16(8 * regs.len())
+  let area = arg_area(e, regs.len())
   if area > 0 {
     a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
   }
@@ -829,8 +874,10 @@ fn soft_call(e: Em, helper: Str, args: List[Int], d: Int) -> Asm {
   for r in e.caller_used {
     a = store(a: a, base: RBP, disp: e.allsave_off.get(r).unwrap_or(0), src: r)
   }
-  let area = align16(8 * args.len())
-  a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
+  let area = arg_area(e, args.len())
+  if area > 0 {
+    a = alu_ri(a: a, op: "sub", dst: RSP, imm: area)
+  }
   var i = 0
   for v in args {
     let s = bits_of(a: a, e: e, v: v, scratch: RAX)
@@ -838,7 +885,9 @@ fn soft_call(e: Em, helper: Str, args: List[Int], d: Int) -> Asm {
     i = i + 1
   }
   a = note_site(call(a, rt_target(e, helper)), e)
-  a = alu_ri(a: a, op: "add", dst: RSP, imm: area)
+  if area > 0 {
+    a = alu_ri(a: a, op: "add", dst: RSP, imm: area)
+  }
   for r in e.caller_used {
     a = load(a: a, dst: r, base: RBP, disp: e.allsave_off.get(r).unwrap_or(0))
   }
@@ -879,7 +928,8 @@ fn i_iop(e0: Em, ins: Ins) -> Em {
   let y = iat(ins, 4)
   let done = label_of(e0, "idone")
   let slow = new_label(done.a, "islow")
-  var e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Reg(v: y), done: done.l))
+  var e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Reg(v: y), done: done.l,
+    rel: rel_of(ins)))
   e = with_a(e, ld(a: ld(a: e.a, e: e, reg: RAX, v: x), e: e, reg: RCX, v: y))
   if opn == "div" or opn == "mod" {
     e = div_check(e: e, span: sat_or(ins, 5), divisor: RCX)
@@ -916,7 +966,8 @@ fn i_iopi(e0: Em, ins: Ins) -> Em {
   let t = iat(ins, 4)
   let done = label_of(e0, "idone")
   let slow = new_label(done.a, "islow")
-  let e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Imm(t: t), done: done.l))
+  let e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Imm(t: t), done: done.l,
+    rel: rel_of(ins)))
   let sx = src(a: e.a, e: e, v: x, scratch: RAX)
   let rx = sx.r
   var a = jcc(a: test_ri8(a: sx.a, reg: rx, imm: 1), cc: "e", target: slow.l)
@@ -1257,12 +1308,43 @@ fn load_y(a: Asm, e: Em, y: YL) -> Asm {
   }
 }
 
+/// Release the Int in the frame slot at rbp+off (on a cold path: the free call is inline).
+fn release_slot(a0: Asm, e: Em, off: Int) -> Asm {
+  let skip = new_label(a0, "rl")
+  var a = load(a: skip.a, dst: RAX, base: RBP, disp: off)
+  a = jcc(a: test_ri8(a: a, reg: RAX, imm: 1), cc: "ne", target: skip.l)
+  a = load(a: a, dst: RCX, base: RAX, disp: 0)
+  a = jcc(a: test_rr(a: a, x: RCX, y: RCX), cc: "s", target: skip.l)
+  a = alu_ri(a: a, op: "sub", dst: RCX, imm: 1)
+  a = store(a: a, base: RAX, disp: 0, src: RCX)
+  a = jcc(a: a, cc: "ne", target: skip.l)
+  return label(call_rt(a0: a, e: e, name: "free", regs: [RAX]), skip.l)
+}
+
 fn emit_cold(e: Em, c: Cold) -> Asm {
   return match c {
-    Cold.ISlow(lab, opn, d, x, y, done) => {
-      let a = load_y(a: ld(a: label(e.a, lab), e: e, reg: RAX, v: x), e: e, y: y)
-      let a2 = call_rt(a0: a, e: e, name: "int_" + opn, regs: [RAX, RCX])
-      return jmp(st(a: a2, e: e, v: d, reg: RAX), done)
+    Cold.ISlow(lab, opn, d, x, y, done, rel) => {
+      // released operands: their registers are dead after the op (not saved around the call), so the operands
+      // and the result go through their frame slots (klar/native/emit.py `int_slow`)
+      var a = load_y(a: ld(a: label(e.a, lab), e: e, reg: RAX, v: x), e: e, y: y)
+      if rel % 2 == 1 {
+        a = store(a: a, base: RBP, disp: slot(e, x), src: RAX)
+      }
+      if rel >= 2 {
+        a = store(a: a, base: RBP, disp: slot(e, yl_reg(y)), src: RCX)
+      }
+      a = call_rt(a0: a, e: e, name: "int_" + opn, regs: [RAX, RCX])
+      if rel > 0 {
+        a = store(a: a, base: RBP, disp: slot(e, d), src: RAX)
+        if rel % 2 == 1 {
+          a = release_slot(a0: a, e: e, off: slot(e, x))
+        }
+        if rel >= 2 {
+          a = release_slot(a0: a, e: e, off: slot(e, yl_reg(y)))
+        }
+        a = load(a: a, dst: RAX, base: RBP, disp: slot(e, d))
+      }
+      return jmp(st(a: a, e: e, v: d, reg: RAX), done)
     },
     Cold.DivZero(lab, span) => {
       var a = label(e.a, lab)
@@ -1303,7 +1385,7 @@ fn sorted_saves(al: Alloc, k: Int) -> List[Int] {
   return al.call_saves.get(k).unwrap_or([]).sort()
 }
 
-fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
+fn function_part(f0: KFn, rt: Map[Str, Str], n: Int, org: Int) -> Part {
   let f = optimize(f0)
   let al = allocate(f, x64_regs())
   var enter: Option[Str] = None
@@ -1362,8 +1444,11 @@ fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
     allsave_off = allsave_off.set(r, first2 - 8 * k)
     k = k + 1
   }
-  let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len() + caller_used.len()))
-  var a = mov_rr(a: push(label(new_asm(n), f.name), RBP), dst: RBP, src: RSP)
+  // the outgoing arguments of the function's calls live at the bottom of the frame: a call stores them at [rsp]
+  // without moving rsp (only a call with more arguments, e.g. a runtime call on a cold path, still does)
+  let outgoing = out_area(f.code)
+  let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len() + caller_used.len())) + outgoing
+  var a = mov_rr(a: push(label(new_asm_at(n, org), f.name), RBP), dst: RBP, src: RSP)
   a = alu_ri(a: a, op: "sub", dst: RSP, imm: frame)
   k = 0
   for r in al.used {
@@ -1384,6 +1469,7 @@ fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
     csave_off: csave_off,
     caller_used: caller_used,
     allsave_off: allsave_off,
+    out_area: outgoing,
     slot_needed: xmm_slot_needed(f, al.xloc),
     user: user,
     site: "",
@@ -1414,7 +1500,7 @@ fn function_part(f0: KFn, rt: Map[Str, Str], n: Int) -> Part {
       },
       None => {},
     }
-    e = instruction(e with { next: nxt, saves: sorted_saves(al, i) }, ins)
+    e = instruction(e with { a: reset_fz(e.a), next: nxt, saves: sorted_saves(al, i) }, ins)
     if not e.xloc.is_empty() and not XMM_AWARE.contains(sat(ins, 0)) {
       // an instruction that knows nothing about XMM wrote the value to its slot: refresh the register
       for dv in defs(ins) {
@@ -2128,8 +2214,9 @@ pub fn emit_program(w: Lw, target: Str) -> Exe {
     if i < 0 {
       part = os_part(target, rt)
     } else {
+      code = align_code(code, 16)     // functions start at 16 bytes (klar/native/emit.py `function`)
       part = function_part(f0: fns.get(i).unwrap_or(KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [],
-        labels: 0 }), rt: rt, n: n)
+        labels: 0 }), rt: rt, n: n, org: code.len())
     }
     n = part.n
     if not part.row.is_empty() {

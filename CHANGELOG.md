@@ -41,6 +41,14 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   variables, resource limits, links on Windows, programs found through PATH).
 
 ### Changed
+- Native code is faster (container, best of 20: fib 1.18 → 0.68 ms, loop −15%, primes −30%, collections −10%;
+  mandelbrot and strings +5%). Calls store their arguments in an area reserved once in the frame instead of moving
+  `rsp` around every call. The release of an Int moves up to its last use, and a release right after a tagged-Int
+  operation is done only on its slow (bignum) path (`hoist_releases`, `fuse_int_releases` in opt.py / opt.klar).
+  Functions start at 16 bytes, and NOPs keep jumps clear of 32-byte boundaries (Intel's JCC erratum), so the speed
+  no longer depends on where a function happens to land.
+- klarc compiles itself faster (49 → 43 s): `lower_function` read `w.file` after passing `w` on, so every function
+  copied the whole lowering state, its string table and data section; the same pattern is gone from 4 other places.
 - E0208 asks for named arguments only where they could be swapped unnoticed. With 3+ parameters, positional
   arguments are fine when the parameters have different types, or when among same-typed parameters every argument
   but at most one carries its parameter's name (`cell(grid, r, c)`, `cell(grid, nr, c - 1)`, `p.r`); `f(200, 20,

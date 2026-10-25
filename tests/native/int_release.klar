@@ -1,0 +1,66 @@
+// Int releases moved to the value's last use and fused into the Int op before them (opt.py `hoist_releases`,
+// `fuse_int_releases`): the operands are released only on the slow (bignum) path. Every value here crosses the
+// small-Int boundary somewhere, so the slow paths run.
+
+fn fact(n: Int) -> Int {
+  if n < 2 {
+    return 1
+  }
+  return n * fact(n - 1)
+}
+
+/// Both operands die at the add: big + big, big + small, small + small that overflows.
+fn add_dead(a: Int, b: Int) -> Int {
+  return a + b
+}
+
+/// `n` dies at `n - 2`, before the second call (as in fib).
+fn twice_down(n: Int) -> Int {
+  let x = add_dead(n - 1, 0)
+  let y = add_dead(n - 2, 0)
+  return x + y
+}
+
+/// A copy of a value is still used after the value's own last use.
+fn keeps_copy(a: Int) -> Int {
+  let b = a
+  let c = a * 3
+  return b + c
+}
+
+fn big_fib(n: Int) -> Int {
+  var a = 0
+  var b = 1
+  var i = 0
+  while i < n {
+    let t = a + b
+    a = b
+    b = t
+    i = i + 1
+  }
+  return a
+}
+
+fn main() uses io {
+  let big = fact(25)
+  print("{big}")
+  print("{add_dead(big, big)}")
+  print("{add_dead(big, 1)}")
+  print("{add_dead(4611686018427387903, 4611686018427387903)}")
+  print("{add_dead(-4611686018427387904, -1)}")
+  print("{twice_down(big)}")
+  print("{twice_down(4611686018427387904)}")
+  print("{twice_down(10)}")
+  print("{keeps_copy(big)}")
+  print("{keeps_copy(2305843009213693952)}")
+  print("{big_fib(150)}")
+  var total = 0
+  var k = 0
+  while k < 200 {
+    total = total + fact(k % 30) - k
+    k = k + 1
+  }
+  print("{total}")
+  let m = big * big - big / 7 % 1000
+  print("{m}")
+}

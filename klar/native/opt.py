@@ -7,12 +7,16 @@ Passes (all local and conservative — correctness first):
   2. compare-and-branch fusion (`brc`, `brci`, `ibr`, `ibri`, `fbr`): the Bool is never
      materialized; releases between the compare and the branch are delayed into both
      successors (delaying a release is always safe);
-  3. dead-code elimination of pure instructions whose result is unused.
+  3. dead-code elimination of pure instructions whose result is unused;
+  4. releases of Ints move up to the last use of the value (`hoist_releases`): the value stops living across
+     the calls in between, and a release right after a tagged-Int op becomes part of it (`fuse_int_releases`).
 
 New instruction forms introduced here (understood by emit.py):
   ("bini", op, d, x, imm)          ("cmpi", cc, d, x, imm)
   ("bink", op, d, x, c)            udiv/urem/sdiv/srem by a positive constant (multiply by reciprocal)
   ("iopi", op, d, x, timm, span)   tagged-Int op with a constant small operand (timm is tagged)
+  ("iop", ..., span, rel) / ("iopi", ..., span, rel)   rel: operands released right after the op (bit 1: x,
+                                   bit 2: y). On the fast path both are small Ints, so only the slow path releases.
   ("icmpi", cc, d, x, timm)
   ("brc", cc, x, y, Lt, Lf)  ("brci", cc, x, imm, Lt, Lf)  ("ibr", cc, x, y, Lt, Lf)
   ("brti", "ne", x, imm8, Lt, Lf)  (branch on x & imm8 != 0)
@@ -134,7 +138,7 @@ def branch_targets(ins):
 # ---- pass 1: block-local folding --------------------------------------------------------------
 def fold(code):
     out = []
-    known = {}                      # vreg -> ("k", imm) | ("addc", x, c) | ("copy", s) | ("small",)
+    known = {}                      # vreg -> ("k", imm) | ("addc", x, c) | ("copy", s) | ("small",) | ("immortal",)
 
     def const_of(v):
         k = known.get(v)
@@ -223,6 +227,8 @@ def fold(code):
                 ins = ("icmpi", SWAP[cc], d, y, cx)
         elif op in ("retain", "release") and ins[1] == "int" and small(ins[2]):
             continue
+        elif op in ("retain", "release") and known.get(ins[2]) == ("immortal",):
+            continue                # `None` (the hole a moved-out value leaves): its count never changes
         # record what this instruction defines
         for d in defs(ins):
             kill(d)
@@ -235,6 +241,8 @@ def fold(code):
             known[ins[1]] = ("copy", ins[2])
         elif op == "iopi" and ins[1] == "mod":
             known[ins[2]] = ("small",)
+        elif op == "addr" and ins[2] == "obj_None":
+            known[ins[1]] = ("immortal",)
         elif op in ("cmp", "cmpi", "fcmp"):
             pass
         out.append(ins)
@@ -405,12 +413,94 @@ def coalesce(code):
     return out
 
 
+# ---- pass 4: Int releases move to the last use and into the tagged-Int op before them ---------------
+ALIAS_FREE = {"iop", "iopi", "icmp", "icmpi", "cmp", "cmpi", "fcmp", "ineg", "call", "callind", "const", "fp",
+              "i2f", "f2i"}       # their result is a new value, never another name for an operand
+BLOCK_END = TERMINATORS | {"label", "enter", "leave"}
+
+
+def alias_classes(code):
+    """vreg -> the set of vregs that may name the same object (copies, pointers derived from it)."""
+    parent = {}
+
+    def find(v):
+        while parent.get(v, v) != v:
+            v = parent[v]
+        return v
+    for ins in code:
+        if ins[0] in ALIAS_FREE or ins[0] in ("store", "store8", "store32"):
+            continue
+        for d in defs(ins):
+            for u in uses(ins):
+                a, b = find(d), find(u)
+                if a != b:
+                    parent[a] = b
+    classes = {}
+    for v in {v for ins in code for v in (*defs(ins), *uses(ins))}:
+        classes.setdefault(find(v), set()).add(v)
+    return {v: classes[find(v)] for c in classes.values() for v in c}
+
+
+def hoist_releases(code):
+    """Move `release int v` up to just after the last instruction of its block that touches v (or a name of the
+    same object). Releasing an Int earlier changes nothing observable: an Int has no destructor, and nothing
+    later reads it. A value whose object was stored in memory somewhere stays where it is (it may be read back)."""
+    alias = alias_classes(code)
+    stored = set()
+    for ins in code:
+        if ins[0] in ("store", "store8", "store32"):
+            stored |= alias.get(ins[3], {ins[3]})
+    out = []
+    for ins in code:
+        if ins[0] == "release" and ins[1] == "int" and ins[2] not in stored:
+            names = alias.get(ins[2], {ins[2]})
+            j = len(out)
+            while j > 0:
+                p = out[j - 1]
+                if p[0] in BLOCK_END or names & (set(uses(p)) | set(defs(p))):
+                    break
+                j -= 1
+            while 0 < j < len(out) and out[j - 1][0] == "site":
+                j -= 1              # a `site` belongs to the call after it
+            out.insert(j, ins)
+            continue
+        out.append(ins)
+    return out
+
+
+def fuse_int_releases(code):
+    out = []
+    i = 0
+    while i < len(code):
+        ins = code[i]
+        i += 1
+        if ins[0] not in ("iop", "iopi") or len(ins) != 6:
+            out.append(ins)
+            continue
+        d, x = ins[2], ins[3]
+        y = ins[4] if ins[0] == "iop" else None
+        rel, rest = 0, []
+        while i < len(code) and code[i][0] == "release":
+            r = code[i]
+            if r[1] == "int" and r[2] != d and r[2] == x and not rel & 1:
+                rel |= 1
+            elif r[1] == "int" and r[2] != d and r[2] == y and not rel & 2:
+                rel |= 2
+            else:
+                rest.append(r)
+            i += 1
+        out.append((*ins, rel) if rel else ins)
+        out.extend(rest)
+    return out
+
+
 def optimize(fn):
     code = coalesce(fn.code)
     code = fold(code)
     code = dce(code)
     code = fuse(fn, code)
     code = dce(code)
+    code = fuse_int_releases(hoist_releases(code))
     fn.code = code
     return fn
 

@@ -13,8 +13,8 @@ use a64.{A64, AL64, FP, LR, SP, X16, X17, add_sp, addsub_imm, adr_sym, bcc, bl, 
 use a64.{cset, fcmp, fcvtzs, fits_imm12, fload, fmov_dd, fmov_dx, fmov_xd, fop, fresh64, fsqrt, fstore, invert}
 use a64.{label64, ldp_post, load, mem, mov_ri, mov_rr, msub, mul, neg, new_a64, new_label64, op3, ret, scvtf, shift_i}
 use a64.{site64, smulh, stp_pre, store, svc, tst1, udf, umulh, word}
-use emit.{Cold, ColdItem, Exe, MAX_DEPTH, OS_FUNCS, Then, YL, align16, bit_length, has_reg, iat, is_pow2, lat, sat}
-use emit.{sat_or, sdiv_magic, sdiv_magic64, soft_helper, trace_table, udiv_magic, udiv_magic_simple}
+use emit.{Cold, ColdItem, Exe, MAX_DEPTH, OS_FUNCS, Then, YL, align16, bit_length, has_reg, iat, is_pow2, lat, rel_of, sat}
+use emit.{sat_or, sdiv_magic, sdiv_magic64, soft_helper, trace_table, udiv_magic, udiv_magic_simple, yl_reg}
 use lower.{Img, Ins, KFn, Lw, add_bss, rt_names}
 use opt.{defs, inline_calls, optimize, used_regs}
 use regalloc.{Alloc, a64_regs, allocate}
@@ -632,7 +632,8 @@ fn i_iop(e0: Em64, ins: Ins) -> Em64 {
   let y = iat(ins, 4)
   let done = label_of(e0, "idone")
   let slow = new_label64(done.a, "islow")
-  var e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Reg(v: y), done: done.l))
+  var e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Reg(v: y), done: done.l,
+    rel: rel_of(ins)))
   e = with_a(e, ld(a: ld(a: e.a, e: e, reg: X0, v: x), e: e, reg: X1, v: y))
   if opn == "div" or opn == "mod" {
     e = div_check(e: e, span: sat_or(ins, 5), divisor: X1)
@@ -667,7 +668,8 @@ fn i_iopi(e0: Em64, ins: Ins) -> Em64 {
   let t = iat(ins, 4)
   let done = label_of(e0, "idone")
   let slow = new_label64(done.a, "islow")
-  let e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Imm(t: t), done: done.l))
+  let e = add_cold(e: e0, a: slow.a, c: Cold.ISlow(lab: slow.l, opn: opn, d: d, x: x, y: YL.Imm(t: t), done: done.l,
+    rel: rel_of(ins)))
   let sx = src(a: e.a, e: e, v: x, scratch: X0)
   let rx = sx.r
   var a = bcc(a: tst1(sx.a, rx), cc: "eq", target: slow.l)
@@ -995,12 +997,39 @@ fn load_y(a: A64, e: Em64, y: YL) -> A64 {
   }
 }
 
+fn release_slot(a0: A64, e: Em64, off: Int) -> A64 {
+  let skip = new_label64(a0, "rl")
+  var a = load(a: skip.a, rt: X0, rn: FP, off: off)
+  a = bcc(a: tst1(a, X0), cc: "ne", target: skip.l)
+  a = bcc(a: cmp_ri(a: load(a: a, rt: X1, rn: X0, off: 0), rn: X1, imm: 0), cc: "lt", target: skip.l)
+  a = store(a: addsub_imm(a: a, op: "subs", rd: X1, rn: X1, imm: 1), rn: X0, off: 0, rt: X1)
+  a = bcc(a: a, cc: "ne", target: skip.l)
+  return label64(call_rt(a0: a, e: e, name: "free", regs: [X0]), skip.l)
+}
+
 fn emit_cold(e: Em64, c: Cold) -> A64 {
   return match c {
-    Cold.ISlow(lab, opn, d, x, y, done) => {
-      let a = load_y(a: ld(a: label64(e.a, lab), e: e, reg: X0, v: x), e: e, y: y)
-      let a2 = call_rt(a0: a, e: e, name: "int_" + opn, regs: [X0, X1])
-      return br(st(a: a2, e: e, v: d, reg: X0), done)
+    Cold.ISlow(lab, opn, d, x, y, done, rel) => {
+      // released operands go through their frame slots (see emit.klar)
+      var a = load_y(a: ld(a: label64(e.a, lab), e: e, reg: X0, v: x), e: e, y: y)
+      if rel % 2 == 1 {
+        a = store(a: a, rn: FP, off: slot(e, x), rt: X0)
+      }
+      if rel >= 2 {
+        a = store(a: a, rn: FP, off: slot(e, yl_reg(y)), rt: X1)
+      }
+      a = call_rt(a0: a, e: e, name: "int_" + opn, regs: [X0, X1])
+      if rel > 0 {
+        a = store(a: a, rn: FP, off: slot(e, d), rt: X0)
+        if rel % 2 == 1 {
+          a = release_slot(a0: a, e: e, off: slot(e, x))
+        }
+        if rel >= 2 {
+          a = release_slot(a0: a, e: e, off: slot(e, yl_reg(y)))
+        }
+        a = load(a: a, rt: X0, rn: FP, off: slot(e, d))
+      }
+      return br(st(a: a, e: e, v: d, reg: X0), done)
     },
     Cold.DivZero(lab, span) => {
       var a = label64(e.a, lab)

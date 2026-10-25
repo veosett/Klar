@@ -500,7 +500,8 @@ class A64Emitter:
         self.soft_call(fn, "soft_pow", [x, y], d)
 
     # ---- tagged Int fast paths ----------------------------------------------------------------------------------
-    def int_slow(self, fn, op, d, x, y_loader, done):
+    def int_slow(self, fn, op, d, x, y_loader, done, rel=0, y=None):
+        """rel: the operands released after the op, only here (see emit.py `int_slow`)."""
         slow = self.a.new_label("islow")
 
         def cold():
@@ -508,11 +509,37 @@ class A64Emitter:
             a.label(slow)
             self.ld(X0, fn, x)
             y_loader()
+            if rel & 1:
+                a.store(FP, self.slot(fn, x), X0)
+            if rel & 2:
+                a.store(FP, self.slot(fn, y), X1)
             self.call_rt(fn, "int_" + op, [X0, X1])
+            if rel:
+                a.store(FP, self.slot(fn, d), X0)
+                if rel & 1:
+                    self.release_slot(fn, self.slot(fn, x))
+                if rel & 2:
+                    self.release_slot(fn, self.slot(fn, y))
+                a.load(X0, FP, self.slot(fn, d))
             self.st(fn, d, X0)
             a.b(done)
         self.cold.append(cold)
         return slow
+
+    def release_slot(self, fn, off):
+        a = self.a
+        skip = a.new_label("rl")
+        a.load(X0, FP, off)
+        a.tst1(X0)
+        a.bcc("ne", skip)
+        a.load(X1, X0, 0)
+        a.cmp_ri(X1, 0)
+        a.bcc("lt", skip)
+        a.addsub_imm("subs", X1, X1, 1)
+        a.store(X0, 0, X1)
+        a.bcc("ne", skip)
+        self.call_rt(fn, "free", [X0])
+        a.label(skip)
 
     def div_check(self, fn, span, divisor_reg):
         a = self.a
@@ -538,10 +565,10 @@ class A64Emitter:
         a.w(0xEB80FC7F | (X2 << 16))             # cmp x3, x2, asr #63
         a.bcc("ne", slow)
 
-    def i_iop(self, fn, op, d, x, y, span=None):
+    def i_iop(self, fn, op, d, x, y, span=None, rel=0):
         a = self.a
         done = a.new_label("idone")
-        slow = self.int_slow(fn, op, d, x, lambda: self.ld(X1, fn, y), done)
+        slow = self.int_slow(fn, op, d, x, lambda: self.ld(X1, fn, y), done, rel, y)
         self.ld(X0, fn, x)
         self.ld(X1, fn, y)
         if op in ("div", "mod"):
@@ -570,11 +597,11 @@ class A64Emitter:
         self.st(fn, d, X0)
         a.label(done)
 
-    def i_iopi(self, fn, op, d, x, t, span=None):
+    def i_iopi(self, fn, op, d, x, t, span=None, rel=0):
         """Tagged Int op with the constant small Int t (already tagged: 2c+1)."""
         a = self.a
         done = a.new_label("idone")
-        slow = self.int_slow(fn, op, d, x, lambda: a.mov_ri(X1, t), done)
+        slow = self.int_slow(fn, op, d, x, lambda: a.mov_ri(X1, t), done, rel)
         rx = self.src(fn, x, X0)
         a.tst1(rx)
         a.bcc("eq", slow)
