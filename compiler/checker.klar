@@ -3258,7 +3258,8 @@ fn need_effects(ck: Ck, what: Str, effects: List[Str], span: Span) -> Ck {
         "declare it", span: span, hint: Some("write `uses {allowed}` after the test name: tests run on an empty file " +
           "system in memory, a clock that starts at 0 and fixed random numbers"), fix: tfix)
   }
-  let allowed = union(c0.ctx.effects, missing).unique().sort()
+  // an unknown effect has its own error (E0403): the hint names only the known ones
+  let allowed = union(c0.ctx.effects.filter(fn(e) => KNOWN_EFFECTS.contains(e)), missing).unique().sort()
   var fix: Option[DiagFix] = None
   match c0.ctx.sig_end {
     Some(se) => {

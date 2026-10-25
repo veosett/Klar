@@ -506,6 +506,7 @@ fn flush_out() {
     // a property's own output is not shown (as in the interpreter)
     n = 0
   }
+  tr_out(buf, n)
   var done: Word = 0
   while done < n {
     let w = os_write(1, buf + done, n - done)
@@ -524,6 +525,7 @@ fn out_bytes(p: Word, n: Word) {
     flush_out()
   }
   if n > OUT_CAP {
+    tr_out(p, n)
     var done: Word = 0
     while done < n {
       let w = os_write(1, p + done, n - done)
@@ -550,6 +552,7 @@ fn out_byte(c: Word) {
 }
 
 fn err_bytes(p: Word, n: Word) {
+  tr_err(p, n)
   var fd = peek(g() + G_ERRFD)
   if fd == 0 {
     fd = 2
@@ -653,8 +656,13 @@ fn report_error(code: Word, msg: Word, sp: Word, details: Word, hint: Word, stac
     sb_add_str(b, hint)
     sb_add_byte(b, 10)
   }
+  // the error is kept apart from what the program itself wrote to stderr (klar/trace.py)
+  tr_error_text(b)
+  poke(g() + G_TR_QUIET, 1)
   err_bytes(peek(b + 32), peek(b + 16))
+  poke(g() + G_TR_QUIET, 0)
   prof_finish()
+  tr_end(1)
   os_exit(1)
   return 0
 }
@@ -864,6 +872,7 @@ fn unreachable() -> Word {
 // ---------------------------------------------------------------------------
 fn main_entry() -> Word {
   init_consts()
+  tr_begin()
   poke(static_addr("g_frames") + 8, static_addr("main_span"))
   let r = user_main()
   prof_finish()
@@ -877,5 +886,6 @@ fn main_entry() -> Word {
     }
   }
   flush_out()
+  tr_end(0)
   return 0
 }

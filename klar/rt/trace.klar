@@ -1,0 +1,571 @@
+// Klar runtime: `klarc run --record` / `klarc replay` (as klar/trace.py). The build puts `g_trace` into the
+// executable: [mode (0 off, 1 record, 2 replay), the events to replay (path or 0), where to write the result (path)].
+// Recording keeps every result the program gets from outside (compiler/trace.klar turns them into the JSON trace of
+// klar/trace.py); a replay returns the kept results instead of calling the system. Both modes keep what the program
+// printed, its runtime error and its exit code, and write them at the end.
+//
+// The events are text: the built-in's name on a line, then its result —
+// `I<n>` Int, `B0`/`B1` Bool, `U` Unit, `S<len>`/`Y<len>` + bytes (Str/Bytes), `L<n>` + n strings, `N` / `O` + value
+// (Option), `K` + value / `E` + string (Result), `R` (the call raised an error) — each item ending with a line break.
+
+const G_TR_BUF: Word = 1072
+const G_TR_OUT: Word = 1080
+const G_TR_ERR: Word = 1088
+const G_TR_IN: Word = 1096
+const G_TR_POS: Word = 1104
+const G_TR_LEN: Word = 1112
+const G_TR_N: Word = 1120
+const G_TR_TEXT: Word = 1128
+const G_TR_QUIET: Word = 1136
+
+fn tr_mode() -> Word {
+  return peek(static_addr("g_trace"))
+}
+
+fn tr_begin() {
+  if tr_mode() == 0 {
+    return
+  }
+  let gp = g()
+  poke(gp + G_TR_BUF, sb_new())
+  poke(gp + G_TR_OUT, sb_new())
+  poke(gp + G_TR_ERR, sb_new())
+  poke(gp + G_TR_TEXT, sb_new())
+  if tr_mode() == 2 {
+    let path = peek(static_addr("g_trace") + 8)
+    let data = sb_new()
+    let fd = os_open(path + 32, 0)
+    if fd >= 0 {
+      let chunk = alloc(65536)
+      var reading = true
+      while reading {
+        let n = os_read(fd, chunk, 65536)
+        if n <= 0 {
+          reading = false
+        } else {
+          sb_add_bytes(data, chunk, n)
+        }
+      }
+      block_free(chunk)
+      os_close(fd)
+    }
+    poke(gp + G_TR_IN, peek(data + 32))
+    poke(gp + G_TR_LEN, peek(data + 16))
+    poke(gp + G_TR_POS, 0)
+  }
+}
+
+// output the program writes (stdout and its own stderr) is also kept while tracing
+fn tr_out(p: Word, n: Word) {
+  if tr_mode() != 0 and peek(g() + G_TR_OUT) != 0 {
+    sb_add_bytes(peek(g() + G_TR_OUT), p, n)
+  }
+}
+
+fn tr_err(p: Word, n: Word) {
+  let gp = g()
+  if tr_mode() != 0 and peek(gp + G_TR_ERR) != 0 and peek(gp + G_TR_QUIET) == 0 {
+    sb_add_bytes(peek(gp + G_TR_ERR), p, n)
+  }
+}
+
+// the text of the runtime error (without its last line break)
+fn tr_error_text(b: Word) {
+  if tr_mode() == 0 or peek(g() + G_TR_TEXT) == 0 {
+    return
+  }
+  var n = peek(b + 16)
+  if n > 0 and peek8(peek(b + 32) + n - 1) == 10 {
+    n = n - 1
+  }
+  sb_add_bytes(peek(g() + G_TR_TEXT), peek(b + 32), n)
+}
+
+fn tr_section(out: Word, name: Str, s: Word) {
+  sb_add_cstr(out, name)
+  sb_add_word(out, peek(s + 16))
+  sb_add_byte(out, 10)
+  sb_add_bytes(out, peek(s + 32), peek(s + 16))
+  sb_add_byte(out, 10)
+}
+
+// writes the result file (the events of a recording, the output, the error, the exit code)
+fn tr_end(code: Word) {
+  if tr_mode() == 0 or peek(g() + G_TR_BUF) == 0 {
+    return
+  }
+  let gp = g()
+  let out = sb_new()
+  sb_add_cstr(out, "KLART1\n")
+  if tr_mode() == 1 {
+    let ev = peek(gp + G_TR_BUF)
+    sb_add_bytes(out, peek(ev + 32), peek(ev + 16))
+  }
+  tr_section(out, "@stdout ", peek(gp + G_TR_OUT))
+  tr_section(out, "@stderr ", peek(gp + G_TR_ERR))
+  tr_section(out, "@error ", peek(gp + G_TR_TEXT))
+  sb_add_cstr(out, "@exit ")
+  sb_add_word(out, code)
+  sb_add_byte(out, 10)
+  let path = peek(static_addr("g_trace") + 16)
+  let fd = os_open(path + 32, 1)
+  if fd >= 0 {
+    var done: Word = 0
+    let n = peek(out + 16)
+    while done < n {
+      let w = os_write(fd, peek(out + 32) + done, n - done)
+      if w <= 0 {
+        done = n
+      } else {
+        done = done + w
+      }
+    }
+    os_close(fd)
+  }
+  poke(gp + G_TR_BUF, 0)
+}
+
+// ---- recording ------------------------------------------------------------------------------------------------
+
+fn tr_name(name: Str) {
+  let b = peek(g() + G_TR_BUF)
+  sb_add_cstr(b, name)
+  sb_add_byte(b, 10)
+}
+
+fn tr_put_bytes(kind: Word, p: Word, n: Word) {
+  let b = peek(g() + G_TR_BUF)
+  sb_add_byte(b, kind)
+  sb_add_word(b, n)
+  sb_add_byte(b, 10)
+  sb_add_bytes(b, p, n)
+  sb_add_byte(b, 10)
+}
+
+// puts a value of the shape `shape` (from position `at`): see the top of the file
+fn tr_put(shape: Str, at: Word, v: Word) {
+  let b = peek(g() + G_TR_BUF)
+  let c = peek8(bits(shape) + 32 + at)
+  if c == 83 {
+    tr_put_bytes(83, v + 32, peek(v + 16))
+  } else if c == 89 {
+    tr_put_bytes(89, peek(v + 32), peek(v + 16))
+  } else if c == 73 {
+    sb_add_byte(b, 73)
+    int_show(b, v)
+    sb_add_byte(b, 10)
+  } else if c == 66 {
+    sb_add_byte(b, 66)
+    sb_add_byte(b, 48 + v)
+    sb_add_byte(b, 10)
+  } else if c == 85 {
+    sb_add_cstr(b, "U\n")
+  } else if c == 76 {
+    let n = peek(v + 16)
+    sb_add_byte(b, 76)
+    sb_add_word(b, n)
+    sb_add_byte(b, 10)
+    var i: Word = 0
+    while i < n {
+      let s = peek(peek(v + 32) + i * 8)
+      tr_put_bytes(83, s + 32, peek(s + 16))
+      i = i + 1
+    }
+  } else if c == 79 {
+    if v == none() or peek(v + 16) == 0 {
+      sb_add_cstr(b, "N\n")
+    } else {
+      sb_add_cstr(b, "O\n")
+      tr_put(shape, at + 1, peek(v + 24))
+    }
+  } else if c == 82 {
+    if peek(v + 16) == 0 {
+      sb_add_cstr(b, "K\n")
+      tr_put(shape, at + 1, peek(v + 24))
+    } else {
+      sb_add_cstr(b, "E\n")
+      tr_put("S", 0, peek(v + 24))
+    }
+  }
+}
+
+fn tr_record(name: Str, shape: Str, v: Word) {
+  if tr_mode() == 1 {
+    tr_name(name)
+    tr_put(shape, 0, v)
+  }
+}
+
+fn tr_record_raised(name: Str) {
+  if tr_mode() == 1 {
+    tr_name(name)
+    sb_add_cstr(peek(g() + G_TR_BUF), "R\n")
+  }
+}
+
+// ---- replaying ------------------------------------------------------------------------------------------------
+
+fn tr_replaying() -> Bool {
+  return tr_mode() == 2
+}
+
+// the text up to the next line break (the position moves after it)
+fn tr_line() -> Word {
+  let gp = g()
+  let p = peek(gp + G_TR_IN)
+  let start = peek(gp + G_TR_POS)
+  var i = start
+  while i < peek(gp + G_TR_LEN) and peek8(p + i) != 10 {
+    i = i + 1
+  }
+  poke(gp + G_TR_POS, i + 1)
+  return str_from(p + start, i - start)
+}
+
+fn tr_number(s: Word, from: Word) -> Word {
+  var i = from
+  var neg = false
+  if i < peek(s + 16) and peek8(s + 32 + i) == 45 {
+    neg = true
+    i = i + 1
+  }
+  var x: Word = 0
+  while i < peek(s + 16) {
+    x = x * 10 + peek8(s + 32 + i) - 48
+    i = i + 1
+  }
+  if neg {
+    return 0 - x
+  }
+  return x
+}
+
+fn tr_diverged(name: Str, other: Word, sp: Word) -> Word {
+  let b = sb_new()
+  sb_add_cstr(b, "replay diverged: the program calls `")
+  sb_add_cstr(b, name)
+  if other == 0 {
+    sb_add_cstr(b, "`, but the recording has ended")
+  } else {
+    sb_add_cstr(b, "`, but the recording has `")
+    sb_add_str(b, other)
+    sb_add_cstr(b, "` next (event ")
+    sb_add_word(b, peek(g() + G_TR_N) + 1)
+    sb_add_cstr(b, ")")
+  }
+  var at = sp
+  if at == 0 {
+    at = current_span()
+  }
+  return fail_with(bits("R0017"), sb_finish(b), at, 0, bits("the program or its input changed since the recording"))
+}
+
+// moves to the result of the next event, which must be a call of `name`; false when it raised (call it again)
+fn tr_next(name: Str, sp: Word) -> Bool {
+  let gp = g()
+  if peek(gp + G_TR_POS) >= peek(gp + G_TR_LEN) {
+    tr_diverged(name, 0, sp)
+  }
+  let got = tr_line()
+  if not Str_eq(got, bits(name)) {
+    tr_diverged(name, got, sp)
+  }
+  rc_dec(got)
+  poke(gp + G_TR_N, peek(gp + G_TR_N) + 1)
+  let p = peek(gp + G_TR_IN) + peek(gp + G_TR_POS)
+  if peek8(p) == 82 {
+    poke(gp + G_TR_POS, peek(gp + G_TR_POS) + 2)
+    return false
+  }
+  return true
+}
+
+fn tr_get_bytes(line: Word) -> Word {
+  let gp = g()
+  let n = tr_number(line, 1)
+  let at = peek(gp + G_TR_IN) + peek(gp + G_TR_POS)
+  poke(gp + G_TR_POS, peek(gp + G_TR_POS) + n + 1)
+  if peek8(line + 32) == 89 {
+    return bytes_from(at, n)
+  }
+  return str_from(at, n)
+}
+
+// reads a value of the shape `shape` (from `at`); `rtd`: the type of an Option or Result built here
+fn tr_get(shape: Str, at: Word, rtd: Word) -> Word {
+  let line = tr_line()
+  let c = peek8(line + 32)
+  var v: Word = 0
+  if c == 83 or c == 89 {
+    v = tr_get_bytes(line)
+  } else if c == 73 {
+    v = bits(tag(tr_number(line, 1)))
+  } else if c == 66 {
+    v = peek8(line + 33) - 48
+  } else if c == 76 {
+    let n = tr_number(line, 1)
+    var l = list_new_str()
+    var i: Word = 0
+    while i < n {
+      let item = tr_line()
+      l = list_push_owned_raw(l, tr_get_bytes(item))
+      rc_dec(item)
+      i = i + 1
+    }
+    v = l
+  } else if c == 78 {
+    v = none()
+  } else if c == 79 {
+    v = some_new(rtd, tr_get(shape, at + 1, 0))
+  } else if c == 75 {
+    v = ok_new(rtd, tr_get(shape, at + 1, 0))
+  } else if c == 69 {
+    v = err_new(rtd, tr_get("S", 0, 0))
+  }
+  rc_dec(line)
+  return v
+}
+
+fn tr_number_line() -> Word {
+  let line = tr_line()
+  let x = tr_number(line, 1)
+  rc_dec(line)
+  return x
+}
+
+fn tr_record_bool(name: Str, v: Bool) {
+  if tr_mode() == 1 {
+    tr_name(name)
+    let b = peek(g() + G_TR_BUF)
+    if v {
+      sb_add_cstr(b, "B1\n")
+    } else {
+      sb_add_cstr(b, "B0\n")
+    }
+  }
+}
+
+// ---- the traced built-ins (the work is in real_*) -------------------------------------------------------------
+
+fn b_read_line(rtd: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("read_line", 0) {
+      return tr_get("OS", 0, rtd)
+    }
+  }
+  let r = real_read_line(rtd)
+  tr_record("read_line", "OS", r)
+  return r
+}
+
+fn b_read_exact(n: Word, rtd: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("read_exact", 0) {
+      return tr_get("OS", 0, rtd)
+    }
+  }
+  let r = real_read_exact(n, rtd)
+  tr_record("read_exact", "OS", r)
+  return r
+}
+
+fn b_cli_args(rtd: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("cli_args", 0) {
+      return tr_get("L", 0, rtd)
+    }
+  }
+  let r = real_cli_args(rtd)
+  tr_record("cli_args", "L", r)
+  return r
+}
+
+fn b_env_var(name: Word, rtd: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("env_var", 0) {
+      return tr_get("OS", 0, rtd)
+    }
+  }
+  let r = real_env_var(name, rtd)
+  tr_record("env_var", "OS", r)
+  return r
+}
+
+fn b_now_ms(sp: Word) -> Int {
+  if tr_replaying() {
+    if tr_next("now_ms", sp) {
+      return tag(tr_number_line())
+    }
+  }
+  let r = real_now_ms(sp)
+  tr_record("now_ms", "I", bits(r))
+  return r
+}
+
+fn b_now_ns(sp: Word) -> Int {
+  if tr_replaying() {
+    if tr_next("now_ns", sp) {
+      return tag(tr_number_line())
+    }
+  }
+  let r = real_now_ns(sp)
+  tr_record("now_ns", "I", bits(r))
+  return r
+}
+
+fn b_random_int(lo: Int, hi: Int, sp: Word) -> Int {
+  if tr_replaying() {
+    if tr_next("random_int", sp) {
+      return tag(tr_number_line())
+    }
+  }
+  if lo > hi {
+    tr_record_raised("random_int")
+  }
+  let r = real_random_int(lo, hi, sp)
+  tr_record("random_int", "I", bits(r))
+  return r
+}
+
+fn b_read_file(path: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("read_file", sp) {
+      return tr_get("RS", 0, rtd)
+    }
+  }
+  let r = real_read_file(path, rtd, sp)
+  tr_record("read_file", "RS", r)
+  return r
+}
+
+fn b_file_exists(path: Word, sp: Word) -> Bool {
+  if tr_replaying() {
+    if tr_next("file_exists", sp) {
+      return tr_number_line() == 1
+    }
+  }
+  let r = real_file_exists(path, sp)
+  tr_record_bool("file_exists", r)
+  return r
+}
+
+fn b_is_dir(path: Word, sp: Word) -> Bool {
+  if tr_replaying() {
+    if tr_next("is_dir", sp) {
+      return tr_number_line() == 1
+    }
+  }
+  let r = real_is_dir(path, sp)
+  tr_record_bool("is_dir", r)
+  return r
+}
+
+fn b_list_dir(path: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("list_dir", sp) {
+      return tr_get("RL", 0, rtd)
+    }
+  }
+  let r = real_list_dir(path, rtd, sp)
+  tr_record("list_dir", "RL", r)
+  return r
+}
+
+fn b_current_dir(sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("current_dir", sp) {
+      return tr_get("S", 0, 0)
+    }
+  }
+  let r = real_current_dir(sp)
+  tr_record("current_dir", "S", r)
+  return r
+}
+
+fn b_write_file(path: Word, content: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("write_file", sp) {
+      return tr_get("RU", 0, rtd)
+    }
+  }
+  let r = real_write_file(path, content, rtd, sp)
+  tr_record("write_file", "RU", r)
+  return r
+}
+
+fn b_make_dir(path: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("make_dir", sp) {
+      return tr_get("RU", 0, rtd)
+    }
+  }
+  let r = real_make_dir(path, rtd, sp)
+  tr_record("make_dir", "RU", r)
+  return r
+}
+
+fn b_remove_file(path: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("remove_file", sp) {
+      return tr_get("RU", 0, rtd)
+    }
+  }
+  let r = real_remove_file(path, rtd, sp)
+  tr_record("remove_file", "RU", r)
+  return r
+}
+
+fn b_set_executable(path: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("set_executable", sp) {
+      return tr_get("RU", 0, rtd)
+    }
+  }
+  let r = real_set_executable(path, rtd, sp)
+  tr_record("set_executable", "RU", r)
+  return r
+}
+
+fn b_run_command(args: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("run_command", sp) {
+      return tr_get("RI", 0, rtd)
+    }
+  }
+  let r = real_run_command(args, rtd, sp)
+  tr_record("run_command", "RI", r)
+  return r
+}
+
+fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("run_capture", sp) {
+      return tr_get("RL", 0, rtd)
+    }
+  }
+  let r = real_run_capture(args, dir, input, rtd, sp)
+  tr_record("run_capture", "RL", r)
+  return r
+}
+
+fn b_read_bytes(path: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("read_bytes", sp) {
+      return tr_get("RY", 0, rtd)
+    }
+  }
+  let r = real_read_bytes(path, rtd, sp)
+  tr_record("read_bytes", "RY", r)
+  return r
+}
+
+fn b_write_bytes(path: Word, data: Word, rtd: Word, sp: Word) -> Word {
+  if tr_replaying() {
+    if tr_next("write_bytes", sp) {
+      return tr_get("RU", 0, rtd)
+    }
+  }
+  let r = real_write_bytes(path, data, rtd, sp)
+  tr_record("write_bytes", "RU", r)
+  return r
+}

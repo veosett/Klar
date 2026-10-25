@@ -1780,7 +1780,16 @@ def sandbox_data(prog, allow):
     prog.words("g_allow", [1, (shown, 0)] + flags + [len(dirs), (dsym, 0), len(progs), (psym, 0)])
 
 
-def lower_program(loaded, image, tests=None, allow=None):
+def trace_data(prog, trace):
+    """`g_trace` for klar/rt/trace.klar: [0], or [mode (1 record, 2 replay), events to replay, result file]."""
+    if not trace:
+        prog.words("g_trace", [0])
+        return
+    mode, src, out = trace
+    prog.words("g_trace", [mode, (prog.str_obj(src), 0) if src else 0, (prog.str_obj(out), 0)])
+
+
+def lower_program(loaded, image, tests=None, allow=None, trace=None):
     """Lower the whole program; returns (Program, runtime-helper map for the emitter).
 
     tests: None -> run main(); a list of TestDecl -> the executable runs test #argv[1].
@@ -1866,6 +1875,7 @@ def lower_program(loaded, image, tests=None, allow=None):
         prog.words("main_kind", [0])
         main_span = tests[0].span if tests else prog.loaded.main.program.span
     sandbox_data(prog, allow)
+    trace_data(prog, trace)
     image.data_syms["main_span"] = image.data_syms[prog.span_sym(main_span)]
     image.add_bss("g_rt", 8 * 4096)
     image.add_bss("g_outbuf", 65536)

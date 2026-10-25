@@ -471,5 +471,6 @@ pub fn rt_files() -> List[Str] {
     "show.klar",
     "softmath.klar",
     "str.klar",
+    "trace.klar",
   ]
 }

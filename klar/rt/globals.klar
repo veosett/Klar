@@ -34,7 +34,7 @@ fn b_range(lo: Int, hi: Int, rtd: Word) -> Word {
   return list_from_range(rtd, untag(lo), untag(hi))
 }
 
-fn b_now_ns(sp: Word) -> Int {
+fn real_now_ns(sp: Word) -> Int {
   sb_need("now_ns", SB_TIME, "time", sp)
   if fake_on() {
     return tag(peek(g() + G_CLOCK))
@@ -42,7 +42,7 @@ fn b_now_ns(sp: Word) -> Int {
   return tag(os_time_ns())
 }
 
-fn b_now_ms(sp: Word) -> Int {
+fn real_now_ms(sp: Word) -> Int {
   sb_need("now_ms", SB_TIME, "time", sp)
   if fake_on() {
     return tag(peek(g() + G_CLOCK) / 1000000)
@@ -65,7 +65,7 @@ fn b_todo(what: Word, sp: Word) -> Word {
   return fail_with(bits("R0012"), sb_finish(b), sp, 0, bits(""))
 }
 
-fn b_random_int(lo: Int, hi: Int, sp: Word) -> Int {
+fn real_random_int(lo: Int, hi: Int, sp: Word) -> Int {
   sb_need("random_int", SB_RAND, "rand", sp)
   if lo > hi {
     let b = sb_new()
@@ -90,7 +90,7 @@ fn b_random_int(lo: Int, hi: Int, sp: Word) -> Int {
 }
 
 // read_exact(n): the next n bytes of standard input (shares the buffer of read_line)
-fn b_read_exact(n: Word, rtd: Word) -> Word {
+fn real_read_exact(n: Word, rtd: Word) -> Word {
   let gp = g()
   let buf = static_addr("g_inbuf")
   var want = w_sar(n, 1)
@@ -126,7 +126,7 @@ fn b_read_exact(n: Word, rtd: Word) -> Word {
   return some_new(rtd, sb_finish(b))
 }
 
-fn b_read_line(rtd: Word) -> Word {
+fn real_read_line(rtd: Word) -> Word {
   let gp = g()
   let buf = static_addr("g_inbuf")
   let b = sb_new()
@@ -179,7 +179,7 @@ fn cstr_len(p: Word) -> Word {
   return n
 }
 
-fn b_cli_args(rtd: Word) -> Word {
+fn real_cli_args(rtd: Word) -> Word {
   var out = list_with_cap(rtd, 4)
   if os_platform() != 1 {
     let argc = os_argc()
@@ -239,7 +239,7 @@ fn io_error_text(b: Word, code: Word) {
   }
 }
 
-fn b_read_file(path: Word, rtd: Word, sp: Word) -> Word {
+fn real_read_file(path: Word, rtd: Word, sp: Word) -> Word {
   sb_need_fs("read_file", path, sp)
   if fake_on() {
     return fake_read_file(path, rtd)
@@ -307,7 +307,7 @@ fn valid_utf8(s: Word) -> Bool {
   return true
 }
 
-fn b_write_file(path: Word, content: Word, rtd: Word, sp: Word) -> Word {
+fn real_write_file(path: Word, content: Word, rtd: Word, sp: Word) -> Word {
   sb_need_fs("write_file", path, sp)
   if fake_on() {
     return fake_write_file(path, content, rtd)
@@ -335,7 +335,7 @@ fn b_write_file(path: Word, content: Word, rtd: Word, sp: Word) -> Word {
   return ok_new(rtd, 0)
 }
 
-fn b_file_exists(path: Word, sp: Word) -> Bool {
+fn real_file_exists(path: Word, sp: Word) -> Bool {
   sb_need_fs("file_exists", path, sp)
   if fake_on() {
     return fake_file_exists(path)
@@ -372,12 +372,13 @@ fn b_exit(code: Int) -> Word {
   }
   flush_out()
   prof_finish()
+  tr_end(c)
   os_exit(c)
   return 0
 }
 
 // environment variable: Linux and macOS walk envp (after argv on the initial stack), Windows asks kernel32
-fn b_env_var(name: Word, rtd: Word) -> Word {
+fn real_env_var(name: Word, rtd: Word) -> Word {
   let n = peek(name + 16)
   if os_platform() != 1 {
     var i = os_argc() + 1
@@ -588,7 +589,7 @@ fn add_win_arg(b: Word, s: Word) {
   sb_add_byte(b, 34)
 }
 
-fn b_run_command(args: Word, rtd: Word, sp: Word) -> Word {
+fn real_run_command(args: Word, rtd: Word, sp: Word) -> Word {
   sb_need_proc("run_command", args, sp)
   let n = peek(args + 16)
   if n == 0 {
@@ -633,7 +634,7 @@ fn b_run_command(args: Word, rtd: Word, sp: Word) -> Word {
   return ok_new(rtd, bits(tag(r)))
 }
 
-fn b_set_executable(path: Word, rtd: Word, sp: Word) -> Word {
+fn real_set_executable(path: Word, rtd: Word, sp: Word) -> Word {
   sb_need_fs("set_executable", path, sp)
   if fake_on() {
     return fake_set_executable(path, rtd)
@@ -656,7 +657,7 @@ fn b_set_executable(path: Word, rtd: Word, sp: Word) -> Word {
 // ---------------------------------------------------------------------------
 // directories
 // ---------------------------------------------------------------------------
-fn b_is_dir(path: Word, sp: Word) -> Bool {
+fn real_is_dir(path: Word, sp: Word) -> Bool {
   sb_need_fs("is_dir", path, sp)
   if fake_on() {
     return fake_is_dir(path)
@@ -682,7 +683,7 @@ fn add_entry(names: Word, p: Word) -> Word {
   return list_push_owned_raw(names, str_from(p, n))
 }
 
-fn b_list_dir(path: Word, rtd: Word, sp: Word) -> Word {
+fn real_list_dir(path: Word, rtd: Word, sp: Word) -> Word {
   sb_need_fs("list_dir", path, sp)
   if fake_on() {
     return fake_list_dir(path, rtd)
@@ -748,7 +749,7 @@ fn b_list_dir(path: Word, rtd: Word, sp: Word) -> Word {
 }
 
 // make_dir(path): creates the directory and the missing ones above it (like Python's os.makedirs(exist_ok=True))
-fn b_make_dir(path: Word, rtd: Word, sp: Word) -> Word {
+fn real_make_dir(path: Word, rtd: Word, sp: Word) -> Word {
   sb_need_fs("make_dir", path, sp)
   if fake_on() {
     return fake_make_dir(path, rtd)
@@ -787,7 +788,7 @@ fn b_make_dir(path: Word, rtd: Word, sp: Word) -> Word {
 }
 
 // current_dir(): the working directory
-fn b_current_dir(sp: Word) -> Word {
+fn real_current_dir(sp: Word) -> Word {
   sb_need_any_fs("current_dir", sp)
   if fake_on() {
     return str_from(bits("/") + 32, 1)
@@ -812,7 +813,7 @@ fn raw_cwd() -> Word {
 }
 
 // remove_file(path): deletes a file
-fn b_remove_file(path: Word, rtd: Word, sp: Word) -> Word {
+fn real_remove_file(path: Word, rtd: Word, sp: Word) -> Word {
   sb_need_fs("remove_file", path, sp)
   if fake_on() {
     return fake_remove_file(path, rtd)
@@ -924,7 +925,7 @@ fn run_capture_win(args: Word, dir: Word, input: Word, rtd: Word) -> Word {
 // run_capture(args, dir, input): runs a program (searched in PATH) in `dir` ("" = here) with `input` as its stdin
 // and returns [exit code, stdout, stderr]; both streams are read together (poll), so neither can fill up and block
 // the child. The input goes into the pipe before the child starts (so at most one pipe buffer: 64 KB).
-fn b_run_capture(args: Word, dir: Word, input: Word, rtd: Word, sp: Word) -> Word {
+fn real_run_capture(args: Word, dir: Word, input: Word, rtd: Word, sp: Word) -> Word {
   sb_need_proc("run_capture", args, sp)
   let n = peek(args + 16)
   if n == 0 {

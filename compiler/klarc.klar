@@ -30,12 +30,13 @@ use emit_a64.{emit_a64}
 use link.{write_elf, write_macho, write_pe}
 use contracts.{with_contracts}
 use loader.{Ld, Module, load_program, load_runtime}
-use lower.{fnv1a, lower_program, lower_program_allow}
+use lower.{TraceSpec, fnv1a, lower_program, lower_program_traced}
+use trace.{events_text, read_result, read_trace, source_hash, trace_json}
 
 const TARGETS: List[Str] = ["linux", "windows", "linux-arm64", "macos"]
 
 type Options { cmd: Str, file: Str, out: Str, target: Str, lib: Str, time: Bool, json: Bool, quiet: Bool, filter: Str,
-  runs: Int, seed: Int, args: List[Str], allow: Option[Str] }
+  runs: Int, seed: Int, args: List[Str], allow: Option[Str], record: Option[Str] }
 
 /// The rights of an `--allow` value (klar/sandbox.py), or the problem with an unknown one.
 fn parse_allow(spec: Str) -> Result[List[Str], Str] {
@@ -62,7 +63,8 @@ fn parse_allow(spec: Str) -> Result[List[Str], Str] {
 fn usage() -> Never uses io {
   print("usage: klarc build <file.klar> [-o <out>] [--target linux|windows|linux-arm64|macos] [--allow <rights>] [--lib <dir>]")
   print("                   [--time]")
-  print("       klarc run <file.klar> [--allow <rights>] [--lib <dir>] [-- <program arguments>]")
+  print("       klarc run <file.klar> [--allow <rights>] [--record <trace.json>] [--lib <dir>] [-- <program arguments>]")
+  print("       klarc replay <trace.json> [file.klar] [-q] [--lib <dir>]   run a recording again (same input, clock, files)")
   print("       klarc test <file.klar> [-k <text>] [-q] [--runs <n>] [--seed <n>] [--lib <dir>]")
   print("       klarc patch <file.klar> <patch.json | - | json> [--dry-run] [--force] [--json]")
   print("       klarc add <name> (--path <dir> | --git <url> [--tag|--rev|--branch <x>]) [--no-fetch] [--json]")
@@ -100,7 +102,7 @@ fn lib_dir(args: List[Str]) -> Str uses io {
 fn parse_args(args: List[Str]) -> Options uses io, proc {
   var o = Options { cmd: args.get_or(0, ""), file: "", out: "", target: "", lib: env_var("KLAR_LIB").unwrap_or(
     "klar"), time: false, json: false, quiet: false, filter: "", runs: 100,
-    seed: 0, args: [], allow: None }
+    seed: 0, args: [], allow: None, record: None }
   var i = 1
   while i < args.len() {
     let a = args.get_or(i, "")
@@ -137,6 +139,9 @@ fn parse_args(args: List[Str]) -> Options uses io, proc {
       i = i + 2
     } else if a == "--allow" {
       o = o with { allow: Some(v) }
+      i = i + 2
+    } else if a == "--record" {
+      o = o with { record: Some(v) }
       i = i + 2
     } else if o.file == "" and not a.starts_with("-") {
       o = o with { file: a }
@@ -221,6 +226,125 @@ fn write_exe(path: Str, image: Bytes) uses io, fs {
   }
 }
 
+fn absolute(path: Str) -> Str uses fs {
+  if path.starts_with("/") or path.slice(1, 2) == ":" {
+    return path
+  }
+  return current_dir() + "/" + path
+}
+
+/// The sources the trace names in its hash: the program as `klar` loads it (not the runtime).
+fn program_sources(ld: Ld) -> Map[Str, Str] {
+  var out: Map[Str, Str] = Map {}
+  for e in ld.sources.entries() {
+    if not e.key.starts_with("rt/") {
+      out = out.set(e.key, e.value)
+    }
+  }
+  return out
+}
+
+fn save_recording(o: Options, ld: Ld, result_path: Str) uses io, fs {
+  let path = o.record.unwrap_or("trace.json")
+  let r = match read_bytes(result_path) {
+    Ok(data) => match read_result(data) {
+      Ok(x) => x,
+      Err(e) => {
+        eprint("klarc: {e}")
+        return exit(2)
+      },
+    },
+    Err(e) => {
+      eprint("klarc: {e}")
+      return exit(2)
+    },
+  }
+  let _ = remove_file(result_path)
+  match write_file(path, trace_json(version: klar_version(), file: absolute(o.file), hash: source_hash(
+    program_sources(ld)), args: o.args, r: r)) {
+      Ok(_) => {},
+      Err(e) => {
+        eprint("klarc: {e}")
+        exit(2)
+      },
+    }
+  if not o.quiet {
+    eprint("recorded {r.events.len()} event(s) to {path}; `klar replay {path}` runs it again")
+  }
+}
+
+/// `klarc replay TRACE [FILE] [-q] [--lib DIR]`: runs a recording again (klar/trace.py).
+fn replay_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
+  var pos: List[Str] = []
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--lib" {
+      i = i + 2
+    } else {
+      if not a.starts_with("-") {
+        pos = pos.push(a)
+      }
+      i = i + 1
+    }
+  }
+  let quiet = args.contains("-q") or args.contains("--quiet")
+  let trace_path = pos.get_or(0, "")
+  let tr = match read_file(trace_path) {
+    Ok(text) => match read_trace(text) {
+      Ok(t) => t,
+      Err(e) => {
+        eprint("error: {trace_path} is not a Klar recording: {e}")
+        return 2
+      },
+    },
+    Err(e) => {
+      eprint("error: {e}")
+      return 2
+    },
+  }
+  let file = pos.get_or(1, tr.file)
+  let ld = load_runtime(load_program(file, lib))
+  let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let diags = user_diags(ld, shown)
+  if diags.any(fn(d) => d.severity == "error") {
+    show_report(text: render_report(ld, diags), to_stderr: true)
+    return 1
+  }
+  if source_hash(program_sources(ld)) != tr.sources and not quiet {
+    eprint("note: the program changed since the recording; the replay may diverge (R0017)")
+  }
+  let o = Options { cmd: "replay", file: file, out: "", target: "", lib: lib, time: false, json: false, quiet: quiet,
+    filter: "", runs: 100, seed: 0, args: [], allow: None, record: None }
+  let events_path = temp_exe(o, "trace-events")
+  let result_path = temp_exe(o, "trace-result")
+  match write_bytes(events_path, events_text(tr.events)) {
+    Ok(_) => {},
+    Err(e) => {
+      eprint("klarc: {e}")
+      return 2
+    },
+  }
+  let w = lower_program_traced(ld: ld, main_path: file, allow: None, trace: TraceSpec { mode: 2, events: events_path,
+    result: result_path }, tests: false)
+  let exe = temp_exe(o, "replay")
+  write_exe(exe, write_elf(emit_program(w, "linux")))
+  let code = run_or_fail([exe])
+  let _ = remove_file(events_path)
+  let same = match read_bytes(result_path) {
+    Ok(data) => match read_result(data) {
+      Ok(r) => r.stdout == tr.stdout and r.stderr == tr.stderr and r.error == tr.error and r.exit == tr.exit,
+      Err(_) => false,
+    },
+    Err(_) => false,
+  }
+  let _ = remove_file(result_path)
+  if not same and not quiet {
+    eprint("note: the replay differs from the recording (output, error or exit code)")
+  }
+  return code
+}
+
 fn run_or_fail(cmd: List[Str]) -> Int uses io, proc {
   return match run_command(cmd) {
     Ok(code) => code,
@@ -259,6 +383,9 @@ fn main() uses io, fs, time, proc {
   }
   if tool == "refs" {
     exit(refs_command(args: argv.drop(1), lib: lib_dir(argv)))
+  }
+  if tool == "replay" {
+    exit(replay_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
   if tool == "context" {
     exit(context_command(args: argv.drop(1), lib: lib_dir(argv)))
@@ -365,7 +492,14 @@ fn main() uses io, fs, time, proc {
     print("\n0 passed, 0 failed")
     return
   }
-  let w = lower_program_allow(ld: tld, main_path: o.file, tests: tests, allow: rights)
+  // `--record T`: the run keeps what it gets from outside (klar/rt/trace.klar, compiler/trace.klar)
+  let recording = o.cmd == "run" and o.record != None
+  let result_path = temp_exe(o, "trace-result")
+  var spec = TraceSpec { mode: 0, events: "", result: "" }
+  if recording {
+    spec = TraceSpec { mode: 1, events: "", result: result_path }
+  }
+  let w = lower_program_traced(ld: tld, main_path: o.file, allow: rights, trace: spec, tests: tests)
   let t2 = lap(o: o, phase: "lower", start: t1)
   var x = emit_program(w, "linux")
   if o.target == "linux-arm64" {
@@ -388,7 +522,11 @@ fn main() uses io, fs, time, proc {
   if o.cmd == "run" {
     let exe = temp_exe(o, "run")
     write_exe(exe, image)
-    exit(run_or_fail([exe].concat(o.args)))
+    let code = run_or_fail([exe].concat(o.args))
+    if recording {
+      save_recording(o: o, ld: ld, result_path: result_path)
+    }
+    exit(code)
   }
   if tests {
     let exe = temp_exe(o, "test")

@@ -3405,12 +3405,24 @@ pub fn lower_program_cov(ld: Ld, main_path: Str, tests: Bool, coverage: Bool) ->
 
 /// `lower_program` with coverage marks and/or profiling calls (klar/rt/cov.klar, klar/rt/profile.klar).
 pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool) -> Lw {
-  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: coverage, profile: profile, allow: None)
+  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: coverage, profile: profile, allow: None,
+    trace: TraceSpec { mode: 0, events: "", result: "" })
 }
 
 /// `lower_program` of a program that runs with the rights of `--allow` (klar/rt/sandbox.klar).
 pub fn lower_program_allow(ld: Ld, main_path: Str, tests: Bool, allow: Option[List[Str]]) -> Lw {
-  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: false, profile: false, allow: allow)
+  return lower_program_traced(ld: ld, main_path: main_path, allow: allow, trace: TraceSpec { mode: 0, events: "",
+    result: "" }, tests: tests)
+}
+
+/// How a run is traced (klar/rt/trace.klar): `mode` 0 (no), 1 (record) or 2 (replay), the events to replay and the
+/// file for the result.
+pub type TraceSpec { mode: Int, events: Str, result: Str }
+
+/// `lower_program` with rights and a trace (`klarc run --record`, `klarc replay`).
+pub fn lower_program_traced(ld: Ld, main_path: Str, allow: Option[List[Str]], trace: TraceSpec, tests: Bool) -> Lw {
+  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: false, profile: false, allow: allow,
+    trace: trace)
 }
 
 /// `g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc, time,
@@ -3462,307 +3474,324 @@ fn sandbox_data(w0: Lw, allow: Option[List[Str]]) -> Lw {
   return words(w: w, name: "g_allow", ws: ws)
 }
 
-fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool, allow: Option[List[Str]]) -> Lw {
-  let rt_mod = match ld.runtime {
-    Some(m) => m,
-    None => fail("native: the runtime is not loaded"),
+/// `g_trace` for klar/rt/trace.klar (as `trace_data` in klar/native/lower.py).
+fn trace_data(w0: Lw, t: TraceSpec) -> Lw {
+  if t.mode == 0 {
+    return words(w: w0, name: "g_trace", ws: [W.N(v: 0)])
   }
-  let main_mod = match ld.by_path.get(main_path) {
-    Some(m) => m,
-    None => fail("native: no main module"),
+  var w = w0
+  var src = W.N(v: 0)
+  if t.events != "" {
+    let s = str_word(w, t.events)
+    w = s.w
+    src = s.v
   }
-  var modules: Map[Str, Module] = Map {}
-  var ordered: List[Module] = [rt_mod]
-  for p in ld.order {
-    match ld.by_path.get(p) {
-      Some(m) => {
-        modules = modules.set(m.name, m)
-        ordered = ordered.push(m)
-      },
-      None => {},
+  let out = str_word(w, t.result)
+  return words(w: out.w, name: "g_trace", ws: [W.N(v: t.mode), src, out.v])
+}
+
+fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool, allow: Option[List[Str]],
+  trace: TraceSpec) -> Lw {
+    let rt_mod = match ld.runtime {
+      Some(m) => m,
+      None => fail("native: the runtime is not loaded"),
     }
-  }
-  modules = modules.set(rt_mod.name, rt_mod)
-  var rt: Map[Str, Int] = Map {}
-  var k = 0
-  for d in checker_of(rt_mod).decls {
-    match d {
-      Decl.Fn(f) => {
-        rt = rt.set(f.name, k)
-      },
-      _ => {},
+    let main_mod = match ld.by_path.get(main_path) {
+      Some(m) => m,
+      None => fail("native: no main module"),
     }
-    k = k + 1
-  }
-  let um0 = KFn { name: "__user_main", klar_name: "__user_main", nparams: 0, nregs: 0, code: [], labels: 0 }
-  var w = Lw {
-    b: ld.b,
-    uni: ld.uni,
-    modules: modules,
-    sources: ld.sources,
-    fns: [],
-    soft: [],
-    instances: Map {},
-    names_used: Map {},
-    queue: [],
-    strings: Map {},
-    spans: Map {},
-    tds: Map {},
-    static_objs: Map {},
-    const_slots: Map {},
-    counter: 0,
-    rt: rt,
-    img: empty_img(),
-    cur: um0,
-    cur_index: 0,
-    m: main_mod,
-    file: main_mod.display,
-    env: Map {},
-    is_rt: false,
-    scopes: [],
-    loops: [],
-    ret_t: unit_t(),
-    dead: false,
-    closure_self: None,
-    captures: Map {},
-    decl: None,
-    posts: [],
-    in_test: false,
-    owned: Map {},
-    cand: Map {},
-    bound: Map {},
-    takeable: Map {},
-    cov_file: "",
-    cov_count: 0,
-    prof_on: false,
-    prof_keys: Map {},
-    prof_lines: Map {},
-  }
-  if coverage {
-    w = w with { cov_file: main_mod.display }
-  }
-  if profile {
-    w = w with { prof_on: true }
-  }
-  // the parameters each function consumes (own.klar)
-  var ofns: List[OwnFn] = []
-  for m in ordered {
-    if not m.is_sys {
+    var modules: Map[Str, Module] = Map {}
+    var ordered: List[Module] = [rt_mod]
+    for p in ld.order {
+      match ld.by_path.get(p) {
+        Some(m) => {
+          modules = modules.set(m.name, m)
+          ordered = ordered.push(m)
+        },
+        None => {},
+      }
+    }
+    modules = modules.set(rt_mod.name, rt_mod)
+    var rt: Map[Str, Int] = Map {}
+    var k = 0
+    for d in checker_of(rt_mod).decls {
+      match d {
+        Decl.Fn(f) => {
+          rt = rt.set(f.name, k)
+        },
+        _ => {},
+      }
+      k = k + 1
+    }
+    let um0 = KFn { name: "__user_main", klar_name: "__user_main", nparams: 0, nregs: 0, code: [], labels: 0 }
+    var w = Lw {
+      b: ld.b,
+      uni: ld.uni,
+      modules: modules,
+      sources: ld.sources,
+      fns: [],
+      soft: [],
+      instances: Map {},
+      names_used: Map {},
+      queue: [],
+      strings: Map {},
+      spans: Map {},
+      tds: Map {},
+      static_objs: Map {},
+      const_slots: Map {},
+      counter: 0,
+      rt: rt,
+      img: empty_img(),
+      cur: um0,
+      cur_index: 0,
+      m: main_mod,
+      file: main_mod.display,
+      env: Map {},
+      is_rt: false,
+      scopes: [],
+      loops: [],
+      ret_t: unit_t(),
+      dead: false,
+      closure_self: None,
+      captures: Map {},
+      decl: None,
+      posts: [],
+      in_test: false,
+      owned: Map {},
+      cand: Map {},
+      bound: Map {},
+      takeable: Map {},
+      cov_file: "",
+      cov_count: 0,
+      prof_on: false,
+      prof_keys: Map {},
+      prof_lines: Map {},
+    }
+    if coverage {
+      w = w with { cov_file: main_mod.display }
+    }
+    if profile {
+      w = w with { prof_on: true }
+    }
+    // the parameters each function consumes (own.klar)
+    var ofns: List[OwnFn] = []
+    for m in ordered {
+      if not m.is_sys {
+        var di = 0
+        for d in checker_of(m).decls {
+          match d {
+            Decl.Fn(f) => {
+              if f.body != None {
+                ofns = ofns.push(OwnFn { key: "{m.name}#{di}", decl: f, cx: Cx { ck: checker_of(m), file: decl_file(m, di)
+                } })
+              }
+            },
+            _ => {},
+          }
+          di = di + 1
+        }
+      }
+    }
+    w = w with { owned: infer_owned(ofns) }
+    // __user_main calls main (or the test the command line selects)
+    w = begin_fn(w, um0)
+    let rr = reg(w)
+    w = rr.w
+    var main_idx = -1
+    var main_decl: Option[FnDecl] = None
+    var test_blocks: List[Decl] = []
+    k = 0
+    for d in checker_of(main_mod).decls {
+      match d {
+        Decl.Fn(f) => {
+          if f.name == "main" and main_decl == None {
+            main_decl = Some(f)
+            main_idx = k
+          }
+        },
+        Decl.Test(_, _, _, _) => {
+          test_blocks = test_blocks.push(d)
+        },
+        Decl.Property(_, _, _, _, _) => {
+          test_blocks = test_blocks.push(d)
+        },
+        _ => {},
+      }
+      k = k + 1
+    }
+    var md = FnDecl { span: zero_span(), name: "", name_span: zero_span(), type_params: [], params: [], ret: None,
+      effects: [], effects_span: None, sig_end: zero_span(), pre: [], post: [], body: None, doc: None, bounds: [],
+      owner_kind: None, owner: None, trait_name: None, method_name: None, public: false, constructs: None }
+    var main_span = zero_span()
+    if tests {
+      w = finish_fn(w)
+      var names: List[Str] = []
+      var test_spans: List[Span] = []
+      var ti = 0
+      for d in test_blocks {
+        match d {
+          Decl.Test(sp, test_name, body, _) => {
+            if ti == 0 {
+              main_span = sp
+            }
+            test_spans = test_spans.push(sp)
+            let t = lower_test(w0: w, m: main_mod, name: test_name, body: body, index: ti)
+            w = t.w
+            names = names.push(t.v)
+            ti = ti + 1
+          },
+          Decl.Property(sp, pname, params, body, _) => {
+            if ti == 0 {
+              main_span = sp
+            }
+            test_spans = test_spans.push(sp)
+            let t = lower_property(w0: w, m: main_mod, name: pname, params: params, body: body, sp: sp, index: ti)
+            w = t.w
+            names = names.push(t.v)
+            ti = ti + 1
+          },
+          _ => {},
+        }
+      }
+      if names.is_empty() {
+        return fail("native: no tests")
+      }
+      w = w with { cur: w.fns.get_or(0, um0), cur_index: 0, dead: false, m: main_mod, file: main_mod.display, scopes: [],
+        in_test: false }
+      let sel = reg(w)
+      w = emit_always(sel.w, [op("call"), r(sel.v), KV.S(s: "test_index_arg"), KV.L(regs: [])])
+      // tests run on fake files, clock and random numbers
+      let fake = rt_fn(w, "fake_begin")
+      let fr = reg(fake.w)
+      w = emit_always(fr.w, [op("call"), r(fr.v), KV.S(s: fake.v), KV.L(regs: [])])
+      ti = 0
+      for nm in names {
+        let c = reg(w)
+        let kr = reg(c.w)
+        let yes = label(kr.w, "t")
+        let no = label(yes.w, "n")
+        w = emit_always(no.w, [op("const"), r(kr.v), r(ti)])
+        w = emit_always(w, [op("cmp"), op("eq"), r(c.v), r(sel.v), r(kr.v)])
+        w = emit_always(w, [op("br"), r(c.v), KV.S(s: yes.v), KV.S(s: no.v)])
+        w = emit_always(w, [op("label"), KV.S(s: yes.v)])
+        // the test's own place, for its call stack
+        let gf = reg(w)
+        let at = reg(gf.w)
+        let ss = span_sym(at.w, test_spans.get_or(ti, main_span))
+        w = emit_always(ss.w, [op("addr"), r(gf.v), KV.S(s: "g_frames")])
+        w = emit_always(w, [op("addr"), r(at.v), KV.S(s: ss.v)])
+        w = emit_always(w, [op("store"), r(gf.v), r(8), r(at.v)])
+        w = emit_always(w, [op("call"), r(rr.v), KV.S(s: nm), KV.L(regs: [])])
+        w = emit_always(w, [op("ret"), r(rr.v)])
+        w = emit_always(w, [op("label"), KV.S(s: no.v)])
+        ti = ti + 1
+      }
+      w = emit_always(emit_always(w, [op("const"), r(rr.v), r(0)]), [op("ret"), r(rr.v)])
+      w = finish_fn(w)
+    } else {
+      md = match main_decl {
+        Some(f) => f,
+        None => fail("native: no main"),
+      }
+      main_span = md.name_span
+      let main_name = instance(w: w, md: main_mod, decl: md, idx: main_idx, type_args: [], kind: "user")
+      w = main_name.w
+      if profile {
+        let pk = addr(w, "prof_keys")
+        let pl = addr(pk.w, "prof_lines_tab")
+        w = call_rt(w: pl.w, name: "prof_start", args: [pk.v, pl.v]).w
+      }
+      w = emit_always(w, [op("call"), r(rr.v), KV.S(s: main_name.v), KV.L(regs: [])])
+      w = finish_fn(emit_always(w, [op("ret"), r(rr.v)]))
+    }
+    // constants initialiser: the runtime's own constants first, then the program's modules in dependency order
+    w = begin_fn(w, KFn { name: "__init_consts", klar_name: "__init_consts", nparams: 0, nregs: 0, code: [], labels: 0 })
+    for m in ordered {
       var di = 0
       for d in checker_of(m).decls {
         match d {
-          Decl.Fn(f) => {
-            if f.body != None {
-              ofns = ofns.push(OwnFn { key: "{m.name}#{di}", decl: f, cx: Cx { ck: checker_of(m), file: decl_file(m, di)
-              } })
-            }
+          Decl.Const(_, cname, _, _, value, _, _) => {
+            w = push_scope(w with { m: m, file: decl_file(m, di), env: Map {}, is_rt: m.is_sys, scopes: [], loops: [],
+              dead: false, closure_self: None, captures: Map {} })
+            let v = expr(w, value)
+            let slot = const_slot(w: v.w, module_name: m.name, cname: cname)
+            let a = addr(slot.w, slot.v)
+            let o = own(a.w, v.v)
+            w = emit_always(o.w, [op("store"), r(a.v), r(0), r(o.v)])
           },
           _ => {},
         }
         di = di + 1
       }
     }
-  }
-  w = w with { owned: infer_owned(ofns) }
-  // __user_main calls main (or the test the command line selects)
-  w = begin_fn(w, um0)
-  let rr = reg(w)
-  w = rr.w
-  var main_idx = -1
-  var main_decl: Option[FnDecl] = None
-  var test_blocks: List[Decl] = []
-  k = 0
-  for d in checker_of(main_mod).decls {
-    match d {
-      Decl.Fn(f) => {
-        if f.name == "main" and main_decl == None {
-          main_decl = Some(f)
-          main_idx = k
+    let z = reg(w)
+    w = emit_always(emit_always(z.w, [op("const"), r(z.v), r(0)]), [op("ret"), r(z.v)])
+    w = finish_fn(w)
+    for helper in RT_HELPERS {
+      w = rt_fn(w, helper).w
+    }
+    w = drain(w, md)
+    // the software math functions the program's `fun` / `fpow` instructions call (rt/softmath.klar)
+    var soft: List[Str] = []
+    for f in w.fns {
+      for ins in f.code {
+        let name = soft_name(ins)
+        if name != "" and not soft.contains(name) {
+          soft = soft.push(name)
         }
-      },
-      Decl.Test(_, _, _, _) => {
-        test_blocks = test_blocks.push(d)
-      },
-      Decl.Property(_, _, _, _, _) => {
-        test_blocks = test_blocks.push(d)
-      },
-      _ => {},
-    }
-    k = k + 1
-  }
-  var md = FnDecl { span: zero_span(), name: "", name_span: zero_span(), type_params: [], params: [], ret: None,
-    effects: [], effects_span: None, sig_end: zero_span(), pre: [], post: [], body: None, doc: None, bounds: [],
-    owner_kind: None, owner: None, trait_name: None, method_name: None, public: false, constructs: None }
-  var main_span = zero_span()
-  if tests {
-    w = finish_fn(w)
-    var names: List[Str] = []
-    var test_spans: List[Span] = []
-    var ti = 0
-    for d in test_blocks {
-      match d {
-        Decl.Test(sp, test_name, body, _) => {
-          if ti == 0 {
-            main_span = sp
-          }
-          test_spans = test_spans.push(sp)
-          let t = lower_test(w0: w, m: main_mod, name: test_name, body: body, index: ti)
-          w = t.w
-          names = names.push(t.v)
-          ti = ti + 1
-        },
-        Decl.Property(sp, pname, params, body, _) => {
-          if ti == 0 {
-            main_span = sp
-          }
-          test_spans = test_spans.push(sp)
-          let t = lower_property(w0: w, m: main_mod, name: pname, params: params, body: body, sp: sp, index: ti)
-          w = t.w
-          names = names.push(t.v)
-          ti = ti + 1
-        },
-        _ => {},
       }
     }
-    if names.is_empty() {
-      return fail("native: no tests")
+    soft = soft.sort()
+    for name in soft {
+      w = rt_fn(w, name).w
     }
-    w = w with { cur: w.fns.get_or(0, um0), cur_index: 0, dead: false, m: main_mod, file: main_mod.display, scopes: [],
-      in_test: false }
-    let sel = reg(w)
-    w = emit_always(sel.w, [op("call"), r(sel.v), KV.S(s: "test_index_arg"), KV.L(regs: [])])
-    // tests run on fake files, clock and random numbers
-    let fake = rt_fn(w, "fake_begin")
-    let fr = reg(fake.w)
-    w = emit_always(fr.w, [op("call"), r(fr.v), KV.S(s: fake.v), KV.L(regs: [])])
-    ti = 0
-    for nm in names {
-      let c = reg(w)
-      let kr = reg(c.w)
-      let yes = label(kr.w, "t")
-      let no = label(yes.w, "n")
-      w = emit_always(no.w, [op("const"), r(kr.v), r(ti)])
-      w = emit_always(w, [op("cmp"), op("eq"), r(c.v), r(sel.v), r(kr.v)])
-      w = emit_always(w, [op("br"), r(c.v), KV.S(s: yes.v), KV.S(s: no.v)])
-      w = emit_always(w, [op("label"), KV.S(s: yes.v)])
-      // the test's own place, for its call stack
-      let gf = reg(w)
-      let at = reg(gf.w)
-      let ss = span_sym(at.w, test_spans.get_or(ti, main_span))
-      w = emit_always(ss.w, [op("addr"), r(gf.v), KV.S(s: "g_frames")])
-      w = emit_always(w, [op("addr"), r(at.v), KV.S(s: ss.v)])
-      w = emit_always(w, [op("store"), r(gf.v), r(8), r(at.v)])
-      w = emit_always(w, [op("call"), r(rr.v), KV.S(s: nm), KV.L(regs: [])])
-      w = emit_always(w, [op("ret"), r(rr.v)])
-      w = emit_always(w, [op("label"), KV.S(s: no.v)])
-      ti = ti + 1
+    w = drain(w with { soft: soft }, md)
+    // static descriptors the runtime refers to by name
+    w = w with { m: main_mod, file: main_mod.display }
+    for nt in [Pair { first: "td_Str", second: con("Str") }, Pair { first: "td_Int", second: con("Int") }, Pair {
+      first: "td_Float", second: con("Float") }, Pair { first: "td_Bool", second: con("Bool") }, Pair { first: "td_Unit",
+        second: unit_t() }, Pair { first: "td_Bytes", second: con("Bytes") }] {
+          let s = td(w, nt.second)
+          w = alias_sym(w: s.w, name: nt.first, sym: s.v)
+        }
+    let si = str_word(w, "Int")
+    w = words(w: si.w, name: "td_Big", ws: [W.N(v: K_BIG), si.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)])
+    let tn = td_word(w, Type.Con(name: "Option", args: [unit_t()]))
+    w = words(w: tn.w, name: "obj_None", ws: [W.N(v: -1), tn.v, W.N(v: 0)])
+    let sb = str_word(w, "Buf")
+    w = words(w: sb.w, name: "td_Buf", ws: [W.N(v: K_BUF), sb.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)])
+    let sl = str_word(w, "List")
+    w = words(w: sl.w, name: "td_ListStr", ws: [W.N(v: K_LIST), sl.v, W.A(sym: "td_Str", add: 0), W.N(v: 0), W.N(v: 0),
+      W.N(v: 0)])
+    var kind = 0
+    if not tests and tname(zonk(sig_of(main_mod, md).ret, Map {})) == "Result" {
+      kind = 1
     }
-    w = emit_always(emit_always(w, [op("const"), r(rr.v), r(0)]), [op("ret"), r(rr.v)])
-    w = finish_fn(w)
-  } else {
-    md = match main_decl {
-      Some(f) => f,
-      None => fail("native: no main"),
+    w = trace_data(sandbox_data(words(w: w, name: "main_kind", ws: [W.N(v: kind)]), allow), trace)
+    let ms = span_sym(w, main_span)
+    w = alias_sym(w: ms.w, name: "main_span", sym: ms.v)
+    var img = add_bss(img: add_bss(img: add_bss(img: w.img, name: "g_rt", size: 8 * 4096), name: "g_outbuf", size: 65536),
+      name: "g_inbuf", size: 65536)
+    if coverage {
+      img = add_bss(img: img, name: "g_cov", size: 8 * w.cov_count.max(1))
     }
-    main_span = md.name_span
-    let main_name = instance(w: w, md: main_mod, decl: md, idx: main_idx, type_args: [], kind: "user")
-    w = main_name.w
+    w = w with { img: img }
     if profile {
-      let pk = addr(w, "prof_keys")
-      let pl = addr(pk.w, "prof_lines_tab")
-      w = call_rt(w: pl.w, name: "prof_start", args: [pk.v, pl.v]).w
-    }
-    w = emit_always(w, [op("call"), r(rr.v), KV.S(s: main_name.v), KV.L(regs: [])])
-    w = finish_fn(emit_always(w, [op("ret"), r(rr.v)]))
-  }
-  // constants initialiser: the runtime's own constants first, then the program's modules in dependency order
-  w = begin_fn(w, KFn { name: "__init_consts", klar_name: "__init_consts", nparams: 0, nregs: 0, code: [], labels: 0 })
-  for m in ordered {
-    var di = 0
-    for d in checker_of(m).decls {
-      match d {
-        Decl.Const(_, cname, _, _, value, _, _) => {
-          w = push_scope(w with { m: m, file: decl_file(m, di), env: Map {}, is_rt: m.is_sys, scopes: [], loops: [],
-            dead: false, closure_self: None, captures: Map {} })
-          let v = expr(w, value)
-          let slot = const_slot(w: v.w, module_name: m.name, cname: cname)
-          let a = addr(slot.w, slot.v)
-          let o = own(a.w, v.v)
-          w = emit_always(o.w, [op("store"), r(a.v), r(0), r(o.v)])
-        },
-        _ => {},
+      var kws = [W.N(v: w.prof_keys.len())]
+      for key in w.prof_keys.keys() {
+        let s = str_word(w, key)
+        w = s.w
+        kws = kws.push(s.v)
       }
-      di = di + 1
-    }
-  }
-  let z = reg(w)
-  w = emit_always(emit_always(z.w, [op("const"), r(z.v), r(0)]), [op("ret"), r(z.v)])
-  w = finish_fn(w)
-  for helper in RT_HELPERS {
-    w = rt_fn(w, helper).w
-  }
-  w = drain(w, md)
-  // the software math functions the program's `fun` / `fpow` instructions call (rt/softmath.klar)
-  var soft: List[Str] = []
-  for f in w.fns {
-    for ins in f.code {
-      let name = soft_name(ins)
-      if name != "" and not soft.contains(name) {
-        soft = soft.push(name)
+      w = words(w: w, name: "prof_keys", ws: kws)
+      var lws = [W.N(v: w.prof_lines.len())]
+      for key in w.prof_lines.keys() {
+        let parts = key.split("\0")
+        let s = str_word(w, parts.get_or(0, ""))
+        w = s.w
+        lws = lws.concat([s.v, W.N(v: parts.get_or(1, "0").to_int().unwrap_or(0))])
       }
+      w = words(w: w, name: "prof_lines_tab", ws: lws)
     }
+    return w
   }
-  soft = soft.sort()
-  for name in soft {
-    w = rt_fn(w, name).w
-  }
-  w = drain(w with { soft: soft }, md)
-  // static descriptors the runtime refers to by name
-  w = w with { m: main_mod, file: main_mod.display }
-  for nt in [Pair { first: "td_Str", second: con("Str") }, Pair { first: "td_Int", second: con("Int") }, Pair {
-    first: "td_Float", second: con("Float") }, Pair { first: "td_Bool", second: con("Bool") }, Pair { first: "td_Unit",
-      second: unit_t() }, Pair { first: "td_Bytes", second: con("Bytes") }] {
-        let s = td(w, nt.second)
-        w = alias_sym(w: s.w, name: nt.first, sym: s.v)
-      }
-  let si = str_word(w, "Int")
-  w = words(w: si.w, name: "td_Big", ws: [W.N(v: K_BIG), si.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)])
-  let tn = td_word(w, Type.Con(name: "Option", args: [unit_t()]))
-  w = words(w: tn.w, name: "obj_None", ws: [W.N(v: -1), tn.v, W.N(v: 0)])
-  let sb = str_word(w, "Buf")
-  w = words(w: sb.w, name: "td_Buf", ws: [W.N(v: K_BUF), sb.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)])
-  let sl = str_word(w, "List")
-  w = words(w: sl.w, name: "td_ListStr", ws: [W.N(v: K_LIST), sl.v, W.A(sym: "td_Str", add: 0), W.N(v: 0), W.N(v: 0),
-    W.N(v: 0)])
-  var kind = 0
-  if not tests and tname(zonk(sig_of(main_mod, md).ret, Map {})) == "Result" {
-    kind = 1
-  }
-  w = sandbox_data(words(w: w, name: "main_kind", ws: [W.N(v: kind)]), allow)
-  let ms = span_sym(w, main_span)
-  w = alias_sym(w: ms.w, name: "main_span", sym: ms.v)
-  var img = add_bss(img: add_bss(img: add_bss(img: w.img, name: "g_rt", size: 8 * 4096), name: "g_outbuf", size: 65536),
-    name: "g_inbuf", size: 65536)
-  if coverage {
-    img = add_bss(img: img, name: "g_cov", size: 8 * w.cov_count.max(1))
-  }
-  w = w with { img: img }
-  if profile {
-    var kws = [W.N(v: w.prof_keys.len())]
-    for key in w.prof_keys.keys() {
-      let s = str_word(w, key)
-      w = s.w
-      kws = kws.push(s.v)
-    }
-    w = words(w: w, name: "prof_keys", ws: kws)
-    var lws = [W.N(v: w.prof_lines.len())]
-    for key in w.prof_lines.keys() {
-      let parts = key.split("\0")
-      let s = str_word(w, parts.get_or(0, ""))
-      w = s.w
-      lws = lws.concat([s.v, W.N(v: parts.get_or(1, "0").to_int().unwrap_or(0))])
-    }
-    w = words(w: w, name: "prof_lines_tab", ws: lws)
-  }
-  return w
-}

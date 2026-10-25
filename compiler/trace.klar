@@ -1,0 +1,272 @@
+// `klarc run --record T` and `klarc replay T`: the counterparts of klar/trace.py, with the same JSON trace (a trace
+// recorded by one tool replays in the other). The program is built with a trace mode (klar/rt/trace.klar); its
+// result file — the events in a simple text form, the output, the runtime error, the exit code — is turned into the
+// JSON trace here, and the JSON events are turned back into that text form for a replay.
+use std.hash.{sha256}
+use std.json.{Json, as_int, as_items, as_text, field, json_object, json_pretty, parse_json}
+
+const B64: Str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+/// Bytes as base64 (with `=` padding).
+pub fn base64_encode(data: List[Int]) -> Str {
+  var out = ""
+  for chunk in data.chunks(3) {
+    let a = chunk.get_or(0, 0)
+    let b = chunk.get_or(1, 0)
+    let c = chunk.get_or(2, 0)
+    let n = a.shift_left(16).bit_or(b.shift_left(8)).bit_or(c)
+    let k = chunk.len()
+    for i in range(0, 4) {
+      if i <= k {
+        let d = n.shift_right(18 - i * 6).bit_and(63)
+        out = out + B64.slice(d, d + 1)
+      } else {
+        out = out + "="
+      }
+    }
+  }
+  return out
+}
+
+/// The bytes of base64 text (characters outside the alphabet are skipped).
+pub fn base64_decode(text: Str) -> List[Int] {
+  var out: List[Int] = []
+  var acc = 0
+  var bits = 0
+  for c in text.chars() {
+    match B64.index_of(c) {
+      Some(v) => {
+        acc = acc.shift_left(6).bit_or(v).bit_and(16777215)
+        bits = bits + 6
+        if bits >= 8 {
+          bits = bits - 8
+          out = out.push(acc.shift_right(bits).bit_and(255))
+        }
+      },
+      None => {},
+    }
+  }
+  return out
+}
+
+/// What the traced program left in its result file.
+pub type RunResult { events: List[Json], stdout: Str, stderr: Str, error: Str, exit: Int }
+
+/// Reads the text form (klar/rt/trace.klar) from position `pos`.
+type Reader { data: Bytes, pos: Int }
+
+fn line(r: Reader) -> Pair[Str, Reader] {
+  var i = r.pos
+  while i < r.data.len() and r.data.get_or(i, 10) != 10 {
+    i = i + 1
+  }
+  return Pair { first: r.data.slice(r.pos, i).decode().unwrap_or(""), second: r with { pos: i + 1 } }
+}
+
+fn take_bytes(r: Reader, n: Int) -> Pair[Bytes, Reader] {
+  return Pair { first: r.data.slice(r.pos, r.pos + n), second: r with { pos: r.pos + n + 1 } }
+}
+
+fn num(s: Str) -> Int {
+  return s.slice(1, s.len()).to_int().unwrap_or(0)
+}
+
+fn variant(enum_name: Str, name: Str, field_name: Str, values: List[Json]) -> Json {
+  return json_object([Pair { first: "variant", second: Json.Arr(items: [Json.Text(value: enum_name), Json.Text(
+    value: name)]) }, Pair { first: "fields", second: Json.Arr(items: match field_name.is_empty() {
+      true => [],
+      false => [Json.Text(value: field_name)],
+    }) }, Pair { first: "values", second: Json.Arr(items: values) }])
+}
+
+/// One value of the text form as the JSON of klar/trace.py (`encode`).
+fn value(r0: Reader) -> Pair[Json, Reader] {
+  let l = line(r0)
+  let s = l.first
+  let r = l.second
+  let k = s.slice(0, 1)
+  if k == "I" {
+    return Pair { first: Json.Int(value: num(s)), second: r }
+  }
+  if k == "B" {
+    return Pair { first: Json.Bool(value: s == "B1"), second: r }
+  }
+  if k == "U" {
+    return Pair { first: json_object([Pair { first: "unit", second: Json.Bool(value: true) }]), second: r }
+  }
+  if k == "S" {
+    let b = take_bytes(r, num(s))
+    return Pair { first: Json.Text(value: b.first.decode().unwrap_or("")), second: b.second }
+  }
+  if k == "Y" {
+    let b = take_bytes(r, num(s))
+    return Pair { first: json_object([Pair { first: "bytes", second: Json.Text(value: base64_encode(b.first.to_list())) }]),
+      second: b.second }
+  }
+  if k == "L" {
+    var items: List[Json] = []
+    var cur = r
+    for _i in range(0, num(s)) {
+      let v = value(cur)
+      items = items.push(v.first)
+      cur = v.second
+    }
+    return Pair { first: json_object([Pair { first: "list", second: Json.Arr(items: items) }]), second: cur }
+  }
+  if k == "N" {
+    return Pair { first: variant(enum_name: "Option", name: "None", field_name: "", values: []), second: r }
+  }
+  let inner = value(r)
+  return match k {
+    "O" => Pair { first: variant(enum_name: "Option", name: "Some", field_name: "value", values: [inner.first]),
+      second: inner.second },
+    "K" => Pair { first: variant(enum_name: "Result", name: "Ok", field_name: "value", values: [inner.first]),
+      second: inner.second },
+    _ => Pair { first: variant(enum_name: "Result", name: "Err", field_name: "error", values: [inner.first]),
+      second: inner.second },
+  }
+}
+
+fn section(r: Reader, name: Str) -> Pair[Str, Reader] {
+  let l = line(r)
+  if not l.first.starts_with(name + " ") {
+    return Pair { first: "", second: r }
+  }
+  let n = l.first.slice(name.len() + 1, l.first.len()).to_int().unwrap_or(0)
+  let b = take_bytes(l.second, n)
+  return Pair { first: b.first.decode().unwrap_or(""), second: b.second }
+}
+
+/// The result file of a traced run.
+pub fn read_result(data: Bytes) -> Result[RunResult, Str] {
+  var r = Reader { data: data, pos: 0 }
+  let head = line(r)
+  if head.first != "KLART1" {
+    return Err("not a result file of a traced run")
+  }
+  r = head.second
+  var events: List[Json] = []
+  while r.pos < data.len() and data.get_or(r.pos, 0) != 64 {
+    let name = line(r)
+    if data.get_or(name.second.pos, 0) == 82 {
+      events = events.push(json_object([Pair { first: "fn", second: Json.Text(value: name.first) }, Pair {
+        first: "raised", second: Json.Bool(value: true) }]))
+      r = line(name.second).second
+    } else {
+      let v = value(name.second)
+      events = events.push(json_object([Pair { first: "fn", second: Json.Text(value: name.first) }, Pair {
+        first: "result", second: v.first }]))
+      r = v.second
+    }
+  }
+  let out = section(r, "@stdout")
+  let err = section(out.second, "@stderr")
+  let error = section(err.second, "@error")
+  let exit_line = line(error.second).first
+  return Ok(RunResult { events: events, stdout: out.first, stderr: err.first, error: error.first,
+    exit: exit_line.slice(6, exit_line.len()).to_int().unwrap_or(1) })
+}
+
+fn utf8(s: Str) -> Bytes {
+  return s.to_bytes()
+}
+
+/// A JSON value of klar/trace.py in the text form (Bytes: base64 data is kept as its raw bytes).
+fn text_value(j: Json) -> Bytes {
+  return match j {
+    Json.Int(n) => utf8("I{n}\n"),
+    Json.Bool(flag) => match flag {
+      true => utf8("B1\n"),
+      false => utf8("B0\n"),
+    },
+    Json.Text(s) => utf8("S{s.to_bytes().len()}\n{s}\n"),
+    Json.Obj(fs) => {
+      if fs.has("unit") {
+        return utf8("U\n")
+      }
+      match fs.get("list") {
+        Some(Json.Arr(items)) => {
+          return items.fold(utf8("L{items.len()}\n"), fn(acc, x) => acc.concat(text_value(x)))
+        },
+        _ => {},
+      }
+      match fs.get("bytes") {
+        Some(Json.Text(data)) => {
+          let raw = bytes_of(base64_decode(data))
+          return utf8("Y{raw.len()}\n").concat(raw).concat(utf8("\n"))
+        },
+        _ => {},
+      }
+      let name = field(j, "variant").and_then(as_items).and_then(fn(xs) => xs.get(1)).and_then(as_text).unwrap_or("")
+      let inner = field(j, "values").and_then(as_items).and_then(fn(xs) => xs.first()).map(text_value).unwrap_or(utf8(""))
+      return match name {
+        "None" => utf8("N\n"),
+        "Some" => utf8("O\n").concat(inner),
+        "Ok" => utf8("K\n").concat(inner),
+        _ => utf8("E\n").concat(inner),
+      }
+    },
+    _ => utf8("U\n"),
+  }
+}
+
+/// The events of a JSON trace in the text form a replaying program reads.
+pub fn events_text(events: List[Json]) -> Bytes {
+  return events.fold(utf8(""), fn(acc, e) => acc.concat(utf8(field(e, "fn").and_then(as_text).unwrap_or("?") + "\n"))
+      .concat(match field(e, "raised") {
+        Some(Json.Bool(true)) => utf8("R\n"),
+        _ => field(e, "result").map(text_value).unwrap_or(utf8("U\n")),
+  }))
+}
+
+/// The short hash of the sources of a program (as `source_hash` in klar/trace.py).
+pub fn source_hash(sources: Map[Str, Str]) -> Str {
+  let names = sources.keys().sort()
+  return sha256(names.map(fn(n) => n + sources.get(n).unwrap_or("")).join("")).slice(0, 16)
+}
+
+/// The JSON trace of a recorded run.
+pub fn trace_json(version: Str, file: Str, hash: Str, args: List[Str], r: RunResult) -> Str {
+  return json_pretty(json_object([Pair { first: "format", second: Json.Int(value: 1) }, Pair { first: "klar",
+    second: Json.Text(value: version) }, Pair { first: "file", second: Json.Text(value: file) }, Pair {
+      first: "sources", second: Json.Text(value: hash) }, Pair { first: "args", second: Json.Arr(items: args.map(fn(a) =>
+        Json.Text(value: a))) }, Pair { first: "events", second: Json.Arr(items: r.events) }, Pair { first: "stdout",
+          second: Json.Text(value: r.stdout) }, Pair { first: "stderr", second: Json.Text(value: r.stderr) }, Pair {
+            first: "error", second: Json.Text(value: r.error) }, Pair { first: "exit", second: Json.Int(value: r.exit) }])) +
+    "\n"
+}
+
+/// A JSON trace: (file, sources hash, args, events, stdout, stderr, error, exit).
+pub type Trace { file: Str, sources: Str, args: List[Str], events: List[Json], stdout: Str, stderr: Str, error: Str,
+  exit: Int }
+
+pub fn read_trace(text: Str) -> Result[Trace, Str] {
+  let j = parse_json(text)?
+  if field(j, "format").and_then(as_int) != Some(1) {
+    return Err("not a Klar recording (format 1)")
+  }
+  let s = fn(k: Str) => field(j, k).and_then(as_text).unwrap_or("")
+  return Ok(Trace { file: s("file"), sources: s("sources"), args: field(j, "args").and_then(as_items).unwrap_or([])
+      .flat_map(fn(a) => match as_text(a) {
+        Some(x) => [x],
+        None => [],
+      }), events: field(j, "events").and_then(as_items).unwrap_or([]), stdout: s("stdout"), stderr: s("stderr"),
+    error: s("error"), exit: field(j, "exit").and_then(as_int).unwrap_or(0) })
+}
+
+test "base64 round trip" {
+  assert base64_encode([104, 105]) == "aGk="
+  assert base64_encode([]) == ""
+  assert base64_decode("aGk=") == [104, 105]
+  assert base64_decode(base64_encode([0, 255, 7, 8])) == [0, 255, 7, 8]
+}
+
+test "the text form and the JSON trace" {
+  let raw = "KLART1\nnow_ms\nI42\nread_file\nE\nS4\nnope\nread_line\nO\nS2\nhi\n@stdout 3\nab\n\n@stderr 0\n\n" +
+    "@error 0\n\n@exit 0\n"
+  let r = read_result(raw.to_bytes()).unwrap_or(RunResult { events: [], stdout: "", stderr: "", error: "", exit: 9 })
+  assert r.events.len() == 3
+  assert r.stdout == "ab\n"
+  assert r.exit == 0
+  assert events_text(r.events).decode() == Ok("now_ms\nI42\nread_file\nE\nS4\nnope\nread_line\nO\nS2\nhi\n")
+}

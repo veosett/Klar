@@ -1402,7 +1402,7 @@ class Checker:
                                 f"memory, a clock that starts at 0 and fixed random numbers", fix=fix)
         else:
             fix = None
-            allowed = sorted(self.ctx.effects | missing)
+            allowed = sorted((self.ctx.effects & KNOWN_EFFECTS) | missing)     # an unknown effect is E0403
             if self.ctx.sig_end is not None and not self.ctx.effects:
                 se = self.ctx.sig_end
                 fix = {"span": Span(se.file, se.end_line, se.end_col, se.end_line, se.end_col),

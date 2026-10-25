@@ -152,6 +152,24 @@ def main():
         if (got.stdout, got.returncode) != ("9\n", 0):
             bad += 1
             print(f"DIFF klarc3 run of a project with a path dependency: {got.stdout[:200]!r} {got.stderr[:200]!r}")
+        # klarc run --record / klarc replay: the same JSON trace as `klar`, each replays the other's recording
+        rr = os.path.join(d, "rr.klar")
+        with open(rr, "w", encoding="utf-8") as f:
+            f.write("fn main() uses io, time, rand, fs {\n  let name = read_line().unwrap_or(\"?\")\n"
+                    "  let dice = random_int(1, 1000000)\n  let cfg = read_file(\"no-such.txt\")\n"
+                    "  print(\"{name} {dice} {cfg} {now_ms() > 0}\")\n  eprint(cli_args())\n"
+                    "  assert dice < 0\n}\n")
+        t_k, t_p = os.path.join(d, "t_k.json"), os.path.join(d, "t_p.json")
+        rec_k = run([stage[2], "run", rr, "-q", "--record", t_k, "--lib", LIB, "--", "a"], input="ann\n")
+        rec_p = run([sys.executable, "-m", "klar", "run", "-q", "--record", t_p, rr, "b"], input="bob\n")
+        for trace, rec in ((t_k, rec_k), (t_p, rec_p)):
+            for tool in ([stage[2], "replay", trace, "--lib", LIB], [sys.executable, "-m", "klar", "replay", trace]):
+                got = run(tool, input="")
+                if (got.stdout, got.stderr, got.returncode) != (rec.stdout, rec.stderr, rec.returncode) or \
+                        rec.returncode != 1:
+                    bad += 1
+                    print(f"DIFF {os.path.basename(tool[0])} replay of {os.path.basename(trace)}: "
+                          f"{got.stdout[:200]!r} {got.stderr[:300]!r} / recorded {rec.stdout[:200]!r}")
         # and reports errors
         proc = run([stage[2], "check", os.path.join("examples", "mistakes.klar"), "--lib", LIB])
         if proc.returncode != 1 or "error[E" not in proc.stdout:
