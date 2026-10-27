@@ -1,0 +1,82 @@
+use catalog.{Item}
+use money.{round2}
+
+/// Minimum amount (after discount, before tax) for free shipping: $50.00.
+pub const FREE_SHIPPING_MIN: Float = 50.0
+
+pub type Line { item: Item, qty: Int }
+
+pub type Cart { lines: List[Line], code: Option[Str] }
+
+pub fn new_cart() -> Cart {
+  return Cart { lines: [], code: None }
+}
+
+pub fn add_line(cart: Cart, item: Item, qty: Int) -> Result[Cart, Str] {
+  if qty < 1 or qty > 99 {
+    return Err("invalid quantity: {qty}")
+  }
+  return Ok(cart with { lines: cart.lines.push(Line { item: item, qty: qty }) })
+}
+
+/// Percentage taken off by a discount code, None for an unknown code.
+pub fn discount_percent(code: Str) -> Option[Int] {
+  return match code {
+    "SAVE10" => Some(10),
+    "WELCOME5" => Some(5),
+    "VIP15" => Some(15),
+    "HALF" => Some(50),
+    _ => None,
+  }
+}
+
+pub fn apply_code(cart: Cart, code: Str) -> Result[Cart, Str] {
+  if discount_percent(code).is_none() {
+    return Err("unknown code: {code}")
+  }
+  return Ok(cart with { code: Some(code) })
+}
+
+pub fn item_count(cart: Cart) -> Int {
+  return cart.lines.fold(0, fn(acc, l) => acc + l.qty)
+}
+
+pub fn line_total(line: Line) -> Float {
+  return line.item.price * line.qty.to_float()
+}
+
+pub fn largest_line(cart: Cart) -> Option[Line] {
+  return cart.lines.max_by(fn(l) => line_total(l))
+}
+
+pub fn subtotal(cart: Cart) -> Float {
+  return cart.lines.fold(0.0, fn(acc, l) => acc + line_total(l))
+}
+
+/// The discount for the cart's code, rounded to the cent (0 without a code).
+pub fn discount(cart: Cart) -> Float {
+  let percent = match cart.code {
+    Some(c) => discount_percent(c).unwrap_or(0),
+    None => 0,
+  }
+  return round2(subtotal(cart) * percent.to_float() / 100.0)
+}
+
+/// Tax on the subtotal after the discount; the rate is in basis points (825 = 8.25%).
+pub fn tax(cart: Cart, rate_bp: Int) -> Float {
+  let taxable = subtotal(cart) - discount(cart)
+  return round2(taxable * rate_bp.to_float() / 10000.0)
+}
+
+pub fn total(cart: Cart, rate_bp: Int) -> Float {
+  return subtotal(cart) - discount(cart) + tax(cart, rate_bp)
+}
+
+/// How much more must be bought (after discount) to get free shipping.
+pub fn free_shipping_gap(cart: Cart) -> Float {
+  let net = subtotal(cart) - discount(cart)
+  if net >= FREE_SHIPPING_MIN {
+    return 0.0
+  }
+  return round2(FREE_SHIPPING_MIN - net)
+}

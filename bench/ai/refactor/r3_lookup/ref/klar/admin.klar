@@ -1,0 +1,25 @@
+use users.{User, find_user}
+
+/// Gives a user a new name (the name is trimmed and must not be empty).
+pub fn rename_user(directory: List[User], user_id: Int, new_name: Str) -> Result[List[User], Str] {
+  let _ = find_user(directory, user_id).ok_or("unknown user {user_id}")?
+  let name = new_name.trim()
+  if name.is_empty() {
+    return Err("empty name")
+  }
+  return Ok(directory.map(fn(x) => match x.id == user_id {
+    true => x with { name: name },
+    false => x,
+  }))
+}
+
+/// Removes a user from the directory.
+pub fn deactivate_user(directory: List[User], user_id: Int) -> Result[List[User], Str] {
+  let _ = find_user(directory, user_id).ok_or("unknown user {user_id}")?
+  return Ok(directory.filter(fn(x) => x.id != user_id))
+}
+
+/// One line per user, sorted by name: "1 alice <alice@example.com>".
+pub fn list_users(directory: List[User]) -> List[Str] {
+  return directory.sort_by(fn(u) => u.name).map(fn(u) => "{u.id} {u.name} <{u.email}>")
+}

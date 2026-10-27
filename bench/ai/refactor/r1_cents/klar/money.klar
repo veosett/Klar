@@ -1,0 +1,29 @@
+/// Rounds a dollar amount to the nearest cent, halves up.
+pub fn round2(x: Float) -> Float {
+  return (x * 100.0 + 0.5).floor().to_float() / 100.0
+}
+
+/// Formats a dollar amount: 12.5 -> "$12.50", -2.5 -> "-$2.50".
+pub fn format_amount(amount: Float) -> Str {
+  let sign = match amount < 0.0 {
+    true => "-",
+    false => "",
+  }
+  return "{sign}${amount.abs().fixed(2)}"
+}
+
+/// Parses "12.5", "12" or "$12.50" (surrounding spaces allowed) into dollars.
+pub fn parse_amount(text: Str) -> Result[Float, Str] {
+  var t = text.trim()
+  if t.starts_with("$") {
+    t = t.slice(1, t.len())
+  }
+  let parts = t.split(".")
+  if parts.len() > 2 or not parts.all(fn(p) => p.is_numeric()) {
+    return Err("invalid amount: " + text)
+  }
+  return match t.to_float() {
+    Some(v) => Ok(v),
+    None => Err("invalid amount: " + text),
+  }
+}

@@ -27,6 +27,12 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
   Linux x86-64, like `tests/bootstrap.py`.
 
 ### Security
+- Time limit (THREATS.md T9): `--timeout N` for `run`, `build`, `test` and `dev` in klar and klarc, 10 s by default
+  for `test` and `dev` (each test, and main). An endless loop or an exponential recursion in a model's code stops
+  with the new error R0018 at the `while` loop or the function that was running, with the call stack, instead of
+  hanging the agent; in a property it ends the run instead of shrinking. Same place and stack in native code
+  (klar/rt/limit.klar, a counter per `while` iteration and per call, the clock read every 4096 ticks; none of it
+  without a limit), the interpreter and the Python backend (`tests/limits/endless.klar`, `TimeLimit`).
 - New right `env` / `env:NAME` (THREATS.md T8): under `--allow` without it, `env_var` returns `None`, so a model's
   code run by an agent no longer reads `ANTHROPIC_API_KEY` and prints it into the agent's log. All four backends
   (`klar build --allow` and klarc build it into the executable).
@@ -58,6 +64,9 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   variables, resource limits, links on Windows, programs found through PATH).
 
 ### Changed
+- `klar spec` is 5% shorter with the same content: the methods are one line per type, without the receiver
+  (a line such as `List[T]: len() -> Int, map[U](f: fn(T) -> U) -> List[U], ...`; a different receiver such as
+  `sum(self: List[Int])` is still shown).
 - The agent loop with klarc is shorter (`bench/ai/loop_latency.py`, the 24 own tasks): a verdict on a program with
   a type error takes 9 ms instead of 280 ms (klarc reports the program's errors before reading the runtime; mypy
   takes 1 000 ms, tsc 2 000 ms), and "all tests pass" 250 ms instead of 420 ms. The runtime's function bodies are
@@ -104,6 +113,11 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   builds, tests and checks programs in any directory. Before, outside the repository every command failed with
   "cannot read module `rt`" unless `--lib` or `KLAR_LIB` pointed at a checkout. A library directory on disk
   (`--lib`, `KLAR_LIB`, `./klar`) is still used first.
+- `bench/ai/refactor_bench.py` and `bench/ai/refactor`: a refactoring benchmark. Four programs of four modules
+  (150-250 lines each), written in Klar, Python and TypeScript, with a change that touches 9-19 places (amounts
+  in cents, a new enum variant, an optional lookup instead of a placeholder, a name split in two), hidden tests
+  (24-87 checks) and reference changes; `validate` checks that the originals compile, their tests fail and the
+  references pass. First run with Haiku: 4/4 on the first try in every language; Klar 34% more tokens than Python.
 - `bench/ai/hard`: a suite of 20 longer tasks (expression parsing, graphs, caches, ledgers, a lexer, ...) with 147
   tests whose expected results come from Python references (`llm_bench.py --suite hard`). First run with Haiku as
   the model: 19/20 on the first try in Klar, Python and TypeScript alike, no compile error in Klar, 60% more tokens

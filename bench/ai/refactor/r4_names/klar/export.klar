@@ -1,0 +1,54 @@
+use contact.{Contact, make_contact}
+use book.{Book, add_contact, empty_book}
+
+const CSV_HEADER: Str = "name,phone,city"
+
+/// One CSV line; no quoting or escaping.
+pub fn csv_line(c: Contact) -> Str {
+  return c.name + "," + c.phone + "," + c.city
+}
+
+/// The header line followed by one line per contact, in book order.
+pub fn csv_lines(book: Book) -> List[Str] {
+  return [CSV_HEADER].concat(book.map(csv_line))
+}
+
+/// The whole CSV file as one text, one line per row.
+pub fn csv_text(book: Book) -> Str {
+  return csv_lines(book).join("\n") + "\n"
+}
+
+/// Reads one CSV line (as written by `csv_line`) back into a contact.
+pub fn parse_csv_line(line: Str) -> Result[Contact, Str] {
+  let fields = line.split(",")
+  if fields.len() != 3 {
+    return Err("bad csv line: " + line)
+  }
+  return make_contact(
+    name: fields.get_or(0, ""),
+    phone: fields.get_or(1, ""),
+    city: fields.get_or(2, ""),
+  )
+}
+
+/// Reads the output of `csv_lines` back into a book; stops at the first bad line.
+pub fn read_csv(lines: List[Str]) -> Result[Book, Str] {
+  if lines.first() != Some(CSV_HEADER) {
+    return Err("bad csv header")
+  }
+  var book = empty_book()
+  for line in lines.drop(1) {
+    let c = parse_csv_line(line)?
+    book = add_contact(book, c)?
+  }
+  return Ok(book)
+}
+
+/// One entry of the display list.
+pub fn display_line(c: Contact) -> Str {
+  return c.name + " — " + c.phone
+}
+
+pub fn display_list(book: Book) -> List[Str] {
+  return book.map(display_line)
+}

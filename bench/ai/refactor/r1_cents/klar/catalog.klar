@@ -1,0 +1,42 @@
+use money.{format_amount}
+
+pub type Item { name: Str, price: Float }
+
+/// Builds a validated item: the name must not be blank and the price must be positive.
+pub fn make_item(name: Str, price: Float) -> Result[Item, Str] {
+  if name.trim().is_empty() {
+    return Err("empty name")
+  }
+  if price <= 0.0 {
+    return Err("invalid price for {name}")
+  }
+  return Ok(Item { name: name, price: price })
+}
+
+pub fn default_catalog() -> List[Item] {
+  return [
+    Item { name: "Widget", price: 3.5 },
+    Item { name: "Gadget", price: 12.5 },
+    Item { name: "Gizmo", price: 49.99 },
+    Item { name: "Cable", price: 7.25 },
+    Item { name: "Case", price: 24.0 },
+  ]
+}
+
+pub fn find_item(items: List[Item], name: Str) -> Option[Item] {
+  return items.find(fn(i) => i.name == name)
+}
+
+/// Cheapest first.
+pub fn sorted_by_price(items: List[Item]) -> List[Item] {
+  return items.sort_by(fn(i) => i.price)
+}
+
+pub fn cheapest(items: List[Item]) -> Option[Item] {
+  return items.min_by(fn(i) => i.price)
+}
+
+/// One line per item: "Widget - $3.50".
+pub fn catalog_text(items: List[Item]) -> Str {
+  return items.map(fn(i) => "{i.name} - {format_amount(i.price)}").join("\n")
+}

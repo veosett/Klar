@@ -1,0 +1,40 @@
+/// A bank transaction. Amounts are whole currency units.
+pub enum Txn {
+  Deposit(amount: Int)
+  Withdraw(amount: Int)
+  Transfer(to: Str, amount: Int)
+}
+
+/// The amount of money a transaction moves.
+pub fn amount_of(t: Txn) -> Int {
+  return match t {
+    Txn.Deposit(a) => a,
+    Txn.Withdraw(a) => a,
+    Txn.Transfer(_, a) => a,
+  }
+}
+
+/// Checks a transaction; the error says what is wrong.
+pub fn validate(t: Txn) -> Result[Unit, Str] {
+  match t {
+    Txn.Transfer(to, _) => {
+      if to.is_empty() {
+        return Err("transfer needs a destination")
+      }
+    },
+    _ => {},
+  }
+  if amount_of(t) <= 0 {
+    return Err("amount must be positive")
+  }
+  return Ok(())
+}
+
+/// True when the transaction adds money to the balance.
+pub fn is_credit(t: Txn) -> Bool {
+  return match t {
+    Txn.Deposit(_) => true,
+    Txn.Withdraw(_) => false,
+    Txn.Transfer(_, _) => false,
+  }
+}

@@ -1,0 +1,25 @@
+/// A person in the directory.
+pub type User {
+  id: Int
+  name: Str
+  email: Str
+}
+
+/// The user with this id, or None when the id is unknown.
+pub fn find_user(directory: List[User], user_id: Int) -> Option[User] {
+  return directory.find(fn(u) => u.id == user_id)
+}
+
+/// The directory with one more user at the end.
+pub fn add_user(directory: List[User], user: User) -> List[User] {
+  return directory.push(user)
+}
+
+/// The email domain of a user ("" when the address has no @).
+pub fn email_domain(user: User) -> Str {
+  let parts = user.email.split("@")
+  if parts.len() != 2 {
+    return ""
+  }
+  return parts.get_or(1, "")
+}

@@ -1,0 +1,44 @@
+use users.{User, find_user}
+
+/// A message that was sent from one user to another.
+pub type Message {
+  from_user: User
+  to_user: User
+  text: Str
+}
+
+/// The greeting for a user.
+pub fn greeting(directory: List[User], user_id: Int) -> Str {
+  return match find_user(directory, user_id) {
+    Some(u) => "hello, " + u.name,
+    None => "hello, stranger",
+  }
+}
+
+/// Sends a message from one user id to another.
+pub fn send_message(directory: List[User], from_id: Int, to_id: Int, text: Str) -> Result[Message, Str] {
+  let sender = find_user(directory, from_id).ok_or("unknown user {from_id}")?
+  let receiver = find_user(directory, to_id).ok_or("unknown user {to_id}")?
+  return Ok(Message { from_user: sender, to_user: receiver, text: text })
+}
+
+/// Sends the greeting of the receiver as a message.
+pub fn send_greeting(directory: List[User], from_id: Int, to_id: Int) -> Result[Message, Str] {
+  let text = greeting(directory, to_id)
+  return send_message(directory: directory, from_id: from_id, to_id: to_id, text: text)
+}
+
+/// Sends the same text to several users; stops at the first failure.
+pub fn broadcast(directory: List[User], from_id: Int, to_ids: List[Int], text: Str) -> Result[List[Message], Str] {
+  var sent: List[Message] = []
+  for to_id in to_ids {
+    let m = send_message(directory: directory, from_id: from_id, to_id: to_id, text: text)?
+    sent = sent.push(m)
+  }
+  return Ok(sent)
+}
+
+/// One line for a message: "alice -> bob: hi".
+pub fn format_message(m: Message) -> Str {
+  return "{m.from_user.name} -> {m.to_user.name}: {m.text}"
+}

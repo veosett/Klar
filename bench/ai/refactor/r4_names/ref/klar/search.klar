@@ -1,0 +1,24 @@
+use contact.{Contact}
+use book.{Book}
+
+/// Contacts whose first or last name contains `text`, ignoring case.
+pub fn search_text(book: Book, text: Str) -> List[Contact] {
+  let needle = text.lower()
+  return book.filter(fn(c) => c.first.lower().contains(needle) or c.last.lower().contains(needle))
+}
+
+/// Contacts living in `city`, ignoring case.
+pub fn contacts_in_city(book: Book, city: Str) -> List[Contact] {
+  let wanted = city.lower()
+  return book.filter(fn(c) => c.city.lower() == wanted)
+}
+
+/// The contact with this phone number, if any.
+pub fn find_by_phone(book: Book, phone: Str) -> Option[Contact] {
+  return book.find(fn(c) => c.phone == phone)
+}
+
+/// Every city in the book once, in alphabetical order.
+pub fn cities(book: Book) -> List[Str] {
+  return book.map(fn(c) => c.city).unique().sort()
+}

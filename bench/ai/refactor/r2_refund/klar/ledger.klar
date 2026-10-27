@@ -1,0 +1,39 @@
+use txn.{Txn, validate}
+
+fn take(balance: Int, amount: Int) -> Result[Int, Str] {
+  if amount > balance {
+    return Err("insufficient funds: balance {balance}, need {amount}")
+  }
+  return Ok(balance - amount)
+}
+
+/// The balance after one transaction. Fails when a withdrawal or a transfer exceeds the balance.
+pub fn apply(balance: Int, t: Txn) -> Result[Int, Str] {
+  return match t {
+    Txn.Deposit(a) => Ok(balance + a),
+    Txn.Withdraw(a) => take(balance, a),
+    Txn.Transfer(_, a) => take(balance, a),
+  }
+}
+
+/// Validates and applies the transactions in order; errors say which one (1-based) failed.
+pub fn apply_all(balance: Int, txns: List[Txn]) -> Result[Int, Str] {
+  var current = balance
+  for e in txns.enumerate() {
+    let at = e.index + 1
+    validate(e.value).map_err(fn(m) => "txn {at}: {m}")?
+    current = apply(current, e.value).map_err(fn(m) => "txn {at}: {m}")?
+  }
+  return Ok(current)
+}
+
+/// The balance after each transaction (the start balance is not included).
+pub fn history(balance: Int, txns: List[Txn]) -> Result[List[Int], Str] {
+  var current = balance
+  var seen: List[Int] = []
+  for t in txns {
+    current = apply(current, t)?
+    seen = seen.push(current)
+  }
+  return Ok(seen)
+}

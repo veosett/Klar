@@ -1,0 +1,441 @@
+use money.{format_amount, parse_amount}
+use catalog.{Item, make_item, default_catalog, find_item, sorted_by_price, cheapest, catalog_text}
+use cart.{Cart, Line, FREE_SHIPPING_MIN, new_cart, add_line, apply_code, discount_percent, item_count, line_total, largest_line, subtotal, discount, tax, total, free_shipping_gap}
+use receipt.{line_text, render, summary}
+
+fn it(name: Str, cents: Int) -> Item {
+  return Item { name: name, price_cents: cents }
+}
+
+fn ln(item: Item, qty: Int) -> Line {
+  return Line { item: item, qty: qty }
+}
+
+fn cart_of(parts: List[Line], code_text: Str) -> Cart {
+  let c = match code_text.is_empty() {
+    true => None,
+    false => Some(code_text),
+  }
+  return Cart { lines: parts, code: c }
+}
+
+fn one(cents: Int, code_text: Str) -> Cart {
+  return cart_of([ln(it("X", cents), 1)], code_text)
+}
+
+fn cart_a(code_text: Str) -> Cart {
+  return cart_of([ln(it("Widget", 350), 2), ln(it("Gadget", 1250), 1)], code_text)
+}
+
+fn cat() -> List[Item] {
+  return default_catalog()
+}
+
+fn pa(text: Str) -> Str {
+  return match parse_amount(text) {
+    Ok(v) => v.to_str(),
+    Err(e) => e,
+  }
+}
+
+fn item_msg(name: Str, cents: Int) -> Str {
+  return match make_item(name, cents) {
+    Ok(i) => "ok {i.name} {i.price_cents}",
+    Err(e) => e,
+  }
+}
+
+fn add_msg(c: Cart, item: Item, qty: Int) -> Str {
+  return match add_line(c, item, qty) {
+    Ok(n) => "ok {n.lines.len()}",
+    Err(e) => e,
+  }
+}
+
+fn code_msg(c: Cart, code_text: Str) -> Str {
+  return match apply_code(c, code_text) {
+    Ok(_) => "ok",
+    Err(e) => e,
+  }
+}
+
+fn name_of_line(l: Option[Line]) -> Str {
+  return match l {
+    Some(x) => x.item.name,
+    None => "none",
+  }
+}
+
+fn largest_line_or_zero(c: Cart) -> Line {
+  return largest_line(c).unwrap_or(ln(it("none", 0), 0))
+}
+
+fn name_of_item(i: Option[Item]) -> Str {
+  return match i {
+    Some(x) => x.name,
+    None => "none",
+  }
+}
+
+fn price_of(i: Option[Item]) -> Int {
+  return match i {
+    Some(x) => x.price_cents,
+    None => -1,
+  }
+}
+
+fn names(items: List[Item]) -> Str {
+  return items.map(fn(i) => i.name).join(",")
+}
+
+fn pct(code_text: Str) -> Int {
+  return discount_percent(code_text).unwrap_or(-1)
+}
+
+test "01 format_amount(0)" {
+  assert format_amount(0) == "$0.00"
+}
+
+test "02 format_amount(5)" {
+  assert format_amount(5) == "$0.05"
+}
+
+test "03 format_amount(100)" {
+  assert format_amount(100) == "$1.00"
+}
+
+test "04 format_amount(1250)" {
+  assert format_amount(1250) == "$12.50"
+}
+
+test "05 format_amount(123456)" {
+  assert format_amount(123456) == "$1234.56"
+}
+
+test "06 format_amount(-250)" {
+  assert format_amount(-250) == "-$2.50"
+}
+
+test "07 format_amount(-5)" {
+  assert format_amount(-5) == "-$0.05"
+}
+
+test "08 format_amount(4999)" {
+  assert format_amount(4999) == "$49.99"
+}
+
+test "09 pa('12.5')" {
+  assert pa("12.5") == "1250"
+}
+
+test "10 pa('12.50')" {
+  assert pa("12.50") == "1250"
+}
+
+test "11 pa('12')" {
+  assert pa("12") == "1200"
+}
+
+test "12 pa('$3.99')" {
+  assert pa("$3.99") == "399"
+}
+
+test "13 pa('  $0.05 ')" {
+  assert pa("  $0.05 ") == "5"
+}
+
+test "14 pa('0')" {
+  assert pa("0") == "0"
+}
+
+test "15 pa('7.05')" {
+  assert pa("7.05") == "705"
+}
+
+test "16 pa('0.5')" {
+  assert pa("0.5") == "50"
+}
+
+test "17 pa('12.345')" {
+  assert pa("12.345") == "invalid amount: 12.345"
+}
+
+test "18 pa('abc')" {
+  assert pa("abc") == "invalid amount: abc"
+}
+
+test "19 pa('')" {
+  assert pa("") == "invalid amount: "
+}
+
+test "20 pa('-1')" {
+  assert pa("-1") == "invalid amount: -1"
+}
+
+test "21 pa('1.2.3')" {
+  assert pa("1.2.3") == "invalid amount: 1.2.3"
+}
+
+test "22 pa('.5')" {
+  assert pa(".5") == "invalid amount: .5"
+}
+
+test "23 pa('5.')" {
+  assert pa("5.") == "invalid amount: 5."
+}
+
+test "24 item_msg('Pen', 0)" {
+  assert item_msg("Pen", 0) == "invalid price for Pen"
+}
+
+test "25 item_msg('Pen', -5)" {
+  assert item_msg("Pen", -5) == "invalid price for Pen"
+}
+
+test "26 item_msg('', 100)" {
+  assert item_msg("", 100) == "empty name"
+}
+
+test "27 item_msg('Pen', 199)" {
+  assert item_msg("Pen", 199) == "ok Pen 199"
+}
+
+test "28 price_of(find_item(cat(), 'Gizmo'))" {
+  assert price_of(find_item(cat(), "Gizmo")) == 4999
+}
+
+test "29 price_of(find_item(cat(), 'Cable'))" {
+  assert price_of(find_item(cat(), "Cable")) == 725
+}
+
+test "30 price_of(find_item(cat(), 'Case'))" {
+  assert price_of(find_item(cat(), "Case")) == 2400
+}
+
+test "31 name_of_item(find_item(cat(), 'Nope'))" {
+  assert name_of_item(find_item(cat(), "Nope")) == "none"
+}
+
+test "32 names(sorted_by_price(cat()))" {
+  assert names(sorted_by_price(cat())) == "Widget,Cable,Gadget,Case,Gizmo"
+}
+
+test "33 names(sorted_by_price([it('A', 999), it('B', 1000), it('C', 98)]))" {
+  assert names(sorted_by_price([it("A", 999), it("B", 1000), it("C", 98)])) == "C,A,B"
+}
+
+test "34 name_of_item(cheapest(cat()))" {
+  assert name_of_item(cheapest(cat())) == "Widget"
+}
+
+test "35 name_of_item(cheapest([it('A', 999), it('B', 1000), it('C', 98)]))" {
+  assert name_of_item(cheapest([it("A", 999), it("B", 1000), it("C", 98)])) == "C"
+}
+
+test "36 catalog_text(cat())" {
+  assert catalog_text(cat()) == "Widget - $3.50\nGadget - $12.50\nGizmo - $49.99\nCable - $7.25\nCase - $24.00"
+}
+
+test "37 FREE_SHIPPING_MIN" {
+  assert FREE_SHIPPING_MIN == 5000
+}
+
+test "38 line_total(ln(it('W', 350), 3))" {
+  assert line_total(ln(it("W", 350), 3)) == 1050
+}
+
+test "39 subtotal(cart_a(''))" {
+  assert subtotal(cart_a("")) == 1950
+}
+
+test "40 subtotal(cart_of([], ''))" {
+  assert subtotal(cart_of([], "")) == 0
+}
+
+test "41 item_count(cart_a(''))" {
+  assert item_count(cart_a("")) == 3
+}
+
+test "42 name_of_line(largest_line(cart_a('')))" {
+  assert name_of_line(largest_line(cart_a(""))) == "Gadget"
+}
+
+test "43 line_total(largest_line_or_zero(cart_a('')))" {
+  assert line_total(largest_line_or_zero(cart_a(""))) == 1250
+}
+
+test "44 add_msg(cart_a(''), it('X', 100), 0)" {
+  assert add_msg(cart_a(""), it("X", 100), 0) == "invalid quantity: 0"
+}
+
+test "45 add_msg(cart_a(''), it('X', 100), 100)" {
+  assert add_msg(cart_a(""), it("X", 100), 100) == "invalid quantity: 100"
+}
+
+test "46 add_msg(cart_a(''), it('X', 100), 5)" {
+  assert add_msg(cart_a(""), it("X", 100), 5) == "ok 3"
+}
+
+test "47 code_msg(cart_a(''), 'NOPE')" {
+  assert code_msg(cart_a(""), "NOPE") == "unknown code: NOPE"
+}
+
+test "48 code_msg(cart_a(''), 'HALF')" {
+  assert code_msg(cart_a(""), "HALF") == "ok"
+}
+
+test "49 pct('VIP15')" {
+  assert pct("VIP15") == 15
+}
+
+test "50 pct('x')" {
+  assert pct("x") == -1
+}
+
+test "51 discount(cart_a(''))" {
+  assert discount(cart_a("")) == 0
+}
+
+test "52 discount(cart_a('SAVE10'))" {
+  assert discount(cart_a("SAVE10")) == 195
+}
+
+test "53 discount(one(1050, 'WELCOME5'))" {
+  assert discount(one(1050, "WELCOME5")) == 53
+}
+
+test "54 discount(one(990, 'WELCOME5'))" {
+  assert discount(one(990, "WELCOME5")) == 50
+}
+
+test "55 discount(one(330, 'VIP15'))" {
+  assert discount(one(330, "VIP15")) == 50
+}
+
+test "56 discount(one(1001, 'HALF'))" {
+  assert discount(one(1001, "HALF")) == 501
+}
+
+test "57 discount(one(1005, 'SAVE10'))" {
+  assert discount(one(1005, "SAVE10")) == 101
+}
+
+test "58 discount(one(1004, 'SAVE10'))" {
+  assert discount(one(1004, "SAVE10")) == 100
+}
+
+test "59 discount(one(1, 'WELCOME5'))" {
+  assert discount(one(1, "WELCOME5")) == 0
+}
+
+test "60 discount(cart_of([ln(it('A', 333), 3)], 'VIP15'))" {
+  assert discount(cart_of([ln(it("A", 333), 3)], "VIP15")) == 150
+}
+
+test "61 tax(one(1000, ''), 825)" {
+  assert tax(one(1000, ""), 825) == 83
+}
+
+test "62 tax(one(200, ''), 725)" {
+  assert tax(one(200, ""), 725) == 15
+}
+
+test "63 tax(one(997, ''), 825)" {
+  assert tax(one(997, ""), 825) == 82
+}
+
+test "64 tax(cart_a(''), 825)" {
+  assert tax(cart_a(""), 825) == 161
+}
+
+test "65 tax(cart_a('SAVE10'), 825)" {
+  assert tax(cart_a("SAVE10"), 825) == 145
+}
+
+test "66 tax(one(1001, 'HALF'), 1000)" {
+  assert tax(one(1001, "HALF"), 1000) == 50
+}
+
+test "67 tax(one(1010, ''), 500)" {
+  assert tax(one(1010, ""), 500) == 51
+}
+
+test "68 tax(one(1010, ''), 0)" {
+  assert tax(one(1010, ""), 0) == 0
+}
+
+test "69 tax(one(1, ''), 825)" {
+  assert tax(one(1, ""), 825) == 0
+}
+
+test "70 total(cart_a(''), 825)" {
+  assert total(cart_a(""), 825) == 2111
+}
+
+test "71 total(cart_a('SAVE10'), 825)" {
+  assert total(cart_a("SAVE10"), 825) == 1900
+}
+
+test "72 total(one(1050, 'WELCOME5'), 825)" {
+  assert total(one(1050, "WELCOME5"), 825) == 1079
+}
+
+test "73 total(cart_of([], ''), 825)" {
+  assert total(cart_of([], ""), 825) == 0
+}
+
+test "74 free_shipping_gap(cart_a('SAVE10'))" {
+  assert free_shipping_gap(cart_a("SAVE10")) == 3245
+}
+
+test "75 free_shipping_gap(one(10000, 'HALF'))" {
+  assert free_shipping_gap(one(10000, "HALF")) == 0
+}
+
+test "76 free_shipping_gap(one(9998, 'HALF'))" {
+  assert free_shipping_gap(one(9998, "HALF")) == 1
+}
+
+test "77 free_shipping_gap(one(5000, ''))" {
+  assert free_shipping_gap(one(5000, "")) == 0
+}
+
+test "78 free_shipping_gap(one(5349, 'VIP15'))" {
+  assert free_shipping_gap(one(5349, "VIP15")) == 453
+}
+
+test "79 free_shipping_gap(cart_of([], ''))" {
+  assert free_shipping_gap(cart_of([], "")) == 5000
+}
+
+test "80 line_text(ln(it('Widget', 350), 2))" {
+  assert line_text(ln(it("Widget", 350), 2)) == "2 x Widget @ $3.50 = $7.00"
+}
+
+test "81 render(cart_a('SAVE10'), 825)" {
+  assert render(cart_a("SAVE10"), 825) == "2 x Widget @ $3.50 = $7.00\n1 x Gadget @ $12.50 = $12.50\nSubtotal: $19.50\nDiscount (SAVE10): -$1.95\nTax: $1.45\nTotal: $19.00\nAdd $32.45 more for free shipping"
+}
+
+test "82 render(cart_a(''), 0)" {
+  assert render(cart_a(""), 0) == "2 x Widget @ $3.50 = $7.00\n1 x Gadget @ $12.50 = $12.50\nSubtotal: $19.50\nTax: $0.00\nTotal: $19.50\nAdd $30.50 more for free shipping"
+}
+
+test "83 render(cart_of([], ''), 825)" {
+  assert render(cart_of([], ""), 825) == "Subtotal: $0.00\nTax: $0.00\nTotal: $0.00\nAdd $50.00 more for free shipping"
+}
+
+test "84 render(cart_of([ln(it('Gizmo', 4999), 1), ln(it('Cable', 725), 2)], ''), 825)" {
+  assert render(cart_of([ln(it("Gizmo", 4999), 1), ln(it("Cable", 725), 2)], ""), 825) == "1 x Gizmo @ $49.99 = $49.99\n2 x Cable @ $7.25 = $14.50\nSubtotal: $64.49\nTax: $5.32\nTotal: $69.81\nFree shipping"
+}
+
+test "85 summary(cart_a('SAVE10'), 825)" {
+  assert summary(cart_a("SAVE10"), 825) == "3 items, total $19.00"
+}
+
+test "86 summary(one(350, ''), 825)" {
+  assert summary(one(350, ""), 825) == "1 item, total $3.79"
+}
+
+test "87 summary(cart_of([], ''), 825)" {
+  assert summary(cart_of([], ""), 825) == "0 items, total $0.00"
+}

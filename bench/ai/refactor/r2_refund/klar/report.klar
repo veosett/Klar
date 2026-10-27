@@ -1,0 +1,75 @@
+use txn.{Txn, amount_of, is_credit}
+
+/// One transaction as text.
+pub fn describe(t: Txn) -> Str {
+  return match t {
+    Txn.Deposit(a) => "deposit of {a}",
+    Txn.Withdraw(a) => "withdrawal of {a}",
+    Txn.Transfer(to, a) => "transfer of {a} to {to}",
+  }
+}
+
+/// Counts per kind and the money that came in and went out.
+pub type Summary {
+  deposits: Int
+  withdrawals: Int
+  transfers: Int
+  money_in: Int
+  money_out: Int
+}
+
+fn tally(s: Summary, t: Txn) -> Summary {
+  return match t {
+    Txn.Deposit(a) => s with { deposits: s.deposits + 1, money_in: s.money_in + a },
+    Txn.Withdraw(a) => s with { withdrawals: s.withdrawals + 1, money_out: s.money_out + a },
+    Txn.Transfer(_, a) => s with { transfers: s.transfers + 1, money_out: s.money_out + a },
+  }
+}
+
+pub fn summarize(txns: List[Txn]) -> Summary {
+  let empty = Summary { deposits: 0, withdrawals: 0, transfers: 0, money_in: 0, money_out: 0 }
+  return txns.fold(empty, fn(s, t) => tally(s, t))
+}
+
+/// The summary as lines of text.
+pub fn summary_text(s: Summary) -> Str {
+  let lines = [
+    "deposits: {s.deposits}",
+    "withdrawals: {s.withdrawals}",
+    "transfers: {s.transfers}",
+    "in: {s.money_in}",
+    "out: {s.money_out}",
+  ]
+  return lines.join("\n")
+}
+
+fn kind_order(t: Txn) -> Int {
+  return match t {
+    Txn.Deposit(_) => 0,
+    Txn.Withdraw(_) => 1,
+    Txn.Transfer(_, _) => 2,
+  }
+}
+
+/// The transactions grouped by kind (deposits, withdrawals, transfers), the original order kept inside a kind.
+pub fn sorted_by_kind(txns: List[Txn]) -> List[Txn] {
+  return txns.sort_by(fn(t) => kind_order(t))
+}
+
+/// The largest transaction, if any.
+pub fn largest(txns: List[Txn]) -> Option[Txn] {
+  return txns.max_by(fn(t) => amount_of(t))
+}
+
+/// Money in minus money out over all transactions.
+pub fn net_change(txns: List[Txn]) -> Int {
+  return txns.fold(0, fn(sum, t) => match is_credit(t) {
+    true => sum + amount_of(t),
+    false => sum - amount_of(t),
+  })
+}
+
+/// One line per transaction, numbered from 1.
+pub fn describe_all(txns: List[Txn]) -> List[Str] {
+  return txns.enumerate().map(fn(e) => "{e.index + 1}. {describe(e.value)}")
+}

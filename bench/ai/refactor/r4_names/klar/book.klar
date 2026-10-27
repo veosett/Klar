@@ -1,0 +1,45 @@
+use contact.{Contact, with_phone}
+
+/// The contacts in the order they were added (until `sort_book`).
+pub type Book = List[Contact]
+
+pub fn empty_book() -> Book {
+  return []
+}
+
+pub fn count_contacts(book: Book) -> Int {
+  return book.len()
+}
+
+/// The contact with exactly this name, if there is one.
+pub fn find_contact(book: Book, name: Str) -> Option[Contact] {
+  return book.find(fn(c) => c.name == name)
+}
+
+/// Adds a contact; a second contact with the same name is refused.
+pub fn add_contact(book: Book, c: Contact) -> Result[Book, Str] {
+  if find_contact(book, c.name).is_some() {
+    return Err("duplicate contact: " + c.name)
+  }
+  return Ok(book.push(c))
+}
+
+/// Removes the contact with this name; the book is unchanged if there is none.
+pub fn remove_contact(book: Book, name: Str) -> Book {
+  return book.filter(fn(c) => c.name != name)
+}
+
+/// Gives the contact with this name a new phone number.
+pub fn update_phone(book: Book, name: Str, phone: Str) -> Result[Book, Str] {
+  let found = find_contact(book, name).ok_or("no such contact: " + name)?
+  let updated = with_phone(found, phone)?
+  return Ok(book.map(fn(c) => match c.name == name {
+    true => updated,
+    false => c,
+  }))
+}
+
+/// The book ordered by name, ignoring case.
+pub fn sort_book(book: Book) -> Book {
+  return book.sort_by(fn(c) => c.name.lower())
+}

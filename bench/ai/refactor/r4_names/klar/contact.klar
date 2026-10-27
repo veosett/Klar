@@ -1,0 +1,33 @@
+/// A person in the contact book. `name` is the full name, e.g. "Ada Lovelace".
+pub type Contact {
+  name: Str
+  phone: Str
+  city: Str
+}
+
+const DIGITS: Str = "0123456789"
+
+fn all_digits(s: Str) -> Bool {
+  return not s.is_empty() and s.chars().all(fn(ch) => DIGITS.contains(ch))
+}
+
+/// Builds a contact. The Err holds the message of the first rule that fails.
+pub fn make_contact(name: Str, phone: Str, city: Str) -> Result[Contact, Str] {
+  if name.is_empty() {
+    return Err("name must not be empty")
+  }
+  if not all_digits(phone) {
+    return Err("phone must be digits only")
+  }
+  return Ok(Contact { name: name, phone: phone, city: city })
+}
+
+/// The same contact with another phone number (validated like in `make_contact`).
+pub fn with_phone(c: Contact, phone: Str) -> Result[Contact, Str] {
+  return make_contact(name: c.name, phone: phone, city: c.city)
+}
+
+/// The same contact, moved to another city.
+pub fn with_city(c: Contact, city: Str) -> Contact {
+  return c with { city: city }
+}

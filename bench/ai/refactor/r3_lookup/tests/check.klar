@@ -1,0 +1,131 @@
+use users.{User, find_user}
+use messages.{Message, greeting, send_message, send_greeting, broadcast, format_message}
+use admin.{rename_user, deactivate_user, list_users}
+use report.{user_line, report_lines, summary, full_report}
+
+fn sample() -> List[User] {
+  return [
+    User { id: 2, name: "bob", email: "bob@example.org" },
+    User { id: 3, name: "carol", email: "carol@example.com" },
+    User { id: 1, name: "alice", email: "alice@example.com" },
+  ]
+}
+
+fn names(directory: List[User]) -> List[Str] {
+  return directory.map(fn(u) => u.name)
+}
+
+test "find_user finds a known id" {
+  let r = find_user(sample(), 2)
+  assert r.map(fn(u) => u.name) == Some("bob")
+}
+
+test "find_user gives None for an unknown id" {
+  assert find_user(sample(), 99).is_none()
+}
+
+test "send_message works for known users" {
+  let r = send_message(directory: sample(), from_id: 1, to_id: 2, text: "hi")
+  assert r.map(fn(m) => format_message(m)) == Ok("alice -> bob: hi")
+}
+
+test "send_message fails for an unknown sender" {
+  let r = send_message(directory: sample(), from_id: 99, to_id: 2, text: "hi")
+  assert r.map(fn(m) => m.text) == Err("unknown user 99")
+}
+
+test "send_message fails for an unknown receiver" {
+  let r = send_message(directory: sample(), from_id: 1, to_id: 77, text: "hi")
+  assert r.map(fn(m) => m.text) == Err("unknown user 77")
+}
+
+test "send_message checks the sender before the receiver" {
+  let r = send_message(directory: sample(), from_id: 99, to_id: 77, text: "hi")
+  assert r.map(fn(m) => m.text) == Err("unknown user 99")
+}
+
+test "greeting of a known user" {
+  assert greeting(sample(), 2) == "hello, bob"
+}
+
+test "greeting of an unknown id" {
+  assert greeting(sample(), 99) == "hello, stranger"
+}
+
+test "send_greeting carries the receiver's greeting" {
+  let r = send_greeting(directory: sample(), from_id: 1, to_id: 3)
+  assert r.map(fn(m) => m.text) == Ok("hello, carol")
+}
+
+test "send_greeting to an unknown receiver fails" {
+  let r = send_greeting(directory: sample(), from_id: 1, to_id: 77)
+  assert r.map(fn(m) => m.text) == Err("unknown user 77")
+}
+
+test "broadcast reaches everybody" {
+  let r = broadcast(directory: sample(), from_id: 1, to_ids: [2, 3], text: "news")
+  assert r.map(fn(ms) => ms.map(fn(m) => m.to_user.name)) == Ok(["bob", "carol"])
+}
+
+test "broadcast stops at an unknown receiver" {
+  let r = broadcast(directory: sample(), from_id: 1, to_ids: [2, 55, 3], text: "news")
+  assert r.map(fn(ms) => ms.len()) == Err("unknown user 55")
+}
+
+test "rename_user renames a known user" {
+  let r = rename_user(sample(), 2, "  robert ")
+  assert r.map(names) == Ok(["robert", "carol", "alice"])
+}
+
+test "rename_user fails for an unknown id" {
+  assert rename_user(sample(), 99, "x").map(names) == Err("unknown user 99")
+}
+
+test "rename_user rejects an empty name" {
+  assert rename_user(sample(), 2, "   ").map(names) == Err("empty name")
+}
+
+test "deactivate_user removes a known user" {
+  let r = deactivate_user(sample(), 3)
+  assert r.map(names) == Ok(["bob", "alice"])
+}
+
+test "deactivate_user fails for an unknown id" {
+  assert deactivate_user(sample(), 99).map(names) == Err("unknown user 99")
+}
+
+test "list_users is sorted by name" {
+  assert list_users(sample()) == [
+    "1 alice <alice@example.com>",
+    "2 bob <bob@example.org>",
+    "3 carol <carol@example.com>",
+  ]
+}
+
+test "user_line of a known user" {
+  assert user_line(sample(), 2) == "2: bob <bob@example.org>"
+}
+
+test "user_line of an unknown id" {
+  assert user_line(sample(), 99) == "99: (unknown)"
+}
+
+test "report_lines lists unknown ids too" {
+  assert report_lines(sample(), [1, 99, 3]) == [
+    "1: alice <alice@example.com>",
+    "99: (unknown)",
+    "3: carol <carol@example.com>",
+  ]
+}
+
+test "summary counts listed and unknown ids" {
+  assert summary(sample(), [1, 99, 3, 98]) == "4 listed, 2 unknown"
+}
+
+test "summary of an empty report" {
+  assert summary(sample(), []) == "0 listed, 0 unknown"
+}
+
+test "full_report" {
+  assert full_report(sample(), [2, 99]) == "2 listed, 1 unknown\n2: bob <bob@example.org>\n99: (unknown)"
+}

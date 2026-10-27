@@ -1,0 +1,15 @@
+use txn.{Txn}
+
+/// The fee charged for one transaction.
+pub fn fee_for(t: Txn) -> Int {
+  return match t {
+    Txn.Deposit(_) => 0,
+    Txn.Withdraw(_) => 2,
+    Txn.Transfer(_, a) => 5 + a / 1000,
+  }
+}
+
+/// The sum of the fees of all transactions.
+pub fn total_fees(txns: List[Txn]) -> Int {
+  return txns.map(fn(t) => fee_for(t)).sum()
+}

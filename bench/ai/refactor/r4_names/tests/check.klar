@@ -1,0 +1,199 @@
+use contact.{Contact, make_contact, with_phone, with_city, initials}
+use book.{Book, empty_book, count_contacts, find_contact, add_contact, remove_contact, update_phone, sort_book}
+use search.{search_text, contacts_in_city, find_by_phone, cities}
+use export.{csv_line, csv_lines, csv_text, parse_csv_line, read_csv, display_line, display_list}
+
+fn mk(first: Str, last: Str, phone: Str, city: Str) -> Contact {
+  return match make_contact(first: first, last: last, phone: phone, city: city) {
+    Ok(c) => c,
+    Err(e) => fail("setup failed: " + e),
+  }
+}
+
+fn ada() -> Contact {
+  return mk(first: "Ada", last: "Lovelace", phone: "5550101", city: "London")
+}
+
+fn charles() -> Contact {
+  return mk(first: "Charles", last: "Babbage", phone: "5550102", city: "london")
+}
+
+fn grace() -> Contact {
+  return mk(first: "Grace", last: "Hopper", phone: "5550103", city: "New York")
+}
+
+fn people() -> Book {
+  return [
+    ada(),
+    charles(),
+    grace(),
+    mk(first: "Alan", last: "Turing", phone: "5550104", city: "Wilmslow"),
+    mk(first: "Anna", last: "Babbage", phone: "5550105", city: "Paris"),
+    mk(first: "Augustus", last: "de Morgan", phone: "5550106", city: "London"),
+  ]
+}
+
+fn full(book: List[Contact]) -> List[Str] {
+  return book.map(fn(c) => c.first + " " + c.last)
+}
+
+fn phone_of(found: Option[Contact]) -> Str {
+  return found.map(fn(c) => c.phone).unwrap_or("none")
+}
+
+fn bad(first: Str, last: Str, phone: Str) -> Result[Contact, Str] {
+  return make_contact(first: first, last: last, phone: phone, city: "X")
+}
+
+test "make_contact keeps first and last name" {
+  let c = ada()
+  assert c.first == "Ada"
+  assert c.last == "Lovelace"
+  assert c.phone == "5550101"
+  assert c.city == "London"
+}
+
+test "make_contact rejects an empty first name" {
+  assert bad(first: "", last: "Lovelace", phone: "5550101") == Err("first name must not be empty")
+}
+
+test "make_contact rejects an empty last name" {
+  assert bad(first: "Ada", last: "", phone: "5550101") == Err("last name must not be empty")
+}
+
+test "make_contact checks the names in order" {
+  assert bad(first: "", last: "", phone: "5550101") == Err("first name must not be empty")
+  assert bad(first: "Ada", last: "", phone: "abc") == Err("last name must not be empty")
+  assert bad(first: "Ada", last: "Lovelace", phone: "abc") == Err("phone must be digits only")
+  assert bad(first: "Ada", last: "Lovelace", phone: "") == Err("phone must be digits only")
+}
+
+test "with_phone and with_city keep both names" {
+  assert with_phone(ada(), "12x") == Err("phone must be digits only")
+  let moved = with_city(ada(), "Paris")
+  assert moved.first == "Ada" and moved.last == "Lovelace" and moved.city == "Paris"
+  let called = with_phone(grace(), "5559999")?
+  assert called.first == "Grace" and called.last == "Hopper" and called.phone == "5559999"
+}
+
+test "initials" {
+  assert initials(ada()) == "A.L."
+  assert initials(grace()) == "G.H."
+  assert initials(mk(first: "grace", last: "hopper", phone: "1", city: "")) == "G.H."
+  assert initials(mk(first: "Augustus", last: "de Morgan", phone: "5550106", city: "London")) == "A.D."
+}
+
+test "find_contact needs first and last name" {
+  let book = people()
+  assert phone_of(find_contact(book, first: "Ada", last: "Lovelace")) == "5550101"
+  assert phone_of(find_contact(book, first: "Anna", last: "Babbage")) == "5550105"
+  assert phone_of(find_contact(book, first: "Charles", last: "Babbage")) == "5550102"
+  assert find_contact(book, first: "Lovelace", last: "Ada").is_none()
+  assert find_contact(book, first: "Ada", last: "Babbage").is_none()
+  assert find_contact(book, first: "Ada", last: "Lovelace ").is_none()
+}
+
+test "add_contact refuses a duplicate first and last name" {
+  let one = add_contact(empty_book(), ada())?
+  assert count_contacts(one) == 1
+  assert add_contact(one, ada()) == Err("duplicate contact: Ada Lovelace")
+  assert add_contact(one, with_city(ada(), "Paris")) == Err("duplicate contact: Ada Lovelace")
+  let two = add_contact(one, mk(first: "Ada", last: "Byron", phone: "5550107", city: "London"))?
+  assert full(two) == ["Ada Lovelace", "Ada Byron"]
+  let three = add_contact(two, mk(first: "Augusta", last: "Lovelace", phone: "5550108", city: "London"))?
+  assert count_contacts(three) == 3
+}
+
+test "remove_contact needs first and last name" {
+  let book = people()
+  let without = remove_contact(book, first: "Charles", last: "Babbage")
+  assert full(without) == ["Ada Lovelace", "Grace Hopper", "Alan Turing", "Anna Babbage", "Augustus de Morgan"]
+  assert count_contacts(remove_contact(book, first: "Charles", last: "Hopper")) == 6
+  assert count_contacts(remove_contact(book, first: "Babbage", last: "Charles")) == 6
+  assert count_contacts(remove_contact(empty_book(), first: "Ada", last: "Lovelace")) == 0
+}
+
+test "update_phone changes only the contact with that first and last name" {
+  let updated = update_phone(people(), first: "Anna", last: "Babbage", phone: "5559999")?
+  assert phone_of(find_contact(updated, first: "Anna", last: "Babbage")) == "5559999"
+  assert phone_of(find_contact(updated, first: "Charles", last: "Babbage")) == "5550102"
+  assert full(updated) == full(people())
+}
+
+test "update_phone errors" {
+  assert update_phone(people(), first: "Ada", last: "Byron", phone: "5559999") == Err("no such contact: Ada Byron")
+  assert update_phone(people(), first: "Ada", last: "Lovelace", phone: "12x") == Err("phone must be digits only")
+}
+
+test "sort_book orders by last name, then first name, ignoring case" {
+  assert full(sort_book(people())) == [
+    "Anna Babbage",
+    "Charles Babbage",
+    "Augustus de Morgan",
+    "Grace Hopper",
+    "Ada Lovelace",
+    "Alan Turing",
+  ]
+  assert full(sort_book(empty_book())) == []
+}
+
+test "search_text matches the first name or the last name" {
+  let book = people()
+  assert full(search_text(book, "love")) == ["Ada Lovelace"]
+  assert full(search_text(book, "ADA")) == ["Ada Lovelace"]
+  assert full(search_text(book, "hop")) == ["Grace Hopper"]
+  assert full(search_text(book, "bab")) == ["Charles Babbage", "Anna Babbage"]
+  assert full(search_text(book, "an")) == ["Alan Turing", "Anna Babbage", "Augustus de Morgan"]
+}
+
+test "search_text does not match across the two names" {
+  assert full(search_text(people(), "ada l")) == []
+  assert full(search_text(people(), "ada lovelace")) == []
+  assert full(search_text(people(), "xyz")) == []
+  assert search_text(people(), "").len() == 6
+}
+
+test "contacts_in_city and the other lookups" {
+  assert full(contacts_in_city(people(), "LONDON")) == ["Ada Lovelace", "Charles Babbage", "Augustus de Morgan"]
+  assert full(contacts_in_city(people(), "Berlin")) == []
+  assert phone_of(find_by_phone(people(), "5550103")) == "5550103"
+  assert find_by_phone(people(), "1").is_none()
+  assert cities(people()) == ["London", "New York", "Paris", "Wilmslow", "london"]
+}
+
+test "csv_line and csv_lines put last name first" {
+  assert csv_line(ada()) == "Lovelace,Ada,5550101,London"
+  assert csv_lines([ada(), grace()]) == [
+    "last,first,phone,city",
+    "Lovelace,Ada,5550101,London",
+    "Hopper,Grace,5550103,New York",
+  ]
+  assert csv_lines(empty_book()) == ["last,first,phone,city"]
+  assert csv_text([ada()]) == "last,first,phone,city\nLovelace,Ada,5550101,London\n"
+}
+
+test "parse_csv_line reads last name first" {
+  assert parse_csv_line("Lovelace,Ada,5550101,London") == Ok(ada())
+  assert parse_csv_line("Ada Lovelace,5550101,London") == Err("bad csv line: Ada Lovelace,5550101,London")
+  assert parse_csv_line("Lovelace,Ada,5550101,London,UK") == Err("bad csv line: Lovelace,Ada,5550101,London,UK")
+  assert parse_csv_line("Lovelace,,5550101,London") == Err("first name must not be empty")
+  assert parse_csv_line(",Ada,5550101,London") == Err("last name must not be empty")
+  assert parse_csv_line("Lovelace,Ada,55x,London") == Err("phone must be digits only")
+}
+
+test "read_csv round trip and errors" {
+  assert read_csv(csv_lines(people())) == Ok(people())
+  assert read_csv(csv_lines(empty_book())) == Ok(empty_book())
+  assert read_csv(["name,phone,city", "Ada Lovelace,5550101,London"]) == Err("bad csv header")
+  assert read_csv([]) == Err("bad csv header")
+  assert read_csv(["last,first,phone,city", "Lovelace,Ada,5550101,London", "Lovelace,Ada,5550102,Paris"]) ==
+    Err("duplicate contact: Ada Lovelace")
+  assert read_csv(["last,first,phone,city", "Lovelace,Ada"]) == Err("bad csv line: Lovelace,Ada")
+}
+
+test "display_line and display_list show Last, First" {
+  assert display_line(ada()) == "Lovelace, Ada — 5550101"
+  assert display_list([ada(), grace()]) == ["Lovelace, Ada — 5550101", "Hopper, Grace — 5550103"]
+  assert display_list(empty_book()) == []
+  assert display_list(sort_book(people())).first() == Some("Babbage, Anna — 5550105")
+}

@@ -1,0 +1,23 @@
+use users.{User, find_user}
+
+/// The report line of one user id: "2: bob <bob@example.com>".
+pub fn user_line(directory: List[User], user_id: Int) -> Str {
+  let u = find_user(directory, user_id)
+  return "{u.id}: {u.name} <{u.email}>"
+}
+
+/// The report lines of the listed ids, in the order given.
+pub fn report_lines(directory: List[User], ids: List[Int]) -> List[Str] {
+  return ids.filter(fn(i) => find_user(directory, i).id != -1).map(fn(i) => user_line(directory, i))
+}
+
+/// How many users the report lists.
+pub fn summary(directory: List[User], ids: List[Int]) -> Str {
+  let known = report_lines(directory, ids).len()
+  return "{known} users"
+}
+
+/// The summary, then one line per listed id.
+pub fn full_report(directory: List[User], ids: List[Int]) -> Str {
+  return [summary(directory, ids)].concat(report_lines(directory, ids)).join("\n")
+}

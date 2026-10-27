@@ -1,0 +1,36 @@
+/// n / d rounded to the nearest integer, halves up (n >= 0, d > 0).
+pub fn round_div(n: Int, d: Int) -> Int
+  requires n >= 0 and d > 0
+{
+  return (2 * n + d) / (2 * d)
+}
+
+/// Formats an amount in cents: 1250 -> "$12.50", -250 -> "-$2.50".
+pub fn format_amount(cents: Int) -> Str {
+  let sign = match cents < 0 {
+    true => "-",
+    false => "",
+  }
+  let abs_cents = cents.abs()
+  let frac = (abs_cents % 100).to_str().pad_left(2, "0")
+  return "{sign}${abs_cents / 100}.{frac}"
+}
+
+/// Parses "12.5", "12" or "$12.50" (surrounding spaces allowed, at most 2 decimals) into cents.
+pub fn parse_amount(text: Str) -> Result[Int, Str] {
+  var t = text.trim()
+  if t.starts_with("$") {
+    t = t.slice(1, t.len())
+  }
+  let parts = t.split(".")
+  if parts.len() > 2 or not parts.all(fn(p) => p.is_numeric()) {
+    return Err("invalid amount: " + text)
+  }
+  let frac = parts.get_or(1, "")
+  if frac.len() > 2 {
+    return Err("invalid amount: " + text)
+  }
+  let dollars = parts.get_or(0, "").to_int().unwrap_or(0)
+  let cents = frac.pad_right(2, "0").to_int().unwrap_or(0)
+  return Ok(dollars * 100 + cents)
+}

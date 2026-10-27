@@ -1,0 +1,45 @@
+use contact.{Contact, with_phone}
+
+/// The contacts in the order they were added (until `sort_book`).
+pub type Book = List[Contact]
+
+pub fn empty_book() -> Book {
+  return []
+}
+
+pub fn count_contacts(book: Book) -> Int {
+  return book.len()
+}
+
+/// The contact with exactly this first and last name, if there is one.
+pub fn find_contact(book: Book, first: Str, last: Str) -> Option[Contact] {
+  return book.find(fn(c) => c.first == first and c.last == last)
+}
+
+/// Adds a contact; a second contact with the same first and last name is refused.
+pub fn add_contact(book: Book, c: Contact) -> Result[Book, Str] {
+  if find_contact(book, c.first, c.last).is_some() {
+    return Err("duplicate contact: " + c.first + " " + c.last)
+  }
+  return Ok(book.push(c))
+}
+
+/// Removes the contact with this name; the book is unchanged if there is none.
+pub fn remove_contact(book: Book, first: Str, last: Str) -> Book {
+  return book.filter(fn(c) => c.first != first or c.last != last)
+}
+
+/// Gives the contact with this name a new phone number.
+pub fn update_phone(book: Book, first: Str, last: Str, phone: Str) -> Result[Book, Str] {
+  let found = find_contact(book, first, last).ok_or("no such contact: " + first + " " + last)?
+  let updated = with_phone(found, phone)?
+  return Ok(book.map(fn(c) => match c.first == first and c.last == last {
+    true => updated,
+    false => c,
+  }))
+}
+
+/// The book ordered by last name, then first name, ignoring case.
+pub fn sort_book(book: Book) -> Book {
+  return book.sort_by(fn(c) => c.first.lower()).sort_by(fn(c) => c.last.lower())
+}

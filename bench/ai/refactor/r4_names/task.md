@@ -1,0 +1,13 @@
+# Change: replace the contact field `name` by `first` and `last`
+
+A contact no longer has one field `name` (the full name) but two: `first` (first name) and `last` (last name). No field or parameter called `name` may remain. Parameters keep the order shown; everything not mentioned here keeps its behaviour.
+
+- **contact**: `Contact` has the fields `first`, `last`, `phone`, `city`. `make_contact(first, last, phone, city)` checks in this order and fails with exactly these messages: `first` empty: "first name must not be empty"; `last` empty: "last name must not be empty"; `phone` empty or not only digits 0-9: "phone must be digits only". (Klar: `Err(message)`; Python: `ValueError(message)`; TypeScript: `Error(message)`.) `with_phone` validates like `make_contact`.
+- **contact**: new function `initials(c)` returns the upper-cased first letter of `first`, a dot, the upper-cased first letter of `last`, a dot: Ada Lovelace gives "A.L.", grace hopper gives "G.H.", Augustus de Morgan gives "A.D.".
+- **book**: `find_contact(book, first, last)`, `remove_contact(book, first, last)` and `update_phone(book, first, last, phone)` take both names. A contact matches only if `first` and `last` are both exactly equal (case-sensitive); swapped or partial names do not match.
+- **book**: `add_contact` refuses a contact whose `first` and `last` both equal those of a contact already in the book, with exactly "duplicate contact: Ada Lovelace" (first, one space, last). `update_phone` for an unknown contact fails with exactly "no such contact: Ada Byron" (same format).
+- **book**: `sort_book` orders by `last`, then by `first`, both compared in lower case (case-insensitive); contacts that are equal keep their order.
+- **search**: `search_text(book, text)` matches a contact when the lower-case `text` is contained in the lower-case `first` or in the lower-case `last`. The two names are not joined: "ada l" does not match Ada Lovelace. Empty text matches every contact. `contacts_in_city` is unchanged.
+- **export**: the CSV columns are now "last,first,phone,city". `csv_lines` starts with the header line `last,first,phone,city`; `csv_line` gives e.g. `Lovelace,Ada,5550101,London` (no quoting). `csv_text` follows from these.
+- **export**: `parse_csv_line` reads this new format: exactly 4 fields in the order last, first, phone, city, otherwise it fails with "bad csv line: " followed by the line; the contact is built with `make_contact`, so its messages apply. `read_csv` expects the new header line, otherwise "bad csv header".
+- **export**: `display_line` shows "Last, First — phone", e.g. "Lovelace, Ada — 5550101" (comma and space after the last name, then space, the em dash U+2014, space, the phone). `display_list` follows from it.

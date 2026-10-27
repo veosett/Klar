@@ -1,0 +1,36 @@
+use cart.{Cart, Line, discount, free_shipping_gap, item_count, line_total, subtotal, tax, total}
+use money.{format_amount}
+
+/// "2 x Widget @ $3.50 = $7.00"
+pub fn line_text(line: Line) -> Str {
+  return "{line.qty} x {line.item.name} @ {format_amount(line.item.price)} = {format_amount(line_total(line))}"
+}
+
+pub fn render(cart: Cart, rate_bp: Int) -> Str {
+  let discount_lines: List[Str] = match cart.code {
+    Some(c) => ["Discount ({c}): -{format_amount(discount(cart))}"],
+    None => [],
+  }
+  let gap = free_shipping_gap(cart)
+  let footer = match gap > 0.0 {
+    true => "Add {format_amount(gap)} more for free shipping",
+    false => "Free shipping",
+  }
+  let lines = cart.lines.map(line_text)
+    .push("Subtotal: {format_amount(subtotal(cart))}")
+    .concat(discount_lines)
+    .push("Tax: {format_amount(tax(cart, rate_bp))}")
+    .push("Total: {format_amount(total(cart, rate_bp))}")
+    .push(footer)
+  return lines.join("\n")
+}
+
+/// "3 items, total $19.00"
+pub fn summary(cart: Cart, rate_bp: Int) -> Str {
+  let n = item_count(cart)
+  let noun = match n == 1 {
+    true => "item",
+    false => "items",
+  }
+  return "{n} {noun}, total {format_amount(total(cart, rate_bp))}"
+}

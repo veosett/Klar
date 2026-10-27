@@ -1,531 +1,366 @@
-# Changelog
+# Бенчмарк «насколько ИИ проще с Klar»
 
-All notable changes to Klar. The format follows [Keep a Changelog](https://keepachangelog.com/),
-versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compatible is listed in
-[docs/SPEC.md](docs/SPEC.md), section 0.
+Скорость языка измеряет `bench/run_bench.klar`. Этот бенчмарк измеряет другое — **как рано язык ловит ошибки,
+которые языковые модели делают чаще всего**, и насколько полезно сообщение об ошибке для следующей попытки.
 
-## [Unreleased]
+Для ИИ важнее всего одно: узнать об ошибке **до запуска** и **с точным указанием, что исправить**. Хуже всего —
+программа, которая молча печатает неверный результат: модель считает задачу решённой.
 
-### Fixed
-- `klar spec` / `klarc spec` and `klar doc` listed the helper functions of the std modules (`skip_ws`, `crc_table`,
-  ...), which cannot be imported, and left out their public types: the reference now has exactly what a program
-  can import, with the fields and variants of `Json`, `Rx`, `Set` and `DateTime` (found by the agent run on the
-  hard suite).
-- `klarc profile` counted the calls of a lambda as calls of the enclosing function when the lambda was passed to an
-  in-place update (`counts = counts.update(k, 0, fn(c) => c + 1)`); it names it `<lambda> (file:line)`, like
-  `klar profile`.
-- Native code leaked memory in common code: `xs.concat(f(x))` and `b.concat(...)` never freed the argument (the
-  `*_owned` runtime functions only borrowed it, while the compiler handed over its reference), `m.update(k, d, f)`
-  kept `f`, and a `return` inside a `match` arm or a `for` loop kept the matched value / the walked list. klarc
-  itself built itself in 1.7 GB of memory; now 0.3 GB, as much as the Python implementation
-  (`tests/native/leaks.klar`, `NativeMemory`: 126 MB before, 12 MB now). klarc also frees the lowering state and
-  each function's KIR as it emits, resolves the jumps inside a function right away, and emits the program once for
-  `--target windows/macos/linux-arm64` (it also built it for Linux first).
-- On Windows the interpreter printed Windows' own texts for file errors ("The directory name is invalid"); it uses
-  the same words as native code on every system ("Not a directory").
-- `tests/selfhost.py` (and its unit test) ran the Linux build of klarc on Windows; it is skipped on hosts other than
-  Linux x86-64, like `tests/bootstrap.py`.
+## Как устроено
 
-### Security
-- New right `env` / `env:NAME` (THREATS.md T8): under `--allow` without it, `env_var` returns `None`, so a model's
-  code run by an agent no longer reads `ANTHROPIC_API_KEY` and prints it into the agent's log. All four backends
-  (`klar build --allow` and klarc build it into the executable).
-A security review of the language, the runtime and the tools (`SECURITY.md` describes the model):
-- Native code: `"x".repeat(n)` and lists sized from a huge count (`range(0, 2^61)`) overflowed the size of the
-  allocation and wrote past it; every allocation size is now checked (new runtime error R0015, "out of memory", also
-  in the interpreter instead of a Python exception). Printing, `==` and hashing of values nested more than 100 000
-  levels deep overflowed the machine stack; they are R0006 now.
-- `klarc` wrote its temporary executables to `/tmp` under predictable names (a symlink planted there by another
-  user was followed); they live in `~/.klar-cache/klarc` now, and an existing file is removed before writing.
-- `klar fetch` / `klarc fetch`: a git URL or revision from `klar.toml` or `klar.lock` that starts with `-` reached
-  git as an option; such values are refused (and `git clone` gets `--` before the URL).
-- Windows: `run_command` / `run_capture` let CreateProcessA find the program in the current directory first (a
-  `git.exe` in an untrusted project would have run); the runtime now searches `PATH` itself and passes the full path.
-- The language servers stopped (or crashed) on a malformed message; it is skipped now.
-- The interpreter crashed with Python errors on `Float.to_int()` of infinity or NaN (now R0009, like native code) and
-  on source nested thousands of brackets deep: expressions and types nested more than 200 levels are E0003 in
-  `klar` and `klarc` (the Python parser also runs in a thread with a large stack: on Windows with Python 3.10 the
-  test crashed the process).
-- `--allow fs:DIR` could be left through a symbolic link: a link inside DIR that points outside (`data/out -> ..`)
-  gave access to where it leads, and `data/out/../x` was checked as `data/x` while the system opened the file next
-  to the link's target. Paths are now resolved the way the system opens them, part by part with links followed
-  (`os.path.realpath`; in native code the new `os_readlink` intrinsic on Linux x86-64 and arm64 and macOS; Windows
-  does not resolve links yet). In all four backends and every native target.
-- The MCP tools `klar_dev` and `klar_eval` ran the model's code with every right (`main` could run programs and
-  write files). They get the rights of `klar mcp --allow RIGHTS` / `klarc mcp --allow RIGHTS` now, by default
-  none but `io`; `klar dev` and `klar eval` take `--allow` too. `docs/THREATS.md` lists every threat to a sandboxed
-  run of a model's code with its test (`SandboxThreats` in tests/test_klar.py) and what is still open (environment
-  variables, resource limits, links on Windows, programs found through PATH).
+`cases/<номер>_<ошибка>/` — одна и та же маленькая программа с одной и той же типичной ошибкой, написанная
+идиоматично на 7 языках (строка с ошибкой помечена `BUG`). Для каждого языка используется его обычный цикл
+разработки:
 
-### Changed
-- The agent loop with klarc is shorter (`bench/ai/loop_latency.py`, the 24 own tasks): a verdict on a program with
-  a type error takes 9 ms instead of 280 ms (klarc reports the program's errors before reading the runtime; mypy
-  takes 1 000 ms, tsc 2 000 ms), and "all tests pass" 250 ms instead of 420 ms. The runtime's function bodies are
-  checked only when a program uses the function (most use few of them), the parsed runtime is reused when
-  `klarc test`/`dev` loads the program again with its contracts, and the lexer slices ASCII sources instead of
-  decoding every token.
-- Native code: `match xs.get(i)` / `match m.get(k)` with `Some(..)`, `None` and `_` arms finds the element without
-  allocating an Option, and `xs.get(i).unwrap_or(d)` / `m.get(k).unwrap_or(d)` with a literal or a name as `d` is
-  one lookup (`tests/native/option_get.klar`). The compiler itself has about 260 and 170 of them.
-- Native code is faster (container, best of 20: fib 1.18 → 0.68 ms, loop −15%, primes −30%, collections −10%;
-  mandelbrot and strings +5%). Calls store their arguments in an area reserved once in the frame instead of moving
-  `rsp` around every call. The release of an Int moves up to its last use, and a release right after a tagged-Int
-  operation is done only on its slow (bignum) path (`hoist_releases`, `fuse_int_releases` in opt.py / opt.klar).
-  Functions start at 16 bytes, and NOPs keep jumps clear of 32-byte boundaries (Intel's JCC erratum), so the speed
-  no longer depends on where a function happens to land.
-- klarc compiles itself 3.5× faster (49 → 14 s; the Python implementation takes 30 s). The lowering state was copied
-  thousands of times per build (and with it the string table and the data section), because the ownership analysis
-  missed moves in three common shapes, which now update in place in every Klar program:
-  - `c with { m: c.m.set(key_of(c), v) }`: the record read inside a call in the arguments of the field's own
-    update no longer stops the field from being taken out (`with_takes`); a read in a later field still does;
-  - uses of a variable in different arms of one `match` (only one runs), and a Bool/Float/Unit `match` subject read
-    from it before the arms (`w = match w.dead { false => pop_scope(w), true => drop_scope(w) }`); a guard runs
-    before the later arms and is not counted as an arm;
-  - a pattern binding named like a variable elsewhere in the function made that variable look like a view of the
-    matched value (bindings are scoped to their arm now).
+| язык | что запускается |
+|---|---|
+| Klar | `klar check`, затем `klar build` и запуск |
+| Python | запуск (так ИИ обычно и работает с Python) |
+| Python + mypy | `mypy` по коду с аннотациями типов, затем запуск |
+| TypeScript | `tsc --strict`, затем `node` |
+| Java | `javac -Xlint:all`, затем `java` |
+| Go | `go vet` + `go build`, затем запуск |
+| Rust | `rustc` (debug, как `cargo run`), затем запуск |
+| C++ | `g++ -Wall -Wextra`, затем запуск |
 
-  Plus: list literals of constant strings, small Ints and Bools are immortal static objects (`["add",
-  "sub"].contains(op)` allocates nothing; updating one copies it), `List.contains` on strings skips the nesting
-  check per element, the lowering splits each source file into lines once, and a lambda keeps only its outer
-  function's state aside (not the whole program state). The klarc sources avoid reading a state after passing it
-  on in 9 places.
-- E0208 asks for named arguments only where they could be swapped unnoticed. With 3+ parameters, positional
-  arguments are fine when the parameters have different types, or when among same-typed parameters every argument
-  but at most one carries its parameter's name (`cell(grid, r, c)`, `cell(grid, nr, c - 1)`, `p.r`); `f(200, 20,
-  10)` and `cell(g, i, j)` still need names, and `cell(g, c, r)` is reported as swapped. In the agent benchmark the
-  old rule was half of all Klar compile failures, and 15 of its 17 calls could not have been wrong.
-- What models write out of habit is accepted with the meaning they mean: `{"a": 1}` is a map (as `Map {"a": 1}`),
-  `fn(x) => { ... }` a block lambda, and a `{` that cannot start an interpolation (`"{"`, `"{}"`, `"{\"a\": 1}"`)
-  a literal brace — all three were errors.
+Исход каждой пары (ошибка, язык):
 
-### Added
-- `klarc` is one standalone file: the runtime, the standard library, `klarc spec` and the `klarc view` template are
-  built into it (`compiler/libsrc.klar`, generated by `python tests/selfhost.py --update`), so a downloaded klarc
-  builds, tests and checks programs in any directory. Before, outside the repository every command failed with
-  "cannot read module `rt`" unless `--lib` or `KLAR_LIB` pointed at a checkout. A library directory on disk
-  (`--lib`, `KLAR_LIB`, `./klar`) is still used first.
-- `bench/ai/hard`: a suite of 20 longer tasks (expression parsing, graphs, caches, ledgers, a lexer, ...) with 147
-  tests whose expected results come from Python references (`llm_bench.py --suite hard`). First run with Haiku as
-  the model: 19/20 on the first try in Klar, Python and TypeScript alike, no compile error in Klar, 60% more tokens
-  than Python (bench/ai/README.md).
-- `bench/ai/loop_latency.py`: seconds from a saved edit to a verdict, per tool chain (klarc, `klar test`, python,
-  mypy, the mypy daemon, tsc + node), on a correct solution and on one with a type error.
-- `tools/mutate.klar`: mutation testing of the compiler written in Klar (ROADMAP item 31). Each mutant flips one
-  operator in `compiler/*.klar`; the mutated klarc compiles the test programs, the examples, the benchmarks and
-  klarc itself, and a mutant is killed when any byte differs (`docs/MUTATION.md`). The first runs found a
-  comparison folding rule no test exercised (`1.5 > 1.5`): `tests/native/folding.klar`.
-- `tests/selfhost.py -j N`: the stages run in parallel processes (one per CPU by default; emit in 3 parts,
-  inspect in 4) and each prints its time.
-- Number literals the way models write them (found by the agent benchmark, ROADMAP 20): hexadecimal, binary and
-  octal integers (`0xFF`, `0b1010`, `0o17`, underscores between digits) and Floats with an exponent (`1e-9`,
-  `2.5E10`), in `klar` and `klarc`, `klar fmt` (`0x1e-5` stays a subtraction) and the VS Code grammar.
-  `std.math.floor_div` and `floor_mod` round like Python's `//` and `%` (Klar's `/` truncates). The `\r` escape
-  is listed in the E0004 hint and the reference.
-- The LLM benchmark with agents as the model (ROADMAP 20): `bench/ai/agent_bench.py` hands an agent (a Claude Code
-  subagent of a given model) the same prompts, hidden tests, feedback and attempts as `llm_bench.py`, records every
-  attempt and scores the run by a deterministic replay; `report` gives first-try and total rates with 95% Wilson
-  intervals and exact McNemar tests between the languages. A first run — Sonnet and Haiku, HumanEval, HumanEval+ and
-  the own tasks, 1 458 solutions — is in `bench/ai/results/agents/` and summed up in `bench/ai/README.md`: the
-  suites are saturated, and on the first try Klar is slightly behind Python (97.7% against 99.4%, p = 0.02), mostly
-  because of the named-arguments rule (E0208). HumanEval+ (`--suite humaneval_plus`, EvalPlus's extra inputs with
-  its canonical results, up to 60 tests per problem) joins the suites.
-- Outside task suites for the LLM benchmark (ROADMAP 19): HumanEval and MBPP as MultiPL-E ships them, turned into
-  the task format of `bench/ai/llm_bench.py` by `bench/ai/build_suites.py` — 154 of 161 HumanEval and 334 of 400
-  MBPP problems, 2 111 test cases, each checked against the canonical Python solution called with the typed
-  arguments (which found 6 problems where MultiPL-E's typing contradicts the problem, e.g. HumanEval/92 and /151,
-  and HumanEval/111's parameter `test`, a Klar keyword). `llm_bench.py --suite humaneval|mbpp`, `--validate` (every
-  test file type-checks against a stub in Klar, Python and TypeScript: all do), a `Pair` type for two-element
-  tuples; the references pass every test (`--provider reference -l python`).
-- `tools/inventory.klar` (ROADMAP 27): the Python code of the repository from its primary sources — `git ls-files`,
-  the import graph, the Klar counterpart of each module, how often both change in one commit (`git log`) and test
-  coverage (coverage.py JSON) — into `docs/PYTHON_INVENTORY.md`.
-- `tools/parity.klar` (ROADMAP 29): every command and flag of `klar` against `klarc`, read from the tools themselves
-  (`--help`, the usage text, the compiler's literals); `tests/bootstrap.py` fails when klarc lacks one. It found
-  `klarc view --open` and `klarc lsp --stdio` missing and `klarc context` absent from the usage: added.
-- `tests/fuzz.klar` (ROADMAP 23, 31): differential fuzzing — random programs, well-typed by construction (Int, Bool,
-  Str, List, Option, helper functions, bounded loops, lambdas, guarded division), run by the interpreter, the Python
-  backend, native code from `klar` and native code from `klarc`; a disagreement or a rejected program is kept.
-- The benchmark runners are written in Klar: `bench/run_bench.klar` (speed against C, C++, Rust, Go, Java, JavaScript
-  and Python) and `bench/ai/run_ai_bench.klar` (when each language catches typical AI mistakes) replace the Python
-  scripts; run them with `klarc run` (no Python needed) or `klar run`.
-- Standard library: `std.regex` (classes, groups, alternatives, `* + ? {n,m}`, anchors: `is_match`, `find`,
-  `find_all`, `replace_all`, `split_by`), `std.csv` (RFC 4180 parsing and formatting, `records`), `std.path` (`join`,
-  `normalize`, `dirname`, `basename`, `extension`, `relative_to`, ...), `std.hash` (`crc32`, `fnv1a`, `sha256`),
-  `std.numfmt` (`group_digits`, `percent`, `human_bytes`, `ordinal`, Roman numerals) and time-zone offsets in
-  `std.time` (`at_offset`, `format_iso_offset`, `parse_iso_offset`). Every function has a doc-test; the same results in
-  native code.
-- **Record and replay**: `klar run --record run.json prog.klar` writes everything the run got from outside (input,
-  arguments, environment, clock, random numbers, files read, results of programs run and of writes); `klar replay
-  run.json` runs it again on exactly that — the same output, error and exit code byte for byte, without the files or
-  the clock, and without writing anything. A replay of a changed program stops with R0017. Native too: `klarc run
-  --record` and `klarc replay` build the program with a trace mode (`klar/rt/trace.klar`); the trace is the same
-  JSON, so a recording made by `klar` replays in `klarc` and the other way round.
-- **Contracts are tested**: `klar test`, `klar dev` and `klarc test/dev` run every pure, non-generic top-level function
-  with `ensures` on random inputs that satisfy its `requires` (a generated property `contract: name`), so a contract
-  finds a wrong result without a single `test`. It found one in `examples/shapes.klar`: `area` of an impossible
-  triangle broke `heron`'s precondition (`area` now `requires valid(s)`).
-- **Effects in function types**: `fn(Int) -> Unit uses io`. Calling a function value needs the effects of its type,
-  a named function or a lambda passed as a value carries its effects, and a function with fewer effects fits where
-  more are allowed. Built-ins that take a function (`map`, `filter`, `fold`, ...) need the effects of that function.
-  A function without `uses` is now pure also when it calls function values, and `par_map` accepts any function value
-  whose type is pure (the E0406 rule about function values from outside its lambda is gone). A function that returns
-  an effectful function writes the return type in parentheses: `-> (fn(Str) -> Unit uses io)`. Example:
-  `examples/effects.klar`.
-- **Rights at run time**: `klar run --allow fs:./data,proc:git,time` / `klar build --allow ...` (and `klarc run/build
-  --allow`) run a program with only these rights in every backend — files outside the allowed directories, other
-  programs, the clock and random numbers are runtime error R0016 with the missing right; `io` is always allowed.
-  Native executables carry the rights. Tested for every right in the interpreter, the Python backend and native
-  code (Linux, Windows, ARM64, macOS).
-- `klar context FILE NAME [--max-tokens N] [--json]` (also `klarc context` and the MCP tool `klar_context`): the
-  smallest context to change one function, type or constant — its source with the documentation, the signatures of
-  the declarations it uses, its tests and its callers, within a token budget (default 2000; what does not fit is
-  counted as "not shown").
-- **Fakes for the effects of tests**: `test "save" uses fs, time, rand { ... }` (and `property "p" (x: Int) uses fs`)
-  runs on an empty file system in memory rooted at `/`, a clock that starts at 0 (new built-in `set_clock(ms)`) and
-  a fixed sequence of random numbers — the same in the interpreter and in native code, fresh for every test and
-  every run of a property. Calling an effect a test does not declare is E0401 with a fix that adds `uses ...`;
-  `proc` and `net` stay forbidden in tests. Tested in `tests/native/fakes.klar`.
-- `docs/ROADMAP.md`: the plan after 1.0 (phases, acceptance criteria, status).
-- `bench/ai/llm_bench.py`: an LLM-in-the-loop benchmark — 24 tasks with hidden tests generated for Klar
-  (`klar test`), Python and TypeScript (`tsc --strict`); the model gets the statement (for Klar also `klar spec`),
-  sees compiler messages and failing cases and retries. It reports tasks solved on the first try and in total,
-  attempts, tokens and how many failures the compiler caught before running. Anthropic and OpenAI-compatible APIs,
-  `--provider reference` (the reference solutions in `bench/ai/tasks/ref/`) and `--provider replay` (re-score saved
-  answers).
-- `klar mcp` / `klarc mcp`: a Model Context Protocol server (stdio, newline-delimited JSON-RPC) that gives AI agents
-  the Klar tools directly — `klar_check`, `klar_dev`, `klar_test`, `klar_eval`, `klar_doc`, `klar_outline`,
-  `klar_refs`, `klar_patch`, `klar_fix`, `klar_fmt`, `klar_explain`, `klar_spec`. Each runs the command of the same
-  name (`--json` where there is one); `klarc mcp` gives the same answer to every message (`tests/selfhost.py`
-  replays a session that uses every tool). `claude mcp add klar -- python3 -m klar mcp`.
-- `run_capture` on Windows: the input, stdout and stderr of the program go through temporary files and the new
-  intrinsic `os_spawn_std` (CreateProcessA with STARTF_USESTDHANDLES and inheritable handles). With it every klarc
-  command that runs programs works on Windows: `klarc dev`, `eval`, `view --run`, `coverage`, `profile` and the
-  git dependencies of `klarc add` / `fetch`.
+| | исход | что это значит для ИИ |
+|---|---|---|
+| ✅ | **compile** — компилятор/типизатор отверг программу | ошибка найдена сразу, исправляется до запуска |
+| 🛡️ | **by design** — такую ошибку в языке не сделать | проблемы нет |
+| ⚠️ | **warning** — скомпилировалось, но предупреждение указало на ошибку | заметит, если читает предупреждения |
+| 💥 | **runtime** — упало при запуске | найдено, только если этот путь выполнился |
+| ❌ | **silent** — отработало и напечатало неверный результат | худший случай: ошибка незаметна |
 
-## [1.0.0] — 2026-10-23
+Дополнительно: указывает ли сообщение на строку с ошибкой, предлагает ли исправление и его размер в токенах.
+Языковая модель не вызывается — результат детерминирован и воспроизводим:
 
-The first stable version: the language of `docs/SPEC.md` (Klar 1.0), compatible within 1.x. `klarc`, the compiler
-written in Klar, now has every command of `klar` and builds itself without Python from a release seed.
+```
+klarc run bench/ai/run_ai_bench.klar                   # все случаи, все найденные языки
+klarc run bench/ai/run_ai_bench.klar -- -l klar rust   # выборочно
+```
 
-### Added
-- Packages: a project is a directory with `klar.toml` (`[package]`, `[dependencies]` with `name = { path = "..." }` or
-  `name = { git = "...", tag|rev|branch = "..." }`). The first part of a `use` may name a dependency:
-  `use geo.{Point}` loads `<geo>/lib.klar`, `use geo.shapes.{Circle}` its `shapes.klar`; a dependency's modules are
-  named after it, so they never clash with the project's. `klar add`, `klar remove`, `klar fetch` (git dependencies
-  into `.klar/deps/`, commits pinned in `klar.lock`), `klar update`, `klar deps`; `klar new` writes `klar.toml`,
-  `klar new --lib` a library package. New errors: E0607 (a name is both a dependency and a file), E0608 (one name,
-  different sources), E0609 (dependency not fetched / not a package), E0610 (invalid klar.toml). Both compilers
-  resolve dependencies the same way: `compiler/manifest.klar` reads the manifests for `klarc`.
-- ARM64 backend: `klar build --target linux-arm64` (and the default on an arm64 host) writes a static AArch64 ELF for
-  Linux. Same frames and calling convention as on x86-64 (`stp x29, x30`, arguments at `[fp+16+8i]`), X28 counts the
-  call depth, floats live in D16–D31; data is reached PC-relatively (ADRP + ADD, patched by the linker); 64 KB
-  segment alignment. Both compilers have it (`klar/native/a64.py`, `emit_a64.py`; `compiler/a64.klar`,
-  `emit_a64.klar`) and `tests/selfhost.py` compares their arm64 executables byte for byte; `klarc build --target
-  linux-arm64` cross-compiles. `tests/native_diff.py --arm64` runs every native test under qemu-aarch64.
+## Результаты (контейнер сборки: Python 3.13, mypy, TypeScript, Java 21, Go 1.24, Rust 1.97, g++ 13)
 
-- Parallelism: `xs.par_map(f)` — the result of `xs.map(f)`, computed on all CPU cores. In native code on Linux the
-  list is cut into one chunk per core and each chunk runs in a worker process (fork; results come back through a
-  pipe in a compact binary form rebuilt with the type descriptors). The checker makes it safe: `f` must be a lambda
-  without effects or a function without `uses` (E0401 / new E0406), and the results must not contain functions
-  (E0406). A runtime error in `f` is reported exactly like in `map` (the first failing element); the other workers
-  are stopped. On Windows and in the interpreter `par_map` is `map`. New runtime file `klar/rt/par.klar`, new
-  intrinsics `os_fork`, `os_pipe`, `os_wait`, `os_kill`, `os_cpu_mask` in all three OS layers of both compilers.
-- `list_dir(path)` (sorted entry names, `Result[List[Str], Str]`), `is_dir(path)` (effect `fs`) and `eprint(value)`
-  (print to stderr, effect `io`), in every backend (Linux: getdents64; Windows: FindFirstFileA).
-- `klarc fmt [paths] [--check] [--json]`: the formatter written in Klar (`compiler/fmt.klar`); `tests/selfhost.py`
-  checks that it formats every file of the repository, and a damaged copy of each, exactly like `klar fmt`. First
-  step of moving all `klar` commands into `klarc`.
-- `klarc check [--json]`, `klarc fix [--dry-run] [--all] [--warnings] [--json]`, `klarc explain CODE`,
-  `klarc --version`: the same output as the Python commands, character for character — the Klar checker now
-  produces the full diagnostics (end positions, notes, machine fixes; `compiler/report.klar` renders them with the
-  code frame). `tests/selfhost.py` compares the report and `--json` of every checker case (340/340) and runs `fix` in
-  three modes on each of them (747/747 identical outputs and files). `klarc build` prints the `built ...` line and
-  `klarc run` shows warnings, like `klar`.
-- `klarc new`, `outline`, `refs`, `rename`, `doc`, `spec`, `ast` (compiler/inspect.klar, astjson.klar): the same
-  output and files as the Python commands, checked by `tests/selfhost.py` on every file of the repository and every
-  checker case. New built-in `make_dir(path)` (creates missing parents; effect `fs`).
-- `klarc patch` (compiler/patch.klar): the AI patch protocol in Klar — the same reports, diffs and written files as
-  `klar patch` (`tests/selfhost.py` compares hundreds of patches on the repository's files); with `--test` the tests
-  are not run yet. The Klar loader can take file texts instead of reading them (`load_program_with`).
-- `run_capture(args, dir, input)` (effect `proc`): runs a program in a directory and returns `[exit code, stdout, stderr]`;
-  both pipes are read together (poll), so a chatty program cannot block. Linux x86-64 and arm64 (new intrinsics
-  `os_dup2`, `os_chdir`, `os_execve`, `os_poll`) and the interpreter; Windows returns an error for now.
-- `klarc dev [--json] [--no-run] [--stdin TEXT]` (compiler/dev.klar): one AI-loop step without Python — check,
-  native tests, native run, the same compact report as `klar dev` (runtime errors are read back from the text the
-  runtime prints). Properties are reported as `skipped`.
-- `klarc add`, `remove`, `fetch`, `update`, `deps` (compiler/pkg.klar): the package commands without Python, with
-  the same output, `klar.toml` edits and `klar.lock`; `tests/selfhost.py` replays a scenario with path and git
-  dependencies on both. New built-ins `remove_file(path)` and `current_dir()` (effect `fs`; Linux unlink /
-  getcwd, Windows DeleteFileA / GetCurrentDirectoryA); klarc's tools no longer trust `$PWD` for absolute paths.
-- `klarc eval [STATEMENTS...] EXPR [--in FILE] [--json]` (compiler/evaluate.klar): the type from the Klar checker,
-  the value from a native run of the expression as a test block; the same output as `klar eval`.
-- `build.sh` / `build.bat`: build klarc without Python from a seed compiler (`seed/klarc-<target>`, `$KLARC`, or the
-  release download), with the self-reproduction check; `.github/workflows/release.yml` builds the seeds for Linux
-  x86-64, Linux arm64 and Windows, checks that they reproduce themselves and attaches them to a release.
-- `klarc view [-o OUT] [--json] [--run]` (compiler/view.klar): the same page and data as `klar view` (checked on
-  every example, native test, benchmark, std and compiler file); `--run` runs the program natively and shows its
-  output and error (call counts and times stay with `klar view --run`).
-- `klarc lsp` (compiler/lsp.klar): the language server without Python — the same responses as `klar lsp` to every
-  request (`tests/selfhost.py` replays sessions of hover, definition, references, rename, completion, signature help,
-  symbols, formatting and code actions on the examples, native tests and compiler files and compares every
-  message). The checker now records the types of `let` and pattern bindings; new built-in `read_exact(n)` (n bytes
-  of standard input). The VS Code extension runs it when `klar.klarcPath` is set.
-- `klarc repl [--plain]` (compiler/repl.klar): the interactive session without Python — the same checks, messages,
-  values and commands as `klar repl` (`tests/selfhost.py` compares a transcript); each input runs natively, with
-  the earlier statements replayed and their output hidden.
-- `klarc coverage [--main] [--runs N] [--min P] [--json]` (compiler/coverage.klar): the same report as
-  `klar coverage`, from native runs: in a coverage build (`lower_program_cov`) each statement of the file reports
-  its line the first time it runs (`klar/rt/cov.klar`, unbuffered on stderr, so forked property runs count too).
-- `klarc profile [args] [--json] [--top N]` (compiler/profile.klar): the report of `klar profile` from a native
-  profile build (`lower_program_mode`, klar/rt/profile.klar): calls, total and self time per user function, the hot
-  lines. Call counts and line counts equal the interpreter's; times are those of the machine code, and built-in
-  functions (machine code too) are not listed. With this every `klar` command has a `klarc` counterpart.
-- `klarc test` reports like `klar test`: each failure with its runtime error and the test's output, `-k`/`--filter`,
-  `-q`, `--runs`, `--seed`, warnings first.
-- Property tests in native code: test executables run `property` blocks too (`exe RUNS SEED INDEX`). The runtime
-  (`klar/rt/prop.klar`) reproduces the interpreter's generator exactly — CPython's `random.Random(f"{seed}:{name}")`
-  (SHA-512 seeding, Mersenne Twister, randbelow, uniform, `round(x, 3)`) — so the native report names the same
-  counterexample after the same number of runs; each run is a child process (fork), the failure comes back through a
-  pipe and the inputs are shrunk like in the interpreter. Both lowerings emit it identically (`tests/selfhost.py`),
-  and `tests/native_diff.py` compares the reports of `tests/native/properties.klar` character for character.
-  Where there is no fork (Windows) each run happens in the test process: `os_setjmp` / `os_longjmp` (new intrinsics,
-  x86-64) bring a failure back to the runner; `tests/native_diff.py --windows` checks the reports under wine.
-- macOS (experimental): `klar build --target macos` / `klarc build --target macos` write a static x86-64 Mach-O
-  executable (LC_UNIXTHREAD, no dyld, BSD system calls; `klar/native/link.py` and `compiler/link.klar`, byte for
-  byte the same). Untested on a real Mac: `tests/macho_run.py` runs such executables on Linux in the Unicorn CPU
-  emulator with the macOS system calls done by Python, `tests/native_diff.py --macos` checks every native test with
-  it, and `tests/bootstrap.py` checks that the macOS build of klarc builds programs byte for byte like klarc on Linux.
-  `par_map` uses worker processes there too (sysctl hw.ncpu). `klar run` on a Mac still uses the Python backend.
-- `docs/SPEC.md` is the Klar 1.0 specification, with the stability rules for 1.x; `docs/SPEC.en.md` is its English
-  translation.
-- Tests for every 1.0 addition: the Mach-O format and a run under the emulator, property runs without fork (Windows,
-  under wine), `build.sh` building klarc from a seed, `klar profile` (exit, lambda names, check errors), the new
-  checker rules (also as `tests/selfhost_cases.txt` cases for klarc), and a check that `klar explain` knows every
-  diagnostic code the compilers and the runtime use.
+| ошибка ИИ | Klar | Python | Python + mypy | TypeScript | Java | Go | Rust | C++ |
+|---|---|---|---|---|---|---|---|---|
+| значение из словаря без проверки, что ключ есть | ✅ | 💥 | ✅ | ✅ | 💥 | ❌ | 💥 | ❌ |
+| число из строки без проверки формата | ✅ | 💥 | 💥 | ❌ | 💥 | ❌ | 💥 | ❌ |
+| среднее пустого списка (деление на 0) | ✅ | 💥 | 💥 | ❌ | 💥 | 💥 | 💥 | 💥 |
+| `trim()`/`strip()` без присваивания результата | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ | ❌ |
+| забыт новый вариант enum в `match`/`switch` | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ⚠️ |
+| перепутан порядок однотипных аргументов | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| переполнение целого (25!) | 🛡️ | 🛡️ | 🛡️ | ❌ | ❌ | ❌ | 💥 | ❌ |
+| индекс на единицу больше последнего | ✅ | 💥 | 💥 | ❌ | 💥 | 💥 | 💥 | ❌ |
+| новая переменная вместо присваивания (затенение) | ✅ | n/a | n/a | ❌ | ✅ | ✅ | ⚠️ | ❌ |
+| метод из другого языка (`.length()` вместо `len`) | ✅ | 💥 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| строка + число | ✅ | 💥 | ✅ | 🛡️ | 🛡️ | ✅ | ✅ | ❌ |
+| рекурсия без базового случая | ✅ | 💥 | 💥 | 💥 | 💥 | 💥 | ⚠️ | 💥 |
+| сортировка записей без ключа | ✅ | 💥 | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ |
 
-### Fixed
-- The effects of `par_map`'s lambda could escape through function values: calling (or passing on) a captured function
-  or a parameter that holds one is now E0406 (the native run had silently lost the effects).
-- `==` on values that contain functions (`Some(f)`, records with function fields) is E0211, like `f == g`.
-- A property input of a newtype with `requires` is E0605: random values would break its invariant.
-- A path that ends in `exit(...)` counts as finished, like `fail(...)` (no more E0205 after it).
-- W0104 on a non-ASCII name suggested renaming it to itself; it now says names use ASCII letters, digits and `_`.
-- `klar explain R0013` (exit() in a test) was missing; Python's lexer read other scripts' digits (`٣`) as numbers
-  and crashed on `²` (only `0`-`9` now, like klarc).
-- `klarc profile`: lambdas are named after the line of the call that runs them (like `klar profile`), `par_map`
-  runs in-process under profiling (forked workers lost their counts), check errors use `klar`'s JSON, and `exit(n)`
-  ends a profiled program normally with its status in both profilers.
-- `klar ast` crashed on functions with trait bounds (a dict of spans was not converted to JSON).
-- Native test executables reported every test's call stack at the place of the first test.
-- `klarc run`/`build` showed the runtime's own warnings (the runtime reports as `rt`).
-- Native error reports showed strings in `note: values:` without quotes (`s = x`); they are quoted like in the
-  interpreter (`s = "x"`).
+| итог | Klar | Python | Python + mypy | TypeScript | Java | Go | Rust | C++ |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **индекс безопасности** (✅/🛡️ = 1, ⚠️ = ½, 💥 = ¼, ❌ = 0), из 100 | **100** | 25 | 58 | 33 | 48 | 37 | 52 | 23 |
+| остановлено до запуска | **13/13** | 1/12 | 6/12 | 4/13 | 5/13 | 4/13 | 4/13 | 2/13 |
+| **молча неверный результат** | **0/13** | 3/12 | 2/12 | 8/13 | 3/13 | 6/13 | 1/13 | 8/13 |
+| сообщение указывает на нужную строку | 12/12 | 7/8 | 7/9 | 2/4 | 8/9 | 7/7 | 10/12 | 3/5 |
+| сообщение предлагает исправление | **12/12** | 0/8 | 0/9 | 0/4 | 0/9 | 0/7 | 6/12 | 0/5 |
+| средний размер сообщения, токенов | 96 | 83 | 55 | 60 | 1 028 | 463 | 154 | 543 |
 
-### Changed
-- Map keys may be any values without functions (`Map[Point, Int]`, `Map[Float, Str]`): only the literal `Map { ... }`
-  had rejected them, while `set` and annotations accepted them and both backends handle them.
-- `sin`, `cos`, `ln`, `exp` and `**` on floats use a software implementation (`klar/rt/softmath.klar`, fdlibm
-  algorithms with an exact reduction of huge arguments) on every target instead of x87 instructions: results are the
-  same on x86-64 and arm64 and closer to correctly rounded.
+Полная таблица с исходами — `results/container.md`, сырые данные — `results/container.json`.
 
-## [0.7.0] — 2026-10-22
+## В чём преимущество Klar для ИИ
 
-Safer types and safer edits: generic impls, newtypes with invariants, contracts checked at compile time, and a patch
-protocol that lets an AI change code by name and keeps only edits that still compile and pass the tests.
+1. **Ошибки — до запуска.** Все 13 ошибок отвергаются компилятором. Rust ловит 4 до запуска и ещё 3 предупреждениями,
+   TypeScript (strict) — 4, Python без типизатора — 1.
+2. **Нет «тихих» ошибок.** Ни одна программа на Klar не напечатала неверный результат. В TypeScript и C++ так
+   закончились 8 случаев из 13, в Go — 6.
+3. **Каждое сообщение — инструкция.** Все сообщения Klar содержат подсказку, многие — машинную правку
+   (`klar fix` применяет безопасные сами). Среди остальных языков подсказки даёт только Rust (6 из 12).
+4. **Компактно.** ~100 токенов на ошибку против 450–1000 у Go и Java и 2 500+ у шаблонной ошибки C++ —
+   цикл исправления дешевле по контексту.
+5. **Один шаг цикла.** `klar dev --json` за один вызов делает проверку, тесты и запуск и возвращает JSON с полем
+   `next`. В других языках это 2–3 разных инструмента с разными форматами вывода.
+6. **Весь язык в промпте.** `klar spec` — полный справочник языка и стандартной библиотеки, ~2 тыс. токенов.
 
-### Added
-- `klar patch FILE PATCH` — the "AI patch" protocol: structured edits addressed by declaration name (`area`,
-  `Circle.area`, `test:name`), by node id (`klar ast`) or by unique text, plus renames; all edits apply to the original
-  text together, the result is formatted and checked (and tested with `--test`), and the file is written only when
-  nothing new breaks. `--dry-run`, `--force`, `--json` (diff, errors, test results).
-- `klar ast` numbers nodes per file (stable ids, pre-order from 1).
-- Generic impls: `impl[T: Show] Show for List[T]`, `impl[K, V] Show for Map[K, V]`, `impl[T] Show for Box[T]` — for
-  List, Map, Option, Result and generic `type`/`enum` declarations. An impl covers every instance; its bounds apply
-  inside its methods and are checked recursively at use (`List[Box[Str]]: Show` needs `Str: Show`, E0220 names the
-  missing piece). All back-ends dispatch statically (native: the impl's type parameters come from the receiver's
-  type), in both the Python and the self-hosted compiler. `klar outline` shows impl headers as written.
-- Newtypes: `type Meters = new Float` declares a distinct type (no mixing with `Float` or other newtypes; E0202 hints
-  "wrap the value: `Meters(value)`" / "read the wrapped value: `.value`"). It is built only by its constructor
-  `Meters(x)` — a function the parser adds after the declaration — whose `requires` lines are the type's invariant
-  (`type Percent = new Int` / `requires value >= 0 and value <= 100`): checked at run time (R0002) and at compile time
-  for known arguments (E0703). Record literals and `with` on a newtype are rejected (E0217). Generic newtypes
-  (`type Id[T] = new Int`), impls and `pub` work; `use m.{Meters}` imports the type and its constructor.
-- Static checking of simple contracts: a `requires` that compares a parameter (or its `len()`) with a number literal,
-  `is_empty()`, `not` and `and` is checked against the signs the safety analysis knows at each call — `if n <= 0 {
-  root(n) }` with `requires n >= 0`, `first([])` with `requires not xs.is_empty()` are E0703 — and the same kind of
-  `ensures` against every `return` (E0706: `ensures result >= 0` and `return -1`). Errors only when the violation is
-  certain; newtype invariants are checked the same way.
+## Честно об ограничениях
 
-## [0.6.0] — 2026-10-22
+* Случаи выбраны как **типичные ошибки моделей**, а Klar проектировался именно против таких ошибок — бенчмарк
+  показывает, какие классы ошибок язык закрывает, а не то, что Klar «лучше» во всём.
+* Два случая сильнее других зависят от правил Klar: перепутанные аргументы ловятся потому, что при ≥3 параметрах
+  Klar требует именованные аргументы; деление на ноль — потому, что компилятор требует доказать, что делитель не ноль
+  (`if b != 0`, `requires b != 0`, `match` и т. п., см. `klar explain E0701`).
+* Python/TypeScript/Java/Go/Rust/C++ можно сделать строже линтерами (clippy, eslint, ruff, -Werror, sanitizers);
+  здесь измеряется стандартный цикл без дополнительной настройки.
+* Ошибки логики (неверная формула) не ловит ни один язык — для них в Klar есть тесты, doc-тесты, `property`
+  и контракты, но это уже отдельная тема.
 
-Self-hosting: the whole compiler is written in Klar (`compiler/`, ~22 000 lines) and builds itself — byte-identical
-to the Python implementation at every stage, from tokens to executables, and faster than it.
+## Второй бенчмарк: модель пишет решение (`llm_bench.py`)
 
-### Added
-- Self-hosting, stage 3a: `compiler/lexer.klar` — the lexer written in Klar. `tests/selfhost.py` checks that it
-  produces exactly the tokens (kinds, values, spans, string parts) and the errors of `klar/lexer.py` on every
-  `.klar` file of the repository and on error snippets (native and interpreter runs, in CI).
-- Self-hosting, stage 3b: `compiler/ast.klar` (the syntax tree as Klar enums and records) and
-  `compiler/parser.klar` — the recursive-descent parser written in Klar, with doc-tests, string interpolation,
-  traits and impls. `tests/selfhost.py` compares its tree (every node and span, via `compiler/dump_ast.klar`) and
-  its syntax errors with `klar/parser.py` on every repository file and on 100 error snippets; the parser also
-  parses its own source.
-- Self-hosting, stage 4a: the checker and the module loader in Klar — `compiler/types.klar` (types and unification
-  without mutation), `compiler/checker.klar` (names, types, effects, traits and impls, exhaustiveness, lints),
-  `compiler/loader.klar` (prelude, `use`, std, cycles, private items) and `compiler/similar.klar` ("did you mean"
-  exactly like Python's `difflib`). `tests/selfhost.py` compares every diagnostic (code, message, hint, position) with
-  klar/checker.py on every repository file and on the ~210 programs of `tests/selfhost_cases.txt`.
-- Self-hosting, stage 4b: the safety analysis in Klar (`compiler/safety.klar`: E0701–E0705, E0215 — sign analysis,
-  facts from conditions, `var` summaries, contracts, unconditional recursion). The Klar checker now records the static
-  type of every expression and how each method call was resolved, and `tests/selfhost.py` compares those too.
-- Self-hosting, stage 4c: the native backend's middle in Klar — `compiler/lower.klar` (typed AST -> KIR with
-  monomorphization, reference counting, closures, contracts, the data image), `compiler/opt.klar` (coalescing,
-  folding, compare-and-branch fusion, dead code, inlining) and `compiler/regalloc.klar` (linear scan with GPR and XMM
-  classes). `tests/selfhost.py` compares the KIR, the data image (byte for byte) and the register allocation of
-  every program with a `main` — 23 programs, ~790 000 KIR instructions, the Klar compiler itself included.
-- Self-hosting, stage 4d: the x86-64 emitter and the linkers in Klar — `compiler/x64.klar` (the assembler),
-  `compiler/emit.klar` (KIR -> machine code: tagged-Int fast paths with out-of-line slow paths, XMM floats, x87,
-  division by constants, the Linux and Windows OS layers, the trace tables) and `compiler/link.klar` (ELF64 and
-  PE32+ writers). `tests/selfhost.py emit` checks that the executables built by the Klar backend are byte for byte
-  those of `klar build`, for Linux and Windows, for every program with a `main` (the Klar compiler included).
-- Self-hosting, stage 5 — bootstrap: `compiler/klarc.klar`, the command-line compiler written in Klar
-  (`klarc build app.klar [-o out] [--target linux|windows] [--lib dir] [--time]`, `klarc check app.klar`). Built by
-  the Python compiler it builds itself, and the result builds itself again: stage1 == stage2 == stage3, byte for
-  byte (`tests/bootstrap.py`, also in the unit tests on Linux).
-- Native: "functional but in place" across function calls. Parameters a function consumes are passed owned
-  (inferred over the call graph), the last use of a local moves its value (path-wise liveness: `w`, `w.img`,
-  `a.w`), a field of a unique record is taken out instead of shared, and `x with { f: x.f.push(v) }` reuses a unique
-  record and updates the field in place (`klar/native/own.py`, `compiler/own.klar`). `Bytes.concat` and `push`/`set`
-  on temporaries update in place too. The self-hosted compiler builds itself in 8 s instead of 35 s.
-- `tests/native/ownership.klar`: unique and shared values through calls, records, closures and `match`.
-- `run_command(["prog", "arg"]) -> Result[Int, Str]` (new effect `proc`): runs a program found in `PATH` with
-  inherited stdin/stdout/stderr and returns its exit code — fork/execve/wait4 on Linux, `CreateProcessA` on
-  Windows, `subprocess` in the interpreter. `set_executable(path)` (`fs`): chmod 755 (nothing to do on Windows).
-- `klarc run app.klar [-- args]` and `klarc test app.klar`: the self-hosted compiler builds into a temporary file
-  and runs the program, or builds the `test` blocks and runs each one in its own process (PASS/FAIL, summary, exit
-  code). The test-executable lowering is now in Klar too; `tests/selfhost.py` compares it with the Python one.
-- `Float.to_bits()` and `float_from_bits(bits)`: the IEEE-754 bits of a Float as a signed 64-bit Int, and back
-  (the Klar backend needs them for float constants).
-- The Klar loader loads the runtime (`klar/rt`, one module of several files); the Klar checker records what the
-  backend needs (the type arguments of every call, the element type of every `for`).
-- The Klar parser reports the same hints as the Python one, and the parser comparison now covers every `*_span`.
+Первый бенчмарк смотрит, как языки ловят готовые ошибки. Второй смотрит, как **настоящая языковая модель**
+доводит задачу до рабочего кода на Klar, Python и TypeScript в цикле агента.
 
-### Changed
-- CI runs only on demand (`workflow_dispatch`).
+24 задачи лежат в `tasks/tasks.json`: строки, списки, словари, разбор текста, ошибки как значения, рекурсия,
+быстрые циклы. У каждой есть формулировка, типизированная сигнатура и скрытые тесты. Для каждого языка тесты
+генерируются автоматически: Klar запускается через `klar test`, Python — интерпретатором, TypeScript — через
+`tsc --strict` и node.
 
-### Fixed
-- Native: constants holding lists or maps corrupted the heap (they were built before the runtime's own constants
-  were initialised); the runtime's constants are now initialised first.
-- Klar parser: `-0.0` was folded to `0.0`; the parser comparison now compares Floats by their bits.
-- Register allocation no longer depends on the iteration order of Python sets when two intervals are equal (ties
-  are broken by the vreg number): builds are deterministic regardless of the Python implementation.
-- Instance names of generic functions use a stable FNV-1a hash of the type instead of Python's `hash`.
-- Checker: a constant declared twice crashed the checker; it is now reported once (E0101) and skipped.
-- Checker: E0216 (a lambda capturing a `var`) could be lost for a second lambda, depending on Python object ids;
-  it is now reported once per variable and lambda.
-- `klar fmt` refused files where a re-indented line contained an interpolated string (the check compared the
-  positions of the interpolated code, which legitimately move).
+Модель получает формулировку, сигнатуру и два примера; для Klar ещё справку `klar spec`, потому что модели почти не
+видели Klar. Модель пишет файл, и харнесс запускает скрытые тесты. Если что-то не так, модель видит сообщения
+компилятора или упавшие тесты и пробует ещё раз (`--attempts`, по умолчанию 3).
 
-## [0.5.0] — 2026-10-21
+Что считается:
+- сколько задач решено с первой попытки и всего;
+- сколько ушло попыток и токенов;
+- сколько неудачных попыток поймал компилятор до запуска, а сколько нашли только тесты (неверный результат, падение).
 
-### Added
-- Windows is a first-class CI target: the whole test-suite and the native/interpreter comparison pass with
-  Windows Python (checked with Python 3.12 for Windows), so the Windows jobs are no longer allowed to fail.
-- `Bytes`: an immutable byte sequence (`bytes_of`, `Str.to_bytes`, `len`, `get`, `get_or`, `slice`, `concat`, `push`,
-  `push_le`, `set`, `to_list`, `decode`, `hex`) with `read_bytes` / `write_bytes`. `b = b.push(x)` appends in place in
-  native code when `b` is the only reference. Constant bytes out of 0..255 and bad `push_le` sizes are compile-time
-  errors (E0704). Property tests generate and shrink `Bytes`.
-- Faster calls in native code: the call depth (R0006 above 10000, exactly as in the interpreter) lives in the
-  reserved register R15 instead of a global (`fib` 1.0 → 0.68 ms); values may stay in caller-saved registers
-  across calls (saved around them); calls inside inlined runtime accessors are cold, so floats stay in XMM
-  registers across them. The native R0006 message names the function, like the interpreter.
-- `klar repl`: an interactive session. Every input is type-checked with the whole session (same rules as a
-  program); only new statements run, variables persist; `:type`, `:doc`, `:load`, `:defs`, `:reset`.
-- Language server `klar lsp` (LSP over stdio, no dependencies): diagnostics as you type with quick fixes (including
-  fixes in another module), hover with types/signatures/docs, go to definition across modules, references and
-  rename (locals stay inside their function), completion of names and of `.` members, signature help, document
-  symbols (traits and impls with their methods), formatting. `KLAR_LSP_LOG=<file>` logs the session.
-- The VS Code extension starts the server (`klar.pythonPath`, `klar.compilerPath` settings) and adds commands to
-  run, test and `klar view` the current file; an end-to-end test drives a real VS Code in CI.
+```sh
+ANTHROPIC_API_KEY=... python bench/ai/llm_bench.py --model claude-sonnet-4-5
+OPENAI_API_KEY=... python bench/ai/llm_bench.py --provider openai --model gpt-4.1   # или OPENAI_BASE_URL=...
+python bench/ai/llm_bench.py --provider reference            # эталонные решения: проверка самого набора
+python bench/ai/llm_bench.py --provider replay --replay bench/ai/results/<имя>   # пересчёт без запросов к API
+```
 
-## [0.4.0] — 2026-10-21
+Ответы модели сохраняются в `results/<имя>/answers.json`, отчёт — в `report.md` и `report.json`. Эталонные решения
+на трёх языках лежат в `tasks/ref/`, и `tests/test_klar.py` проверяет, что они проходят все скрытые тесты.
+Результатов настоящих моделей здесь пока нет: для запуска нужен ключ API.
 
-### Added
-- `std.json`: `Json` enum (exact `Int` numbers, ordered objects), `parse_json` with line/column errors,
-  `json_text`, `json_pretty`, `field` / `item` / `lookup("a.0.b")`, `as_*` accessors and builders.
-- `std.time`: `DateTime` in UTC, `from_unix_ms` / `to_unix_ms`, `now_utc`, ISO 8601 `format_iso` / `parse_iso`,
-  `weekday`, `day_of_year`, `add_days`, `days_between`, leap years — pure calendar arithmetic, valid before 1970.
-- `List.get_or(index, default)`: an element without allocating an `Option`.
+### Чужие задачи: HumanEval и MBPP (`--suite`)
 
-- Native code keeps floats in XMM registers (XMM2–XMM15, a second register class in the linear-scan allocator);
-  Int slow paths save them, so float loops with Int counters stay in registers. `mandelbrot`: 1.1 ms → 0.33 ms
-  (C: 0.27 ms, Go: 0.25 ms).
-- Visibility: only `pub fn` / `pub type` / `pub enum` / `pub const` / `pub trait` can be imported (E0606, with a
-  `klar fix` that adds the `pub` in the other module); a private function nothing calls warns (W0406). The
-  standard modules mark their API `pub`. **Breaking:** modules imported by others need `pub` on what they share.
-- Exhaustiveness of nested patterns (usefulness algorithm): `match` reports the exact missing values
-  (`Some(Shape.Rect(_, _))`, `Ok(None)`, ...), accepts complete nested matches without a catch-all, and warns
-  about every unreachable arm, not only those after a catch-all.
-- Traits: `trait Name { fn m(self, ...) -> T }` with default methods, `impl Name for Type` (Int, Float, Bool, Str
-  and non-generic records/enums), bounds on generic functions `fn f[T: A + B](x: T)` and the `Self` type.
-  Checked statically (E0220 not implemented, E0221 impl does not match, E0222 impl misplaced/duplicated,
-  E0223 type not inferable, E0224 trait used as a type); `klar fix` inserts `todo(...)` stubs for missing
-  methods. The native compiler dispatches statically (one instance per type); the interpreter and the
-  Python back-end dispatch on the runtime type. Tools (`outline`, `doc`, `refs`/`rename`, `view`) know traits.
-- The compile-time contract check (E0703) also covers method-syntax calls (`x.f(...)`, impl methods).
-- Bit operations on Int (`bit_and`, `bit_or`, `bit_xor`, `bit_not`, `shift_left`, `shift_right`; two's complement,
-  arbitrary precision), `Str.codes` / `Int.to_char`, `exit(code)`, `env_var(name)`, and `std.set` (`Set[T]`).
-  The lexer points `& | ^ ~ << >>` at the methods. All back-ends agree (native on Linux and Windows).
-- Developer tools (`klar/tools/`, documented in `docs/TOOLS.md`):
-  `klar fmt` (canonical layout, token-stream safety net, `--check`/`--diff`), `klar outline` (API of a file),
-  `klar doc` (built-ins, std and project symbols with tested examples), `klar eval` (value : type of an expression),
-  `klar refs` / `klar rename` (exact thanks to no shadowing), `klar coverage` (statements tests never run),
-  `klar view` (interactive HTML for human reviewers: overview, call graph with run counts, step-by-step flow of each
-  function, EN/RU), `klar new` (project skeleton with `AGENTS.md`).
-- VS Code extension (`editors/vscode`): highlighting, snippets, problem matcher.
-- E0216: a lambda may not capture a `var` (snapshot it with `let`, or use `fold` / a `for` loop) — removes the
-  "does the closure see later changes?" class of bugs; the native back-end now compiles every valid program.
-- Clear error with a fix for `fn(x) => { ... }` (a block-bodied lambda has no `=>`).
-- Illustrated language guides with diagrams: `docs/GUIDE.md` (Russian), `docs/GUIDE.en.md` (English); every code
-  example in them is compiled and tested by the test-suite. Architecture diagrams converted to Mermaid.
-- `AGENTS.md` / `CLAUDE.md` for AI assistants working on the repository.
+Свои 24 задачи писали мы же, а значит, язык подогнан под собственный экзамен. Поэтому есть и чужие задачи:
+HumanEval и MBPP в том виде, в каком их выпускает [MultiPL-E](https://github.com/nuprl/MultiPL-E) — стандартный
+способ переносить эти бенчмарки на другие языки (Cassano et al., 2022).
 
-### Changed
-- `now_ms()` is the wall clock (ms since 1970 UTC) on every back-end; the native build used a monotonic clock.
-  `now_ns()` stays monotonic for measuring durations.
+`build_suites.py` превращает их в формат `llm_bench.py`. Задача берётся, если:
+- типы её сигнатуры выражаются во всех трёх языках;
+- хотя бы один тест — простое равенство на литералах.
 
-## [0.3.0] — 2026-10-21
+Каждый тест проверяется каноническим решением на Python, вызванным с типизированными аргументами. Если эталон не
+проходит хотя бы один тест задачи, значит, типизация MultiPL-E противоречит самой задаче, и задача отбрасывается
+целиком. Так ушли 6 задач, например:
+- HumanEval/92: целые числа типизированы как `float`, а решение проверяет `isinstance(x, int)`;
+- HumanEval/151: `[5, 4]` переписано в `[5.0, 4.0]`.
 
-### Added
-- **Native compiler** (`klar/native/`): Klar → KIR → optimizer → linear-scan register allocator →
-  own x86-64 assembler → own linker writing ELF64 (Linux, raw syscalls, no libc) and PE32+ (Windows, KERNEL32 only).
-  `klar run` uses it by default; `klar build [--target linux|windows]` writes a standalone executable.
-- **Runtime written in Klar** (`klar/rt/*.klar`): allocator, reference counting, bignums, shortest Float printing,
-  UTF-8 strings, List, Map, I/O.
-- Optimizer: inlining of small runtime functions, constant folding into immediates, address folding,
-  copy propagation and coalescing, compare-and-branch fusion, division by constants via reciprocal multiply,
-  dead and unreachable code elimination. In-place updates for uniquely referenced values.
-- Zero-cost error traces: frame-pointer walk + return-address tables (identical text to the interpreter).
-- **Compile-time safety pass** (`klar/safety.py`): E0701 Int division without a proof that the divisor is non-zero,
-  E0702 unconditional recursion, E0703 constant arguments violating `requires`, E0704 constant arguments outside a
-  built-in's domain, E0705 always-out-of-bounds index, E0215 sorting values without an order.
-- Better hints for using `Option`/`Result` as plain values and for lines starting with an operator.
-- Speed benchmark: C++ and Rust added (C, C++, Rust, Go, Java, JS, Python, Klar ×3 back-ends).
-- **AI-ergonomics benchmark** (`bench/ai/`): 13 typical AI mistakes × 7 languages.
-- `tests/native_diff.py` (native vs interpreter, Linux and Windows via wine), `tests/native/edge_cases.klar`.
-- Project infrastructure: `pyproject.toml` (`klar` console script), CI, license, contributing guide.
+Ещё в HumanEval/111 параметр называется `test`, а это ключевое слово Klar: такие параметры переименовываются во
+всех языках одинаково. Осталось 154 из 161 задачи HumanEval и 334 из 400 задач MBPP, всего 2 111 тестов.
 
-## [0.2.0]
+Что отброшено и почему — в `suites/<набор>/report.md`.
 
-### Added
-- Modules (`use a.b.{x}`), generic records and enums, type aliases, constants, `match` guards, prelude in Klar.
-- Doc-tests (`/// >>>`), property tests with shrinking, `dbg`, `todo`.
-- Tools: `klar dev` (one AI-loop step, compact JSON), `klar fix` (safe machine fixes), `klar profile`.
-- Back-end compiling Klar to Python bytecode; standard modules `std.math`, `std.text`, `std.list`, `std.result`.
+```sh
+git clone https://github.com/nuprl/MultiPL-E /tmp/MultiPL-E && python bench/ai/build_suites.py /tmp/MultiPL-E
+python bench/ai/llm_bench.py --suite humaneval --validate          # все тесты типизируются во всех языках
+python bench/ai/llm_bench.py --suite mbpp --provider reference -l python
+ANTHROPIC_API_KEY=... python bench/ai/llm_bench.py --suite humaneval --model claude-sonnet-4-5
+```
 
-## [0.1.0]
+Данные MultiPL-E распространяются по лицензии BSD-3-Clause с ограничением: их нельзя использовать как обучающие
+данные (`suites/LICENSE-MultiPL-E`). Поэтому `suites/` никогда не входит в корпус для моделей (ROADMAP 17).
+Заодно это защищает и от утечки: модель, обученная на тестах, решала бы их по памяти.
 
-### Added
-- Core language: static types with inference, generic functions, records, enums, `Option`/`Result`/`?`,
-  immutability, effects (`uses io`), contracts (`requires`/`ensures`), exhaustive `match`, tests.
-- Reference tree-walking interpreter, JSON diagnostics with stable codes, `klar spec`, `klar explain`.
+### Агенты в роли модели (`agent_bench.py`): результаты
+
+Ключей API нет, поэтому моделью служили агенты: субагенты Claude Code двух моделей, **Sonnet** и **Haiku**.
+Протокол тот же, что у `llm_bench.py`:
+- агент получает задачу только через `agent_bench.py prompt`, а файл сдаёт только через `agent_bench.py submit`;
+- `submit` запускает скрытые тесты и отвечает тем же текстом, что увидела бы модель;
+- даётся не больше 3 попыток;
+- каждый агент работает с одним языком, чтобы не переводить своё же решение с Python на Klar;
+- агенту запрещено запускать компиляторы и тесты самому и открывать другие файлы. Проверка журналов: нарушений 0;
+- для Klar агент один раз читает `klar spec` из файла.
+
+Всего 43 агента и 1 612 решений: 486 задач на каждом из трёх языков, плюс ещё один прогон Klar на HumanEval+, в котором модель сначала изучила руководство. Итоговые числа — повторный детерминированный прогон каждой попытки
+(`agent_bench.py score`): во время прогона машина была перегружена, и один тест упал по тайм-ауту. Полная таблица с
+95% доверительными интервалами — [`results/agents/REPORT.md`](results/agents/REPORT.md), все попытки с кодом —
+`results/agents/<модель>/<набор>/<язык>/`.
+
+| модель | набор | Klar: с 1-й попытки / решено | Python | TypeScript |
+|---|---|---|---|---|
+| Sonnet | HumanEval (154) | 152 / 154 | 154 / 154 | 154 / 154 |
+| Haiku | HumanEval (154) | 153 / 154 | 153 / 154 | 150 / 154 |
+| Haiku | HumanEval+ (154, до 60 тестов в задаче) | 148 / 153 | 152 / 154 | 152 / 154 |
+| Haiku | свои задачи (24) | 22 / 24 | 24 / 24 | 24 / 24 |
+| **всего** | 486 | **475 (97,7%) / 485 (99,8%)** | **483 (99,4%) / 486** | **480 (98,8%) / 486** |
+
+Попарно по задачам, с первой попытки (точный тест Мак-Нимара, все наборы вместе):
+- **Klar против Python: 1 задача только у Klar, 9 — только у Python, p = 0,02.** Разница значима, и она не в
+  пользу Klar;
+- Klar против TypeScript: 4 и 9, p = 0,27 — разницы не видно.
+
+Токены на задачу у Haiku в HumanEval, вместе с одним чтением справки: Klar — около 3 800, Python — около 2 900,
+TypeScript — около 3 150. Справка `klar spec` (около 9 000 токенов) — это цена языка, которого модель не видела.
+
+**Почему Klar проиграл первые попытки.** Все 8 ошибок компиляции разобраны по первопричине (не по каскадной E0601):
+
+| причина | раз | что это |
+|---|---:|---|
+| E0208: при 3+ параметрах аргументы нужно называть | 3 | решение дизайна Klar |
+| `{` в строке — это интерполяция (нужно `\{`) | 1 | решение дизайна |
+| `{...}` вместо `Map {...}` | 1 | решение дизайна |
+| `=> {` у лямбды с блоком | 1 | решение дизайна |
+| нет литерала `0x...` | 1 | пробел языка — **исправлено** |
+| нет деления с округлением вниз (`//` из Python) | 1 | пробел языка — **исправлено**: `std.math.floor_div` |
+
+Все ошибки компиляции исправлены со следующей попытки по сообщению компилятора: подсказки и машинные правки
+работают. Единственная нерешённая задача — HumanEval/132 (`is_nested`), у неё спорные ожидаемые значения в
+HumanEval+.
+
+**Всё вместе: успех, попытки, понимание языка, затраты.** Строки — модель и набор. «Ошибка языка» — первая
+попытка, которую отверг компилятор: модель написала некорректный код на этом языке. «Секунд» — время агента на
+задачу без времени самих проверок. Одна проверка занимает: Klar 0,6 с, Python 0,2 с, TypeScript 11,5 с, потому что
+`tsc` медленный. Полная таблица — в разделе «Everything together» файла [`REPORT.md`](results/agents/REPORT.md).
+
+| | язык | с 1-й попытки | решено | попыток на задачу | ошибка языка | токенов на задачу | секунд на задачу |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Sonnet, HumanEval | Klar | 98,7% | 100% | 1,013 | 1,3% | 3 219 | 5,5 |
+| | Python | 100% | 100% | 1,000 | 0% | 2 686 | 5,1 |
+| | TypeScript | 100% | 100% | 1,000 | 0% | 2 674 | 8,9 |
+| Haiku, HumanEval+ | Klar, только справка | 96,1% | 99,4% | 1,058 | 1,3% | 4 172 | 12,4 |
+| | Klar, сначала руководство и примеры | 96,1% | 99,4% | 1,045 | 1,9% | 4 623 | 10,2 |
+| | Python | 98,7% | 100% | 1,013 | 0% | 2 886 | 8,6 |
+| | TypeScript | 98,7% | 100% | 1,019 | 0% | 3 101 | 9,9 |
+| Haiku, свои задачи | Klar | 91,7% | 100% | 1,083 | 8,3% | 5 476 | 9,2 |
+| | Python | 100% | 100% | 1,000 | 0% | 3 781 | 5,6 |
+| | TypeScript | 100% | 100% | 1,000 | 0% | 3 995 | 1,7 |
+
+Если сложить все показатели:
+- **Решаемость в итоге одинакова** (99,4–100%).
+- **Попыток Klar нужно немного больше:** в среднем 1,01–1,08 против 1,00–1,02. Это 1–8 лишних попыток на 100 задач.
+- **Токенов на Klar уходит на 20–45% больше,** чем на Python. Это чтение справки (около 9 000 токенов один раз) и
+  более длинные рассуждения.
+- **По времени Klar медленнее Python на 10–45%.** TypeScript по чистому времени агента близок к Klar, но каждая его
+  проверка идёт в 20 раз дольше.
+- **Понимание языка:**
+  - на Python и TypeScript ошибок языка почти нет: 0–2%, языки знакомы по обучению;
+  - на Klar их 1–8%, и большинство одного вида. E0208, обязательные имена аргументов, — это 6 из 11 ошибок
+    компиляции Klar во всех прогонах, включая все 3 ошибки после изучения руководства.
+
+**Руководство перед тестом не помогло.** Haiku, который сначала прочёл справку, `docs/GUIDE.md` и программы из
+`examples/`, решил HumanEval+ с первой попытки так же: 96,1%. Токенов он потратил больше. Ошибается он в тех же
+местах:
+- правило E0208 — его модель знает из руководства, но по привычке всё равно пишет `f(a, b, c)`;
+- трудные граничные случаи, на которых ошибается и Python (HumanEval/132, /163).
+
+Значит, дело не в недостатке знаний, а в правиле, которое идёт против привычки модели. Компилятор чинит его с первого
+сообщения: у ошибки есть машинная правка.
+
+**После исправлений по этим данным.** Узкие места были исправлены:
+- E0208 теперь требует имена только там, где аргументы одного типа можно незаметно перепутать;
+- принимаются `{"a": 1}`, `fn(x) => { ... }` и `{` в строках там, где интерполяции быть не может;
+- добавлены литералы `0x` и `1e-9` и `std.math.floor_div`.
+
+Тот же Haiku на тех же задачах, снова только со справкой:
+
+| Haiku, Klar | с 1-й попытки | попыток | ошибка языка | токенов | секунд |
+|---|---:|---:|---:|---:|---:|
+| HumanEval+, до | 96,1% | 1,058 | 1,3% | 4 172 | 12,4 |
+| HumanEval+, **после** | **96,8%** | **1,039** | **0,6%** | **3 986** | **8,4** (Python — 8,6) |
+| свои задачи, до | 91,7% | 1,083 | 8,3% | 5 476 | 9,2 |
+| свои задачи, **после** | **100%** | **1,000** | **0%** | 5 332 | **7,2** |
+
+На своих задачах Klar теперь решает всё с первой попытки, как Python и TypeScript. На HumanEval+ отставание от
+Python сократилось с 4 задач до 3, по времени Klar сравнялся с Python. Оставшиеся промахи:
+- трудные граничные случаи, на которых ошибаются и другие языки (HumanEval/132, /161, /163);
+- один действительно неоднозначный вызов с тремя `Int` подряд — там ошибка E0208 верна.
+
+**Выводы.**
+1. **HumanEval насыщен.** Обе модели решают почти всё на всех языках, так что этот набор не отличает языки друг от
+   друга. Нужны задачи труднее: LiveCodeBench или задачи с ловушками.
+2. **Тезис «на Klar ИИ ошибается реже» на этих данных не подтверждён.** С первой попытки Klar немного хуже
+   Python (97,7% против 99,4%), и это значимо. К итогу разница исчезает: 99,8% против 100%.
+3. **Ошибки Klar — от его правил, а не от логики задач.** Самое дорогое правило — обязательные имена аргументов
+   (E0208): больше половины ошибок компиляции, и его не снимает даже чтение руководства. Это первый кандидат для
+   абляции (пункт 21). Можно сделать E0208 предупреждением, которое `klar dev` и `klar fix` исправляют сами.
+4. **Пробелы языка закрыты:** `0x`/`0b`/`0o`, `1e-9`, `std.math.floor_div`/`floor_mod`.
+5. **Измерение работает как обратная связь.** Узкие места, найденные агентами, исправлены, и повторный прогон
+   показал рост по всем показателям. Следующий шаг — задачи труднее и модели других семейств.
+
+**Ограничения.**
+- Обе модели — одного семейства (Claude).
+- HumanEval почти наверняка был в обучающих данных моделей, причём на Python; это фора Python.
+- Агенты — не модели за API: они сами решают, когда сдать решение.
+
+### Трудный набор (`--suite hard`)
+
+HumanEval насыщен, поэтому добавлен набор из 20 более длинных задач (`hard/tasks.json`): разбор и вычисление
+выражений, топологическая сортировка с циклами, LRU-кэш, Дейкстра, перенос строк, разбор длительностей, сложение
+длинных чисел, комнаты для встреч, журнал счетов с ошибками, диапазоны, расстояние Левенштейна, присваивания с
+переменными, спираль, наибольшая возрастающая подпоследовательность, судоку, словесная лестница, объединение групп,
+лексер, скользящая медиана, склад с заказами. Ожидаемые ответы получены прогоном эталонов на Python
+(`hard/ref/python`), 147 тестов; `--validate` проверяет, что тесты типизируются во всех трёх языках.
+
+Первый прогон — Haiku, по агенту на язык, тот же протокол (`agent_bench.py`):
+
+| | Klar | Python | TypeScript |
+|---|---:|---:|---:|
+| с первой попытки / решено | 19 / 20 | 19 / 20 | 19 / 20 |
+| ошибок компиляции | **0** | — | 0 |
+| токенов агента (со справкой Klar) | 163 тыс. | 101 тыс. | 111 тыс. |
+| объём решений, символов | 22 200 | 17 800 | 26 300 |
+
+Единственная неудача у всех трёх — одна и та же неоднозначность в условии h20 (агенты буквально писали
+`"bad order ID " + id`); условие исправлено после прогона, тесты те же. Итог: на задачах труднее HumanEval Klar
+держится наравне с Python и TypeScript и без единой ошибки компиляции. Цена — токены: на 60% больше, чем у
+Python. Из них около 9 тыс. — одно чтение справки, остальное, по-видимому, — более длинный код (`xs.get_or(i, d)` вместо `xs[i]`,
+явные типы у пустых списков) и рассуждения. Прогон нашёл и ошибку в справке: `klar spec` и `klar doc` показывали
+внутренние функции std-модулей (`skip_ws`, `crc_table`), которые нельзя импортировать, и не показывали их публичные
+типы (`enum Json`, `Set`, `DateTime`); исправлено.
+
+### Рефакторинг (`refactor_bench.py`)
+
+Задачи HumanEval и трудного набора пишутся с нуля. Обычная работа агента — менять готовую программу. В
+`refactor/` четыре программы по четыре модуля (150-250 строк), каждая написана трижды — на Klar, Python и
+TypeScript — с запросом на изменение, скрытыми тестами (24-87 проверок) и эталонной правкой:
+
+| задача | изменение | мест |
+|---|---|---:|
+| `r1_cents` | суммы в копейках (`Int`) вместо `Float`, округление половины вверх | 19 |
+| `r2_refund` | новый вариант `Refund` в типе транзакций: баланс, комиссии, проверка, описание, сводка, сортировка | 13 |
+| `r3_lookup` | `find_user` возвращает необязательное значение вместо пользователя-заглушки | 9 |
+| `r4_names` | поле `name` делится на `first` и `last`: поиск, сортировка, CSV, отображение | 14 |
+
+`validate` проверяет набор: оригиналы компилируются, их скрытые тесты падают, эталоны проходят — 12/12. Агент
+получает программу через `prompt`, правит файлы и сдаёт через `submit` (до 3 попыток), как в `agent_bench.py`.
+
+Первый прогон, Haiku, по агенту на язык: **4/4 с первой попытки на каждом языке**, ни одной ошибки компиляции.
+Токены: Klar — 142 тыс., Python — 106 тыс., TypeScript — 116 тыс. Набор, как и трудный, насыщен: программы в
+150-250 строк модель прочитывает целиком и находит все места сама, без подсказок компилятора. Чтобы проверить
+главный козырь Klar (компилятор показывает каждое место, которое затронуло изменение), нужны программы, которые
+не помещаются в одно чтение, — тысячи строк. Это следующий шаг.
+
+## Третий бенчмарк: сколько агент ждёт вердикта (`loop_latency.py`)
+
+Агент много раз за задачу сохраняет файл и спрашивает инструменты: «типы в порядке, тесты прошли?» Пока он ждёт
+ответа, он стоит. `loop_latency.py` меряет секунды от правки до вердикта на 24 своих задачах (эталонные решения),
+каждая в свежем каталоге, как в харнессе `llm_bench.py`. Две правки:
+
+- **верное решение** — вердикт должен быть «прошло»;
+- **ошибка типов** — то же решение плюс неиспользуемая функция, которая возвращает `Int` вместо `Str`; её видит
+  только проверка типов, поэтому вердикт должен быть «ошибка».
+
+```sh
+python bench/ai/loop_latency.py --klarc ./klarc          # --suite humaneval, --limit N, --json out.json
+```
+
+Результаты (контейнер, Python 3.13, mypy 2.3, TypeScript 6.0, node 22; klarc — отдельный бинарник без каталога
+библиотеки), медиана на задачу:
+
+| Цепочка | Верное решение | Ошибка типов | Верных вердиктов |
+|---|---:|---:|---:|
+| `klarc test` (native) | 249 мс | **9 мс** | 48/48 |
+| `klar test` (Python) | 129 мс | 136 мс | 48/48 |
+| `python` | 17 мс | 17 мс | 24/48 — ошибку типов не видит |
+| `mypy` + `python` | 1 020 мс | 1 000 мс | 48/48 |
+| демон mypy (тёплый) + `python` | 124 мс | 104 мс | 48/48 |
+| `tsc --strict` + node | 2 057 мс | 1 963 мс | 48/48 |
+
+Итого на 24 задачи: klarc — 6,1 с на верные решения (Python-реализация Klar — 8,4 с: свойства и контракты в
+интерпретаторе медленные), mypy — 24 с, tsc — 50 с. Ошибку типов klarc сообщает за 9 мс: ошибки программы выдаются
+до того, как читается рантайм. До этой работы было 280 мс на ошибку и 420 мс на верное решение; что изменилось —
+в CHANGELOG. Верное решение в klarc — это сборка в машинный код и запуск тестов; сборка тестов программы занимает
+почти всё время (≈75 мс разбор рантайма и проверка, ≈50 мс понижение, ≈100 мс оптимизация и регистры).
+
+**Ограничения.** Задачи маленькие: на большом проекте время mypy и tsc растёт с размером проекта, у klarc —
+тоже (он проверяет программу целиком, инкрементальной проверки нет). Время ответа модели (секунды) всё равно
+больше любого из этих чисел, кроме tsc; главное здесь — не скорость, а то, что вердикт об ошибке типов вообще есть
+и приходит сразу.
