@@ -7,6 +7,10 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- `klar spec` / `klarc spec` and `klar doc` listed the helper functions of the std modules (`skip_ws`, `crc_table`,
+  ...), which cannot be imported, and left out their public types: the reference now has exactly what a program
+  can import, with the fields and variants of `Json`, `Rx`, `Set` and `DateTime` (found by the agent run on the
+  hard suite).
 - `klarc profile` counted the calls of a lambda as calls of the enclosing function when the lambda was passed to an
   in-place update (`counts = counts.update(k, 0, fn(c) => c + 1)`); it names it `<lambda> (file:line)`, like
   `klar profile`.
@@ -100,6 +104,10 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   builds, tests and checks programs in any directory. Before, outside the repository every command failed with
   "cannot read module `rt`" unless `--lib` or `KLAR_LIB` pointed at a checkout. A library directory on disk
   (`--lib`, `KLAR_LIB`, `./klar`) is still used first.
+- `bench/ai/hard`: a suite of 20 longer tasks (expression parsing, graphs, caches, ledgers, a lexer, ...) with 147
+  tests whose expected results come from Python references (`llm_bench.py --suite hard`). First run with Haiku as
+  the model: 19/20 on the first try in Klar, Python and TypeScript alike, no compile error in Klar, 60% more tokens
+  than Python (bench/ai/README.md).
 - `bench/ai/loop_latency.py`: seconds from a saved edit to a verdict, per tool chain (klarc, `klar test`, python,
   mypy, the mypy daemon, tsc + node), on a correct solution and on one with a type error.
 - `tools/mutate.klar`: mutation testing of the compiler written in Klar (ROADMAP item 31). Each mutant flips one
