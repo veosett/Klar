@@ -2916,9 +2916,13 @@ fn variants_list(c: Ck, enum_name: Str) -> List[Str] {
 /// A function used as a value: calling the value does its effects.
 fn instantiate(ck: Ck, sig: Sig, span: Span) -> Res[Type] {
   let m = fresh_map(ck, sig.tparams)
-  let done = record_call(c: note_bounds(c: m.c, sig: sig, mapping: m.v, span: span), span: span, sig: sig, inst: m.v)
-  let ps = fresh_effs_all(ck: done, ts: sig.params.map(fn(p) => sub(c: done, t: p.second, m: m.v)))
-  let r = fresh_effs(ck: ps.c, t: sub(c: done, t: sig.ret, m: m.v))
+  let mv = m.v
+  let done = record_call(c: note_bounds(c: m.c, sig: sig, mapping: mv, span: span), span: span, sig: sig, inst: mv)
+  // the types first: `done` moves into `fresh_effs_all`, and a later read would make it copy the state
+  let pts = sig.params.map(fn(p) => sub(c: done, t: p.second, m: mv))
+  let rt = sub(c: done, t: sig.ret, m: mv)
+  let ps = fresh_effs_all(ck: done, ts: pts)
+  let r = fresh_effs(ck: ps.c, t: rt)
   let f = fresh_var(r.c)
   return ok(f.c, Type.Fun(params: ps.v, ret: r.v, eff: eff_flex(id: var_id(f.v), names: sig.effects)))
 }
@@ -3394,10 +3398,11 @@ fn call_sig_p(ck: Ck, sig: Sig, args: List[Arg], span: Span, expected: Option[Ty
     var c = ck
     let fm = fresh_map(c, sig.tparams)
     let mapping = fm.v
+    let s0 = fm.c.s      // (read before `fm.c` moves on: a later read would make every update below copy the state)
     c = record_call(c: note_bounds(c: fm.c, sig: sig, mapping: mapping, span: span), span: span, sig: sig, inst: mapping)
     var params: List[Pair[Str, Type]] = []
     for p in sig.params {
-      let r = fresh_effs(ck: c, t: subst(s: fm.c.s, t: p.second, mapping: mapping))
+      let r = fresh_effs(ck: c, t: subst(s: s0, t: p.second, mapping: mapping))
       c = r.c
       params = params.push(Pair { first: p.first, second: r.v })
     }

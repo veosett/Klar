@@ -89,7 +89,8 @@ pub type Lw {
   b: Builtins,
   uni: Universe,
   modules: Map[Str, Module],
-  sources: Map[Str, Str],
+  /// the lines of each source file (split once: error messages quote them at every call site)
+  sources: Map[Str, List[Str]],
   fns: List[KFn],
   instances: Map[Str, Str],
   names_used: Map[Str, Bool],
@@ -270,7 +271,7 @@ fn str_obj(w: Lw, text: Str) -> LR[Str] {
 }
 
 fn source_line(w: Lw, file: Str, line: Int) -> Str {
-  let lines = w.sources.get(file).unwrap_or("").split("\n")
+  let lines = w.sources.get(file).unwrap_or([])
   if line > 0 and line <= lines.len() {
     let text = lines.get_or(line - 1, "")
     return match text.ends_with("\r") {
@@ -894,6 +895,18 @@ fn cexpr(w0: Lw, e: Expr) -> LR[V] {
 }
 
 /// A read of a path inside an in-place `with`: from the record being updated (borrowed).
+/// Whether `e` reads a field of a record a `with` is updating in place (see `bound_read`). Asked first, so that the
+/// caller hands its state to `bound_read` only when it is needed (a read of the state afterwards would copy it).
+fn reads_bound(w: Lw, e: Expr) -> Bool {
+  if w.bound.is_empty() {
+    return false
+  }
+  return match path_of(e) {
+    Some(p) => bound_prefix(w, p) != "",
+    None => false,
+  }
+}
+
 fn bound_read(w0: Lw, e: Expr) -> Option[LR[V]] {
   if w0.bound.is_empty() {
     return None
@@ -962,19 +975,28 @@ fn unique_record(w0: Lw, v: V) -> LR[Int] {
   return lr(place(w, done.v), u.v)
 }
 
-/// A use inside the fields of a `with`: its path, node and the bases of the nested `with`s around it.
-type WOcc { path: Str, key: Str, bases: List[Str] }
+/// A use inside the fields of a `with`: its path, node, the bases of the nested `with`s around it, the field it is in,
+/// and whether it lies inside a call in the arguments of that field's own update (`safe`, see `with_takes`).
+type WOcc { path: Str, key: Str, bases: List[Str], field: Int, safe: Bool }
 
-fn with_occs(e: Expr, bases: List[Str]) -> List[WOcc] {
+fn is_call(e: Expr) -> Bool {
+  return match e {
+    Expr.Call(_, _, _) => true,
+    Expr.MethodCall(_, _, _, _, _) => true,
+    _ => false,
+  }
+}
+
+fn with_occs(e: Expr, bases: List[Str], field: Int, in_args: Bool, safe: Bool) -> List[WOcc] {
   match path_of(e) {
     Some(p) => {
-      return [WOcc { path: p, key: nkey(e), bases: bases }]
+      return [WOcc { path: p, key: nkey(e), bases: bases, field: field, safe: safe }]
     },
     None => {},
   }
   return match e {
     Expr.Lambda(_, _, _, body) => all_exprs(body_exprs(body)).flat_map(fn(x) => match x {
-      Expr.Name(_, n) => [WOcc { path: n, key: nkey(x), bases: bases }],
+      Expr.Name(_, n) => [WOcc { path: n, key: nkey(x), bases: bases, field: field, safe: false }],
       _ => [],
     }),
     Expr.WithExpr(_, base, fs) => {
@@ -982,30 +1004,68 @@ fn with_occs(e: Expr, bases: List[Str]) -> List[WOcc] {
         Some(_) => bases.push(nkey(base)),
         None => bases,
       }
-      return with_occs(base, bases).concat(fs.flat_map(fn(f) => with_occs(f.value, inner)))
+      return with_occs(e: base, bases: bases, field: field, in_args: in_args, safe: safe).concat(fs.flat_map(fn(f) =>
+        with_occs(e: f.value, bases: inner, field: field, in_args: in_args, safe: safe)))
     },
-    _ => sub_exprs(e).flat_map(fn(x) => with_occs(x, bases)),
+    _ => {
+      let inner_safe = safe or (in_args and is_call(e))
+      return sub_exprs(e).flat_map(fn(x) => with_occs(e: x, bases: bases, field: field, in_args: in_args,
+        safe: inner_safe))
+    },
   }
 }
 
-/// The field uses inside `e` (a `with` updating the record at path bp in place) that may take their field out: the
-/// only use of that field, in a consuming position or as the base of a nested `with`.
-fn with_takes(w: Lw, e: Expr, fields: List[FieldInit], bp: Str) -> Map[Str, Bool] {
-  let occs = fields.flat_map(fn(f) => with_occs(f.value, []))
-  var out: Map[Str, Bool] = Map {}
-  if occs.any(fn(o) => bp == o.path or bp.starts_with(o.path + ".")) {
-    return out
+/// The uses in field k's value; an update of the field itself (`c.m.set(...)`) has its arguments marked.
+fn field_occs(w: Lw, f: FieldInit, fp: Str, k: Int) -> List[WOcc] {
+  match f.value {
+    Expr.MethodCall(sp, obj, _, _, args) => {
+      let reuse = match resolution(w, sp) {
+        Some(res) => res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name),
+        None => false,
+      }
+      if reuse and path_of(obj) == Some(fp) {
+        return with_occs(e: obj, bases: [], field: k, in_args: false, safe: false).concat(args.flat_map(fn(a) =>
+          with_occs(e: a.value, bases: [], field: k, in_args: true, safe: false)))
+      }
+    },
+    _ => {},
   }
+  return with_occs(e: f.value, bases: [], field: k, in_args: false, safe: false)
+}
+
+/// The field uses inside `e` (a `with` updating the record at path bp in place) that may take their field out: the
+/// only use of that field, in a consuming position or as the base of a nested `with`. A use of the record itself
+/// would see the holes that taken fields leave, so no field before it is taken; its own field still is when the use
+/// lies inside a call in the arguments of that field's update (klar/native/lower.py `with_takes`).
+fn with_takes(w: Lw, e: Expr, fields: List[FieldInit], bp: Str) -> Map[Str, Bool] {
+  var occs: List[WOcc] = []
+  var k = 0
+  for f in fields {
+    occs = occs.concat(field_occs(w: w, f: f, fp: bp + "." + f.name, k: k))
+    k = k + 1
+  }
+  let reads = occs.filter(fn(o) => bp == o.path or bp.starts_with(o.path + "."))
+  var last = -1
+  for o in reads {
+    last = last.max(o.field)
+  }
+  var out: Map[Str, Bool] = Map {}
   let t = ty(w, e)
   let fts = record_fields(w, t)
+  var fi = 0
   for f in fields {
+    let fi_now = fi
+    fi = fi + 1
+    let blocked = fi_now < last or (fi_now == last and not reads.all(fn(o) => o.field != fi_now or o.safe))
     let ft = fts.find(fn(x) => x.first == f.name).map(fn(x) => x.second).unwrap_or(unit_t())
-    if rck(ft) != "" {
+    if not blocked and rck(ft) != "" {
       let fp = bp + "." + f.name
-      let near = occs.filter(fn(o) => o.path == fp or o.path.starts_with(fp + ".") or fp.starts_with(o.path + "."))
+      // (the reads of the record itself are handled above)
+      let near = occs.filter(fn(o) => o.path == fp or o.path.starts_with(fp + ".") or (fp.starts_with(o.path + ".") and
+          not (bp == o.path or bp.starts_with(o.path + "."))))
       let exact = near.filter(fn(o) => o.path == fp)
       if exact.len() == 1 {
-        let ek = exact.get_or(0, WOcc { path: "", key: "", bases: [] }).key
+        let ek = exact.get_or(0, WOcc { path: "", key: "", bases: [], field: -1, safe: false }).key
         if near.all(fn(o) => o.key == ek or o.bases.contains(ek)) {
           out = out.set(ek, true)
         }
@@ -1154,9 +1214,17 @@ fn inst_type(w: Lw, info: CallInfo, tp: Str) -> Type {
   return zonk(info.inst.get(tp).unwrap_or(unit_t()), w.env)
 }
 
+fn split_sources(sources: Map[Str, Str]) -> Map[Str, List[Str]] {
+  var out: Map[Str, List[Str]] = Map {}
+  for en in sources.entries() {
+    out = out.set(en.key, en.value.split("\n"))
+  }
+  return out
+}
+
 /// The text of the source at a span (one line: the exact columns; several lines: the rest of the first line).
 fn src_text(w: Lw, sp: Span) -> Str {
-  let lines = w.sources.get(w.file).unwrap_or("").split("\n")
+  let lines = w.sources.get(w.file).unwrap_or([])
   if sp.line <= 0 or sp.line > lines.len() {
     return "?"
   }
@@ -1932,8 +2000,96 @@ fn str_lit(w0: Lw, parts: List[StrPiece]) -> LR[V] {
   return vv(w: f.w, rg: f.v, t: con("Str"), owned: true)
 }
 
+/// The key and the items of a list literal whose items are all constant strings, small Ints or Bools ("" when it is
+/// not one): klar/native/lower.py `static_list`.
+fn static_items(items: List[Expr]) -> Pair[Str, List[Str]] {
+  var key = ""
+  var out: List[Str] = []
+  for it in items {
+    match it {
+      Expr.StrLit(_, parts) => {
+        var text = ""
+        for p in parts {
+          match p {
+            StrPiece.Text(s) => {
+              text = text + s
+            },
+            StrPiece.Code(_) => {
+              return Pair { first: "", second: [] }
+            },
+          }
+        }
+        key = key + "|s{text.len()}:" + text
+        out = out.push("s" + text)
+      },
+      Expr.IntLit(_, v) => {
+        if v < -2305843009213693952 or v >= 2305843009213693952 {
+          return Pair { first: "", second: [] }
+        }
+        key = key + "|i{v}"
+        out = out.push("i{v}")
+      },
+      Expr.BoolLit(_, b) => {
+        key = key + "|b{b}"
+        out = out.push("b{b}")
+      },
+      _ => {
+        return Pair { first: "", second: [] }
+      },
+    }
+  }
+  return Pair { first: key, second: out }
+}
+
+/// An immortal list for a literal of constant items, so that `["mov", "i2f"].contains(op)` allocates nothing.
+fn static_list(w0: Lw, t: Type, items: List[Expr]) -> Option[LR[Str]] {
+  let si = static_items(items)
+  if si.first == "" {
+    return None
+  }
+  let key = "list:" + tshow(t) + si.first
+  match w0.static_objs.get(key) {
+    Some(name) => {
+      return Some(lr(w0, name))
+    },
+    None => {},
+  }
+  var w = w0
+  var ws: List[W] = []
+  for x in si.second {
+    let body = x.slice(1, x.len())
+    if x.starts_with("s") {
+      let s = str_obj(w, body)
+      w = s.w
+      ws = ws.push(W.A(sym: s.v, add: 0))
+    } else if x.starts_with("i") {
+      ws = ws.push(W.N(v: 2 * body.to_int().unwrap_or(0) + 1))
+    } else {
+      ws = ws.push(W.N(v: match body == "true" {
+        true => 1,
+        false => 0,
+      }))
+    }
+  }
+  let tdw = td_word(w, t)
+  let name = "obj{tdw.w.static_objs.len()}"
+  w = words(w: tdw.w, name: name + "_items", ws: ws)
+  w = words(w: w, name: name, ws: [W.N(v: -1), tdw.v, W.N(v: ws.len()), W.N(v: ws.len()), W.A(sym: name + "_items",
+    add: 0)])
+  return Some(lr(w with { static_objs: w.static_objs.set(key, name) }, name))
+}
+
 fn list_lit(w0: Lw, e: Expr, items: List[Expr]) -> LR[V] {
   let t = ty(w0, e)
+  if not items.is_empty() and static_items(items).first != "" {
+    return match static_list(w0, t, items) {
+      Some(s) => {
+        let a = addr(s.w, s.v)
+        return vv(w: a.w, rg: a.v, t: t, owned: false)
+      },
+      None => fail("native: static list"),
+    }
+  }
   let n = items.len()
   let a = addr_td(w0, t)
   let c = konst(a.w, n)
@@ -1973,11 +2129,11 @@ fn resolve_const(w: Lw, name: Str) -> Option[Pair[Str, Str]] {
 }
 
 fn x_name(w: Lw, e: Expr, name: Str) -> LR[V] {
-  match bound_read(w, e) {
-    Some(b) => {
-      return b
-    },
-    None => {},
+  if reads_bound(w, e) {
+    return match bound_read(w, e) {
+      Some(b) => b,
+      None => fail("native: bound read"),
+    }
   }
   match lookup(w, name) {
     Some(loc) => {
@@ -1987,9 +2143,9 @@ fn x_name(w: Lw, e: Expr, name: Str) -> LR[V] {
   }
   match w.captures.get(name) {
     Some(cap) => {
+      let env = w.closure_self.unwrap_or(0)
       let d = reg(w)
-      return vv(w: emit(d.w, [op("load"), r(d.v), r(w.closure_self.unwrap_or(0)), r(24 + 8 * cap.first)]), rg: d.v,
-        t: cap.second, owned: false)
+      return vv(w: emit(d.w, [op("load"), r(d.v), r(env), r(24 + 8 * cap.first)]), rg: d.v, t: cap.second, owned: false)
     },
     None => {},
   }
@@ -2027,8 +2183,8 @@ fn fn_value(w0: Lw, e: Expr, info: CallInfo) -> LR[V] {
     Some(d) => d,
     None => fail("native: no declaration"),
   }
-  let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: sig.tparams.map(fn(tp) => inst_type(w: w0,
-    info: info, tp: tp)), kind: "user")
+  let type_args = sig.tparams.map(fn(tp) => inst_type(w: w0, info: info, tp: tp))    // (before `w0` moves: see user_call)
+  let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: type_args, kind: "user")
   var w = target.w
   let key = "fnval#" + target.v
   if not w.static_objs.has(key) {
@@ -2359,8 +2515,10 @@ fn user_call(w0: Lw, e: Expr, sig: Sig, info: CallInfo, recv: Option[Expr]) -> L
     true => "rt",
     false => "user",
   }
-  let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: sig.tparams.map(fn(tp) => inst_type(w: w0,
-    info: info, tp: tp)), kind: kind)
+  // the type arguments first: a read of `w0` after `instance` would keep a second reference to the whole state, and
+  // every update below (strings, spans, the data section) would copy it
+  let type_args = sig.tparams.map(fn(tp) => inst_type(w: w0, info: info, tp: tp))
+  let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: type_args, kind: kind)
   var w = target.w
   let owned = match tm.is_sys {
     true => [],
@@ -2658,11 +2816,11 @@ fn variant_ctor(w0: Lw, e: Expr, enum_name: Str, vname: Str) -> LR[V] {
 // ---- records, Try, match --------------------------------------------------------------------------------------
 
 fn x_field_access(w0: Lw, e: Expr) -> LR[V] {
-  match bound_read(w0, e) {
-    Some(b) => {
-      return b
-    },
-    None => {},
+  if reads_bound(w0, e) {
+    return match bound_read(w0, e) {
+      Some(b) => b,
+      None => fail("native: bound read"),
+    }
   }
   let parts = match e {
     Expr.FieldAccess(_, obj, name, _) => Pair { first: obj, second: name },
@@ -2771,7 +2929,6 @@ fn x_record(w0: Lw, e: Expr, fields: List[FieldInit]) -> LR[V] {
 fn x_with(w0: Lw, e: Expr, base: Expr, fields: List[FieldInit]) -> LR[V] {
   let bp = path_of(base)
   let moved = moves(w0, base)
-  var b = lr(w0, V { reg: 0, t: unit_t(), owned: false })
   if moved or bp == None {
     let src = cexpr(w0, base)
     if src.v.owned {
@@ -2781,10 +2938,13 @@ fn x_with(w0: Lw, e: Expr, base: Expr, fields: List[FieldInit]) -> LR[V] {
       }
       return with_in_place(w0: src.w, e: e, fields: fields, src: src.v, bp: path)
     }
-    b = src
-  } else {
-    b = expr(w0, base)
+    return with_copy(b: src, fields: fields)
   }
+  return with_copy(b: expr(w0, base), fields: fields)
+}
+
+/// `base with {...}` on a value that is not owned: a new record with the other fields retained.
+fn with_copy(b: LR[V], fields: List[FieldInit]) -> LR[V] {
   let t = b.v.t
   let fs = record_fields(b.w, t)
   var w = b.w
@@ -3046,8 +3206,46 @@ fn x_lambda(w0: Lw, e: Expr) -> LR[V] {
 }
 
 /// Lowers the body of a lambda as a function of its own (closure object first, then the parameters).
+/// The state of the function being lowered, kept aside while a lambda inside it is lowered. (Keeping the whole `Lw`
+/// would share its tables with the lambda's state, and every update of them would copy them.)
+type FnState {
+  cur: KFn,
+  cur_index: Int,
+  scopes: List[LScope],
+  loops: List[LoopT],
+  ret_t: Type,
+  dead: Bool,
+  closure_self: Option[Int],
+  captures: Map[Str, Pair[Int, Type]],
+  decl: Option[FnDecl],
+  posts: List[Expr],
+  in_test: Bool,
+  cand: Map[Str, Bool],
+  bound: Map[Str, Int],
+  takeable: Map[Str, Bool],
+}
+
+fn fn_state(w: Lw) -> FnState {
+  return FnState {
+    cur: w.cur,
+    cur_index: w.cur_index,
+    scopes: w.scopes,
+    loops: w.loops,
+    ret_t: w.ret_t,
+    dead: w.dead,
+    closure_self: w.closure_self,
+    captures: w.captures,
+    decl: w.decl,
+    posts: w.posts,
+    in_test: w.in_test,
+    cand: w.cand,
+    bound: w.bound,
+    takeable: w.takeable,
+  }
+}
+
 fn lambda_fn(w0: Lw, name: Str, params: List[Param], body: Body, ft: Type, captured: Map[Str, Pair[Int, Type]]) -> Lw {
-  let outer = w0
+  let outer = fn_state(w0)
   let fps = match ft {
     Type.Fun(ps, _, _) => ps,
     _ => [],
@@ -3535,7 +3733,7 @@ fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profil
       b: ld.b,
       uni: ld.uni,
       modules: modules,
-      sources: ld.sources,
+      sources: split_sources(ld.sources),
       fns: [],
       soft: [],
       instances: Map {},

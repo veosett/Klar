@@ -12,8 +12,10 @@ see the old value. Two analyses find where the copy can be skipped (compiler/own
   collection that was unique stays unique and the runtime updates it in place.
 
 A candidate use must also be the only use of its path in its statement (other uses would be borrowed views that
-the move could invalidate), except for the other arguments of the same call (they are retained around the call)
-and for the field values of a `with` whose base it is (they read the reused record).
+the move could invalidate), except for the other arguments of the same call (they are retained around the call),
+for the field values of a `with` whose base it is (they read the reused record), for uses in another arm of the
+same `match` (only one arm runs) and for a `match` subject that is a Bool, Float or Unit read before the arms (a
+copy, not a view: `w = match w.dead { false => pop_scope(w), true => drop_scope(w) }` moves `w`).
 """
 from .. import nodes as N
 
@@ -176,7 +178,27 @@ def infer_owned(decls):
 
 # ---- last uses ----------------------------------------------------------------------------------------------------
 class Occ:
-    __slots__ = ("node", "path", "stmt", "seq", "regions", "parent", "live", "alias", "anc")
+    __slots__ = ("node", "path", "stmt", "seq", "regions", "parent", "live", "alias", "anc", "subj")
+
+
+SCALARS = ("Bool", "Float", "Unit")
+
+
+def scalar(e):
+    """A value that is copied when read (no reference into the variable it came from)."""
+    t = getattr(e, "kt", None)
+    return t is not None and type(t).__name__ == "TCon" and t.name in SCALARS
+
+
+def exclusive(o, o2):
+    """o and o2 lie in different arms of the same `match` (or o2 is that match's scalar subject)."""
+    for r in o.regions:
+        if r[0] == "m":
+            if o2.subj == r[1]:
+                return True
+            if any(r2[0] == "m" and r2[1] == r[1] and r2[2] != r[2] for r2 in o2.regions):
+                return True
+    return False
 
 
 def finished(o2, o):
@@ -202,6 +224,7 @@ class Liveness:
         self.seq = 0
         self.loops = []           # [exit live set, head live set]
         self.anc = []             # (id, computes a new value) of the expressions around the current one
+        self.subj = None          # id of the `match` whose scalar subject is being walked
 
     # ---- driver
     def run_block(self, block):
@@ -226,7 +249,7 @@ class Liveness:
                     continue
                 ok = True
                 for o2 in occs:
-                    if o2 is o or not overlaps(o2.path, o.path) or finished(o2, o):
+                    if o2 is o or not overlaps(o2.path, o.path) or finished(o2, o) or exclusive(o, o2):
                         continue
                     r = o.parent
                     if r is None or r not in o2.regions:
@@ -325,6 +348,7 @@ class Liveness:
         o.regions = tuple(self.regions)
         o.anc = tuple(self.anc)
         o.live = check
+        o.subj = self.subj
         self.occs[id(e)] = o
         return live | {(path, excl)}
 
@@ -409,20 +433,30 @@ class Liveness:
             return self.ex(e.obj, live)
         if t is N.Match:
             sp, _ = self.local_path(e.subject)
-            for arm in e.arms:
+            outer_alias = self.alias       # an arm's bindings are names only inside it (a `var x` elsewhere is not one)
+            outs = EMPTY
+            for k, arm in enumerate(e.arms):
+                self.alias = dict(outer_alias)
                 for n in N.walk(arm.pattern):
                     if isinstance(n, N.PBind):
                         self.alias[n.name] = sp
-            outs = EMPTY
-            for arm in e.arms:
+                self.regions.append(("m", id(e), k))       # (only the body: a guard runs before later arms)
                 if isinstance(arm.body, N.Block):
                     lv = self.block(arm.body, live)
                 else:
                     lv = self.ex(arm.body, live)
+                self.regions.pop()
                 if arm.guard is not None:
                     lv = self.ex(arm.guard, lv)
                 outs = outs | lv
-            return self.ex(e.subject, outs)
+            self.alias = outer_alias
+            if sp is None or not scalar(e.subject):
+                return self.ex(e.subject, outs)
+            outer, self.subj = self.subj, id(e)
+            try:
+                return self.ex(e.subject, outs)
+            finally:
+                self.subj = outer
         if t is N.Lambda:
             own = {p.name for p in e.params}
             for n in N.walk(e.body):

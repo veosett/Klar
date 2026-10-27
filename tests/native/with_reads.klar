@@ -1,0 +1,50 @@
+// `with` updates that read the record they update (klar/native/lower.py `with_takes`): a field is taken out of the
+// record (and updated in place) only when no later read could see the hole it leaves.
+
+type St { names: Map[Str, Int], log: List[Str], n: Int, tag: Str }
+
+fn key_of(s: St, k: Str) -> Str {
+  return "{s.tag}:{k}:{s.names.len()}:{s.log.len()}"
+}
+
+/// The read of `s` is inside a call in the arguments of the field's own update: the field is updated in place.
+fn add(s: St, k: Str) -> St {
+  return s with { names: s.names.set(key_of(s, k), s.n) }
+}
+
+/// Two fields; the record is read in the second one: the first field must not be taken before that read.
+fn add_both(s: St, k: Str) -> St {
+  return s with { log: s.log.push(k), names: s.names.set(key_of(s, k), s.log.len()) }
+}
+
+/// The record is read in the first field and the second field is taken after the read.
+fn add_rev(s: St, k: Str) -> St {
+  return s with { names: s.names.set(key_of(s, k), 1), log: s.log.push(key_of(s, k)) }
+}
+
+/// A read of the record directly as an argument (not inside a call): no take.
+fn self_len(s: St) -> St {
+  return s with { log: s.log.push("{s.n}") }
+}
+
+fn show(s: St) -> Str {
+  var ks = s.names.keys().sort()
+  return "{ks} {s.log} {s.n}"
+}
+
+fn main() uses io {
+  var s = St { names: Map {}, log: [], n: 7, tag: "t" }
+  var i = 0
+  while i < 5 {
+    s = add(s, "a{i}")
+    s = add_both(s, "b{i}")
+    s = add_rev(s, "c{i}")
+    s = self_len(s)
+    i = i + 1
+  }
+  print(show(s))
+  // the old value stays intact when it is still used
+  let before = s
+  let after = add_both(s, "z")
+  print("{before.names.len()} {before.log.len()} {after.names.len()} {after.log.len()}")
+}

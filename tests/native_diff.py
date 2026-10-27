@@ -33,18 +33,8 @@ def default_files():
                                                           "shapes.klar", "features.klar")]
     files += [os.path.join(ROOT, "klar", "std", f) for f in sorted(os.listdir(os.path.join(ROOT, "klar", "std")))]
     files.append(os.path.join(ROOT, "tests", "stdlib", "builtins_test.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "edge_cases.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "bits_and_os.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "traits.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "patterns.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "floats.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "bytes.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "consts.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "ownership.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "generic_impls.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "newtypes.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "parallel.klar"))
-    files.append(os.path.join(ROOT, "tests", "native", "properties.klar"))
+    native = os.path.join(ROOT, "tests", "native")
+    files += [os.path.join(native, f) for f in sorted(os.listdir(native)) if f.endswith(".klar")]
     bench = os.path.join(ROOT, "bench", "programs")
     files += [os.path.join(bench, b, b + ".klar") for b in sorted(os.listdir(bench))]
     return files

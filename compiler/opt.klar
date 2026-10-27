@@ -778,6 +778,9 @@ fn touches(parent: Map[Int, Int], ins: Ins, root: Int) -> Bool {
 /// `hoist_releases`): an Int has no destructor and nothing later reads it. A value whose object was stored in
 /// memory stays where it is.
 fn hoist_releases(code: List[Ins]) -> List[Ins] {
+  if not code.any(fn(ins) => opc(ins) == "release" and str_at(ins, 1) == "int") {
+    return code
+  }
   let parent = alias_parents(code)
   var stored: Map[Int, Bool] = Map {}
   for ins in code {
@@ -788,8 +791,12 @@ fn hoist_releases(code: List[Ins]) -> List[Ins] {
   }
   var out: List[Ins] = []
   for ins in code {
-    let root = find_root(parent, int_at(ins, 2))
-    if opc(ins) == "release" and str_at(ins, 1) == "int" and not stored.has(root) {
+    let is_rel = opc(ins) == "release" and str_at(ins, 1) == "int"
+    let root = match is_rel {
+      true => find_root(parent, int_at(ins, 2)),
+      false => -1,
+    }
+    if is_rel and not stored.has(root) {
       var j = out.len()
       var moving = true
       while moving and j > 0 {

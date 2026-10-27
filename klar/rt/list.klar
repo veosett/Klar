@@ -371,6 +371,16 @@ fn List_count(xs: Word, pred: Word) -> Int {
 fn List_contains(xs: Word, item: Word) -> Bool {
   let et = list_elem_td(xs)
   var i: Word = 0
+  if peek(et) == K_STR {
+    // the common case (`["add", "sub"].contains(op)`): no nesting check per element
+    while i < peek(xs + 16) {
+      if Str_eq(list_at(xs, i), item) {
+        return true
+      }
+      i = i + 1
+    }
+    return false
+  }
   while i < peek(xs + 16) {
     if eq_v(list_at(xs, i), item, et) {
       return true

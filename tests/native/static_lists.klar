@@ -1,0 +1,49 @@
+// List literals of constant items are immortal static objects (klar/native/lower.py `static_list`): reading them
+// allocates nothing, and every update copies them, so the literal stays the same for the next use.
+
+const NAMES: List[Str] = ["mov", "add", "sub"]
+
+fn is_arith(op: Str) -> Bool {
+  return ["add", "sub", "mul", "div"].contains(op)
+}
+
+fn grow(n: Int) -> List[Int] {
+  var xs = [1, 2, 3]
+  var i = 0
+  while i < n {
+    xs = xs.push(i)
+    i = i + 1
+  }
+  return xs
+}
+
+fn changed() -> List[Bool] {
+  return [true, false, true].set(1, true)
+}
+
+fn main() uses io {
+  let add = is_arith("add")
+  let mov = is_arith("mov")
+  print("{add} {mov} {NAMES.len()} {NAMES}")
+  print("{grow(3)} {grow(0)} {grow(2)}")
+  print("{changed()} {[true, false, true]}")
+  var total = 0
+  for k in range(0, 3) {
+    for x in [10, 20, 30] {
+      total = total + x * k
+    }
+  }
+  print("{total}")
+  let a = ["x", "y"]
+  let b = ["x", "y"]
+  let c = a.concat(b).reverse()
+  let wide = ["é", "日本"]
+  let big = [4611686018427387903, -1]
+  print("{a == b} {c} {a} {wide} {big}")
+  var held: List[List[Str]] = []
+  for i in range(0, 3) {
+    let tail = "{i}"
+    held = held.push(["k", "v"].push(tail))
+  }
+  print("{held}")
+}

@@ -47,8 +47,22 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   operation is done only on its slow (bignum) path (`hoist_releases`, `fuse_int_releases` in opt.py / opt.klar).
   Functions start at 16 bytes, and NOPs keep jumps clear of 32-byte boundaries (Intel's JCC erratum), so the speed
   no longer depends on where a function happens to land.
-- klarc compiles itself faster (49 → 43 s): `lower_function` read `w.file` after passing `w` on, so every function
-  copied the whole lowering state, its string table and data section; the same pattern is gone from 4 other places.
+- klarc compiles itself 3.5× faster (49 → 14 s; the Python implementation takes 30 s). The lowering state was copied
+  thousands of times per build (and with it the string table and the data section), because the ownership analysis
+  missed moves in three common shapes, which now update in place in every Klar program:
+  - `c with { m: c.m.set(key_of(c), v) }`: the record read inside a call in the arguments of the field's own
+    update no longer stops the field from being taken out (`with_takes`); a read in a later field still does;
+  - uses of a variable in different arms of one `match` (only one runs), and a Bool/Float/Unit `match` subject read
+    from it before the arms (`w = match w.dead { false => pop_scope(w), true => drop_scope(w) }`); a guard runs
+    before the later arms and is not counted as an arm;
+  - a pattern binding named like a variable elsewhere in the function made that variable look like a view of the
+    matched value (bindings are scoped to their arm now).
+
+  Plus: list literals of constant strings, small Ints and Bools are immortal static objects (`["add",
+  "sub"].contains(op)` allocates nothing; updating one copies it), `List.contains` on strings skips the nesting
+  check per element, the lowering splits each source file into lines once, and a lambda keeps only its outer
+  function's state aside (not the whole program state). The klarc sources avoid reading a state after passing it
+  on in 9 places.
 - E0208 asks for named arguments only where they could be swapped unnoticed. With 3+ parameters, positional
   arguments are fine when the parameters have different types, or when among same-typed parameters every argument
   but at most one carries its parameter's name (`cell(grid, r, c)`, `cell(grid, nr, c - 1)`, `p.r`); `f(200, 20,

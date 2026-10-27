@@ -18,7 +18,7 @@ from ..builtins import GLOBALS, METHODS, parsed
 from ..types import NEVER, TCon, TFn, TParam, prune, show
 from .intrinsics import SYS_NAMES
 from .kir import Fn
-from .own import EMPTY, REUSE, Liveness, infer_owned, path_of, root_of
+from .own import EMPTY, REUSE, Liveness, builtin_kind, infer_owned, path_of, root_of
 
 K_UNIT, K_BOOL, K_INT, K_FLOAT, K_WORD = 0, 1, 2, 3, 4
 K_STR, K_LIST, K_MAP, K_RECORD, K_ENUM, K_FN, K_BIG, K_BUF, K_BYTES = 10, 11, 12, 13, 14, 15, 16, 17, 18
@@ -522,46 +522,62 @@ class FnLowering:
 
     def with_takes(self, e, bp):
         """The field uses inside `e` (a `with` updating the record at path bp in place) that may take their field out:
-        the only use of that field, in a consuming position or as the base of a nested `with`."""
-        occs = []
+        the only use of that field, in a consuming position or as the base of a nested `with`.
 
-        def collect(x, bases):
+        A use of the record itself (`c` in `c with { m: c.m.set(key_of(c), v) }`) would see the holes that taken fields
+        leave, so no field before it is taken. Its own field still is when the use lies inside a call in the
+        arguments of that field's update (`c.m.set(...)`): the arguments are evaluated before the receiver is taken,
+        and the call has made a value of its own by then."""
+        occs = []                  # (path, node, bases, field index, safe)
+
+        def collect(x, bases, k, in_args, safe):
             p = path_of(x)
             if p is not None:
-                occs.append((p, x, bases))
+                occs.append((p, x, bases, k, safe))
                 return
             if isinstance(x, N.Lambda):
                 for n in N.walk(x.body):
                     if isinstance(n, N.Name):
-                        occs.append((n.name, n, bases))
+                        occs.append((n.name, n, bases, k, False))
                 return
             if isinstance(x, N.WithExpr):
                 bp2 = path_of(x.base)
-                collect(x.base, bases)
+                collect(x.base, bases, k, in_args, safe)
                 inner = bases + (id(x.base),) if bp2 is not None else bases
                 for f in x.fields:
-                    collect(f.value, inner)
+                    collect(f.value, inner, k, in_args, safe)
                 return
             if isinstance(x, N.Node):
+                inner_safe = safe or (in_args and isinstance(x, (N.Call, N.MethodCall)))
                 for f in x.__dataclass_fields__:
                     v = getattr(x, f)
                     if isinstance(v, N.Node):
-                        collect(v, bases)
+                        collect(v, bases, k, in_args, inner_safe)
                     elif isinstance(v, list):
                         for it in v:
                             if isinstance(it, N.Node):
-                                collect(it, bases)
-        for f in e.fields:
-            collect(f.value, ())
-        if any(bp == p or bp.startswith(p + ".") for p, _, _ in occs):
-            return set()
+                                collect(it, bases, k, in_args, inner_safe)
+        for k, f in enumerate(e.fields):
+            v = f.value
+            if isinstance(v, N.MethodCall) and builtin_kind(v) == "builtin" and \
+                    (v.resolved[1], v.resolved[2]) in REUSE and path_of(v.obj) == bp + "." + f.name:
+                collect(v.obj, (), k, False, False)
+                for a in v.args:
+                    collect(a, (), k, True, False)
+            else:
+                collect(v, (), k, False, False)
+        reads = [o for o in occs if bp == o[0] or bp.startswith(o[0] + ".")]
+        last = max((o[3] for o in reads), default=-1)
         out = set()
         t = self.ty(e)
-        for f in e.fields:
+        for k, f in enumerate(e.fields):
+            if k < last or (k == last and not all(o[4] for o in reads if o[3] == k)):
+                continue
             if not rck(dict(self.p.record_fields(t))[f.name]):
                 continue
             fp = bp + "." + f.name
-            near = [o for o in occs if o[0] == fp or o[0].startswith(fp + ".") or fp.startswith(o[0] + ".")]
+            near = [o for o in occs if o[0] == fp or o[0].startswith(fp + ".") or
+                    (fp.startswith(o[0] + ".") and not (bp == o[0] or bp.startswith(o[0] + ".")))]   # (reads: see above)
             exact = [o for o in near if o[0] == fp]
             if len(exact) == 1 and all(o is exact[0] or id(exact[0][1]) in o[2] for o in near):
                 out.add(id(exact[0][1]))
@@ -938,8 +954,43 @@ class FnLowering:
                 self.drop(v)
         return V(self.call_rt("sb_finish", [sb]), STR_T, True)
 
+    def static_list(self, e, t):
+        """An immortal list for a literal whose items are all constant strings, small Ints or Bools, so that
+        `["mov", "i2f"].contains(op)` allocates nothing. Updating it (`push`, `set`) copies it, as for any shared
+        list. None for other literals."""
+        items = []
+        for it in e.items:
+            if isinstance(it, N.StrLit) and all(isinstance(p, str) for p in it.parts):
+                items.append(("s", "".join(it.parts)))
+            elif isinstance(it, N.IntLit) and -2 ** 61 <= it.value < 2 ** 61:
+                items.append(("i", it.value))
+            elif isinstance(it, N.BoolLit):
+                items.append(("b", it.value))
+            else:
+                return None
+        key = ("list", show(t), tuple(items))
+        if key not in self.p.static_objs:
+            ws = []
+            for kind, v in items:
+                if kind == "s":
+                    ws.append((self.p.str_obj(v), 0))
+                elif kind == "i":
+                    ws.append(2 * v + 1)
+                else:
+                    ws.append(1 if v else 0)
+            td = self.p.td(t)
+            name = f"obj{len(self.p.static_objs)}"
+            self.p.words(name + "_items", ws)
+            self.p.words(name, [-1, (td, 0), len(ws), len(ws), (name + "_items", 0)])
+            self.p.static_objs[key] = name
+        return self.p.static_objs[key]
+
     def x_ListLit(self, e):
         t = self.ty(e)
+        if e.items:
+            static = self.static_list(e, t)
+            if static is not None:
+                return V(self.addr(static), t, False)
         n = len(e.items)
         lst = self.call_rt("list_with_cap", [self.addr(self.p.td(t)), self.const(n)])
         data = self.reg()

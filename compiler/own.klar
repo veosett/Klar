@@ -8,6 +8,7 @@
 // Nodes are identified by their source span (`node_key`); live sets are sets of "path!excluded,fields" strings.
 use ast.{Arg, Block, Body, Else, Expr, FieldInit, FnDecl, MatchArm, Pattern, Span, Stmt, StrPiece}
 use checker.{CallInfo, Ck, Resolution, span_key}
+use types.{Type}
 
 /// Methods whose receiver may be updated in place (runtime function <Owner>_<m>_owned).
 pub const REUSE: List[Str] = ["List.push", "List.set", "List.insert", "List.remove_at", "List.concat", "Bytes.push",
@@ -427,8 +428,9 @@ pub fn infer_owned(fns: List[OwnFn]) -> Map[Str, List[Int]] {
 
 /// A use of a local: its path, statement, the calls / `with`s around it, the call or `with` it is a direct
 /// argument / base of ("" if none), what must not overlap it for a move, and the expressions around it.
+/// `subj`: the key of the `match` whose Bool/Float/Unit subject this use is ("" otherwise).
 type Occ { path: Str, stmt: Str, regions: List[Str], parent: Str, live: List[Str], alias: Bool,
-  anc: List[Pair[Str, Bool]] }
+  anc: List[Pair[Str, Bool]], subj: Str }
 
 type Lv {
   cx: Cx,
@@ -438,6 +440,8 @@ type Lv {
   alias: Map[Str, Str],
   occs: Map[Str, Occ],
   regions: List[Str],
+  /// the key of the `match` whose scalar subject is being walked ("" otherwise)
+  subj: Str,
   stmt: Str,
   anc: List[Pair[Str, Bool]],
   /// [exit live set, head live set] of the loops around
@@ -477,6 +481,32 @@ fn finished(o2: Occ, o: Occ) -> Bool {
   return o2.anc.drop(k).any(fn(a) => a.second)
 }
 
+/// A value that is copied when read (no reference into the variable it came from): Bool, Float, Unit.
+fn scalar_at(cx: Cx, e: Expr) -> Bool {
+  return match cx.ck.types.get(span_key(cx.file, expr_span_of(e))) {
+    Some(Type.Con(n, _)) => n == "Bool" or n == "Float" or n == "Unit",
+    _ => false,
+  }
+}
+
+/// o and o2 lie in different arms of the same `match` (or o2 is that match's scalar subject).
+fn exclusive(o: Occ, o2: Occ) -> Bool {
+  for r in o.regions {
+    if r.starts_with("m") {
+      let cut = r.index_of("#").unwrap_or(r.len())
+      let mkey = r.slice(1, cut)
+      if o2.subj == mkey {
+        return true
+      }
+      let prefix = r.slice(0, cut + 1)
+      if o2.regions.any(fn(r2) => r2.starts_with(prefix) and r2 != r) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 fn candidate(o: Occ, occs: List[Occ], no_move: List[Str]) -> Bool {
   if o.alias or no_move.contains(root_of(o.path)) {
     return false
@@ -485,7 +515,7 @@ fn candidate(o: Occ, occs: List[Occ], no_move: List[Str]) -> Bool {
     return false
   }
   for o2 in occs {
-    if overlaps(o2.path, o.path) and not finished(o2, o) {
+    if overlaps(o2.path, o.path) and not finished(o2, o) and not exclusive(o, o2) {
       let r = o.parent
       if r == "" or not o2.regions.contains(r) {
         return false
@@ -521,14 +551,14 @@ fn candidates(s: Lv) -> Map[Str, Bool] {
 }
 
 pub fn liveness_block(cx: Cx, locals: List[Str], no_move: List[Str], b: Block) -> Map[Str, Bool] {
-  let s = Lv { cx: cx, locals: locals, no_move: no_move, alias: Map {}, occs: Map {}, regions: [], stmt: "", anc: [],
-    loops: [] }
+  let s = Lv { cx: cx, locals: locals, no_move: no_move, alias: Map {}, occs: Map {}, regions: [], subj: "", stmt: "",
+    anc: [], loops: [] }
   return candidates(block(s: s, b: b, live: Map {}).s)
 }
 
 pub fn liveness_expr(cx: Cx, locals: List[Str], e: Expr) -> Map[Str, Bool] {
-  let s = Lv { cx: cx, locals: locals, no_move: [], alias: Map {}, occs: Map {}, regions: [], stmt: "e:" + node_key(
-    expr_span_of(e)), anc: [], loops: [] }
+  let s = Lv { cx: cx, locals: locals, no_move: [], alias: Map {}, occs: Map {}, regions: [], subj: "", stmt: "e:" +
+      node_key(expr_span_of(e)), anc: [], loops: [] }
   return candidates(ex(s: s, e: e, live: Map {}, parent: "", check: None, excl: []).s)
 }
 
@@ -698,7 +728,7 @@ fn ex(s: Lv, e: Expr, live: Map[Str, Bool], parent: Str, check: Option[Map[Str, 
       }
       let chk = check.unwrap_or(live)
       let o = Occ { path: lp.first, stmt: s.stmt, regions: s.regions, parent: par, live: chk.keys(), alias: lp.second,
-        anc: s.anc }
+        anc: s.anc, subj: s.subj }
       return LS { s: s with { occs: s.occs.set(node_key(expr_span_of(e)), o) }, live: add_item(live: live, path: lp.first, excl: ex2) }
     },
     None => {},
@@ -779,31 +809,43 @@ fn ex_in(s: Lv, e: Expr, live: Map[Str, Bool], key: Str) -> LS {
       }
       return walk(s: a.s, e: obj, live: a.live)
     },
-    Expr.Match(_, subject, arms) => {
+    Expr.Match(msp, subject, arms) => {
+      let mkey = node_key(msp)
       let sp = match local_path(s, subject) {
         Some(lp) => lp.first,
         None => "",
       }
       var st = s
-      for arm in arms {
-        for n in pattern_binds(arm.pattern) {
-          st = st with { alias: st.alias.set(n, sp) }
-        }
-      }
       var outs: Map[Str, Bool] = Map {}
+      var k = 0
       for arm in arms {
-        let b = match arm.body {
-          Body.BlockBody(blk) => block(s: st, b: blk, live: live),
-          Body.ExprBody(x) => walk(s: st, e: x, live: live),
+        // an arm's bindings are names only inside it (a `var x` elsewhere is not one)
+        var al = s.alias
+        for n in pattern_binds(arm.pattern) {
+          al = al.set(n, sp)
         }
+        st = st with { alias: al }
+        // (only the body is in the arm's region: a guard runs before the later arms)
+        let inner = st with { regions: st.regions.push("m{mkey}#{k}") }
+        let b0 = match arm.body {
+          Body.BlockBody(blk) => block(s: inner, b: blk, live: live),
+          Body.ExprBody(x) => walk(s: inner, e: x, live: live),
+        }
+        let b = LS { s: b0.s with { regions: st.regions }, live: b0.live }
         let g = match arm.guard {
           Some(x) => walk(s: b.s, e: x, live: b.live),
           None => b,
         }
         st = g.s
         outs = union(outs, g.live)
+        k = k + 1
       }
-      return walk(s: st, e: subject, live: outs)
+      st = st with { alias: s.alias }
+      if sp == "" or not scalar_at(st.cx, subject) {
+        return walk(s: st, e: subject, live: outs)
+      }
+      let sw = walk(s: st with { subj: mkey }, e: subject, live: outs)
+      return LS { s: sw.s with { subj: st.subj }, live: sw.live }
     },
     Expr.Lambda(_, params, _, body) => {
       var own_names = params.map(fn(p) => p.name)

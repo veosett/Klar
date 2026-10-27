@@ -1,0 +1,55 @@
+// Moves inside `match` arms (klar/native/own.py `exclusive`): only one arm runs, so each arm may move the same
+// variable; a Bool subject read from it is a copy. A guard runs before the later arms, so it never moves.
+
+type St { items: List[Int], done: Bool, name: Str }
+
+fn add(s: St, x: Int) -> St {
+  return s with { items: s.items.push(x) }
+}
+
+fn close(s: St) -> St {
+  return s with { done: true }
+}
+
+fn step(s0: St, x: Int) -> St {
+  var s = s0
+  s = match s.done {
+    false => add(s, x),
+    true => s,
+  }
+  s = match x % 3 {
+    0 => add(add(s, x), -x),
+    1 => add(s, x * 10),
+    _ => s,
+  }
+  return s
+}
+
+fn guarded(s: St, x: Int) -> St {
+  return match x {
+    n if s.items.len() > n => close(s),
+    n if n % 2 == 0 => add(s, n),
+    _ => add(add(s, x), x),
+  }
+}
+
+fn label(s: St) -> Str {
+  return match s.done {
+    true => "{s.name}: done, {s.items.len()} items",
+    false => "{s.name}: open, {s.items}",
+  }
+}
+
+fn main() uses io {
+  var s = St { items: [], done: false, name: "a" }
+  var i = 0
+  while i < 12 {
+    s = step(s, i)
+    s = guarded(s, i)
+    print(label(s))
+    i = i + 1
+  }
+  let keep = s
+  let more = step(s, 4)
+  print("{keep.items.len()} {more.items.len()} {label(keep)}")
+}

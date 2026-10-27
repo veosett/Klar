@@ -445,6 +445,8 @@ def hoist_releases(code):
     """Move `release int v` up to just after the last instruction of its block that touches v (or a name of the
     same object). Releasing an Int earlier changes nothing observable: an Int has no destructor, and nothing
     later reads it. A value whose object was stored in memory somewhere stays where it is (it may be read back)."""
+    if not any(ins[0] == "release" and ins[1] == "int" for ins in code):
+        return code
     alias = alias_classes(code)
     stored = set()
     for ins in code:
