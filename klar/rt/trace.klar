@@ -386,7 +386,10 @@ fn b_env_var(name: Word, rtd: Word) -> Word {
       return tr_get("OS", 0, rtd)
     }
   }
-  let r = real_env_var(name, rtd)
+  var r = none()
+  if sb_env_ok(name) {
+    r = real_env_var(name, rtd)
+  }
   tr_record("env_var", "OS", r)
   return r
 }

@@ -139,12 +139,14 @@ fn Bytes_concat(o: Word, other: Word) -> Word {
   return r
 }
 
+// consumes both (see List_concat_owned)
 fn Bytes_concat_owned(o: Word, other: Word) -> Word {
   let n = peek(o + 16)
   let m = peek(other + 16)
   let u = bytes_unique(o, m)
   copy_bytes(peek(u + 32) + n, peek(other + 32), m)
   poke(u + 16, n + m)
+  rc_dec(other)
   return u
 }
 

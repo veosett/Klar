@@ -154,6 +154,25 @@ fn List_get(xs: Word, i: Int, rtd: Word) -> Word {
   return some_elem(xs, k, rtd)
 }
 
+// `match xs.get(i)` without the Option (klar/native/lower.py `option_slot`): the slot of element `i` (-1: there is
+// none), and the element in a slot, retained
+fn list_slot(xs: Word, i: Int) -> Word {
+  if not is_small(i) {
+    return -1
+  }
+  let k = untag(i)
+  if k < 0 or k >= peek(xs + 16) {
+    return -1
+  }
+  return k
+}
+
+fn list_take(xs: Word, k: Word) -> Word {
+  let v = list_at(xs, k)
+  retain_v(v, list_elem_td(xs))
+  return v
+}
+
 fn List_get_or(xs: Word, i: Int, d: Word, td_T: Word) -> Word {
   if is_small(i) {
     let k = untag(i)
@@ -250,6 +269,8 @@ fn List_remove_at(xs: Word, i: Int, sp: Word) -> Word {
   return List_remove_at_owned(xs, i, sp)
 }
 
+// consumes both lists, like every `*_owned` function: the lowering hands over its references (`out.concat(f(x))`
+// leaked the temporary when `other` was only borrowed here)
 fn List_concat_owned(xs: Word, other: Word) -> Word {
   let n = peek(xs + 16)
   let m = peek(other + 16)
@@ -265,11 +286,13 @@ fn List_concat_owned(xs: Word, other: Word) -> Word {
     }
   }
   poke(u + 16, n + m)
+  rc_dec(other)
   return u
 }
 
 fn List_concat(xs: Word, other: Word) -> Word {
   rc_inc(xs)
+  rc_inc(other)
   return List_concat_owned(xs, other)
 }
 
@@ -814,7 +837,6 @@ fn List_flat_map(xs: Word, f: Word, rtd: Word) -> Word {
   while i < peek(xs + 16) {
     let part = call1(f, list_at(xs, i))
     out = List_concat_owned(out, part)
-    rc_dec(part)
     i = i + 1
   }
   return out
@@ -824,7 +846,9 @@ fn List_flatten(xs: Word, rtd: Word) -> Word {
   var out = list_with_cap(rtd, 4)
   var i: Word = 0
   while i < peek(xs + 16) {
-    out = List_concat_owned(out, list_at(xs, i))
+    let part = list_at(xs, i)
+    rc_inc(part)
+    out = List_concat_owned(out, part)
     i = i + 1
   }
   return out

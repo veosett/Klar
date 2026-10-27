@@ -46,6 +46,14 @@ const TWO_CHAR: List[Str] = ["->", "=>", "==", "!=", "<=", ">="]
 
 const ONE_CHAR: Str = "+-*/%<>=()[]\{\},:.?"
 
+/// The printable ASCII characters (32 to 126) as strings: an operator token takes its text from here.
+const PRINTABLE: List[Str] = [
+  " ", "!", "\"", "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/", "0", "1", "2", "3", "4", "5", "6", "7", "8",
+  "9", ":", ";", "<", "=", ">", "?", "@", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q",
+  "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "[", "\\", "]", "^", "_", "`", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+  "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "\{", "|", "\}", "~",
+]
+
 const FOREIGN: Map[Str, Str] = Map {
   "&&": "Klar uses the word `and`",
   "||": "Klar uses the word `or`",
@@ -112,7 +120,20 @@ fn code_point(b: Bytes, i: Int) -> Int {
 
 /// The character at byte `i`, as text.
 fn char_at(b: Bytes, i: Int) -> Str {
-  return b.slice(i, i + char_len(at(b, i))).decode().unwrap_or("?")
+  let c = at(b, i)
+  if c >= 32 and c < 127 {
+    return PRINTABLE.get_or(c - 32, "?")
+  }
+  return b.slice(i, i + char_len(c)).decode().unwrap_or("?")
+}
+
+/// The text of the one byte at `i` ("" at the end, or when it starts a longer character).
+fn byte_text(b: Bytes, i: Int) -> Str {
+  let c = at(b, i)
+  if c >= 32 and c < 127 {
+    return PRINTABLE.get_or(c - 32, "")
+  }
+  return text(b: b, a: i, z: i + 1)
 }
 
 /// Characters (code points) in the bytes [a, z): the column distance.
@@ -151,6 +172,10 @@ fn is_letter_cp(cp: Int) -> Bool {
 }
 
 fn is_letter(b: Bytes, i: Int) -> Bool {
+  let c = at(b, i)
+  if c < 128 {
+    return (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+  }
   return is_letter_cp(code_point(b, i))
 }
 
@@ -393,16 +418,8 @@ fn scan_string(b: Bytes, start: Int, line: Int, col: Int) -> Result[StrScan, Lex
 
 // ---- the main loop --------------------------------------------------------------------------------------
 
-fn token(kind: TokKind, value: Str, pos: List[Int]) -> Token {
-  return Token {
-    kind: kind,
-    text: value,
-    line: pos.get_or(0, 0),
-    col: pos.get_or(1, 0),
-    end_line: pos.get_or(2, 0),
-    end_col: pos.get_or(3, 0),
-    parts: [],
-  }
+fn token(kind: TokKind, value: Str, line: Int, col: Int, end_line: Int, end_col: Int) -> Token {
+  return Token { kind: kind, text: value, line: line, col: col, end_line: end_line, end_col: end_col, parts: [] }
 }
 
 fn last_is_newline(toks: List[Token]) -> Bool {
@@ -422,6 +439,8 @@ pub fn tokenize(src: Str) -> Result[List[Token], LexError] {
 pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Token], LexError] {
   let b = src.to_bytes()
   let n = b.len()
+  // all ASCII: byte offsets are character offsets, so a token's text is a slice of the source
+  let ascii = src.len() == n
   var toks: List[Token] = []
   var stack: List[Int] = []
   var i = 0
@@ -438,7 +457,7 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
         Some(open) => open == 123,
       }
       if at_statement and not last_is_newline(toks) and not next_line_continues(b, i + 1) {
-        toks = toks.push(token(kind: TokKind.Newline, value: "\n", pos: [line, col, line + 1, 1]))
+        toks = toks.push(token(kind: TokKind.Newline, value: "\n", line: line, col: col, end_line: line + 1, end_col: 1))
       }
       i = i + 1
       line = line + 1
@@ -447,7 +466,7 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
       let end = line_end(b, i)
       let end_col = col + chars_between(b: b, a: i, z: end)
       if at(b, i + 2) == 47 and at(b, i + 3) != 47 and stack.is_empty() {
-        toks = toks.push(token(kind: TokKind.Doc, value: text(b: b, a: i + 3, z: end), pos: [line, col, line, end_col]))
+        toks = toks.push(token(kind: TokKind.Doc, value: text(b: b, a: i + 3, z: end), line: line, col: col, end_line: line, end_col: end_col))
       }
       i = end
       col = end_col
@@ -462,30 +481,36 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
         false => TokKind.IntLit,
       }
       let end_col = col + scan.end - i
-      toks = toks.push(token(kind: kind, value: digits, pos: [line, col, line, end_col]))
+      toks = toks.push(token(kind: kind, value: digits, line: line, col: col, end_line: line, end_col: end_col))
       i = scan.end
       col = end_col
     } else if c == 34 {
       let scan = scan_string(b: b, start: i, line: line, col: col)?
       let end_col = col + chars_between(b: b, a: i, z: scan.end)
-      toks = toks.push(token(kind: TokKind.StrLit, value: scan.value, pos: [line, col, line, end_col])
+      toks = toks.push(token(kind: TokKind.StrLit, value: scan.value, line: line, col: col, end_line: line, end_col: end_col)
         with { parts: scan.parts })
       i = scan.end
       col = end_col
     } else if c == 95 or is_letter(b, i) {
       let end = scan_ident(b, i)
-      let word = text(b: b, a: i, z: end)
+      let word = match ascii {
+        true => src.slice(i, end),
+        false => text(b: b, a: i, z: end),
+      }
       let kind = match KEYWORDS.contains(word) {
         true => TokKind.Keyword,
         false => TokKind.Ident,
       }
-      let end_col = col + chars_between(b: b, a: i, z: end)
-      toks = toks.push(token(kind: kind, value: word, pos: [line, col, line, end_col]))
+      var end_col = col + end - i
+      if not ascii {
+        end_col = col + chars_between(b: b, a: i, z: end)
+      }
+      toks = toks.push(token(kind: kind, value: word, line: line, col: col, end_line: line, end_col: end_col))
       i = end
       col = end_col
     } else {
       let one = char_at(b, i)
-      let two = one + text(b: b, a: i + one.to_bytes().len(), z: i + one.to_bytes().len() + 1)
+      let two = one + byte_text(b, i + char_len(c))
       if FOREIGN.has(two) and not TWO_CHAR.contains(two) {
         let fix = FOREIGN.get(two).unwrap_or("")
         let replacement = match two {
@@ -498,7 +523,7 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
           col: col, width: 2, replacement: replacement })
       }
       if TWO_CHAR.contains(two) {
-        toks = toks.push(token(kind: TokKind.Op, value: two, pos: [line, col, line, col + 2]))
+        toks = toks.push(token(kind: TokKind.Op, value: two, line: line, col: col, end_line: line, end_col: col + 2))
         i = i + 2
         col = col + 2
       } else if c < 128 and ONE_CHAR.contains(one) {
@@ -507,7 +532,7 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
         } else if (c == 41 or c == 93 or c == 125) and not stack.is_empty() {
           stack = stack.remove_at(stack.len() - 1)
         }
-        toks = toks.push(token(kind: TokKind.Op, value: one, pos: [line, col, line, col + 1]))
+        toks = toks.push(token(kind: TokKind.Op, value: one, line: line, col: col, end_line: line, end_col: col + 1))
         i = i + 1
         col = col + 1
       } else {
@@ -530,9 +555,9 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
     }
   }
   if not last_is_newline(toks) {
-    toks = toks.push(token(kind: TokKind.Newline, value: "\n", pos: [line, col, line, col]))
+    toks = toks.push(token(kind: TokKind.Newline, value: "\n", line: line, col: col, end_line: line, end_col: col))
   }
-  return Ok(toks.push(token(kind: TokKind.Eof, value: "", pos: [line, col, line, col])))
+  return Ok(toks.push(token(kind: TokKind.Eof, value: "", line: line, col: col, end_line: line, end_col: col)))
 }
 
 test "a small program" {
@@ -552,4 +577,13 @@ test "errors" {
   assert tokenize("a && b").map(fn(ts) => ts.len()).is_err()
   assert tokenize("\"open").is_err()
   assert tokenize("12px").is_err()
+}
+
+test "the printable characters" {
+  assert PRINTABLE.len() == 95
+  var k = 0
+  for ch in PRINTABLE {
+    assert ch.codes() == [k + 32]
+    k = k + 1
+  }
 }

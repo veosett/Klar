@@ -12,7 +12,7 @@
 // symbols, argument lists or nothing.
 use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span, Stmt}
 use ast.{StrPiece, TypeExpr, expr_span, pattern_span}
-use checker.{Builtins, CallInfo, Ck, Resolution, Sig, Universe, span_key}
+use checker.{Builtins, CallInfo, Ck, Resolution, Sig, Universe, check_body, span_key}
 use own.{Cx, OwnFn, REUSE, all_exprs, body_exprs, infer_owned, liveness_block, liveness_expr, node_key, path_of}
 use own.{root_of, sub_exprs}
 use loader.{Ld, Module}
@@ -103,6 +103,9 @@ pub type Lw {
   counter: Int,
   /// runtime function name -> its declaration index in the runtime module
   rt: Map[Str, Int],
+  /// the checker of the runtime module, with the bodies checked so far (`check_body`), and their indices
+  rt_ck: Ck,
+  rt_checked: Map[Int, Bool],
   img: Img,
   // ---- the function being lowered
   cur: KFn,
@@ -1134,6 +1137,12 @@ fn pop_scope(w: Lw) -> Lw {
   return cleanup(w with { scopes: w.scopes.take(w.scopes.len() - 1) }, [sc])
 }
 
+/// A scope that only releases temporaries (a `match` subject, the list a `for` walks) when a `return`, `break` or
+/// `continue` leaves the code that uses them; the normal way out releases them itself (klar/native/lower.py `hold`).
+fn hold(w: Lw, held: List[Pair[Int, Str]]) -> Lw {
+  return w with { scopes: w.scopes.push(LScope { vars: Map {}, clean: held.filter(fn(p) => p.second != "") }) }
+}
+
 /// Leaves a scope without releasing its values (the code after it is dead).
 fn drop_scope(w: Lw) -> Lw {
   return w with { scopes: w.scopes.take(w.scopes.len() - 1) }
@@ -1167,6 +1176,9 @@ fn lookup(w: Lw, name: Str) -> Option[Local] {
 // ---- annotations of the checker -------------------------------------------------------------------------------
 
 fn ck_of(w: Lw) -> Ck {
+  if w.m.name == "klar_rt" {
+    return w.rt_ck
+  }
   return checker_of(w.m)
 }
 
@@ -1366,7 +1378,12 @@ fn sig_of(m: Module, d: FnDecl) -> Sig {
   }
 }
 
-fn lower_function(w0: Lw, item: QItem) -> Lw {
+fn lower_function(w1: Lw, item: QItem) -> Lw {
+  var w0 = w1
+  // the runtime is checked lazily (compiler/loader.klar `load_runtime`): the body of this function now
+  if item.mod_name == "klar_rt" and not w0.rt_checked.has(item.idx) {
+    w0 = w0 with { rt_ck: check_body(w0.rt_ck, item.idx), rt_checked: w0.rt_checked.set(item.idx, true) }
+  }
   let m = module_of(w0, item.mod_name)
   let d = item.decl
   let is_rt = item.kind == "rt"
@@ -1678,9 +1695,21 @@ fn assign(w0: Lw, name: Str, value: Expr) -> Lw {
         Some(res) => {
           if obj_name == name and res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name) and
             not args.any(fn(a) => names_name(walk_expr(a.value), name)) {
+            // in a profile build the call site names the lambdas it calls (as `call_expr`)
+            var old_site = -1
+            if w.prof_on and not w.is_rt and not w.dead {
+              let id = prof_key(w, "<lambda> (" + w.file + ":" + span.line.to_str() + ")")
+              let kid = konst(id.w, id.v)
+              let old = call_rt(w: kid.w, name: "prof_site", args: [kid.v])
+              w = old.w
+              old_site = old.v
+            }
             let new = builtin_method(w: w, e: value, owner: res.owner, m: res.name, recv: Some(V { reg: loc.reg, t: loc.t,
               owned: true }), consume: true, recv_node: None)
-            let o = own(new.w, new.v)
+            var o = own(new.w, new.v)
+            if old_site >= 0 and not o.w.dead {
+              o = LR { w: call_rt(w: o.w, name: "prof_site", args: [old_site]).w, v: o.v }
+            }
             return emit(o.w, [op("mov"), r(loc.reg), r(o.v)])
           }
         },
@@ -1771,7 +1800,8 @@ fn for_stmt(w0: Lw, span: Span, var_name: Str, iter: Expr, body: Block) -> Lw {
       let lo_o = own(i.w, lo.v)
       w = emit(lo_o.w, [op("mov"), r(i.v), r(lo_o.v)])
       let hi_o = own(w, hi.v)
-      w = place(jump(hi_o.w, top.v), top.v)
+      w = hold(hi_o.w, [Pair { first: i.v, second: "int" }, Pair { first: hi_o.v, second: "int" }])
+      w = place(jump(w, top.v), top.v)
       let c = reg(w)
       w = emit(c.w, [op("icmp"), op("lt"), r(c.v), r(i.v), r(hi_o.v)])
       w = place(emit(w, [op("br"), r(c.v), KV.S(s: bod.v), KV.S(s: end.v)]), bod.v)
@@ -1782,7 +1812,7 @@ fn for_stmt(w0: Lw, span: Span, var_name: Str, iter: Expr, body: Block) -> Lw {
       w = place(jump(w, step.v), step.v)
       let one = konst(w, tag_int(1))
       w = emit(one.w, [op("iop"), op("add"), r(i.v), r(i.v), r(one.v), KV.Nil])
-      w = place(jump(w, top.v), end.v)
+      w = drop_scope(place(jump(w, top.v), end.v))
       w = emit(w, [op("release"), op("int"), r(i.v)])
       return emit(w, [op("release"), op("int"), r(hi_o.v)])
     },
@@ -1791,7 +1821,7 @@ fn for_stmt(w0: Lw, span: Span, var_name: Str, iter: Expr, body: Block) -> Lw {
   let lst = expr(w, iter)
   let lo = own(lst.w, lst.v)
   let lreg = lo.v
-  let n = reg(lo.w)
+  let n = reg(hold(lo.w, [Pair { first: lreg, second: "obj" }]))
   w = emit(n.w, [op("load"), r(n.v), r(lreg), r(16)])
   let data = reg(w)
   let idx = konst(data.w, 0)
@@ -1814,7 +1844,7 @@ fn for_stmt(w0: Lw, span: Span, var_name: Str, iter: Expr, body: Block) -> Lw {
   w = place(jump(w, step.v), step.v)
   let one = konst(w, 1)
   w = emit(one.w, [op("bin"), op("add"), r(idx.v), r(idx.v), r(one.v)])
-  w = place(jump(w, top.v), end.v)
+  w = drop_scope(place(jump(w, top.v), end.v))
   return emit(w, [op("release"), op("obj"), r(lreg)])
 }
 
@@ -2678,6 +2708,14 @@ fn x_method_call(w0: Lw, e: Expr) -> LR[V] {
   if res.kind == "variant" {
     return variant_ctor(w0: w0, e: e, enum_name: res.owner, vname: res.name)
   }
+  if res.kind == "builtin" and res.owner == "Option" and res.name == "unwrap_or" {
+    match get_or(w0, e) {
+      Some(fused) => {
+        return fused
+      },
+      None => {},
+    }
+  }
   if res.kind == "ufcs" or res.kind == "trait" {
     let info = match call_info(w0, span) {
       Some(i) => i,
@@ -2739,6 +2777,80 @@ fn x_method_call(w0: Lw, e: Expr) -> LR[V] {
     return builtin_method(w: w, e: e, owner: res.owner, m: res.name, recv: Some(recv.v), consume: false, recv_node: None)
   }
   return fail("native: {res.kind}")
+}
+
+/// A literal (without interpolation, `-` allowed), an empty list or map, or a name: no calls, no effects (as
+/// `plain_value` in klar/native/lower.py).
+fn plain_value(e: Expr) -> Bool {
+  return match e {
+    Expr.IntLit(_, _) => true,
+    Expr.FloatLit(_, _) => true,
+    Expr.BoolLit(_, _) => true,
+    Expr.UnitLit(_) => true,
+    Expr.Name(_, _) => true,
+    Expr.StrLit(_, parts) => parts.all(fn(p) => match p {
+      StrPiece.Text(_) => true,
+      StrPiece.Code(_) => false,
+    }),
+    Expr.Unary(_, uop, operand) => uop == "-" and match operand {
+      Expr.IntLit(_, _) => true,
+      Expr.FloatLit(_, _) => true,
+      _ => false,
+    },
+    Expr.ListLit(_, items) => items.is_empty(),
+    Expr.MapLit(_, entries) => entries.is_empty(),
+    _ => false,
+  }
+}
+
+/// `xs.get(i).unwrap_or(d)` / `m.get(k).unwrap_or(d)` with a plain `d` (evaluating it before the lookup changes
+/// nothing): one call, no Option (as `get_or` in klar/native/lower.py).
+fn get_or(w0: Lw, e: Expr) -> Option[LR[V]] {
+  let outer = call_parts(e)
+  let g = outer.first.second
+  let gspan = match g {
+    Expr.MethodCall(sp, _, _, _, _) => sp,
+    _ => {
+      return None
+    },
+  }
+  let res = match resolution(w0, gspan) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  let dflt = match outer.second.get(0) {
+    Some(a) => a.value,
+    None => {
+      return None
+    },
+  }
+  if res.kind != "builtin" or res.name != "get" or (res.owner != "List" and res.owner != "Map") or
+    outer.second.len() != 1 or not plain_value(dflt) {
+    return None
+  }
+  let sig = match w0.b.methods.get(res.owner) {
+    Some(ms) => match ms.get("get") {
+      Some(s) => s,
+      None => fail("native: no built-in {res.owner}.get"),
+    },
+    None => fail("native: no built-in {res.owner}.get"),
+  }
+  let parts = call_parts(g)
+  let recv = expr(w0, parts.first.second)
+  let a = args_in_param_order(w0: recv.w, names: sig.params.drop(1).map(fn(p) => p.first), args: parts.second)
+  let d = expr(a.w, dflt)
+  let t = ty(d.w, e)
+  let key = a.v.first.get_or(0, recv.v).reg
+  var out = lr(d.w, 0)
+  if res.owner == "List" {
+    let td_a = addr_td(out.w, t)
+    out = call_rt(w: td_a.w, name: "List_get_or", args: [recv.v.reg, key, d.v.reg, td_a.v])
+  } else {
+    out = call_rt(w: out.w, name: "map_get_or", args: [recv.v.reg, key, d.v.reg])
+  }
+  return Some(vv(w: drop(drop_all(drop(out.w, d.v), a.v.second), recv.v), rg: out.v, t: t, owned: rck(t) != ""))
 }
 
 fn builtin_method(w: Lw, e: Expr, owner: Str, m: Str, recv: Option[V], consume: Bool, recv_node: Option[Expr]) -> LR[V] {
@@ -2980,10 +3092,157 @@ fn with_copy(b: LR[V], fields: List[FieldInit]) -> LR[V] {
   return vv(w: drop(w, b.v), rg: obj.v, t: t, owned: true)
 }
 
+/// "List" / "Map" for `match xs.get(i)` / `match m.get(k)` with only `Some(..)`, `None` and `_` arms, whose
+/// element is found and matched without allocating the Option (as `option_slot` in klar/native/lower.py).
+fn option_get(w: Lw, subject: Expr, arms: List[MatchArm]) -> Option[Str] {
+  let span = match subject {
+    Expr.MethodCall(sp, _, _, _, _) => sp,
+    _ => {
+      return None
+    },
+  }
+  let res = match resolution(w, span) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  if res.kind != "builtin" or res.name != "get" or (res.owner != "List" and res.owner != "Map") {
+    return None
+  }
+  for arm in arms {
+    let ok = match arm.pattern {
+      Pattern.Wild(_) => true,
+      Pattern.Variant(_, en, variant, _) => (en == None or en == Some("Option")) and (variant == "Some" or
+          variant == "None"),
+      _ => false,
+    }
+    if not ok {
+      return None
+    }
+  }
+  return Some(res.owner)
+}
+
+/// The element of `xs.get(i)` / `m.get(k)` without the Option: (the register that is 1 when it is missing, the
+/// element, retained — a stand-in that needs no release when it is missing).
+fn option_slot(w0: Lw, subject: Expr, owner: Str) -> LR[Pair[Int, V]] {
+  let parts = call_parts(subject)
+  let et = targs(ty(w0, subject)).get_or(0, unit_t())
+  let sig = match w0.b.methods.get(owner) {
+    Some(ms) => match ms.get("get") {
+      Some(s) => s,
+      None => fail("native: no built-in {owner}.get"),
+    },
+    None => fail("native: no built-in {owner}.get"),
+  }
+  let recv = expr(w0, parts.first.second)
+  let a = args_in_param_order(w0: recv.w, names: sig.params.drop(1).map(fn(p) => p.first), args: parts.second)
+  let is_list = owner == "List"
+  let slot = call_rt(w: a.w, name: match is_list {
+    true => "list_slot",
+    false => "map_slot",
+  }, args: [recv.v.reg, a.v.first.get_or(0, recv.v).reg])
+  let missing = reg(slot.w)
+  let zero = konst(missing.w, 0)
+  let elem = reg(emit(zero.w, [op("cmp"), op("lt"), r(missing.v), r(slot.v), r(zero.v)]))
+  let found = label(elem.w, "gfound")
+  let absent = label(found.w, "gnone")
+  let joined = label(absent.w, "gjoin")
+  var w = place(emit(joined.w, [op("br"), r(missing.v), KV.S(s: absent.v), KV.S(s: found.v)]), found.v)
+  let took = call_rt(w: w, name: match is_list {
+    true => "list_take",
+    false => "map_take",
+  }, args: [recv.v.reg, slot.v])
+  w = place(jump(emit(took.w, [op("mov"), r(elem.v), r(took.v)]), joined.v), absent.v)
+  let k = rck(et)
+  let stand_in = match k == "obj" {
+    true => call_rt(w: w, name: "none", args: []),
+    false => konst(w, match k == "int" {
+      true => 1,
+      false => 0,
+    }),
+  }
+  w = place(emit(stand_in.w, [op("mov"), r(elem.v), r(stand_in.v)]), joined.v)
+  w = drop(drop_all(w, a.v.second), recv.v)
+  return lr(w, Pair { first: missing.v, second: V { reg: elem.v, t: et, owned: true } })
+}
+
+/// The arms of a match on an Option that is not allocated (`option_slot`).
+fn match_option(w0: Lw, e: Expr, arms: List[MatchArm], missing: Int, elem: V) -> LR[V] {
+  let t = ty(w0, e)
+  let res = reg(hold(w0, [Pair { first: elem.reg, second: rck(elem.t) }]))
+  var w = emit(res.w, [op("const"), r(res.v), r(0)])
+  let end = label(w, "mend")
+  w = end.w
+  for arm in arms {
+    let nxt = label(w, "marm")
+    w = push_scope(nxt.w)
+    match arm.pattern {
+      Pattern.Variant(_, _, variant, args) => {
+        let ok = label(w, "pv")
+        if variant == "Some" {
+          w = place(emit(ok.w, [op("br"), r(missing), KV.S(s: nxt.v), KV.S(s: ok.v)]), ok.v)
+          match args.get(0) {
+            Some(Pattern.Wild(_)) => {},
+            Some(sub) => {
+              w = pattern(w: w, p: sub, rg: elem.reg, t: elem.t, fail_to: nxt.v)
+            },
+            None => {},
+          }
+        } else {
+          w = place(emit(ok.w, [op("br"), r(missing), KV.S(s: ok.v), KV.S(s: nxt.v)]), ok.v)
+        }
+      },
+      _ => {},
+    }
+    match arm.guard {
+      Some(g) => {
+        let gv = expr(w, g)
+        let ok = label(gv.w, "mg")
+        w = place(emit(ok.w, [op("br"), r(gv.v.reg), KV.S(s: ok.v), KV.S(s: nxt.v)]), ok.v)
+      },
+      None => {},
+    }
+    match arm.body {
+      Body.BlockBody(b) => {
+        w = block_body(w, b)
+        if not w.dead {
+          w = emit(w, [op("const"), r(res.v), r(0)])
+        }
+      },
+      Body.ExprBody(x) => {
+        let v = expr(w, x)
+        let o = own(v.w, v.v)
+        w = emit(o.w, [op("mov"), r(res.v), r(o.v)])
+      },
+    }
+    w = match w.dead {
+      false => pop_scope(w),
+      true => drop_scope(w),
+    }
+    w = place(jump(w, end.v), nxt.v)
+  }
+  w = call_rt(w: w, name: "unreachable", args: []).w with { dead: true }
+  w = drop_scope(place(w, end.v))
+  return vv(w: drop(w, elem), rg: res.v, t: t, owned: rck(t) != "")
+}
+
 fn x_match(w0: Lw, e: Expr, subject: Expr, arms: List[MatchArm]) -> LR[V] {
+  match option_get(w0, subject, arms) {
+    Some(owner) => {
+      let got = option_slot(w0, subject, owner)
+      return match_option(w0: got.w, e: e, arms: arms, missing: got.v.first, elem: got.v.second)
+    },
+    None => {},
+  }
   let subj = expr(w0, subject)
   let t = ty(subj.w, e)
-  let res = reg(subj.w)
+  let held = match subj.v.owned {
+    true => [Pair { first: subj.v.reg, second: rck(subj.v.t) }],
+    false => [],
+  }
+  let res = reg(hold(subj.w, held))
   var w = emit(res.w, [op("const"), r(res.v), r(0)])
   let end = label(w, "mend")
   w = end.w
@@ -3018,7 +3277,7 @@ fn x_match(w0: Lw, e: Expr, subject: Expr, arms: List[MatchArm]) -> LR[V] {
     w = place(jump(w, end.v), nxt.v)
   }
   w = call_rt(w: w, name: "unreachable", args: []).w with { dead: true }
-  w = place(w, end.v)
+  w = drop_scope(place(w, end.v))
   return vv(w: drop(w, subj.v), rg: res.v, t: t, owned: rck(t) != "")
 }
 
@@ -3631,7 +3890,8 @@ pub fn lower_program_traced(ld: Ld, main_path: Str, allow: Option[List[Str]], tr
 }
 
 /// `g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc, time,
-/// rand, net, #dirs, dirs, #programs, programs] (as `sandbox_data` in klar/native/lower.py).
+/// rand, net, #dirs, dirs, #programs, programs, env, #variables, variables] (as `sandbox_data` in
+/// klar/native/lower.py).
 fn sandbox_data(w0: Lw, allow: Option[List[Str]]) -> Lw {
   let rights = match allow {
     Some(given) => given,
@@ -3662,6 +3922,17 @@ fn sandbox_data(w0: Lw, allow: Option[List[Str]]) -> Lw {
     pws = [W.N(v: 0)]
   }
   w = words(w: w, name: "g_allow_progs", ws: pws)
+  let envs = rights.filter(fn(x) => x.starts_with("env:")).map(fn(x) => x.slice(4, x.len()))
+  var ews: List[W] = []
+  for ev in envs {
+    let s = str_word(w, ev)
+    w = s.w
+    ews = ews.push(s.v)
+  }
+  if ews.is_empty() {
+    ews = [W.N(v: 0)]
+  }
+  w = words(w: w, name: "g_allow_envs", ws: ews)
   let shown = str_word(w, match rights.is_empty() {
     true => "nothing",
     false => rights.join(", "),
@@ -3676,6 +3947,10 @@ fn sandbox_data(w0: Lw, allow: Option[List[Str]]) -> Lw {
   }
   ws = ws.concat([W.N(v: dirs.len()), W.A(sym: "g_allow_dirs", add: 0), W.N(v: progs.len()), W.A(sym: "g_allow_progs",
     add: 0)])
+  ws = ws.concat([W.N(v: match rights.contains("env") {
+    true => 1,
+    false => 0,
+  }), W.N(v: envs.len()), W.A(sym: "g_allow_envs", add: 0)])
   return words(w: w, name: "g_allow", ws: ws)
 }
 
@@ -3746,6 +4021,8 @@ fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profil
       const_slots: Map {},
       counter: 0,
       rt: rt,
+      rt_ck: checker_of(rt_mod),
+      rt_checked: Map {},
       img: empty_img(),
       cur: um0,
       cur_index: 0,

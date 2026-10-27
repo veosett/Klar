@@ -60,6 +60,21 @@ def rck(t):
     return "obj"
 
 
+def plain_value(e):
+    """A literal (without interpolation, `-` allowed), an empty list or map, or a name: no calls, no effects."""
+    if isinstance(e, (N.IntLit, N.FloatLit, N.BoolLit, N.UnitLit, N.Name)):
+        return True
+    if isinstance(e, N.StrLit):
+        return all(isinstance(p, str) for p in e.parts)
+    if isinstance(e, N.Unary):
+        return e.op == "-" and isinstance(e.operand, (N.IntLit, N.FloatLit))
+    if isinstance(e, N.ListLit):
+        return not e.items
+    if isinstance(e, N.MapLit):
+        return not e.entries
+    return False
+
+
 def fnv1a(text):
     """32-bit FNV-1a of the UTF-8 text: a stable short name for a type (unlike `hash`, the same in every run)."""
     h = 2166136261
@@ -591,6 +606,11 @@ class FnLowering:
         sc = self.scopes.pop()
         self.cleanup([sc])
 
+    def hold(self, regs_kinds):
+        """A scope that only releases temporaries (a `match` subject, the list a `for` walks) when a `return`,
+        `break` or `continue` leaves the code that uses them; the normal way out releases them itself."""
+        self.scopes.append({"vars": {}, "clean": [(r, k) for r, k in regs_kinds if k]})
+
     def cleanup(self, scopes):
         for sc in reversed(scopes):
             for reg, kind in reversed(sc["clean"]):
@@ -807,6 +827,7 @@ class FnLowering:
             i = self.reg()
             self.emit("mov", i, self.own(lo))
             hi_r = self.own(hi)
+            self.hold([(i, "int"), (hi_r, "int")])
             self.jump(top)
             self.place(top)
             c = self.reg()
@@ -825,11 +846,13 @@ class FnLowering:
             self.emit("iop", "add", i, i, one, None)
             self.jump(top)
             self.place(end)
+            self.scopes.pop()
             self.emit("release", "int", i)
             self.emit("release", "int", hi_r)
             return
         lst = self.expr(it)
         lreg = self.own(lst)
+        self.hold([(lreg, "obj")])
         n = self.reg()
         self.emit("load", n, lreg, 16)
         data = self.reg()
@@ -860,6 +883,7 @@ class FnLowering:
         self.emit("bin", "add", idx, idx, one)
         self.jump(top)
         self.place(end)
+        self.scopes.pop()
         self.emit("release", "obj", lreg)
 
     def s_Break(self, s):
@@ -1310,6 +1334,10 @@ class FnLowering:
         if res is None:
             raise NativeUnsupported("unresolved method call")
         kind = res[0]
+        if kind == "builtin" and res[1] == "Option" and res[2] == "unwrap_or":
+            fused = self.get_or(e)
+            if fused is not None:
+                return fused
         if kind == "variant":
             return self.variant_ctor(e, res[1], res[2])
         if kind == "ufcs":
@@ -1350,6 +1378,29 @@ class FnLowering:
             out = self.builtin_method(e, res[1], res[2], recv)
             return out
         raise NativeUnsupported(kind)
+
+    def get_or(self, e):
+        """`xs.get(i).unwrap_or(d)` / `m.get(k).unwrap_or(d)` with a plain `d` (a literal or a name, so evaluating it
+        before the lookup changes nothing): one call, no Option."""
+        g = e.obj
+        res = getattr(g, "resolved", None)
+        if not isinstance(g, N.MethodCall) or res is None or res[0] != "builtin" or res[1] not in ("List", "Map") \
+                or res[2] != "get" or len(e.args) != 1 or not plain_value(e.args[0].value):
+            return None
+        decl = parsed(METHODS[res[1]]["get"][0])
+        recv = self.expr(g.obj)
+        ordered, order = self.args_in_param_order([p.name for p in decl.params[1:]], g.args)
+        d = self.expr(e.args[0].value)
+        t = self.ty(e)
+        if res[1] == "List":
+            out = self.call_rt("List_get_or", [recv.reg, ordered[0].reg, d.reg, self.addr(self.p.td(t))])
+        else:
+            out = self.call_rt("map_get_or", [recv.reg, ordered[0].reg, d.reg])
+        self.drop(d)
+        for v in order:
+            self.drop(v)
+        self.drop(recv)
+        return V(out, t, rck(t) is not None)
 
     def builtin_method(self, e, owner, m, recv, consume=False, recv_node=None):
         decl = parsed(METHODS[owner][m][0])
@@ -1502,8 +1553,48 @@ class FnLowering:
         return V(u, t, True)
 
     # ---- match ----------------------------------------------------------------------------
+    def option_slot(self, e):
+        """`match xs.get(i)` / `match m.get(k)` with only `Some(..)`, `None` and `_` arms: the element is found and
+        matched without allocating the Option — (the register that is 1 when it is missing, the element), or None
+        for other matches. The element is retained (a stand-in that needs no release when it is missing)."""
+        s = e.subject
+        res = getattr(s, "resolved", None)
+        if not isinstance(s, N.MethodCall) or res is None or res[0] != "builtin" or res[1] not in ("List", "Map") \
+                or res[2] != "get":
+            return None
+        for arm in e.arms:
+            p = arm.pattern
+            if not (isinstance(p, N.PWild) or isinstance(p, N.PVariant) and p.enum in (None, "Option")
+                    and p.variant in ("Some", "None")):
+                return None
+        et = self.ty(s).args[0]
+        decl = parsed(METHODS[res[1]]["get"][0])
+        recv = self.expr(s.obj)
+        ordered, order = self.args_in_param_order([p.name for p in decl.params[1:]], s.args)
+        slot = self.call_rt("list_slot" if res[1] == "List" else "map_slot", [recv.reg, ordered[0].reg])
+        missing = self.reg()
+        self.emit("cmp", "lt", missing, slot, self.const(0))
+        elem = self.reg()
+        found, absent, joined = self.label("gfound"), self.label("gnone"), self.label("gjoin")
+        self.emit("br", missing, absent, found)
+        self.place(found)
+        self.emit("mov", elem, self.call_rt("list_take" if res[1] == "List" else "map_take", [recv.reg, slot]))
+        self.jump(joined)
+        self.place(absent)
+        k = rck(et)
+        self.emit("mov", elem, self.call_rt("none", []) if k == "obj" else self.const(1 if k == "int" else 0))
+        self.place(joined)
+        for v in order:
+            self.drop(v)
+        self.drop(recv)
+        return missing, V(elem, et, True)
+
     def x_Match(self, e):
+        got = self.option_slot(e)
+        if got is not None:
+            return self.match_option(e, got[0], got[1])
         subj = self.expr(e.subject)
+        self.hold([(subj.reg, rck(subj.t))] if subj.owned else [])
         t = self.ty(e)
         res = self.reg()
         self.emit("const", res, 0)
@@ -1533,7 +1624,54 @@ class FnLowering:
         self.call_rt("unreachable", [])
         self.dead = True
         self.place(end)
+        self.scopes.pop()
         self.drop(subj)
+        return V(res, t, rck(t) is not None)
+
+    def match_option(self, e, missing, elem):
+        """The arms of a match on an Option that is not allocated (`option_slot`)."""
+        self.hold([(elem.reg, rck(elem.t))])
+        t = self.ty(e)
+        res = self.reg()
+        self.emit("const", res, 0)
+        end = self.label("mend")
+        for arm in e.arms:
+            nxt = self.label("marm")
+            self.push_scope()
+            p = arm.pattern
+            if isinstance(p, N.PVariant):
+                ok = self.label("pv")
+                if p.variant == "Some":
+                    self.emit("br", missing, nxt, ok)
+                    self.place(ok)
+                    if p.args and not isinstance(p.args[0], N.PWild):
+                        self.pattern(p.args[0], elem.reg, elem.t, nxt)
+                else:
+                    self.emit("br", missing, ok, nxt)
+                    self.place(ok)
+            if arm.guard is not None:
+                g = self.expr(arm.guard)
+                ok = self.label("mg")
+                self.emit("br", g.reg, ok, nxt)
+                self.place(ok)
+            if isinstance(arm.body, N.Block):
+                self.block_body(arm.body)
+                if not self.dead:
+                    self.emit("const", res, 0)
+            else:
+                v = self.expr(arm.body)
+                self.emit("mov", res, self.own(v))
+            if not self.dead:
+                self.pop_scope()
+            else:
+                self.scopes.pop()
+            self.jump(end)
+            self.place(nxt)
+        self.call_rt("unreachable", [])
+        self.dead = True
+        self.place(end)
+        self.scopes.pop()
+        self.drop(elem)
         return V(res, t, rck(t) is not None)
 
     def pattern(self, p, reg, t, fail):
@@ -1818,7 +1956,7 @@ SOFT_MATH = {"sin": "soft_sin", "cos": "soft_cos", "ln": "soft_ln", "exp": "soft
 
 def sandbox_data(prog, allow):
     """`g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc,
-    time, rand, net, #dirs, dirs, #programs, programs]."""
+    time, rand, net, #dirs, dirs, #programs, programs, env, #variables, variables]."""
     if allow is None:
         prog.words("g_allow", [0])
         return
@@ -1826,9 +1964,12 @@ def sandbox_data(prog, allow):
     progs = [r[5:] for r in allow if r.startswith("proc:")]
     dsym = prog.words("g_allow_dirs", [(prog.str_obj(d), 0) for d in dirs] or [0])
     psym = prog.words("g_allow_progs", [(prog.str_obj(p), 0) for p in progs] or [0])
+    envs = [r[4:] for r in allow if r.startswith("env:")]
+    esym = prog.words("g_allow_envs", [(prog.str_obj(v), 0) for v in envs] or [0])
     shown = prog.str_obj(", ".join(allow) if allow else "nothing")
     flags = [1 if r in allow else 0 for r in ("fs", "proc", "time", "rand", "net")]
-    prog.words("g_allow", [1, (shown, 0)] + flags + [len(dirs), (dsym, 0), len(progs), (psym, 0)])
+    prog.words("g_allow", [1, (shown, 0)] + flags + [len(dirs), (dsym, 0), len(progs), (psym, 0),
+                                                     1 if "env" in allow else 0, len(envs), (esym, 0)])
 
 
 def trace_data(prog, trace):

@@ -1,0 +1,37 @@
+// Comparisons and arithmetic the optimizer folds at compile time (klar/native/opt.py `fold`): every operator with
+// equal, smaller and larger constants, so a wrong folding rule shows up as a wrong line here.
+
+fn cmp_line(a: Int, b: Int) -> Str {
+  return "{a < b} {a <= b} {a > b} {a >= b} {a == b} {a != b}"
+}
+
+fn main() uses io {
+  let five = 5
+  let six = 6
+  let neg = 0 - 7
+  // constants on both sides: folded
+  print("{5 < 5} {5 <= 5} {5 > 5} {5 >= 5} {5 == 5} {5 != 5}")
+  print("{five < six} {five <= six} {five > six} {five >= six} {five == six} {five != six}")
+  print("{six < five} {six <= five} {six > five} {six >= five} {six == five} {six != five}")
+  print("{neg < five} {neg > five} {neg <= neg} {neg >= neg}")
+  // one constant side: compare with an immediate
+  print(cmp_line(5, 5))
+  print(cmp_line(4, 5))
+  print(cmp_line(6, 5))
+  print(cmp_line(-3, -3))
+  print("{five + 1} {five - 1} {five * 3} {five / 2} {five % 2} {neg / 2} {neg % 2}")
+  print("{1.5 < 1.5} {1.5 <= 1.5} {1.5 > 1.5} {1.5 >= 1.5} {1.5 == 1.5} {1.5 != 1.5}")
+  print("{2.5 < 1.5} {2.5 <= 1.5} {2.5 > 1.5} {1.5 >= 2.5} {2.5 == 1.5} {2.5 != 1.5}")
+  var n = 0
+  var i = 0
+  while i < 10 {
+    if i > 4 {
+      n = n + 1
+    }
+    if i >= 4 {
+      n = n + 10
+    }
+    i = i + 1
+  }
+  print("{n}")
+}

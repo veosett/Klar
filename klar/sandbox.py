@@ -5,14 +5,17 @@
   paths are compared the way the system opens them: `.`, `..` and symbolic links resolved, so a link that leads
   out of DIR does not give access to where it leads; on Windows links are not resolved);
 * `proc` — every program; `proc:NAME` — only `run_command([NAME, ...])` / `run_capture([NAME, ...], ...)`;
-* `time`, `rand`, `net`.
+* `time`, `rand`, `net`;
+* `env` — every environment variable; `env:NAME` — only NAME. Without it `env_var` returns `None`: reading the
+  environment stays `io` (no error), but secrets such as API keys are not visible to the program.
 
 klar/rt/sandbox.klar implements the same checks (and messages) in native code; the rights are built into the
 executable (`klar build --allow ...`).
 """
 import os
 
-RIGHTS = ("io", "time", "rand", "net", "fs", "proc")
+RIGHTS = ("io", "time", "rand", "net", "fs", "proc", "env")
+WITH_ARG = ("fs", "proc", "env")
 HINTS = {
     "fs": "add the right to `--allow`: `fs` for every file or `fs:DIR` for one directory",
     "proc": "add the right to `--allow`: `proc` for every program or `proc:NAME` for one",
@@ -31,8 +34,9 @@ def parse_allow(spec):
         if not r:
             continue
         kind, _, arg = r.partition(":")
-        if kind not in RIGHTS or (arg and kind not in ("fs", "proc")) or (":" in r and not arg):
-            raise RightsError(f"unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME)")
+        if kind not in RIGHTS or (arg and kind not in WITH_ARG) or (":" in r and not arg):
+            raise RightsError(f"unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME, env, "
+                              f"env:NAME)")
         out.append(r)
     return out
 
@@ -70,6 +74,12 @@ class Sandbox:
         self.all_fs = "fs" in self.rights
         self.progs = [r[5:] for r in self.rights if r.startswith("proc:")]
         self.all_proc = "proc" in self.rights
+        self.envs = [r[4:] for r in self.rights if r.startswith("env:")]
+        self.all_env = "env" in self.rights
+
+    def env_ok(self, name):
+        """May the program read the environment variable `name`? (Else `env_var` returns None.)"""
+        return self.all_env or name in self.envs
 
     def deny(self, what, right, arg, sp):
         from .builtins import rt_error

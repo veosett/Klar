@@ -13,7 +13,8 @@ use a64.{A64, AL64, FP, LR, SP, X16, X17, add_sp, addsub_imm, adr_sym, bcc, bl, 
 use a64.{cset, fcmp, fcvtzs, fits_imm12, fload, fmov_dd, fmov_dx, fmov_xd, fop, fresh64, fsqrt, fstore, invert}
 use a64.{label64, ldp_post, load, mem, mov_ri, mov_rr, msub, mul, neg, new_a64, new_label64, op3, ret, scvtf, shift_i}
 use a64.{site64, smulh, stp_pre, store, svc, tst1, udf, umulh, word}
-use emit.{Cold, ColdItem, Exe, MAX_DEPTH, OS_FUNCS, Then, YL, align16, bit_length, has_reg, iat, is_pow2, lat, rel_of, sat}
+use emit.{Cold, ColdItem, Exe, MAX_DEPTH, NO_FN, OS_FUNCS, Prepared, Then, YL, align16, bit_length, has_reg, iat, is_pow2}
+use emit.{lat, prepare, rel_of, sat}
 use emit.{sat_or, sdiv_magic, sdiv_magic64, soft_helper, trace_table, udiv_magic, udiv_magic_simple, yl_reg}
 use lower.{Img, Ins, KFn, Lw, add_bss, rt_names}
 use opt.{defs, inline_calls, optimize, used_regs}
@@ -1420,12 +1421,38 @@ fn patch_word(code: Bytes, pos: Int, field: Int) -> Bytes {
 
 /// Emits the machine code for the lowered program `w` (target "linux-arm64").
 pub fn emit_a64(w: Lw) -> Exe {
-  let rt = rt_names(w)
-  var img = add_bss(img: w.img, name: "g_depth", size: 8)
+  return emit_a64_prepared(prepare(w))
+}
+
+/// Writes the displacement of a branch (b26 / b19) to the code at `at`.
+fn patch_branch(code: Bytes, fx: Fix, at: Int) -> Bytes {
+  var delta = (at - fx.pos) / 4
+  if fx.kind == "b26" {
+    if delta < -33554432 or delta >= 33554432 {
+      return fail("emit_a64: branch out of range")
+    }
+    if delta < 0 {
+      delta = delta + 67108864
+    }
+    return patch_word(code: code, pos: fx.pos, field: delta)
+  }
+  if delta < -262144 or delta >= 262144 {
+    return fail("emit_a64: conditional branch to {fx.target} out of range")
+  }
+  if delta < 0 {
+    delta = delta + 524288
+  }
+  return patch_word(code: code, pos: fx.pos, field: delta * 32)
+}
+
+/// As emit.klar `emit_prepared`: the program's KIR is freed function by function as it is emitted.
+pub fn emit_a64_prepared(prep: Prepared) -> Exe {
+  let rt = prep.rt
+  var img = add_bss(img: prep.img, name: "g_depth", size: 8)
   img = add_bss(img: img, name: "g_frames", size: 16 * (MAX_DEPTH + 2))
   img = add_bss(img: img, name: "g_argp", size: 8)
   img = add_bss(img: img, name: "g_scratch", size: 256)
-  let fns = inline_calls(w.fns)
+  var fns = inline_calls(prep.fns)
   var code = bytes_of([])
   var labels: Map[Str, Int] = Map {}
   var fixups: List[Fix] = []
@@ -1439,12 +1466,20 @@ pub fn emit_a64(w: Lw) -> Exe {
       let os = linux_layer(new_a64(0), rt.get("main_entry").unwrap_or("main_entry"))
       part = Part64 { chunks: [os], n: os.n, row: [] }
     } else {
-      part = function_part(f0: fns.get(i).unwrap_or(KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [],
-        labels: 0 }), rt: rt, n: n)
+      part = function_part(f0: fns.get(i).unwrap_or(NO_FN), rt: rt, n: n)
+      fns = fns.set(i, NO_FN)
     }
     n = part.n
     if not part.row.is_empty() {
       fn_rows = fn_rows.push(part.row)
+    }
+    // the labels of this function: its own jumps are resolved now, and only the labels other code refers to (the
+    // function itself, its trace-table rows and call sites) are kept for the program
+    var local: Map[Str, Int] = Map {}
+    var keep: Map[Str, Bool] = Map {}
+    var pfix: List[Fix] = []
+    for rl in part.row {
+      keep = keep.set(rl, true)
     }
     for ch in part.chunks {
       let base = code.len()
@@ -1456,16 +1491,37 @@ pub fn emit_a64(w: Lw) -> Exe {
         j = j + 1
       }
       for l in ch.labels {
-        if labels.has(l.name) {
+        if labels.has(l.name) or local.has(l.name) {
           return fail("emit_a64: duplicate label {l.name}")
         }
-        labels = labels.set(l.name, base + l.pos)
+        local = local.set(l.name, base + l.pos)
       }
       for fx in ch.fixups {
-        fixups = fixups.push(fx with { pos: base + fx.pos })
+        pfix = pfix.push(fx with { pos: base + fx.pos })
       }
       for s in ch.sites {
         sites = sites.push([s.label, s.span])
+        keep = keep.set(s.label, true)
+      }
+    }
+    for fx in pfix {
+      match local.get(fx.target) {
+        Some(at) => {
+          if fx.kind == "b26" or fx.kind == "b19" {
+            code = patch_branch(code: code, fx: fx, at: at)
+          } else {
+            fixups = fixups.push(fx)
+            keep = keep.set(fx.target, true)
+          }
+        },
+        None => {
+          fixups = fixups.push(fx)
+        },
+      }
+    }
+    for en in local.entries() {
+      if not en.key.starts_with(".") or keep.has(en.key) {
+        labels = labels.set(en.key, en.value)
       }
     }
     i = i + 1
@@ -1480,24 +1536,7 @@ pub fn emit_a64(w: Lw) -> Exe {
         Some(p) => p,
         None => fail("emit_a64: unresolved code label {fx.target}"),
       }
-      var delta = (at - fx.pos) / 4
-      if fx.kind == "b26" {
-        if delta < -33554432 or delta >= 33554432 {
-          return fail("emit_a64: branch out of range")
-        }
-        if delta < 0 {
-          delta = delta + 67108864
-        }
-        code = patch_word(code: code, pos: fx.pos, field: delta)
-      } else {
-        if delta < -262144 or delta >= 262144 {
-          return fail("emit_a64: conditional branch to {fx.target} out of range")
-        }
-        if delta < 0 {
-          delta = delta + 524288
-        }
-        code = patch_word(code: code, pos: fx.pos, field: delta * 32)
-      }
+      code = patch_branch(code: code, fx: fx, at: at)
     } else {
       rest = rest.push(fx)
     }

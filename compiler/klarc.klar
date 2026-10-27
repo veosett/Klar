@@ -7,7 +7,7 @@
 //     klarc check app.klar [--lib <dir of klar/>]
 //
 // The library directory holds the runtime (`rt/`) and the standard library (`std/`); it defaults to $KLAR_LIB, then
-// `klar`. Bootstrap: `klar build compiler/klarc.klar` (the Python compiler) gives klarc1; klarc1 builds klarc2 from the
+// `klar`, and when that is not on disk klarc uses the copy built into it (compiler/libfs.klar). Bootstrap: `klar build compiler/klarc.klar` (the Python compiler) gives klarc1; klarc1 builds klarc2 from the
 // same source and klarc2 builds klarc3 — tests/bootstrap.py checks that all three are the same bytes.
 use ast.{Decl}
 use builtin_sigs.{klar_version}
@@ -25,8 +25,8 @@ use coverage.{coverage_command}
 use profile.{profile_command}
 use dev.{dev_command, host_target, parse_allow, show_failure, test_items}
 use report.{check_json, render_report, user_diags}
-use emit.{emit_program}
-use emit_a64.{emit_a64}
+use emit.{emit_prepared, emit_program, prepare}
+use emit_a64.{emit_a64_prepared}
 use link.{write_elf, write_macho, write_pe}
 use contracts.{with_contracts}
 use loader.{Ld, Module, load_program, load_runtime}
@@ -481,13 +481,13 @@ fn main() uses io, fs, time, proc {
   }
   let w = lower_program_traced(ld: tld, main_path: o.file, allow: rights, trace: spec, tests: tests)
   let t2 = lap(o: o, phase: "lower", start: t1)
-  var x = emit_program(w, "linux")
-  if o.target == "linux-arm64" {
-    x = emit_a64(w)
-  } else if o.target == "windows" {
-    x = emit_program(w, "windows")
-  } else if o.target == "macos" {
-    x = emit_program(w, "macos")
+  // only what emission needs: the rest of the lowering state is freed first (and the program is emitted once)
+  let prep = prepare(w)
+  let x = match o.target {
+    "linux-arm64" => emit_a64_prepared(prep),
+    "windows" => emit_prepared(prep, "windows"),
+    "macos" => emit_prepared(prep, "macos"),
+    _ => emit_prepared(prep, "linux"),
   }
   let t3 = lap(o: o, phase: "optimize + allocate + emit", start: t2)
   var image = bytes_of([])

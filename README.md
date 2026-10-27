@@ -223,6 +223,10 @@ python -m klar build compiler/klarc.klar -o klarc   # stage 1: the Python compil
 ./klarc patch app.klar edits.json                   # the AI patch protocol; also add/fetch/deps, eval, fix, doc
 ```
 
+`klarc` is a single file with the runtime and the standard library built in: copy it anywhere and it builds, tests
+and checks programs in any directory (a library directory on disk — `--lib`, `$KLAR_LIB` or `./klar` — is used
+first). An agent's verdict on a type error takes 9 ms, "all tests pass" 250 ms (`bench/ai/loop_latency.py`).
+
 `pip install -e .` installs a `klar` command. On Windows `klar.bat run examples\hello.klar` works from the
 repository root, on Linux `sh klar.sh ...`.
 

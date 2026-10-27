@@ -108,9 +108,10 @@ pub fn parse_allow(spec: Str) -> Result[List[Str], Str] {
         Some(k) => r.slice(k + 1, r.len()),
         None => "",
       }
-      let known = ["io", "time", "rand", "net", "fs", "proc"].contains(kind)
-      if not known or (arg != "" and kind != "fs" and kind != "proc") or (has_colon and arg == "") {
-        return Err("unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME)")
+      let known = ["io", "time", "rand", "net", "fs", "proc", "env"].contains(kind)
+      let takes_arg = kind == "fs" or kind == "proc" or kind == "env"
+      if not known or (arg != "" and not takes_arg) or (has_colon and arg == "") {
+        return Err("unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME, env, env:NAME)")
       }
       out = out.push(r)
     }

@@ -362,6 +362,9 @@ def _set_executable(it, a, sp):
 @glob("fn env_var(name: Str) -> Option[Str] uses io")
 def _env_var(it, a, sp):
     import os
+    sb = getattr(it, "sandbox", None)
+    if sb is not None and not sb.env_ok(a[0]):
+        return NONE                     # `--allow` without `env`: the environment is not visible (THREATS.md T8)
     v = os.environ.get(a[0])
     return NONE if v is None else some(v)
 

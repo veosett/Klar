@@ -1,0 +1,128 @@
+// `match xs.get(i)` and `match m.get(k)` with only `Some(..)`, `None` and `_` arms: native code finds the element
+// without allocating the Option (klar/native/lower.py `option_slot`). Every kind of element, nested patterns,
+// guards, a `return` from an arm, and the list replaced while an arm still uses its element. Also
+// `xs.get(i).unwrap_or(d)` with a plain default, which is one lookup without an Option (`get_or`).
+
+enum Tok {
+  Word(text: Str),
+  Num(value: Int),
+  End,
+}
+
+fn word_at(toks: List[Tok], i: Int) -> Str {
+  return match toks.get(i) {
+    Some(Tok.Word(t)) => t,
+    Some(Tok.Num(n)) => "#{n}",
+    _ => "?",
+  }
+}
+
+fn first_big(xs: List[Int], limit: Int) -> Int {
+  var i = 0
+  while i < 100 {
+    match xs.get(i) {
+      Some(x) => {
+        if x > limit {
+          return x
+        }
+      },
+      None => {
+        return -1
+      },
+    }
+    i = i + 1
+  }
+  return -2
+}
+
+fn describe(m: Map[Str, List[Str]], key: Str) -> Str {
+  return match m.get(key) {
+    Some(vs) if vs.len() > 1 => "{key}: {vs.len()} values",
+    Some(vs) => key + ": " + vs.join(","),
+    None => "{key}: none",
+  }
+}
+
+fn replaced(start: List[Str]) -> Str {
+  var xs = start
+  match xs.get(0) {
+    Some(s) => {
+      xs = ["other"]
+      return s + " then " + xs.get_or(0, "")
+    },
+    None => {},
+  }
+  return "empty"
+}
+
+fn pick(xs: List[Int], i: Int) -> Int {
+  return xs.get(i).unwrap_or(-1)
+}
+
+fn main() uses io {
+  let toks = [Tok.Word(text: "let"), Tok.Num(value: 42), Tok.End]
+  print("{word_at(toks, 0)} {word_at(toks, 1)} {word_at(toks, 2)} {word_at(toks, 3)} {word_at(toks, -1)}")
+  print("{first_big([1, 5, 9, 20], 6)} {first_big([1, 2], 6)}")
+  let m = Map { "a": ["x"], "b": ["y", "z"] }
+  print(describe(m, "a") + " | " + describe(m, "b") + " | " + describe(m, "c"))
+  let two = replaced(["first", "second"])
+  print("{two} {replaced([])}")
+  let opts: List[Option[Int]] = [Some(1), None]
+  for i in range(0, 3) {
+    let shown = match opts.get(i) {
+      Some(Some(v)) => "some {v}",
+      Some(None) => "inner none",
+      None => "outside",
+    }
+    print(shown)
+  }
+  let floats = [1.5, 2.5]
+  let bools = [true]
+  let f = match floats.get(1) {
+    Some(x) => x * 2.0,
+    None => 0.0,
+  }
+  let b = match bools.get(0) {
+    Some(true) => "yes",
+    _ => "no",
+  }
+  let counts = Map { "k": 3 }
+  let c = match counts.get("k") {
+    Some(n) => n + 1,
+    None => 0,
+  }
+  let big = [4611686018427387904 * 2]
+  let g = match big.get(0) {
+    Some(v) => v + 1,
+    None => 0,
+  }
+  print("{f} {b} {c} {g}")
+  // many rounds: neither the elements nor the stand-ins leak
+  var total = 0
+  let words = ["alpha", "beta"]
+  for k in range(0, 20000) {
+    total = total + match words.get(k % 3) {
+      Some(w) => w.len(),
+      None => 1,
+    }
+  }
+  print("{total}")
+  let fallback = "none"
+  let names = Map { "a": "x" }
+  let lists = Map { "a": [1, 2] }
+  let nested = [[1], [2, 3]]
+  let maps = [Map { "k": 1.5 }]
+  let a1 = names.get("a").unwrap_or(fallback)
+  let a2 = names.get("b").unwrap_or(fallback)
+  let a3 = names.get("b").unwrap_or("")
+  let a4 = lists.get("b").unwrap_or([]).len() + lists.get("a").unwrap_or([]).len()
+  let a5 = nested.get(1).unwrap_or([]).len() + nested.get(5).unwrap_or([]).len()
+  let a6 = pick([7, 8], -1) + pick([7, 8], 1) + pick([7, 8], 2)
+  let a7 = maps.get(0).unwrap_or(Map {}).get("k").unwrap_or(-2.5) + maps.get(3).unwrap_or(Map {}).len().to_float()
+  print("{a1} {a2} [{a3}] {a4} {a5} {a6} {a7}")
+  var acc = 0
+  for k in range(0, 20000) {
+    acc = acc + names.get("{k % 2}").unwrap_or(fallback).len() + nested.get(k % 3).unwrap_or([]).len()
+  }
+  print("{acc}")
+}

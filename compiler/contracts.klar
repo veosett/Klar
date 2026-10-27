@@ -3,7 +3,7 @@
 // like any other code.
 use ast.{Decl, Span, TypeExpr, expr_span}
 use checker.{contract_candidates}
-use loader.{Ld, load_program_with, load_runtime}
+use loader.{Ld, load_program_with, load_runtime_again}
 
 /// The source of a span, on one line.
 fn span_text(lines: List[Str], sp: Span) -> Str {
@@ -107,7 +107,7 @@ pub fn with_contracts(ld: Ld, path: Str, lib: Str) -> Ld uses fs {
     None => "",
   }
   let src = ld.sources.get(display).unwrap_or("")
-  let full = load_runtime(load_program_with(path: path, lib: lib, overlay: Map { path: src + extra }))
+  let full = load_runtime_again(load_program_with(path: path, lib: lib, overlay: Map { path: src + extra }), ld)
   if full.diags.any(fn(d) => d.severity == "error") {
     return ld
   }

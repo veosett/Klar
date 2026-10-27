@@ -170,6 +170,28 @@ fn Map_get(m: Word, key: Word, rtd: Word) -> Word {
   return some_new(rtd, v)
 }
 
+// `match m.get(k)` without the Option (klar/native/lower.py `option_slot`): the slot of key `k` (-1: absent), and
+// the value in a slot, retained
+fn map_slot(m: Word, key: Word) -> Word {
+  return map_find(m, key)
+}
+
+fn map_take(m: Word, i: Word) -> Word {
+  let v = peek(peek(m + 40) + i * 8)
+  retain_v(v, map_val_td(m))
+  return v
+}
+
+// `m.get(k).unwrap_or(d)` without the Option (klar/native/lower.py `get_or`)
+fn map_get_or(m: Word, key: Word, d: Word) -> Word {
+  let i = map_find(m, key)
+  if i < 0 {
+    retain_v(d, map_val_td(m))
+    return d
+  }
+  return map_take(m, i)
+}
+
 fn Map_has(m: Word, key: Word) -> Bool {
   return map_find(m, key) >= 0
 }
@@ -275,6 +297,7 @@ fn Map_update_owned(m: Word, key: Word, default: Word, f: Word) -> Word {
   }
   let nv = call1(f, cur)
   release_v(default, map_val_td(m))
+  rc_dec(f)              // consumed, like the other arguments (the lowering hands over its reference)
   return Map_set_owned(m, key, nv)
 }
 
@@ -282,6 +305,7 @@ fn Map_update(m: Word, key: Word, default: Word, f: Word) -> Word {
   rc_inc(m)
   retain_v(key, map_key_td(m))
   retain_v(default, map_val_td(m))
+  rc_inc(f)
   return Map_update_owned(m, key, default, f)
 }
 

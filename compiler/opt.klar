@@ -59,8 +59,12 @@ fn put(ins: Ins, k: Int, v: KV) -> Ins {
   return ins.set(k, v)
 }
 
-const PURE: List[Str] = ["const", "fp", "mov", "addr", "bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "i2f", "f2i", "fun",
-  "fpow", "load", "load8", "load32"]
+/// Instructions without effects (removable when nothing uses what they define).
+const PURE: Map[Str, Bool] = Map {
+  "const": true, "fp": true, "mov": true, "addr": true, "bin": true, "bini": true, "bink": true, "cmp": true, "cmpi": true,
+  "fbin": true, "fcmp": true, "i2f": true, "f2i": true, "fun": true, "fpow": true, "load": true, "load8": true,
+  "load32": true,
+}
 
 /// Instructions that never call out of line (so caller-saved registers survive them).
 pub const NO_CALL: List[Str] = ["const", "fp", "mov", "addr", "bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "i2f",
@@ -102,70 +106,54 @@ fn wrap(v: Int) -> Int {
   return u
 }
 
+/// Where an instruction keeps the vreg it defines, by opcode: 1 field 1; 2 field 2; 3 field 1 unless it is nil
+/// (calls).
+const DEFS: Map[Str, Int] = Map {
+  "const": 1, "fp": 1, "mov": 1, "addr": 1, "i2f": 1, "f2i": 1, "ineg": 1, "fpow": 1, "load": 1, "load8": 1, "load32": 1,
+  "bin": 2, "bini": 2, "bink": 2, "cmp": 2, "cmpi": 2, "fbin": 2, "fcmp": 2, "fun": 2, "iop": 2, "iopi": 2, "icmp": 2,
+  "icmpi": 2, "call": 3, "callind": 3,
+}
+
 /// The vregs an instruction defines.
 pub fn defs(ins: Ins) -> List[Int] {
-  let o = opc(ins)
-  if ["const", "fp", "mov", "addr", "i2f", "f2i", "ineg", "fpow", "load", "load8", "load32"].contains(o) {
-    return [int_at(ins, 1)]
-  }
-  if ["bin", "bini", "bink", "cmp", "cmpi", "fbin", "fcmp", "fun", "iop", "iopi", "icmp", "icmpi"].contains(o) {
-    return [int_at(ins, 2)]
-  }
-  if o == "call" or o == "callind" {
-    return match is_nil(ins, 1) {
+  return match DEFS.get(opc(ins)).unwrap_or(0) {
+    1 => [int_at(ins, 1)],
+    2 => [int_at(ins, 2)],
+    3 => match is_nil(ins, 1) {
       true => [],
       false => [int_at(ins, 1)],
-    }
+    },
+    _ => [],
   }
-  return []
+}
+
+/// Where an instruction keeps the vregs it uses, by opcode (one lookup instead of a chain of comparisons):
+/// 1 field 2; 2 fields 3 and 4; 3 field 3; 4 fields 2 and 3; 5 fields 1 and 3; 6 the list in field 3 (call);
+/// 7 field 2 and the list in field 3 (callind); 8 field 1 (br); 9 field 1 unless it is nil (ret).
+const USES: Map[Str, Int] = Map {
+  "mov": 1, "i2f": 1, "f2i": 1, "ineg": 1, "load": 1, "load8": 1, "load32": 1, "retain": 1, "release": 1, "brci": 1,
+  "brti": 1, "ibri": 1, "bin": 2, "cmp": 2, "fbin": 2, "fcmp": 2, "iop": 2, "icmp": 2, "bini": 3, "bink": 3, "cmpi": 3,
+  "fun": 3, "iopi": 3, "icmpi": 3, "fpow": 4, "brc": 4, "ibr": 4, "fbr": 4, "store": 5, "store8": 5, "store32": 5, "call": 6,
+  "callind": 7, "br": 8, "ret": 9,
 }
 
 /// The vregs an instruction uses.
 pub fn used_regs(ins: Ins) -> List[Int] {
-  let o = opc(ins)
-  if ["mov", "i2f", "f2i", "ineg"].contains(o) {
-    return [int_at(ins, 2)]
-  }
-  if ["bin", "cmp", "fbin", "fcmp", "iop", "icmp"].contains(o) {
-    return [int_at(ins, 3), int_at(ins, 4)]
-  }
-  if ["bini", "bink", "cmpi", "fun", "iopi", "icmpi"].contains(o) {
-    return [int_at(ins, 3)]
-  }
-  if o == "fpow" {
-    return [int_at(ins, 2), int_at(ins, 3)]
-  }
-  if ["load", "load8", "load32"].contains(o) {
-    return [int_at(ins, 2)]
-  }
-  if ["store", "store8", "store32"].contains(o) {
-    return [int_at(ins, 1), int_at(ins, 3)]
-  }
-  if o == "call" {
-    return list_at(ins, 3)
-  }
-  if o == "callind" {
-    return [int_at(ins, 2)].concat(list_at(ins, 3))
-  }
-  if o == "retain" or o == "release" {
-    return [int_at(ins, 2)]
-  }
-  if o == "br" {
-    return [int_at(ins, 1)]
-  }
-  if o == "brc" or o == "ibr" or o == "fbr" {
-    return [int_at(ins, 2), int_at(ins, 3)]
-  }
-  if o == "brci" or o == "brti" or o == "ibri" {
-    return [int_at(ins, 2)]
-  }
-  if o == "ret" {
-    return match is_nil(ins, 1) {
+  return match USES.get(opc(ins)).unwrap_or(0) {
+    1 => [int_at(ins, 2)],
+    2 => [int_at(ins, 3), int_at(ins, 4)],
+    3 => [int_at(ins, 3)],
+    4 => [int_at(ins, 2), int_at(ins, 3)],
+    5 => [int_at(ins, 1), int_at(ins, 3)],
+    6 => list_at(ins, 3),
+    7 => [int_at(ins, 2)].concat(list_at(ins, 3)),
+    8 => [int_at(ins, 1)],
+    9 => match is_nil(ins, 1) {
       true => [],
       false => [int_at(ins, 1)],
-    }
+    },
+    _ => [],
   }
-  return []
 }
 
 fn mapped(m: Map[Int, Int], v: Int) -> Int {
@@ -497,11 +485,17 @@ fn fold_bin(o: Str, a: Int, b: Int) -> Int {
 
 // ---- pass 2: compare + branch fusion ------------------------------------------------------------------------------
 
-fn use_counts(code: List[Ins]) -> Map[Int, Int] {
-  var n: Map[Int, Int] = Map {}
+/// How often each vreg is used, by vreg number.
+fn use_counts(code: List[Ins]) -> List[Int] {
+  var n: List[Int] = []
   for ins in code {
     for u in used_regs(ins) {
-      n = n.set(u, n.get(u).unwrap_or(0) + 1)
+      if u >= 0 {
+        while n.len() <= u {
+          n = n.push(0)
+        }
+        n = n.set(u, n.get_or(u, 0) + 1)
+      }
     }
   }
   return n
@@ -557,7 +551,7 @@ fn fuse(f0: KFn, code: List[Ins]) -> Pair[KFn, List[Ins]] {
         } else {
           if opc(m) == "release" {
             releases = releases.push(m)
-          } else if PURE.contains(opc(m)) and not used_regs(m).contains(d) and not defs(m).any(fn(x) => operands.contains(x) or
+          } else if PURE.has(opc(m)) and not used_regs(m).contains(d) and not defs(m).any(fn(x) => operands.contains(x) or
               x == d) {
               mid = mid.push(m)
             } else {
@@ -671,7 +665,7 @@ fn dce(code0: List[Ins]) -> List[Ins] {
   var code = code0
   while true {
     let n = use_counts(code)
-    let kept = code.filter(fn(ins) => not (PURE.contains(opc(ins)) and defs(ins).all(fn(d) => n.get(d).unwrap_or(0) == 0)))
+    let kept = code.filter(fn(ins) => not (PURE.has(opc(ins)) and defs(ins).all(fn(d) => n.get(d).unwrap_or(0) == 0)))
     let out = match kept.is_empty() {
       true => kept,
       false => unreachable(kept),

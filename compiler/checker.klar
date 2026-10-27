@@ -5034,9 +5034,8 @@ fn at_decl(c: Ck, idx: Int) -> Ck {
   return c with { cur_decl: idx, cur_file: c.decl_files.get(idx).unwrap_or(c.file) }
 }
 
-/// Checks the module: the diagnostics, sorted by position.
-pub fn check_module(ck: Ck) -> Ck {
-  var c = collect(ck)
+fn check_consts(ck: Ck) -> Ck {
+  var c = ck
   var idx = 0
   for d in c.decls {
     match d {
@@ -5047,7 +5046,29 @@ pub fn check_module(ck: Ck) -> Ck {
     }
     idx = idx + 1
   }
-  idx = 0
+  return c
+}
+
+/// The declarations of a module without the bodies of its functions: the runtime, whose functions the native
+/// lowering checks one by one (`check_body`) when a program uses them — most programs use few of them.
+pub fn check_module_lazy(ck: Ck) -> Ck {
+  let c = settle_types(check_consts(collect(ck)))
+  let own = c.file
+  return c with { diags: c.diags.sort_by(fn(d) => diag_rank(d, own)) }
+}
+
+/// Checks the body of function `idx` of a module checked by `check_module_lazy` (its types settled).
+pub fn check_body(ck: Ck, idx: Int) -> Ck {
+  return match ck.decls.get(idx) {
+    Some(Decl.Fn(f)) => settle_types(check_pending(check_fn(ck: at_decl(ck, idx), f: f, idx: idx))),
+    _ => ck,
+  }
+}
+
+/// Checks the module: the diagnostics, sorted by position.
+pub fn check_module(ck: Ck) -> Ck {
+  var c = check_consts(collect(ck))
+  var idx = 0
   for d in c.decls {
     c = at_decl(c, idx)
     match d {

@@ -212,6 +212,10 @@ python -m klar build compiler/klarc.klar -o klarc   # stage 1: Python-компи
 ./klarc patch app.klar edits.json                   # протокол правок для ИИ; также add/fetch/deps, eval, fix, doc
 ```
 
+`klarc` — один файл, рантайм и стандартная библиотека встроены в него: скопируйте его куда угодно, и он собирает,
+тестирует и проверяет программы в любом каталоге (каталог библиотеки на диске — `--lib`, `$KLAR_LIB` или `./klar` —
+берётся первым). Вердикт агенту об ошибке типов — 9 мс, «все тесты прошли» — 250 мс (`bench/ai/loop_latency.py`).
+
 `pip install -e .` установит команду `klar`. На Windows из корня репозитория работает `klar.bat run examples\hello.klar`,
 на Linux — `sh klar.sh ...`.
 

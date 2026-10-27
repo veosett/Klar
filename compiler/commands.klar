@@ -11,6 +11,7 @@ use inspect.{NameOcc, UMod, doc_json, doc_lookup, doc_text, name_occurrences, ou
 use inspect.{main_module, user_modules}
 use jsonout.{J, compact, json_list, pretty}
 use loader.{Ld, load_program}
+use libfs.{list_source_dir, read_source}
 use parser.{ParseError, parse_program}
 use report.{diag_json, edit_file, render_report, user_diags}
 
@@ -735,9 +736,9 @@ fn option_value(args: List[Str], name: Str) -> Str {
 /// The std modules: (name, (source lines, declarations)), in file order.
 pub fn std_modules(lib: Str) -> List[Pair[Str, Pair[List[Str], List[Decl]]]] uses fs {
   var out: List[Pair[Str, Pair[List[Str], List[Decl]]]] = []
-  for f in list_dir(lib + "/std").unwrap_or([]) {
+  for f in list_source_dir(lib + "/std").unwrap_or([]) {
     if f.ends_with(".klar") {
-      let src = read_file(lib + "/std/" + f).unwrap_or("")
+      let src = read_source(lib + "/std/" + f).unwrap_or("")
       match parse_program(src) {
         Ok(p) => {
           out = out.push(Pair { first: f.slice(0, f.len() - 5), second: Pair { first: src.split("\n"),
@@ -868,7 +869,7 @@ fn std_modules_reference(lib: Str) -> Str uses fs {
 
 /// `klarc spec`: the compact language reference for AI authors.
 pub fn spec_command(lib: Str) -> Int uses io, fs {
-  print(read_file(lib + "/ai_reference.md").unwrap_or(""))
+  print(read_source(lib + "/ai_reference.md").unwrap_or(""))
   print(stdlib_reference())
   print(std_modules_reference(lib))
   return 0

@@ -1,0 +1,329 @@
+// Mutation testing of the compiler written in Klar (ROADMAP item 31): how many small bugs planted in compiler/*.klar
+// do the differential checks notice? A mutant flips one operator (`==` / `!=`, `<` / `<=`, `+ 1` / `- 1`, `and` /
+// `or`, `true` / `false`) on one line. The reference klarc builds the mutated compiler; the mutant then compiles the
+// oracle programs (tests/native, the examples, the benchmarks, klarc itself) and checks examples/mistakes.klar. A
+// mutant whose results differ from the reference in any byte is killed; one that changes nothing survived, and is
+// either a gap in the checks or a change that cannot matter (an equivalent mutant).
+//
+//     klarc run tools/mutate.klar -- [--klarc build/klarc] [-n 30] [--seed 1] [--files opt.klar,emit.klar]
+//                                    [--work /tmp/klar-mutants] [--out docs/MUTATION.md] [--no-self]
+//
+// Run it from the repository root on Linux (it uses `timeout` to stop a mutant that loops).
+
+type MutOpts { klarc: Str, n: Int, seed: Int, files: List[Str], work: Str, out: Str, self_build: Bool }
+
+/// A place to mutate: compiler/<file>, line (from 1), the column of the operator, and the replacement.
+type Site { file: Str, line: Int, col: Int, from: Str, to: Str }
+
+/// One oracle step: a command line and the file whose bytes it writes ("" when its output is what is compared).
+type Step { name: Str, cmd: List[Str], out: Str }
+
+type Outcome { site: Site, verdict: Str, by: Str }
+
+const OPS: List[Str] = [" == ", " != ", " < ", " <= ", " > ", " >= ", " + 1", " - 1", " and ", " or "]
+
+const SWAP: List[Str] = [" != ", " == ", " <= ", " < ", " >= ", " > ", " - 1", " + 1", " or ", " and "]
+
+fn parse_mut_opts(args: List[Str]) -> MutOpts {
+  var o = MutOpts { klarc: "build/klarc", n: 30, seed: 1, files: [], work: "/tmp/klar-mutants", out: "docs/MUTATION.md",
+    self_build: true }
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    let v = args.get_or(i + 1, "")
+    if a == "--no-self" {
+      o = o with { self_build: false }
+      i = i + 1
+    } else {
+      if a == "--klarc" {
+        o = o with { klarc: v }
+      } else if a == "-n" {
+        o = o with { n: v.to_int().unwrap_or(30) }
+      } else if a == "--seed" {
+        o = o with { seed: v.to_int().unwrap_or(1) }
+      } else if a == "--files" {
+        o = o with { files: v.split(",").filter(fn(f) => f != "") }
+      } else if a == "--work" {
+        o = o with { work: v }
+      } else if a == "--out" {
+        o = o with { out: v }
+      }
+      i = i + 2
+    }
+  }
+  return o
+}
+
+/// The columns of a line that are code: not inside a string literal, not after `//`.
+fn code_mask(line: Str) -> List[Bool] {
+  var out: List[Bool] = []
+  var in_str = false
+  var esc = false
+  var comment = false
+  var i = 0
+  let cs = line.chars()
+  while i < cs.len() {
+    let c = cs.get_or(i, "")
+    if comment {
+      out = out.push(false)
+    } else if in_str {
+      out = out.push(false)
+      if esc {
+        esc = false
+      } else if c == "\\" {
+        esc = true
+      } else if c == "\"" {
+        in_str = false
+      }
+    } else if c == "\"" {
+      in_str = true
+      out = out.push(false)
+    } else if c == "/" and cs.get_or(i + 1, "") == "/" {
+      comment = true
+      out = out.push(false)
+    } else {
+      out = out.push(true)
+    }
+    i = i + 1
+  }
+  return out
+}
+
+fn all_code(mask: List[Bool], from: Int, n: Int) -> Bool {
+  var k = from
+  while k < from + n {
+    if not mask.get_or(k, false) {
+      return false
+    }
+    k = k + 1
+  }
+  return true
+}
+
+fn is_word(c: Str) -> Bool {
+  return c != "" and "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_".contains(c)
+}
+
+/// The mutation sites of one file (columns count characters).
+fn sites_in(file: Str, text: Str) -> List[Site] {
+  var out: List[Site] = []
+  var ln = 0
+  for line in text.split("\n") {
+    ln = ln + 1
+    let mask = code_mask(line)
+    let cs = line.chars()
+    var k = 0
+    for op in OPS {
+      let to = SWAP.get_or(k, op)
+      var at = 0
+      while at + op.len() <= cs.len() {
+        if line.slice(at, at + op.len()) == op and all_code(mask: mask, from: at, n: op.len()) {
+          out = out.push(Site { file: file, line: ln, col: at, from: op, to: to })
+        }
+        at = at + 1
+      }
+      k = k + 1
+    }
+    for pair in [["true", "false"], ["false", "true"]] {
+      let w = pair.get_or(0, "")
+      var at = 0
+      while at + w.len() <= cs.len() {
+        if line.slice(at, at + w.len()) == w and all_code(mask: mask, from: at, n: w.len()) and not is_word(cs.get_or(
+          at - 1, "")) and not is_word(cs.get_or(at + w.len(), "")) {
+            out = out.push(Site { file: file, line: ln, col: at, from: w, to: pair.get_or(1, "") })
+          }
+        at = at + 1
+      }
+    }
+  }
+  return out
+}
+
+/// A deterministic generator (the same seed picks the same mutants on every machine).
+fn next_rand(x: Int) -> Int {
+  return (x * 6364136223846793005 + 1442695040888963407) % 18446744073709551616
+}
+
+fn pick(sites: List[Site], n: Int, seed: Int) -> List[Site] {
+  var pool = sites
+  var out: List[Site] = []
+  var r = next_rand(seed + 1)
+  while out.len() < n and not pool.is_empty() {
+    r = next_rand(r)
+    let k = r.shift_right(33) % pool.len()
+    out = out.push(pool.get_or(k, Site { file: "", line: 0, col: 0, from: "", to: "" }))
+    pool = pool.remove_at(k)
+  }
+  return out.sort_by(fn(s) => "{s.file}:{s.line + 100000}:{s.col + 1000}")
+}
+
+fn mutated(text: Str, s: Site) -> Str {
+  var out: List[Str] = []
+  var ln = 0
+  for line in text.split("\n") {
+    ln = ln + 1
+    if ln == s.line {
+      out = out.push(line.slice(0, s.col) + s.to + line.slice(s.col + s.from.len(), line.len()))
+    } else {
+      out = out.push(line)
+    }
+  }
+  return out.join("\n")
+}
+
+/// The output of a command run with a time limit: [exit code, stdout, stderr], or the problem.
+fn run_limited(cmd: List[Str], seconds: Int) -> Result[List[Str], Str] uses proc {
+  return run_capture(["timeout", "{seconds}"].concat(cmd), "", "")
+}
+
+fn programs() -> List[Str] uses fs {
+  var out: List[Str] = []
+  for f in list_dir("tests/native").unwrap_or([]).sort() {
+    if f.ends_with(".klar") {
+      out = out.push("tests/native/" + f)
+    }
+  }
+  for f in ["hello", "bank", "collections", "shapes", "features"] {
+    out = out.push("examples/{f}.klar")
+  }
+  for b in list_dir("bench/programs").unwrap_or([]).sort() {
+    out = out.push("bench/programs/{b}/{b}.klar")
+  }
+  return out
+}
+
+/// The oracle: build each program (its bytes), check examples/mistakes.klar (its diagnostics), and build klarc.
+fn steps(klarc: Str, work: Str, self_build: Bool) -> List[Step] uses fs {
+  var out: List[Step] = []
+  var i = 0
+  for p in programs() {
+    let exe = "{work}/out/p{i}"
+    out = out.push(Step { name: p, cmd: [klarc, "build", p, "-o", exe], out: exe })
+    i = i + 1
+  }
+  out = out.push(Step { name: "check examples/mistakes.klar", cmd: [klarc, "check", "examples/mistakes.klar"], out: "" })
+  if self_build {
+    let exe = "{work}/out/klarc"
+    out = out.push(Step { name: "klarc itself", cmd: [klarc, "build", "compiler/klarc.klar", "-o", exe], out: exe })
+  }
+  return out
+}
+
+/// What a step produced: the bytes it wrote (as hex) or its output, with the exit code.
+fn result_of(st: Step, limit: Int) -> Str uses fs, proc {
+  return match run_limited(cmd: st.cmd, seconds: limit) {
+    Ok(r) => {
+      let code = r.get_or(0, "?")
+      if st.out == "" {
+        let so = r.get_or(1, "")
+        let se = r.get_or(2, "")
+        return "{code}\n{so}{se}"
+      }
+      let bytes = read_bytes(st.out).map(fn(b) => b.hex()).unwrap_or("(nothing written)")
+      remove_file(st.out).unwrap_or(())
+      return "{code}\n{bytes}"
+    },
+    Err(e) => "cannot run: {e}",
+  }
+}
+
+fn with_klarc(st: Step, klarc: Str) -> Step {
+  return st with { cmd: [klarc].concat(st.cmd.drop(1)) }
+}
+
+fn main() uses io, fs, proc {
+  let o = parse_mut_opts(cli_args())
+  let all_files = list_dir("compiler").unwrap_or([]).filter(fn(f) => f.ends_with(".klar")).sort()
+  let files = match o.files.is_empty() {
+    true => all_files,
+    false => o.files,
+  }
+  make_dir(o.work).unwrap_or(())
+  make_dir("{o.work}/out").unwrap_or(())
+  make_dir("{o.work}/compiler").unwrap_or(())
+  var sources: Map[Str, Str] = Map {}
+  for f in all_files {
+    let text = read_file("compiler/" + f).unwrap_or("")
+    sources = sources.set(f, text)
+    write_file("{o.work}/compiler/{f}", text).unwrap_or(())
+  }
+  var sites: List[Site] = []
+  for f in files {
+    sites = sites.concat(sites_in(file: f, text: sources.get(f).unwrap_or("")))
+  }
+  let chosen = pick(sites: sites, n: o.n, seed: o.seed)
+  print("mutate: {sites.len()} sites in {files.len()} files, {chosen.len()} mutants (seed {o.seed})")
+  let plan = steps(klarc: o.klarc, work: o.work, self_build: o.self_build)
+  var reference: List[Str] = []
+  for st in plan {
+    reference = reference.push(result_of(st, 600))
+  }
+  let mk = "{o.work}/mutant-klarc"
+  var outcomes: List[Outcome] = []
+  var n = 0
+  for s in chosen {
+    n = n + 1
+    let orig = sources.get(s.file).unwrap_or("")
+    write_file("{o.work}/compiler/{s.file}", mutated(text: orig, s: s)).unwrap_or(())
+    let built = run_limited(cmd: [o.klarc, "build", "{o.work}/compiler/klarc.klar", "-o", mk], seconds: 600)
+    var verdict = "survived"
+    var by = ""
+    match built {
+      Ok(r) => {
+        if r.get_or(0, "") != "0" {
+          verdict = "stillborn"
+          by = r.get_or(1, "").split("\n").get_or(0, "")
+        }
+      },
+      Err(e) => {
+        verdict = "stillborn"
+        by = e
+      },
+    }
+    if verdict == "survived" {
+      var k = 0
+      for st in plan {
+        if verdict == "survived" and result_of(with_klarc(st, mk), 120) != reference.get_or(k, "") {
+          verdict = "killed"
+          by = st.name
+        }
+        k = k + 1
+      }
+    }
+    write_file("{o.work}/compiler/{s.file}", orig).unwrap_or(())
+    print("  {n}/{chosen.len()} {s.file}:{s.line} `{s.from.trim()}` -> `{s.to.trim()}`: {verdict} {by}")
+    outcomes = outcomes.push(Outcome { site: s, verdict: verdict, by: by })
+  }
+  let killed = outcomes.filter(fn(x) => x.verdict == "killed").len()
+  let still = outcomes.filter(fn(x) => x.verdict == "stillborn").len()
+  let alive = outcomes.filter(fn(x) => x.verdict == "survived")
+  let live = outcomes.len() - still
+  var score = 0
+  if live != 0 {
+    score = killed * 1000 / live
+  }
+  let also = match o.self_build {
+    true => ", klarc itself",
+    false => "",
+  }
+  let nprog = programs().len() + match o.self_build {
+    true => 1,
+    false => 0,
+  }
+  var md: List[Str] = ["# Mutation testing of the Klar compiler", "",
+    "Generated by `tools/mutate.klar` (ROADMAP item 31). Do not edit by hand — run it again:", "", "```",
+    "klarc run tools/mutate.klar -- -n {o.n} --seed {o.seed}", "```", "",
+    "Each mutant flips one operator in one line of `compiler/*.klar`. The reference klarc builds the mutated compiler, and the mutant then compiles {nprog} programs (tests/native, examples, benchmarks{also}) and checks `examples/mistakes.klar`; a mutant is killed when any result differs from the reference in any byte.",
+    "", "## Summary", "", "- Sites: {sites.len()} in {files.len()} files; mutants: {outcomes.len()} (seed {o.seed})",
+    "- Killed: {killed}; survived: {alive.len()}; did not compile: {still}",
+    "- **Mutation score: {score / 10}.{score % 10}%** (killed of the mutants that compile)", "", "## Mutants", "",
+    "| File:line | Change | Result | First check that noticed |", "|---|---|---|---|"]
+  for x in outcomes {
+    let by = x.by.replace("|", "\\|")
+    let from = x.site.from.trim()
+    let to = x.site.to.trim()
+    md = md.push("| `{x.site.file}:{x.site.line}` | `{from}` → `{to}` | {x.verdict} | {by} |")
+  }
+  write_file(o.out, md.join("\n") + "\n").unwrap_or(())
+  print("mutate: score {score / 10}.{score % 10}% ({killed} killed, {alive.len()} survived, {still} did not compile) -> {o.out}")
+}

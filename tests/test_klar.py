@@ -781,7 +781,7 @@ class Documentation(unittest.TestCase):
         files += glob.glob(os.path.join(ROOT, "klar", "rt", "*.klar"))
         files += glob.glob(os.path.join(ROOT, "compiler", "*.klar"))
         for path in files:
-            if path.endswith(("diagnostics.py", "builtin_sigs.klar")):
+            if path.endswith(("diagnostics.py", "builtin_sigs.klar", "libsrc.klar")):
                 continue
             with open(path, encoding="utf-8") as f:
                 used |= set(re.findall(r"[\"(]([EWR]0\d{3})[\")]", f.read()))
@@ -1188,7 +1188,35 @@ fn main() uses io {
             self.assertIn("default method of trait `Shape`", cli("doc", "label", "--in", path)[1])
 
 
+class NativeMemory(unittest.TestCase):
+    def test_temporaries_are_freed(self):
+        """tests/native/leaks.klar allocates temporaries 200 000 times over (concat of a temporary, Map.update's
+        function, `return` inside `match` and `for`): with every one freed the process stays small."""
+        from klar.native.build import build, host_target
+        if host_target() != "linux" or not hasattr(os, "wait4"):
+            self.skipTest("peak memory of a child process is read with wait4 on Linux")
+        def peak(exe, rounds):
+            p = subprocess.Popen([exe, str(rounds)], stdout=subprocess.DEVNULL)
+            _, status, usage = os.wait4(p.pid, 0)
+            self.assertEqual(status, 0)
+            return usage.ru_maxrss                 # KB
+        with tempfile.TemporaryDirectory() as d:
+            exe, _ = build(os.path.join(ROOT, "tests", "native", "leaks.klar"), out=os.path.join(d, "leaks"))
+            small, big = peak(exe, 20000), peak(exe, 200000)
+        self.assertLess(big - small, 10 * 1024, f"peak memory grew from {small} KB to {big} KB (it leaked ~120 MB)")
+
+
 class SelfHosting(unittest.TestCase):
+    def test_generated_files_are_current(self):
+        """compiler/builtin_sigs.klar and compiler/libsrc.klar (the library built into klarc) match their sources:
+        after a change to klar/rt, klar/std or the built-ins, run `python tests/selfhost.py --update`."""
+        sys.path.insert(0, os.path.join(ROOT, "tests"))
+        import selfhost
+        for path, want in ((selfhost.BUILTIN_SIGS, selfhost.builtin_sigs_source()),
+                           (selfhost.LIBSRC, selfhost.library_source())):
+            with open(path, encoding="utf-8", newline="") as f:
+                self.assertTrue(f.read() == want, f"{path} is out of date: run `python tests/selfhost.py --update`")
+
     def test_klar_compiler_matches_python(self):
         """compiler/*.klar give exactly the tokens, trees, diagnostics, KIR and executables of the Python compiler
         (native builds)."""
@@ -2150,16 +2178,27 @@ class SandboxThreats(SandboxDirs, unittest.TestCase):
         self.assertTrue(self.denied("proc", "proc:git"))
         self.assertFalse(self.denied("proc", "proc:klar-not-a-program"))
 
-    def test_env_is_readable_under_allow(self):           # T8 (open): env_var is `io`, always allowed
+    def test_env_needs_the_env_right(self):               # T8: secrets stay out of a sandboxed program
         src = os.path.join(self.dir, "env.klar")
         with open(src, "w", encoding="utf-8") as f:
-            f.write('fn main() uses io {\n  print(env_var("KLAR_THREAT_TEST"))\n}\n')
+            f.write('fn main() uses io {\n  print(env_var("KLAR_THREAT_TEST"))\n  print(env_var("KLAR_OTHER"))\n}\n')
         os.environ["KLAR_THREAT_TEST"] = "token"
+        os.environ["KLAR_OTHER"] = "other"
         try:
-            code, out, _ = cli("run", "-q", "--interp", "--allow", "", src)
+            for allow, want in (("", "None\nNone\n"), ("time", "None\nNone\n"),
+                                ("env", 'Some("token")\nSome("other")\n'),
+                                ("env:KLAR_THREAT_TEST", 'Some("token")\nNone\n'), (None, 'Some("token")\nSome("other")\n')):
+                for backend in ("--interp", "--py", None):              # (None: native code)
+                    flags = ["run", "-q"] + ([backend] if backend else []) + (["--allow", allow] if allow is not None else [])
+                    code, out, _ = cli(*flags, src)
+                    self.assertEqual((code, out), (0, want), (allow, backend))
         finally:
             del os.environ["KLAR_THREAT_TEST"]
-        self.assertEqual((code, out), (0, 'Some("token")\n'))
+            del os.environ["KLAR_OTHER"]
+        from klar.sandbox import RightsError, parse_allow
+        self.assertEqual(parse_allow("env:HOME,env"), ["env:HOME", "env"])
+        with self.assertRaises(RightsError):
+            parse_allow("env:")
 
     def test_mcp_runs_the_models_code_with_no_rights(self):      # T5: klar_dev / klar_eval get `klar mcp --allow`
         from klar.tools.mcp import call_tool

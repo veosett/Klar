@@ -1,6 +1,7 @@
 // Klar runtime: the rights of `--allow` (klar/sandbox.py, with the same checks and messages). `klar build --allow`
 // puts them into the executable as `g_allow`: [0] without rights, else [1, shown, fs, proc, time, rand, net, #dirs,
-// dirs, #programs, programs] (`shown`: the rights as the message names them; dirs and programs: arrays of strings).
+// dirs, #programs, programs, env, #variables, variables] (`shown`: the rights as the message names them; dirs,
+// programs and variables: arrays of strings).
 
 const SB_SHOWN: Word = 8
 const SB_FS: Word = 16
@@ -12,6 +13,9 @@ const SB_NDIRS: Word = 56
 const SB_DIRS: Word = 64
 const SB_NPROGS: Word = 72
 const SB_PROGS: Word = 80
+const SB_ENV: Word = 88
+const SB_NENVS: Word = 96
+const SB_ENVS: Word = 104
 
 fn allow_area() -> Word {
   return static_addr("g_allow")
@@ -211,6 +215,23 @@ fn sb_need_any_fs(what: Str, sp: Word) {
   if sb_on() and peek(allow_area() + SB_FS) == 0 and peek(allow_area() + SB_NDIRS) == 0 {
     sb_deny(what, "fs", 0, sp)
   }
+}
+
+// may the program read the environment variable `name`? Without `env` / `env:NAME` in `--allow`, `env_var` returns
+// None (klar/sandbox.py `env_ok`): API keys and other secrets stay out of the program's output (THREATS.md T8)
+fn sb_env_ok(name: Word) -> Bool {
+  if not sb_on() or peek(allow_area() + SB_ENV) != 0 {
+    return true
+  }
+  let names = peek(allow_area() + SB_ENVS)
+  var i: Word = 0
+  while i < peek(allow_area() + SB_NENVS) {
+    if Str_eq(peek(names + i * 8), name) {
+      return true
+    }
+    i = i + 1
+  }
+  return false
 }
 
 fn sb_need_proc(what: Str, args: Word, sp: Word) {

@@ -8,7 +8,9 @@
 // a dependency: `use geo.{Point}` loads `<geo>/lib.klar`, `use geo.shapes.{Circle}` `<geo>/shapes.klar`.
 use ast.{Decl, Program, Span}
 use builtin_sigs.{rt_files}
-use checker.{Builtins, Ck, Diag, Export, Universe, check_module, empty_universe, exports, fix_at, load_builtins, new_checker}
+use checker.{Builtins, Ck, Diag, Export, Universe, check_module, check_module_lazy, empty_universe, exports, fix_at}
+use checker.{load_builtins, new_checker}
+use libfs.{read_source, source_exists}
 use checker.{DiagFix, FixEdit, private_decl}
 use parser.{ParseError, parse_program}
 use safety.{analyze}
@@ -65,7 +67,12 @@ pub type Ld {
   packages: Map[Str, PkgReg],
   /// dependency root -> its name (module names inside it start with it)
   dep_names: Map[Str, Str],
+  /// the runtime files as parsed by an earlier `load_runtime` (reused when the program is loaded again)
+  rt_parsed: Option[RtParsed],
 }
+
+/// The runtime files, parsed: all declarations as one program, the file of each, and the texts by display name.
+pub type RtParsed { prog: Program, files: List[Str], sources: List[Pair[Str, Str]] }
 
 /// The result of loading a module: the loader state and the path of the module (None: not loaded).
 pub type Loaded { ld: Ld, path: Option[Str] }
@@ -377,7 +384,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
   let is_sys = path.starts_with(rt_dir(ld) + "/")
   let read = match ld.overlay.get(path) {
     Some(t) => Ok(t),
-    None => read_file(path),
+    None => read_source(path),
   }
   let source = match read {
     Ok(text) => text,
@@ -468,7 +475,7 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
         }
         if skip {
           // (reported above)
-        } else if not file_exists(dep_path) {
+        } else if not source_exists(dep_path) {
           ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "module `{dep_name}` not found (looked for " +
               "`{display_of(ld, dep_path)}`)", span: span, hint: Some("create the file `{display_of(ld, dep_path)}` " +
                 "(modules are files next to the importing file)")))
@@ -560,7 +567,7 @@ pub fn load_program_with(path: Str, lib: Str, overlay: Map[Str, Str]) -> Ld uses
   let root = dirname(path)
   var ld = Ld { root: root, lib: lib, b: load_builtins(), uni: empty_universe(), by_path: Map {}, stack: [], diags: [],
     prelude: None, order: [], sources: Map {}, runtime: None, project: find_root(root), manifests: Map {}, packages: Map {},
-    dep_names: Map {}, overlay: overlay }
+    dep_names: Map {}, overlay: overlay, rt_parsed: None }
   let prelude_path = lib + "/prelude.klar"
   ld = load(ld0: ld, path: prelude_path, name: "prelude", display: "prelude.klar", importer: None, pkg: None).ld
   ld = ld with { prelude: Some(prelude_path) }
@@ -572,8 +579,32 @@ pub fn load_program_with(path: Str, lib: Str, overlay: Map[Str, Str]) -> Ld uses
   return load(ld0: ld, path: path, name: name, display: file, importer: None, pkg: ld.project).ld
 }
 
-/// Loads all runtime files (system Klar) as ONE module `klar_rt`, so they can call each other freely.
+/// Loads all runtime files (system Klar) as ONE module `klar_rt`, so they can call each other freely. A program
+/// with errors is not lowered, so its errors are reported without reading and checking the runtime (`ld0` as is).
 pub fn load_runtime(ld0: Ld) -> Ld uses fs {
+  if ld0.diags.any(fn(d) => d.severity == "error") {
+    return ld0
+  }
+  let rp = match ld0.rt_parsed {
+    Some(x) => x,
+    None => {
+      return parse_runtime(ld0)
+    },
+  }
+  var ld = ld0
+  for p in rp.sources {
+    ld = ld with { sources: ld.sources.set(p.first, p.second) }
+  }
+  return check_runtime(ld: ld, prog: rp.prog, files: rp.files)
+}
+
+/// `load_runtime` with the program of an earlier load (`klarc test` adds the contracts as properties): the
+/// runtime is not read and parsed again.
+pub fn load_runtime_again(ld0: Ld, earlier: Ld) -> Ld uses fs {
+  return load_runtime(ld0 with { rt_parsed: earlier.rt_parsed })
+}
+
+fn parse_runtime(ld0: Ld) -> Ld uses fs {
   var ld = ld0
   var decls: List[Decl] = []
   var files: List[Str] = []
@@ -581,7 +612,7 @@ pub fn load_runtime(ld0: Ld) -> Ld uses fs {
   var failed = false
   for fname in rt_files() {
     let display = "rt/" + fname
-    let read = read_file(rt_dir(ld) + "/" + fname)
+    let read = read_source(rt_dir(ld) + "/" + fname)
     match read {
       Err(e) => {
         ld = add_error(ld: ld, file: display, d: diag(code: "E0601", msg: "cannot read module `rt`: {e}", span: zero_span(),
@@ -608,8 +639,7 @@ pub fn load_runtime(ld0: Ld) -> Ld uses fs {
       },
     }
   }
-  let base = Module { name: "klar_rt", path: rt_dir(ld) + "/<all>", display: "rt", failed: true, is_sys: true, checker: None,
-    exports: Map {}, import_from: Map {}, pkg: None }
+  let base = rt_base(ld)
   let head = match first {
     Some(p) => p,
     None => {
@@ -620,6 +650,19 @@ pub fn load_runtime(ld0: Ld) -> Ld uses fs {
     return ld with { runtime: Some(base) }
   }
   let prog = Program { span: head.span, module_name: Some("klar_rt"), decls: decls }
+  let read = ld.sources
+  let texts = rt_files().map(fn(f) => Pair { first: "rt/" + f, second: read.get("rt/" + f).unwrap_or("") })
+  return check_runtime(ld: ld with { rt_parsed: Some(RtParsed { prog: prog, files: files, sources: texts }) }, prog: prog,
+    files: files)
+}
+
+/// The runtime module before it is checked (`failed` until then).
+fn rt_base(ld: Ld) -> Module {
+  return Module { name: "klar_rt", path: rt_dir(ld) + "/<all>", display: "rt", failed: true, is_sys: true, checker: None,
+    exports: Map {}, import_from: Map {}, pkg: None }
+}
+
+fn check_runtime(ld: Ld, prog: Program, files: List[Str]) -> Ld {
   var imports: Map[Str, Export] = Map {}
   var import_from: Map[Str, Pair[Str, Str]] = Map {}
   match prelude_module(ld) {
@@ -631,8 +674,9 @@ pub fn load_runtime(ld0: Ld) -> Ld uses fs {
     },
     None => {},
   }
-  let ck = check_module(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: "rt", mod_name: "klar_rt", sys: true,
+  // the function bodies are checked when the lowering needs them (compiler/lower.klar `lower_function`)
+  let ck = check_module_lazy(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: "rt", mod_name: "klar_rt", sys: true,
     imports: imports) with { decl_files: files })
-  let m = base with { failed: false, checker: Some(ck), import_from: import_from }
+  let m = rt_base(ld) with { failed: false, checker: Some(ck), import_from: import_from }
   return ld with { uni: ck.uni, diags: ld.diags.concat(ck.diags), runtime: Some(m) }
 }

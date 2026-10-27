@@ -10,6 +10,7 @@ use commands.{absolute}
 use dev.{host_target, native_image, parse_rt, save_exe, temp_path}
 use inspect.{UMod, decl_span, doc_examples, sig_text, type_text, user_modules}
 use jsonout.{J, compact, spaced}
+use libfs.{read_source}
 use loader.{Ld, load_program, load_runtime}
 
 // ---- source text ------------------------------------------------------------------------------------------------
@@ -954,7 +955,7 @@ pub fn view_command(args: List[Str], lib: Str) -> Int uses io, fs, proc, time {
     }
     out = stem + ".view.html"
   }
-  let tpl = match read_file(lib + "/tools/view_template.html") {
+  let tpl = match read_source(lib + "/tools/view_template.html") {
     Ok(t) => t,
     Err(e) => {
       eprint("klarc: {e}")

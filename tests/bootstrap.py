@@ -170,6 +170,21 @@ def main():
                     bad += 1
                     print(f"DIFF {os.path.basename(tool[0])} replay of {os.path.basename(trace)}: "
                           f"{got.stdout[:200]!r} {got.stderr[:300]!r} / recorded {rec.stdout[:200]!r}")
+        # klarc alone, outside the repository and without --lib/KLAR_LIB: the library built into it
+        alone = os.path.join(d, "alone")
+        os.makedirs(alone)
+        with open(os.path.join(alone, "app.klar"), "w", encoding="utf-8") as f:
+            f.write("use std.json.{parse_json}\n\nfn twice(n: Int) -> Int {\n  return n * 2\n}\n\n"
+                    "test \"twice\" {\n  assert twice(4) == 8\n}\n\nfn main() uses io {\n"
+                    "  print(parse_json(\"[1]\").is_ok())\n}\n")
+        env = {k: v for k, v in os.environ.items() if k != "KLAR_LIB"}
+        for args, want in ((["run", "app.klar"], "true\n"), (["test", "-q", "app.klar"], "1 passed, 0 failed")):
+            got = subprocess.run([os.path.abspath(stage[2])] + args, capture_output=True, text=True, encoding="utf-8",
+                                 cwd=alone, env=env)
+            if got.returncode != 0 or want not in got.stdout:
+                bad += 1
+                print(f"DIFF klarc3 {' '.join(args)} without a library directory: {got.stdout[:300]!r} "
+                      f"{got.stderr[:300]!r}")
         # every command and flag of `klar` is in klarc too (tools/parity.klar, ROADMAP item 29)
         got = run([stage[2], "run", os.path.join("tools", "parity.klar"), "--lib", LIB, "--", "--klarc", stage[2],
                    "--python", sys.executable, "--out", os.path.join(d, "parity.md"), "--check"])

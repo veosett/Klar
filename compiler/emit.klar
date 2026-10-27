@@ -2195,13 +2195,36 @@ fn le32(v: Int, k: Int) -> Int {
 }
 
 /// Lowers nothing itself: emits the machine code for the lowered program `w` ("linux", "windows" or "macos").
-pub fn emit_program(w: Lw, target: Str) -> Exe {
+/// Writes the rel32 field at pos.
+fn patch_rel32(code: Bytes, pos: Int, rel: Int) -> Bytes {
+  var c = code.set(pos, le32(rel, 0))
+  c = c.set(pos + 1, le32(rel, 1))
+  c = c.set(pos + 2, le32(rel, 2))
+  return c.set(pos + 3, le32(rel, 3))
+}
+
+/// What emission needs of the lowered program. `prepare` takes it out of the lowering state, so that the rest of
+/// that state (the modules with their checker results, the string and span tables) is freed before emission.
+pub type Prepared { img: Img, fns: List[KFn], rt: Map[Str, Str] }
+
+pub fn prepare(w: Lw) -> Prepared {
   let rt = rt_names(w)
-  var img = add_bss(img: w.img, name: "g_depth", size: 8)
+  return Prepared { img: w.img, fns: w.fns, rt: rt }
+}
+
+pub fn emit_program(w: Lw, target: Str) -> Exe {
+  return emit_prepared(prepare(w), target)
+}
+
+pub const NO_FN: KFn = KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [], labels: 0 }
+
+pub fn emit_prepared(prep: Prepared, target: Str) -> Exe {
+  let rt = prep.rt
+  var img = add_bss(img: prep.img, name: "g_depth", size: 8)
   img = add_bss(img: img, name: "g_frames", size: 16 * (MAX_DEPTH + 2))
   img = add_bss(img: img, name: "g_argp", size: 8)
   img = add_bss(img: img, name: "g_scratch", size: 256)
-  let fns = inline_calls(w.fns)
+  var fns = inline_calls(prep.fns)
   var code = bytes_of([])
   var labels: Map[Str, Int] = Map {}
   var fixups: List[Fix] = []
@@ -2215,12 +2238,20 @@ pub fn emit_program(w: Lw, target: Str) -> Exe {
       part = os_part(target, rt)
     } else {
       code = align_code(code, 16)     // functions start at 16 bytes (klar/native/emit.py `function`)
-      part = function_part(f0: fns.get(i).unwrap_or(KFn { name: "", klar_name: "", nparams: 0, nregs: 0, code: [],
-        labels: 0 }), rt: rt, n: n, org: code.len())
+      part = function_part(f0: fns.get(i).unwrap_or(NO_FN), rt: rt, n: n, org: code.len())
+      fns = fns.set(i, NO_FN)         // its KIR is not needed any more: free it as the program is emitted
     }
     n = part.n
     if not part.row.is_empty() {
       fn_rows = fn_rows.push(part.row)
+    }
+    // the labels of this function: its own jumps are resolved now, and only the labels other code refers to (the
+    // function itself, its trace-table rows and call sites) are kept for the program
+    var local: Map[Str, Int] = Map {}
+    var keep: Map[Str, Bool] = Map {}
+    var pfix: List[Fix] = []
+    for rl in part.row {
+      keep = keep.set(rl, true)
     }
     for ch in part.chunks {
       let base = code.len()
@@ -2232,16 +2263,37 @@ pub fn emit_program(w: Lw, target: Str) -> Exe {
         j = j + 1
       }
       for l in ch.labels {
-        if labels.has(l.name) {
+        if labels.has(l.name) or local.has(l.name) {
           return fail("emit: duplicate label {l.name}")
         }
-        labels = labels.set(l.name, base + l.pos)
+        local = local.set(l.name, base + l.pos)
       }
       for fx in ch.fixups {
-        fixups = fixups.push(fx with { pos: base + fx.pos })
+        pfix = pfix.push(fx with { pos: base + fx.pos })
       }
       for s in ch.sites {
         sites = sites.push([s.label, s.span])
+        keep = keep.set(s.label, true)
+      }
+    }
+    for fx in pfix {
+      match local.get(fx.target) {
+        Some(at) => {
+          if fx.kind == "" {
+            code = patch_rel32(code: code, pos: fx.pos, rel: at + fx.add - (fx.pos + 4))
+          } else {
+            fixups = fixups.push(fx)
+            keep = keep.set(fx.target, true)
+          }
+        },
+        None => {
+          fixups = fixups.push(fx)
+        },
+      }
+    }
+    for en in local.entries() {
+      if not en.key.starts_with(".") or keep.has(en.key) {
+        labels = labels.set(en.key, en.value)
       }
     }
     i = i + 1
