@@ -51,6 +51,12 @@ ERROR_SNIPPETS = [
 ]
 
 PARSE_SNIPPETS = [
+    "fn f() {\n  let x = " + " + ".join(["a"] * 150) + "\n}\n", "fn f() {\n  let x = " + " + ".join(["a"] * 300) + "\n}\n",
+    "fn f() {\n  let x = a" + ".b()" * 300 + "\n}\n", "fn f() {\n  let x = " + "- " * 300 + "a\n}\n",
+    "fn f() {\n  let x = " + "not " * 300 + "a\n}\n", "fn f() {\n  let x = " + " or ".join(["a"] * 300) + "\n}\n",
+    "fn f() {\n  let x = " + " and ".join(["a * b"] * 300) + "\n}\n", "fn f() {\n  let x = " + " * ".join(["a"] * 300) + "\n}\n",
+    "fn f() {\n  let x = a" + " with { b: 1 }" * 300 + "\n}\n",
+    "fn f() {\n  if a {\n" + "  } else if a {\n" * 300 + "  }\n}\n",
     "fn f() {\n  let x\n}\n", "fn f() {\n  x.a = 1\n}\n", "fn f() {\n  1 = 2\n}\n", "fn f() {\n  a < b < c\n}\n",
     "fn f() {\n  let x = -1.abs()\n}\n", "fn f() {\n  let x = null\n}\n", "fn f() {\n  xs[0]\n}\n",
     "fn f() {\n  let t = (1, 2)\n}\n", "fn f() {\n  p.0\n}\n", "fn f() {\n  g(x = 1)\n}\n",

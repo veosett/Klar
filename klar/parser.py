@@ -692,7 +692,9 @@ class Parser:
         self.skip_nl()
         if self.accept_kw("else"):
             if self.at_kw("if"):
+                self.link()
                 else_ = self.parse_if()
+                self.depth -= 1
             else:
                 if not self.at_op("{"):
                     self.fail("expected `{` or `if` after `else`")
@@ -710,40 +712,57 @@ class Parser:
         finally:
             self.no_struct = old
 
+    def link(self):
+        """One more link of a chain (`a + b + c`, `a.b().c()`, `- - a`, `else if`): its tree is as deep as the chain
+        is long, so links count as nesting. The caller takes them back at the end of the chain."""
+        self.depth = getattr(self, "depth", 0) + 1
+        if self.depth > MAX_NESTING:
+            self.fail("this chain is too long to parse: the limit is about 200 operators, calls or `else if` in a row",
+                      hint="split it into named parts; for a long `else if` chain use `match`")
+
     def parse_expr(self):
         # an explicit limit: on Windows the C stack of the main thread (1 MB) overflows long before Python's
         # recursion limit, which would kill the tool instead of reporting E0003
-        self.depth = getattr(self, "depth", 0) + 1
+        base = getattr(self, "depth", 0)
+        self.depth = base + 1
         try:
             if self.depth > MAX_NESTING:
                 self.fail("the code is nested too deeply to parse", tok=self.cur,
-                          hint="split deeply nested expressions or types into named parts")
+                          hint="split deeply nested expressions into named parts; for a long `else if` chain use `match`")
             return self.parse_or()
         finally:
-            self.depth -= 1
+            self.depth = base
 
     def parse_or(self):
         left = self.parse_and()
+        base = self.depth
         while self.at_kw("or"):
+            self.link()
             self.advance()
             self.skip_nl()
             right = self.parse_and()
             left = N.Binary(span=left.span.merge(right.span), op="or", left=left, right=right)
+        self.depth = base
         return left
 
     def parse_and(self):
         left = self.parse_not()
+        base = self.depth
         while self.at_kw("and"):
+            self.link()
             self.advance()
             self.skip_nl()
             right = self.parse_not()
             left = N.Binary(span=left.span.merge(right.span), op="and", left=left, right=right)
+        self.depth = base
         return left
 
     def parse_not(self):
         if self.at_kw("not"):
+            self.link()
             start = self.advance().span
             operand = self.parse_not()
+            self.depth -= 1
             return N.Unary(span=start.merge(operand.span), op="not", operand=operand)
         return self.parse_cmp()
 
@@ -760,20 +779,26 @@ class Parser:
 
     def parse_add(self):
         left = self.parse_mul()
+        base = self.depth
         while self.cur.kind == "OP" and self.cur.value in ("+", "-"):
+            self.link()
             op = self.advance().value
             self.skip_nl()
             right = self.parse_mul()
             left = N.Binary(span=left.span.merge(right.span), op=op, left=left, right=right)
+        self.depth = base
         return left
 
     def parse_mul(self):
         left = self.parse_unary()
+        base = self.depth
         while self.cur.kind == "OP" and self.cur.value in ("*", "/", "%"):
+            self.link()
             op = self.advance().value
             self.skip_nl()
             right = self.parse_unary()
             left = N.Binary(span=left.span.merge(right.span), op=op, left=left, right=right)
+        self.depth = base
         return left
 
     def parse_unary(self):
@@ -784,8 +809,10 @@ class Parser:
                 self.fail(f"`-{lit}.method()` is ambiguous: the method runs before the minus",
                           hint=f"write `(-{lit}).method()` for the negative number, or `-({lit}.method())`",
                           fix={"span": sp, "text": f"(-{lit})"})
+            self.link()
             start = self.advance().span
             operand = self.parse_unary()
+            self.depth -= 1
             if isinstance(operand, N.IntLit):
                 return N.IntLit(span=start.merge(operand.span), value=-operand.value)
             if isinstance(operand, N.FloatLit):
@@ -815,7 +842,10 @@ class Parser:
         return args
 
     def parse_postfix(self, expr):
+        base = self.depth
         while True:
+            if self.at_op("(") or self.at_op(".") or self.at_op("?") or self.at_kw("with"):
+                self.link()
             if self.at_op("("):
                 args = self.parse_args()
                 expr = N.Call(span=self.span_from(expr.span), callee=expr, args=args)
@@ -841,6 +871,7 @@ class Parser:
             elif self.at_op("["):
                 self.fail("indexing with `[]` is not supported", hint="use `.get(i)` which returns `Option[T]` (Some/None)")
             else:
+                self.depth = base
                 return expr
 
     def parse_field_inits(self) -> List[N.FieldInit]:

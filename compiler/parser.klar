@@ -355,7 +355,17 @@ fn parse_expr(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
 
 fn too_deep(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   return bad_h(t: tk(p, i), message: "the code is nested too deeply to parse",
-    hint: "split deeply nested expressions or types into named parts")
+    hint: "split deeply nested expressions into named parts; for a long `else if` chain use `match`")
+}
+
+/// One more link of a chain (`a + b + c`, `a.b().c()`, `- - a`, `else if`) at token `i`: its tree is as deep as the
+/// chain is long, so links count as nesting.
+fn link(p: Ps, i: Int) -> Result[Ps, ParseError] {
+  if p.depth >= MAX_NESTING {
+    return bad_h(t: tk(p, i), message: "this chain is too long to parse: the limit is about 200 operators, calls or `else if` in a row",
+      hint: "split it into named parts; for a long `else if` chain use `match`")
+  }
+  return Ok(p with { depth: p.depth + 1 })
 }
 
 /// An expression where `Name { ... }` is not a record literal (`if`, `while`, `for`, `match` subjects).
@@ -369,8 +379,10 @@ fn binary(op: Str, left: Expr, right: Expr) -> Expr {
 
 fn parse_or(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   var left = parse_and(p, i)?
+  var q = p
   while is_kw(tk(p, left.pos), "or") {
-    let right = parse_and(p, skip_nl(p, next(p, left.pos)))?
+    q = link(q, left.pos)?
+    let right = parse_and(q, skip_nl(p, next(p, left.pos)))?
     left = Got { value: binary(op: "or", left: left.value, right: right.value), pos: right.pos }
   }
   return Ok(left)
@@ -378,8 +390,10 @@ fn parse_or(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
 
 fn parse_and(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   var left = parse_not(p, i)?
+  var q = p
   while is_kw(tk(p, left.pos), "and") {
-    let right = parse_not(p, skip_nl(p, next(p, left.pos)))?
+    q = link(q, left.pos)?
+    let right = parse_not(q, skip_nl(p, next(p, left.pos)))?
     left = Got { value: binary(op: "and", left: left.value, right: right.value), pos: right.pos }
   }
   return Ok(left)
@@ -387,7 +401,7 @@ fn parse_and(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
 
 fn parse_not(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   if is_kw(tk(p, i), "not") {
-    let operand = parse_not(p, next(p, i))?
+    let operand = parse_not(link(p, i)?, next(p, i))?
     let sp = merge(span_of(tk(p, i)), expr_span(operand.value))
     return Ok(Got { value: Expr.Unary(span: sp, op: "not", operand: operand.value), pos: operand.pos })
   }
@@ -414,9 +428,11 @@ fn parse_cmp(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
 
 fn parse_add(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   var left = parse_mul(p, i)?
+  var q = p
   while is_op(tk(p, left.pos), "+") or is_op(tk(p, left.pos), "-") {
+    q = link(q, left.pos)?
     let op = tk(p, left.pos).text
-    let right = parse_mul(p, skip_nl(p, next(p, left.pos)))?
+    let right = parse_mul(q, skip_nl(p, next(p, left.pos)))?
     left = Got { value: binary(op: op, left: left.value, right: right.value), pos: right.pos }
   }
   return Ok(left)
@@ -424,9 +440,11 @@ fn parse_add(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
 
 fn parse_mul(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
   var left = parse_unary(p, i)?
+  var q = p
   while is_op(tk(p, left.pos), "*") or is_op(tk(p, left.pos), "/") or is_op(tk(p, left.pos), "%") {
+    q = link(q, left.pos)?
     let op = tk(p, left.pos).text
-    let right = parse_unary(p, skip_nl(p, next(p, left.pos)))?
+    let right = parse_unary(q, skip_nl(p, next(p, left.pos)))?
     left = Got { value: binary(op: op, left: left.value, right: right.value), pos: right.pos }
   }
   return Ok(left)
@@ -446,7 +464,7 @@ fn parse_unary(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
         fix: Some(ParseFix { span: sp, text: "(-{shown})" }) })
     }
     let start = span_of(tk(p, i))
-    let operand = parse_unary(p, next(p, i))?
+    let operand = parse_unary(link(p, i)?, next(p, i))?
     let sp = merge(start, expr_span(operand.value))
     let folded = match operand.value {
       Expr.IntLit(_, v) => Expr.IntLit(span: sp, value: 0 - v),
@@ -488,10 +506,14 @@ fn parse_args(p: Ps, i: Int) -> Result[Got[List[Arg]], ParseError] {
 fn parse_postfix(p: Ps, start: Expr, i: Int) -> Result[Got[Expr], ParseError] {
   var e = start
   var j = i
+  var q = p
   while true {
     let sp = expr_span(e)
+    if is_op(tk(p, j), "(") or is_op(tk(p, j), ".") or is_op(tk(p, j), "?") or is_kw(tk(p, j), "with") {
+      q = link(q, j)?
+    }
     if is_op(tk(p, j), "(") {
-      let args = parse_args(p, j)?
+      let args = parse_args(q, j)?
       e = Expr.Call(span: span_from(p: p, start: sp, i: args.pos), callee: e, args: args.value)
       j = args.pos
     } else if is_op(tk(p, j), ".") {
@@ -503,7 +525,7 @@ fn parse_postfix(p: Ps, start: Expr, i: Int) -> Result[Got[Expr], ParseError] {
       let name = expect_ident(p: p, i: j, what: "field or method name after `.`")?
       j = name.pos
       if is_op(tk(p, j), "(") {
-        let args = parse_args(p, j)?
+        let args = parse_args(q, j)?
         e = Expr.MethodCall(span: span_from(p: p, start: sp, i: args.pos), obj: e, method: name.value.text,
           method_span: span_of(name.value), args: args.value)
         j = args.pos
@@ -515,7 +537,7 @@ fn parse_postfix(p: Ps, start: Expr, i: Int) -> Result[Got[Expr], ParseError] {
       j = next(p, j)
       e = Expr.Try(span: span_from(p: p, start: sp, i: j), expr: e)
     } else if is_kw(tk(p, j), "with") {
-      let fields = parse_field_inits(p, next(p, j))?
+      let fields = parse_field_inits(q, next(p, j))?
       j = fields.pos
       e = Expr.WithExpr(span: span_from(p: p, start: sp, i: j), base: e, fields: fields.value)
     } else if is_op(tk(p, j), "[") {
@@ -980,7 +1002,7 @@ fn parse_if(p: Ps, i: Int) -> Result[Got[Stmt], ParseError] {
   if is_kw(tk(p, k), "else") {
     let after = next(p, k)
     if is_kw(tk(p, after), "if") {
-      let nested = parse_if(p, after)?
+      let nested = parse_if(link(p, after)?, after)?
       else_ = Else.ElseIf(stmt: nested.value)
       j = nested.pos
     } else {

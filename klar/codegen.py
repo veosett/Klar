@@ -955,7 +955,10 @@ class CompiledProgram:
         self.ns["_tick"] = self.limit.tick
         for name, (_, impl) in GLOBALS.items():
             self.ns[f"B_{name}_value"] = (lambda impl: lambda *a: impl(self.ctx, list(a), BUILTIN_SPAN))(impl)
-        self.code = compile(self.src, GEN_FILE, "exec")
+        try:
+            self.code = compile(self.src, GEN_FILE, "exec")
+        except SyntaxError as ex:       # CPython's limit of 200 nested parentheses: a call in a chain takes two
+            raise Unsupported(f"the generated code does not compile: {ex.msg}")
 
     def run_main(self):
         old = sys.getrecursionlimit()

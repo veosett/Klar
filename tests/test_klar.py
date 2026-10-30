@@ -1932,6 +1932,18 @@ class RuntimeLimits(unittest.TestCase):
         self.assertEqual(errors(src), ["E0003"])
         self.assertEqual(errors("fn f(x: " + "List[" * 300 + "Int" + "]" * 300 + ") {\n}"), ["E0003"])
 
+    def test_a_long_chain_is_a_diagnostic(self):
+        """`a + a + ...` nests as deeply as `(((a)))`: without a limit the later passes ran out of stack."""
+        for chain in (lambda n: " + ".join(["1"] * n), lambda n: " * ".join(["1"] * n), lambda n: "- " * n + "x",
+                      lambda n: " or ".join(["true"] * n), lambda n: " and ".join(["true"] * n),
+                      lambda n: "not " * n + "b", lambda n: "x" + ".abs()" * n):
+            for n, want in ((150, []), (5000, ["E0003"])):
+                src = f"fn f(x: Int, b: Bool) {{\n  let y = {chain(n)}\n}}\n"
+                self.assertEqual([e for e in errors(src) if e == "E0003"], want, chain(3))
+        branches = "".join(f"  }} else if a == {i} {{\n    print(1)\n" for i in range(1000))
+        src = "fn f(a: Int) uses io {\n  if a == 0 {\n    print(0)\n" + branches + "  }\n}\n"
+        self.assertEqual(errors(src), ["E0003"])
+
 
 class LlmBenchmark(unittest.TestCase):
     """bench/ai/llm_bench.py: the reference solutions pass every hidden test, and wrong answers are scored as such."""

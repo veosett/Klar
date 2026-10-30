@@ -7,6 +7,10 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- A long chain (`a + a + ...`, `a.b().c()...`, `- - a`, `not not a`, `else if`) of some hundreds of links crashed `klar`
+  with a raw `RecursionError` and `klarc` with R0006 and its own stack. Its tree is as deep as the chain is long, so
+  links now count towards the nesting limit: about 200 is the most, then E0003 with a hint. `--py` falls back to the
+  interpreter on code that CPython refuses (200 nested parentheses, a chain of 100 method calls).
 - A module that does not load (or is not found, or lacks the imported name) no longer buries its own error under
   "unknown function"/"unknown type" errors at every use of what it would have exported: the importer gets one
   E0601 / E0603, then the module's own errors. Found by the agent run without a reference, where 15 such errors
