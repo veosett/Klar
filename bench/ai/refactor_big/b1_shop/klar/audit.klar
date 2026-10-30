@@ -1,0 +1,28 @@
+use model.{Order, Status}
+use orders.{next_status, can_cancel}
+
+/// What is wrong with an order.
+pub fn check_order(o: Order) -> List[Str] {
+  var errors: List[Str] = []
+  if o.lines.is_empty() {
+    errors = errors.push("no lines")
+  }
+  if o.shipping < 0.0 {
+    errors = errors.push("negative shipping")
+  }
+  if o.lines.any(fn(l) => l.unit_price <= 0.0) {
+    errors = errors.push("bad price")
+  }
+  if o.lines.any(fn(l) => l.qty <= 0) {
+    errors = errors.push("bad quantity")
+  }
+  return errors
+}
+
+/// True when an order may go from one status to another.
+pub fn valid_step(from: Status, to: Status) -> Bool {
+  if to == Status.Cancelled {
+    return can_cancel(from)
+  }
+  return from != to and next_status(from) == to
+}

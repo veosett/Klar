@@ -1,0 +1,144 @@
+/// The kinds of route records.
+pub enum RouteKind {
+  Urban
+  Rural
+  Express
+}
+
+pub type Route {
+  id: Int
+  name: Str
+  city: Str
+  kind: RouteKind
+  stops: Int
+  distance: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn routes_find(xs: List[Route], id: Int) -> Option[Route] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn routes_in_city(xs: List[Route], city: Str) -> List[Route] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn routes_active(xs: List[Route]) -> List[Route] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn routes_names(xs: List[Route]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of stops.
+pub fn routes_total_stops(xs: List[Route]) -> Int {
+  return xs.map(fn(x) => x.stops).sum()
+}
+
+/// The sum of distance.
+pub fn routes_total_distance(xs: List[Route]) -> Float {
+  return xs.map(fn(x) => x.distance).sum_float()
+}
+
+/// The mean of distance, 0 for no records.
+pub fn routes_average_distance(xs: List[Route]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return routes_total_distance(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn routes_kind_label(k: RouteKind) -> Str {
+  return match k {
+    RouteKind.Urban => "Urban",
+    RouteKind.Rural => "Rural",
+    RouteKind.Express => "Express",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn routes_kind_weight(k: RouteKind) -> Float {
+  return match k {
+    RouteKind.Urban => 1.0,
+    RouteKind.Rural => 1.5,
+    RouteKind.Express => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn routes_describe(x: Route) -> Str {
+  return "{x.name} ({x.city}), {routes_kind_label(x.kind)}: {x.stops} stops, {x.distance.fixed(2)} distance"
+}
+
+/// The records of one kind.
+pub fn routes_by_kind(xs: List[Route], k: RouteKind) -> List[Route] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most stops first.
+pub fn routes_ranked(xs: List[Route]) -> List[Route] {
+  return xs.sort_by(fn(x) => 0 - x.stops)
+}
+
+/// The first few of the ranking.
+pub fn routes_top(xs: List[Route], n: Int) -> List[Route] {
+  return routes_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn routes_validate(x: Route) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.stops < 0 {
+    errors = errors.push("negative stops")
+  }
+  if x.distance < 0.0 {
+    errors = errors.push("negative distance")
+  }
+  return errors
+}
+
+/// The record with distance and stops weighed together.
+pub fn routes_score(x: Route) -> Float {
+  return x.distance * routes_kind_weight(x.kind) + x.stops.to_float()
+}
+
+/// A row of the export file.
+pub fn routes_row(x: Route) -> Str {
+  return "{x.id},{x.name},{x.city},{routes_kind_label(x.kind)},{x.stops},{x.distance.fixed(2)}"
+}
+
+/// The export file.
+pub fn routes_file(xs: List[Route]) -> Str {
+  return ["id,name,city,kind,stops,distance"].concat(xs.map(fn(x) => routes_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn routes_per_city(xs: List[Route]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of distance.
+pub fn routes_over(xs: List[Route], limit: Float) -> List[Route] {
+  return xs.filter(fn(x) => x.distance > limit)
+}
+
+/// A line for the dashboard.
+pub fn routes_summary(xs: List[Route]) -> Str {
+  return "{xs.len()} route records, {routes_active(xs).len()} active, {routes_total_distance(xs).fixed(2)} distance"
+}

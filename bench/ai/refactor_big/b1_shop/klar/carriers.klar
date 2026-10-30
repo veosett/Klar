@@ -1,0 +1,144 @@
+/// The kinds of carrier records.
+pub enum CarrierKind {
+  Road
+  Rail
+  Courier
+}
+
+pub type Carrier {
+  id: Int
+  name: Str
+  city: Str
+  kind: CarrierKind
+  vans: Int
+  fuel_cost: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn carriers_find(xs: List[Carrier], id: Int) -> Option[Carrier] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn carriers_in_city(xs: List[Carrier], city: Str) -> List[Carrier] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn carriers_active(xs: List[Carrier]) -> List[Carrier] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn carriers_names(xs: List[Carrier]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of vans.
+pub fn carriers_total_vans(xs: List[Carrier]) -> Int {
+  return xs.map(fn(x) => x.vans).sum()
+}
+
+/// The sum of fuel_cost.
+pub fn carriers_total_fuel_cost(xs: List[Carrier]) -> Float {
+  return xs.map(fn(x) => x.fuel_cost).sum_float()
+}
+
+/// The mean of fuel_cost, 0 for no records.
+pub fn carriers_average_fuel_cost(xs: List[Carrier]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return carriers_total_fuel_cost(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn carriers_kind_label(k: CarrierKind) -> Str {
+  return match k {
+    CarrierKind.Road => "Road",
+    CarrierKind.Rail => "Rail",
+    CarrierKind.Courier => "Courier",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn carriers_kind_weight(k: CarrierKind) -> Float {
+  return match k {
+    CarrierKind.Road => 1.0,
+    CarrierKind.Rail => 1.5,
+    CarrierKind.Courier => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn carriers_describe(x: Carrier) -> Str {
+  return "{x.name} ({x.city}), {carriers_kind_label(x.kind)}: {x.vans} vans, {x.fuel_cost.fixed(2)} fuel_cost"
+}
+
+/// The records of one kind.
+pub fn carriers_by_kind(xs: List[Carrier], k: CarrierKind) -> List[Carrier] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most vans first.
+pub fn carriers_ranked(xs: List[Carrier]) -> List[Carrier] {
+  return xs.sort_by(fn(x) => 0 - x.vans)
+}
+
+/// The first few of the ranking.
+pub fn carriers_top(xs: List[Carrier], n: Int) -> List[Carrier] {
+  return carriers_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn carriers_validate(x: Carrier) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.vans < 0 {
+    errors = errors.push("negative vans")
+  }
+  if x.fuel_cost < 0.0 {
+    errors = errors.push("negative fuel_cost")
+  }
+  return errors
+}
+
+/// The record with fuel_cost and vans weighed together.
+pub fn carriers_score(x: Carrier) -> Float {
+  return x.fuel_cost * carriers_kind_weight(x.kind) + x.vans.to_float()
+}
+
+/// A row of the export file.
+pub fn carriers_row(x: Carrier) -> Str {
+  return "{x.id},{x.name},{x.city},{carriers_kind_label(x.kind)},{x.vans},{x.fuel_cost.fixed(2)}"
+}
+
+/// The export file.
+pub fn carriers_file(xs: List[Carrier]) -> Str {
+  return ["id,name,city,kind,vans,fuel_cost"].concat(xs.map(fn(x) => carriers_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn carriers_per_city(xs: List[Carrier]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of fuel_cost.
+pub fn carriers_over(xs: List[Carrier], limit: Float) -> List[Carrier] {
+  return xs.filter(fn(x) => x.fuel_cost > limit)
+}
+
+/// A line for the dashboard.
+pub fn carriers_summary(xs: List[Carrier]) -> Str {
+  return "{xs.len()} carrier records, {carriers_active(xs).len()} active, {carriers_total_fuel_cost(xs).fixed(2)} fuel_cost"
+}

@@ -1,0 +1,144 @@
+/// The kinds of campaign records.
+pub enum CampaignKind {
+  Email
+  Banner
+  Radio
+}
+
+pub type Campaign {
+  id: Int
+  name: Str
+  city: Str
+  kind: CampaignKind
+  clicks: Int
+  budget: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn campaigns_find(xs: List[Campaign], id: Int) -> Option[Campaign] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn campaigns_in_city(xs: List[Campaign], city: Str) -> List[Campaign] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn campaigns_active(xs: List[Campaign]) -> List[Campaign] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn campaigns_names(xs: List[Campaign]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of clicks.
+pub fn campaigns_total_clicks(xs: List[Campaign]) -> Int {
+  return xs.map(fn(x) => x.clicks).sum()
+}
+
+/// The sum of budget.
+pub fn campaigns_total_budget(xs: List[Campaign]) -> Float {
+  return xs.map(fn(x) => x.budget).sum_float()
+}
+
+/// The mean of budget, 0 for no records.
+pub fn campaigns_average_budget(xs: List[Campaign]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return campaigns_total_budget(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn campaigns_kind_label(k: CampaignKind) -> Str {
+  return match k {
+    CampaignKind.Email => "Email",
+    CampaignKind.Banner => "Banner",
+    CampaignKind.Radio => "Radio",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn campaigns_kind_weight(k: CampaignKind) -> Float {
+  return match k {
+    CampaignKind.Email => 1.0,
+    CampaignKind.Banner => 1.5,
+    CampaignKind.Radio => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn campaigns_describe(x: Campaign) -> Str {
+  return "{x.name} ({x.city}), {campaigns_kind_label(x.kind)}: {x.clicks} clicks, {x.budget.fixed(2)} budget"
+}
+
+/// The records of one kind.
+pub fn campaigns_by_kind(xs: List[Campaign], k: CampaignKind) -> List[Campaign] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most clicks first.
+pub fn campaigns_ranked(xs: List[Campaign]) -> List[Campaign] {
+  return xs.sort_by(fn(x) => 0 - x.clicks)
+}
+
+/// The first few of the ranking.
+pub fn campaigns_top(xs: List[Campaign], n: Int) -> List[Campaign] {
+  return campaigns_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn campaigns_validate(x: Campaign) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.clicks < 0 {
+    errors = errors.push("negative clicks")
+  }
+  if x.budget < 0.0 {
+    errors = errors.push("negative budget")
+  }
+  return errors
+}
+
+/// The record with budget and clicks weighed together.
+pub fn campaigns_score(x: Campaign) -> Float {
+  return x.budget * campaigns_kind_weight(x.kind) + x.clicks.to_float()
+}
+
+/// A row of the export file.
+pub fn campaigns_row(x: Campaign) -> Str {
+  return "{x.id},{x.name},{x.city},{campaigns_kind_label(x.kind)},{x.clicks},{x.budget.fixed(2)}"
+}
+
+/// The export file.
+pub fn campaigns_file(xs: List[Campaign]) -> Str {
+  return ["id,name,city,kind,clicks,budget"].concat(xs.map(fn(x) => campaigns_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn campaigns_per_city(xs: List[Campaign]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of budget.
+pub fn campaigns_over(xs: List[Campaign], limit: Float) -> List[Campaign] {
+  return xs.filter(fn(x) => x.budget > limit)
+}
+
+/// A line for the dashboard.
+pub fn campaigns_summary(xs: List[Campaign]) -> Str {
+  return "{xs.len()} campaign records, {campaigns_active(xs).len()} active, {campaigns_total_budget(xs).fixed(2)} budget"
+}

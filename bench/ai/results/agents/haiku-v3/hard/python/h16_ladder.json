@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from collections import deque\n\n\ndef ladder(start: str, goal: str, words: list[str]) -> int:\n    if start == goal:\n        return 1\n\n    vocab = set(words)\n    vocab.discard(start)\n    if goal not in vocab:\n        return 0\n\n    def one_letter_apart(a: str, b: str) -> bool:\n        if len(a) != len(b):\n            return False\n        diff = 0\n        for x, y in zip(a, b):\n            if x != y:\n                diff += 1\n                if diff > 1:\n                    return False\n        return diff == 1\n\n    dist = {start: 1}\n    queue = deque([start])\n    while queue:\n        word = queue.popleft()\n        if word == goal:\n            return dist[word]\n        for nxt in list(vocab):\n            if nxt not in dist and one_letter_apart(word, nxt):\n                dist[nxt] = dist[word] + 1\n                queue.append(nxt)\n                vocab.discard(nxt)\n    return 0\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

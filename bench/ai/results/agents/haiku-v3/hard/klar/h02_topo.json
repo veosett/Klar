@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn all_names(deps: Map[Str, List[Str]]) -> List[Str] {\n  var names: List[Str] = []\n  for entry in deps.entries() {\n    if not names.contains(entry.key) {\n      names = names.push(entry.key)\n    }\n    for d in entry.value {\n      if not names.contains(d) {\n        names = names.push(d)\n      }\n    }\n  }\n  return names.sort()\n}\n\nfn deps_of(deps: Map[Str, List[Str]], task: Str) -> List[Str] {\n  let none_list: List[Str] = []\n  return deps.get(task).unwrap_or(none_list)\n}\n\npub fn topo(deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n  var remaining = all_names(deps)\n  var order: List[Str] = []\n  while remaining.len() > 0 {\n    let finished = order\n    let pick = remaining.find(fn(cand) => deps_of(deps, cand).all(fn(d) => finished.contains(d)))\n    match pick {\n      Some(chosen) => {\n        order = order.push(chosen)\n        remaining = remaining.filter(fn(x) => x != chosen)\n      },\n      None => { return Err(\"cycle\") },\n    }\n  }\n  return Ok(order)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

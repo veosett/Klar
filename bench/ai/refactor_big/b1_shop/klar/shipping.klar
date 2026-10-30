@@ -1,0 +1,38 @@
+use model.{Tier}
+use money.{fmt, round2}
+
+/// Baskets from this amount ship free.
+pub const FREE_OVER: Float = 50.0
+
+/// The cost of sending a parcel.
+pub fn shipping_cost(amount: Float, weight: Float) -> Float {
+  if amount >= FREE_OVER {
+    return 0.0
+  }
+  return round2(4.99 + weight * 1.5)
+}
+
+/// The cost for a member: gold members pay half.
+pub fn member_cost(cost: Float, t: Tier) -> Float {
+  return match t {
+    Tier.Gold => round2(cost * 0.5),
+    _ => cost,
+  }
+}
+
+/// A surcharge for hard to reach places.
+pub fn surcharge(city: Str) -> Float {
+  return match city {
+    "Harbour" => 7.5,
+    "Summit" => 12.0,
+    _ => 0.0,
+  }
+}
+
+/// The shipping line of a receipt.
+pub fn shipping_label(cost: Float) -> Str {
+  if cost == 0.0 {
+    return "free shipping"
+  }
+  return "shipping {fmt(cost)}"
+}

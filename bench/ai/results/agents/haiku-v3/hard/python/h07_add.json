@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def add_decimal(a: str, b: str) -> str:\n    i = len(a) - 1\n    j = len(b) - 1\n    carry = 0\n    digits = []\n    while i >= 0 or j >= 0 or carry:\n        total = carry\n        if i >= 0:\n            total += ord(a[i]) - ord(\"0\")\n            i -= 1\n        if j >= 0:\n            total += ord(b[j]) - ord(\"0\")\n            j -= 1\n        digits.append(chr(ord(\"0\") + total % 10))\n        carry = total // 10\n    result = \"\".join(reversed(digits)).lstrip(\"0\")\n    return result if result else \"0\"\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

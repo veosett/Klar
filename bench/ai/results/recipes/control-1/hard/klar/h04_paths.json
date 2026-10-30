@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn paths(n: Int, edges: List[List[Int]], src: Int) -> List[Int] {\n  var dist: List[Int] = []\n  var done: List[Bool] = []\n  for i in range(0, n) {\n    dist = dist.push(-1)\n    done = done.push(false)\n  }\n  if src < 0 or src >= n {\n    return dist\n  }\n  dist = dist.set(src, 0)\n  var steps = 0\n  while steps < n {\n    var best = -1\n    for i in range(0, n) {\n      let d = dist.get_or(i, -1)\n      if d >= 0 and done.get_or(i, true) == false {\n        if best < 0 or d < dist.get_or(best, -1) {\n          best = i\n        }\n      }\n    }\n    if best < 0 {\n      break\n    }\n    let u = best\n    let du = dist.get_or(u, 0)\n    done = done.set(u, true)\n    for e in edges {\n      if e.get_or(0, -1) == u {\n        let v = e.get_or(1, 0)\n        let nd = du + e.get_or(2, 0)\n        let cur = dist.get_or(v, -1)\n        if cur < 0 or nd < cur {\n          dist = dist.set(v, nd)\n        }\n      }\n    }\n    steps = steps + 1\n  }\n  return dist\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

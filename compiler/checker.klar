@@ -211,6 +211,8 @@ pub type Ck {
   /// the file of each declaration (a module made of several files: the runtime), and of the one being checked
   decl_files: List[Str],
   cur_file: Str,
+  /// names whose import failed (reported by the loader): their uses are not errors again
+  unresolved: Map[Str, Bool],
 }
 
 /// The key of an expression in the tables of the checker: its file and position.
@@ -592,6 +594,7 @@ pub fn new_checker(b: Builtins, universe: Universe, prog: Program, file: Str, mo
       prop_types: Map {},
       decl_files: [],
       cur_file: file,
+      unresolved: Map {},
     }
   }
 
@@ -1085,6 +1088,9 @@ fn resolve(ck: Ck, te: TypeExpr, tps: Map[Str, Type]) -> Res[Type] {
       }
     },
     None => {},
+  }
+  if c.unresolved.has(name) {
+    return Res { c: c, v: Type.Any }
   }
   let cands = union(type_names_visible(c), tps.keys())
   if name == "Self" {
@@ -3031,6 +3037,9 @@ fn e_name(ck: Ck, span: Span, name: Str) -> Res[Type] {
     "Math" => Some(""),
     _ => None,
   }
+  if foreign == None and c.unresolved.has(name) {
+    return ok(c, Type.Any)
+  }
   let hint = match foreign {
     Some(rep) => match name == "Math" {
       true => Some("math functions are methods: `x.sqrt()`, `x.pow(2.0)`, `x.abs()`; constants `PI`, `E`"),
@@ -3691,6 +3700,8 @@ fn e_call(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
         c = error(c: c, code: "E0210", msg: "`None` takes no arguments", span: cspan, hint: Some("write `None`"))
       } else if c.consts.has(name) {
         c = error(c: c, code: "E0210", msg: "constant `{name}` is not a function", span: cspan, hint: None)
+      } else if c.unresolved.has(name) {
+        // its import failed (reported by the loader)
       } else {
         let owners = c.uni.traits.values().filter(fn(t) => t.methods.has(name)).map(fn(t) => t.name)
         let hint = match owners.get(0) {
@@ -4182,6 +4193,8 @@ fn e_record(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
       } else if c.uni.aliases.has(name) {
         c = error(c: c, code: "E0104", msg: "`{name}` is a type alias; construct the underlying type instead", span: span,
           hint: None)
+      } else if c.unresolved.has(name) {
+        // its import failed (reported by the loader)
       } else {
         c = error(c: c, code: "E0104", msg: "unknown record type `{name}`", span: span,
           hint: did_you_mean(name, visible_records(c)))

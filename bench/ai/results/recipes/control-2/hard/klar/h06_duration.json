@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type Scan { value: Int, next: Int }\n\nfn char_at(cs: List[Str], pos: Int) -> Str {\n  return cs.get_or(pos, \"\")\n}\n\nfn digit_value(c: Str) -> Int {\n  if c.is_empty() {\n    return -1\n  }\n  return \"0123456789\".index_of(c).unwrap_or(-1)\n}\n\nfn read_int(cs: List[Str], pos: Int, acc: Int) -> Scan {\n  let d = digit_value(char_at(cs, pos))\n  if d >= 0 {\n    return read_int(cs, pos + 1, acc * 10 + d)\n  }\n  return Scan { value: acc, next: pos }\n}\n\nfn unit_index(c: Str) -> Int {\n  if c.is_empty() {\n    return -1\n  }\n  return \"dhms\".index_of(c).unwrap_or(-1)\n}\n\nfn unit_seconds(u: Int) -> Int {\n  let table: List[Int] = [86400, 3600, 60, 1]\n  return table.get_or(u, 0)\n}\n\nfn parse_parts(cs: List[Str], pos: Int, min_unit: Int, total: Int) -> Result[Int, Str] {\n  if pos == cs.len() {\n    return Ok(total)\n  }\n  let scan = read_int(cs, pos, 0)\n  if scan.next == pos {\n    return Err(\"invalid duration\")\n  }\n  let u = unit_index(char_at(cs, scan.next))\n  if u < 0 or u <= min_unit {\n    return Err(\"invalid duration\")\n  }\n  let add = scan.value * unit_seconds(u)\n  return parse_parts(cs: cs, pos: scan.next + 1, min_unit: u, total: total + add)\n}\n\npub fn duration(s: Str) -> Result[Int, Str] {\n  let cs = s.chars()\n  if cs.is_empty() {\n    return Err(\"invalid duration\")\n  }\n  return parse_parts(cs: cs, pos: 0, min_unit: -1, total: 0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

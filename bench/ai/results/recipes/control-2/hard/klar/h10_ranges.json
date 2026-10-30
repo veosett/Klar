@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type Acc { out: List[Str], lo: Int, hi: Int, started: Bool }\n\nfn emit(out: List[Str], lo: Int, hi: Int) -> List[Str] {\n  if hi - lo >= 2 {\n    return out.push(lo.to_str() + \"-\" + hi.to_str())\n  }\n  if hi == lo {\n    return out.push(lo.to_str())\n  }\n  return out.push(lo.to_str()).push(hi.to_str())\n}\n\nfn add_num(st: Acc, x: Int) -> Acc {\n  if not st.started {\n    return Acc { out: st.out, lo: x, hi: x, started: true }\n  }\n  if x == st.hi + 1 {\n    return Acc { out: st.out, lo: st.lo, hi: x, started: true }\n  }\n  return Acc { out: emit(out: st.out, lo: st.lo, hi: st.hi), lo: x, hi: x, started: true }\n}\n\nfn finish_acc(st: Acc) -> List[Str] {\n  if not st.started {\n    return st.out\n  }\n  return emit(out: st.out, lo: st.lo, hi: st.hi)\n}\n\npub fn ranges(xs: List[Int]) -> Str {\n  let sorted = xs.unique().sort()\n  let none: List[Str] = []\n  let start = Acc { out: none, lo: 0, hi: 0, started: false }\n  let end_acc = sorted.fold(start, fn(st, x) => add_num(st, x))\n  return finish_acc(end_acc).join(\",\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

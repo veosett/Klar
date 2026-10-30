@@ -6,7 +6,44 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 
 ## [Unreleased]
 
+### Added
+- `bench/ai/refactor_big`: a large change in a program of about 3 000 lines, in Klar and Python with `mypy`, with
+  hypotheses written before the runs and held-out checks that never answer the agent. First result: quality is equal
+  and at the ceiling (0 of 40 held-out checks failed in all 6 runs); Python took less time (211 s against 304 s) and
+  fewer output tokens (`bench/ai/README.md`).
+
 ### Fixed
+- The benchmarks ran Klar under the default 10 s per test while the other languages had only the 120 s of the whole
+  run, so on a busy machine a correct but slow answer failed with R0018 (seen with a reference solution of 1 000 000
+  iterations). They now pass `--timeout 100`.
+- `klarc eval` ran the expression as a test block: effects other than `io` failed with E0000, and `cli_args()` showed the
+  arguments of the test runner. It now starts at the expression, like `klar eval`, with the real files and clock.
+- A long chain (`a + a + ...`, `a.b().c()...`, `- - a`, `not not a`, `else if`) of some hundreds of links crashed `klar`
+  with a raw `RecursionError` and `klarc` with R0006 and its own stack. Its tree is as deep as the chain is long, so
+  links now count towards the nesting limit: about 200 is the most, then E0003 with a hint. `--py` falls back to the
+  interpreter on code that CPython refuses (200 nested parentheses, a chain of 100 method calls).
+- A module that does not load (or is not found, or lacks the imported name) no longer buries its own error under
+  "unknown function"/"unknown type" errors at every use of what it would have exported: the importer gets one
+  E0601 / E0603, then the module's own errors. Found by the agent run without a reference, where 15 such errors
+  came before the one real error (`||`) in every report.
+- klarc showed modules next to a main file given as a relative path as `../name.klar`.
+- Syntax errors come all at once when they can: `&&`, `||`, `::`, `!` and a trailing `;` are reported and read as
+  `and`, `or`, `.`, `not` and nothing, so the rest of the file is still parsed and type-checked and the report has
+  every error (before: one lexical error, then — after a fix — the next). `klar fix` applies all of them in one
+  round. In the agent run without a reference, one task spent its three attempts on one error each.
+- Windows: a function with a frame over 4 KB crashed with 0xC0000005, because the stack grows through one guard page
+  and the frame stepped over it. Such a function now touches every page of its frame when it starts. Smaller frames
+  build the same bytes.
+- Recovered from two broken commits (4cd2275, e210074). Groups of files in the working tree were hard links to one
+  file, so writing one overwrote them all, and 124 files were committed with the contents of another (a compiler
+  source holding a JSON report; `klar` did not start). Recovered exactly: the files untouched by those commits,
+  and from a later snapshot `tests/test_klar.py`, `docs/ROADMAP.md` and the agent report. Written again from the
+  commit messages, this file and the tests: the reference changes, the time limit, `--suite hard` and the suite
+  itself (`bench/ai/README.md` says how it was checked). Lost: the raw answers of the agent runs on the hard suite
+  and of the refactoring benchmark (`results/agents/haiku/hard`, `results/refactor`); their totals remain in the
+  report. `RepositoryIntegrity` now fails on such a state.
+- `llm_bench.py` and `refactor_bench.py` on Windows read the compiler's output in the system's encoding, so models
+  got `вЂ”` for `—` in the error messages.
 - `klar spec` / `klarc spec` and `klar doc` listed the helper functions of the std modules (`skip_ws`, `crc_table`,
   ...), which cannot be imported, and left out their public types: the reference now has exactly what a program
   can import, with the fields and variants of `Json`, `Rx`, `Set` and `DateTime` (found by the agent run on the
@@ -64,6 +101,11 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   variables, resource limits, links on Windows, programs found through PATH).
 
 ### Changed
+- `klar spec` is 30% shorter: the std modules are one line each, with their types and the names of their functions
+  (`klar doc NAME` shows a signature, `klar spec --full` lists them all). In 838 solutions by agents 51 used a std
+  module, while the signatures took 38% of the reference, which every agent reads once. Three runs on the rebuilt hard
+  suite took 145-167 k tokens against 163 k before: the gain is within the spread of the runs (`bench/ai/README.md`).
+- The hint for `xs[i]` also names `.get_or(i, default)`: models that knew only `.get(i)` wrote the helper themselves.
 - `klar spec` is 5% shorter with the same content: the methods are one line per type, without the receiver
   (a line such as `List[T]: len() -> Int, map[U](f: fn(T) -> U) -> List[U], ...`; a different receiver such as
   `sum(self: List[Int])` is still shown).
@@ -108,6 +150,7 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   a literal brace — all three were errors.
 
 ### Added
+- `tests/no_python.sh` and the CI job `no-python`: from a seed compiler to a working klarc on a machine without Python.
 - `klarc` is one standalone file: the runtime, the standard library, `klarc spec` and the `klarc view` template are
   built into it (`compiler/libsrc.klar`, generated by `python tests/selfhost.py --update`), so a downloaded klarc
   builds, tests and checks programs in any directory. Before, outside the repository every command failed with

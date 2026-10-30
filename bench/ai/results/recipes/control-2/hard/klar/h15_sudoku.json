@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(rows: List[Str], r: Int, c: Int) -> Str {\n  return rows.get_or(r, \"\").slice(c, c + 1)\n}\n\nfn row_cells(rows: List[Str], r: Int) -> List[Str] {\n  return range(0, 9).map(fn(c) => cell(rows: rows, r: r, c: c))\n}\n\nfn col_cells(rows: List[Str], c: Int) -> List[Str] {\n  return range(0, 9).map(fn(r) => cell(rows: rows, r: r, c: c))\n}\n\nfn box_cells(rows: List[Str], b: Int) -> List[Str] {\n  let top = (b / 3) * 3\n  let left = (b % 3) * 3\n  return range(0, 9).map(fn(k) => cell(rows: rows, r: top + k / 3, c: left + k % 3))\n}\n\nfn no_repeat(cells: List[Str]) -> Bool {\n  let filled = cells.filter(fn(x) => x != \".\")\n  return filled.unique().len() == filled.len()\n}\n\nfn shape_ok(rows: List[Str]) -> Bool {\n  if rows.len() != 9 {\n    return false\n  }\n  return rows.all(fn(r) => (r.len() == 9) and r.chars().all(fn(ch) => \"123456789.\".contains(ch)))\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n  if not shape_ok(rows) {\n    return false\n  }\n  let rows_ok = range(0, 9).all(fn(i) => no_repeat(row_cells(rows: rows, r: i)))\n  let cols_ok = range(0, 9).all(fn(i) => no_repeat(col_cells(rows: rows, c: i)))\n  let boxes_ok = range(0, 9).all(fn(i) => no_repeat(box_cells(rows: rows, b: i)))\n  return rows_ok and cols_ok and boxes_ok\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

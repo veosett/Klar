@@ -1,0 +1,41 @@
+use model.{Order, Status}
+use money.{fmt}
+use orders.{grand_total, is_open, status_label}
+use analytics.{revenue}
+
+/// Every status, in the order the dashboard shows them.
+pub fn all_statuses() -> List[Status] {
+  return [Status.Draft, Status.Paid, Status.Packed, Status.Shipped, Status.Delivered, Status.Cancelled]
+}
+
+/// One line per status: "Paid: 3".
+pub fn status_counts(os: List[Order]) -> List[Str] {
+  return all_statuses().map(fn(s) => "{status_label(s)}: {os.count(fn(o) => o.status == s)}")
+}
+
+/// The colour of a status on the board.
+pub fn status_color(s: Status) -> Str {
+  return match s {
+    Status.Draft => "grey",
+    Status.Paid => "blue",
+    Status.Packed => "blue",
+    Status.Shipped => "green",
+    Status.Delivered => "green",
+    Status.Cancelled => "red",
+  }
+}
+
+/// The money tied up in open orders.
+pub fn open_value(os: List[Order]) -> Float {
+  return os.filter(fn(o) => is_open(o.status)).map(fn(o) => grand_total(o)).sum_float()
+}
+
+/// The headline of the board.
+pub fn headline(os: List[Order]) -> Str {
+  return "{os.len()} orders, {fmt(revenue(os))} received, {fmt(open_value(os))} open"
+}
+
+/// True when the board should flag the money tied up: over 5000.00.
+pub fn value_alert(os: List[Order]) -> Bool {
+  return open_value(os) > 5000.0
+}

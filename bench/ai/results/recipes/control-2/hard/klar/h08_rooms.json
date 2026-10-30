@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn covering(meetings: List[List[Int]], t: Int) -> Int {\n  return meetings.count(fn(m) => (m.get_or(0, 0) <= t) and (t < m.get_or(1, 0)))\n}\n\npub fn rooms(meetings: List[List[Int]]) -> Int {\n  let starts = meetings.map(fn(m) => m.get_or(0, 0))\n  let loads = starts.map(fn(t) => covering(meetings, t))\n  return loads.fold(0, fn(best, c) => best.max(c))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

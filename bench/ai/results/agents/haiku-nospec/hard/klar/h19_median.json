@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn at(xs: List[Int], i: Int) -> Int {\n    match xs.get(i) {\n        Some(v) => {\n            return v\n        }\n        None => {\n            return 0\n        }\n    }\n}\n\nfn unit(d: Int) -> Float {\n    var f = 0.0\n    var i = 0\n    while i < d {\n        f = f + 1.0\n        i = i + 1\n    }\n    return f\n}\n\nfn pos_float(n: Int) -> Float {\n    if n < 10 {\n        return unit(n)\n    }\n    return pos_float(n / 10) * 10.0 + unit(n - (n / 10) * 10)\n}\n\nfn to_float(n: Int) -> Float {\n    if n < 0 {\n        return 0.0 - pos_float(0 - n)\n    }\n    return pos_float(n)\n}\n\nfn insert_int(xs: List[Int], x: Int) -> List[Int] {\n    var out: List[Int] = []\n    var placed = false\n    for y in xs {\n        if not placed and y > x {\n            out = out.push(x)\n            placed = true\n        }\n        out = out.push(y)\n    }\n    if not placed {\n        out = out.push(x)\n    }\n    return out\n}\n\npub fn medians(xs: List[Int], k: Int) -> List[Float] {\n    var out: List[Float] = []\n    let n = xs.len()\n    if k < 1 or k > n {\n        return out\n    }\n    var s = 0\n    while s + k <= n {\n        var sorted: List[Int] = []\n        var j = 0\n        while j < k {\n            sorted = insert_int(xs: sorted, x: at(xs, s + j))\n            j = j + 1\n        }\n        let half = k / 2\n        var med = 0.0\n        if (k / 2) * 2 == k {\n            med = (to_float(at(sorted, half - 1)) + to_float(at(sorted, half))) / 2.0\n        } else {\n            med = to_float(at(sorted, half))\n        }\n        out = out.push(med)\n        s = s + 1\n    }\n    return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

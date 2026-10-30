@@ -1,0 +1,144 @@
+/// The kinds of supplier records.
+pub enum SupplierKind {
+  Maker
+  Reseller
+  Importer
+}
+
+pub type Supplier {
+  id: Int
+  name: Str
+  city: Str
+  kind: SupplierKind
+  lead_days: Int
+  rating: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn suppliers_find(xs: List[Supplier], id: Int) -> Option[Supplier] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn suppliers_in_city(xs: List[Supplier], city: Str) -> List[Supplier] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn suppliers_active(xs: List[Supplier]) -> List[Supplier] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn suppliers_names(xs: List[Supplier]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of lead_days.
+pub fn suppliers_total_lead_days(xs: List[Supplier]) -> Int {
+  return xs.map(fn(x) => x.lead_days).sum()
+}
+
+/// The sum of rating.
+pub fn suppliers_total_rating(xs: List[Supplier]) -> Float {
+  return xs.map(fn(x) => x.rating).sum_float()
+}
+
+/// The mean of rating, 0 for no records.
+pub fn suppliers_average_rating(xs: List[Supplier]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return suppliers_total_rating(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn suppliers_kind_label(k: SupplierKind) -> Str {
+  return match k {
+    SupplierKind.Maker => "Maker",
+    SupplierKind.Reseller => "Reseller",
+    SupplierKind.Importer => "Importer",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn suppliers_kind_weight(k: SupplierKind) -> Float {
+  return match k {
+    SupplierKind.Maker => 1.0,
+    SupplierKind.Reseller => 1.5,
+    SupplierKind.Importer => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn suppliers_describe(x: Supplier) -> Str {
+  return "{x.name} ({x.city}), {suppliers_kind_label(x.kind)}: {x.lead_days} lead_days, {x.rating.fixed(2)} rating"
+}
+
+/// The records of one kind.
+pub fn suppliers_by_kind(xs: List[Supplier], k: SupplierKind) -> List[Supplier] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most lead_days first.
+pub fn suppliers_ranked(xs: List[Supplier]) -> List[Supplier] {
+  return xs.sort_by(fn(x) => 0 - x.lead_days)
+}
+
+/// The first few of the ranking.
+pub fn suppliers_top(xs: List[Supplier], n: Int) -> List[Supplier] {
+  return suppliers_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn suppliers_validate(x: Supplier) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.lead_days < 0 {
+    errors = errors.push("negative lead_days")
+  }
+  if x.rating < 0.0 {
+    errors = errors.push("negative rating")
+  }
+  return errors
+}
+
+/// The record with rating and lead_days weighed together.
+pub fn suppliers_score(x: Supplier) -> Float {
+  return x.rating * suppliers_kind_weight(x.kind) + x.lead_days.to_float()
+}
+
+/// A row of the export file.
+pub fn suppliers_row(x: Supplier) -> Str {
+  return "{x.id},{x.name},{x.city},{suppliers_kind_label(x.kind)},{x.lead_days},{x.rating.fixed(2)}"
+}
+
+/// The export file.
+pub fn suppliers_file(xs: List[Supplier]) -> Str {
+  return ["id,name,city,kind,lead_days,rating"].concat(xs.map(fn(x) => suppliers_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn suppliers_per_city(xs: List[Supplier]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of rating.
+pub fn suppliers_over(xs: List[Supplier], limit: Float) -> List[Supplier] {
+  return xs.filter(fn(x) => x.rating > limit)
+}
+
+/// A line for the dashboard.
+pub fn suppliers_summary(xs: List[Supplier]) -> Str {
+  return "{xs.len()} supplier records, {suppliers_active(xs).len()} active, {suppliers_total_rating(xs).fixed(2)} rating"
+}

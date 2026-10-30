@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn one_diff(a: Str, b: Str) -> Bool {\n  if a.len() != b.len() {\n    return false\n  }\n  let ca = a.chars()\n  let cb = b.chars()\n  let diffs = range(0, ca.len()).filter(fn(i) => ca.get_or(i, \"\") != cb.get_or(i, \"\"))\n  return diffs.len() == 1\n}\n\npub fn ladder(start: Str, goal: Str, words: List[Str]) -> Int {\n  if start == goal {\n    return 1\n  }\n  let pool = words.unique()\n  var visited: Map[Str, Bool] = Map {}\n  visited = visited.set(start, true)\n  var frontier: List[Str] = [start]\n  var depth = 1\n  while frontier.len() > 0 {\n    if frontier.contains(goal) {\n      return depth\n    }\n    var level: List[Str] = []\n    for w in frontier {\n      for cand in pool {\n        if not (visited.has(cand)) and one_diff(w, cand) {\n          visited = visited.set(cand, true)\n          level = level.push(cand)\n        }\n      }\n    }\n    frontier = level\n    depth = depth + 1\n  }\n  return 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

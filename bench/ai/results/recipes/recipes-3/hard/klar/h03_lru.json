@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn drop_key(order: List[Str], k: Str) -> List[Str] {\n  return order.filter(fn(x) => x != k)\n}\n\npub fn lru(capacity: Int, ops: List[Str]) -> List[Str] {\n  var vals: Map[Str, Str] = Map {}\n  var order: List[Str] = []\n  var out: List[Str] = []\n  for op in ops {\n    let parts = op.split(\" \")\n    let key = parts.get_or(1, \"\")\n    if parts.get_or(0, \"\") == \"put\" {\n      if capacity > 0 {\n        let value = parts.drop(2).join(\" \")\n        if vals.has(key) {\n          order = drop_key(order, key)\n        } else if vals.len() >= capacity {\n          let old = order.first().unwrap_or(\"\")\n          vals = vals.remove(old)\n          order = order.drop(1)\n        }\n        order = order.push(key)\n        vals = vals.set(key, value)\n      }\n    } else {\n      out = out.push(vals.get(key).unwrap_or(\"-\"))\n      if vals.has(key) {\n        order = drop_key(order, key)\n        order = order.push(key)\n      }\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

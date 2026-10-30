@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import heapq\n\n\ndef paths(n: int, edges: list[list[int]], src: int) -> list[int]:\n    adj = [[] for _ in range(n)]\n    for u, v, w in edges:\n        adj[u].append((v, w))\n\n    INF = float(\"inf\")\n    dist = [INF] * n\n    dist[src] = 0\n    heap = [(0, src)]\n    while heap:\n        d, u = heapq.heappop(heap)\n        if d > dist[u]:\n            continue\n        for v, w in adj[u]:\n            nd = d + w\n            if nd < dist[v]:\n                dist[v] = nd\n                heapq.heappush(heap, (nd, v))\n\n    return [int(d) if d != INF else -1 for d in dist]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

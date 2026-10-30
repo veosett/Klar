@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn paths(n: Int, edges: List[List[Int]], src: Int) -> List[Int] {\n  var best: Map[Int, Int] = Map {}\n  best = best.set(src, 0)\n  for _k in range(0, n) {\n    for e in edges {\n      let u = e.get_or(0, 0)\n      let v = e.get_or(1, 0)\n      let w = e.get_or(2, 0)\n      if best.has(u) {\n        let cand = best.get(u).unwrap_or(0) + w\n        let improves = match best.has(v) {\n          true => cand < best.get(v).unwrap_or(0),\n          false => true,\n        }\n        if improves {\n          best = best.set(v, cand)\n        }\n      }\n    }\n  }\n  let done_map = best\n  return range(0, n).map(fn(i) => done_map.get(i).unwrap_or(-1))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

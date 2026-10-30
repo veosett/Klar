@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "const DIGITS: Str = \"0123456789\"\n\npub fn add_decimal(a: Str, b: Str) -> Str {\n  let xs = a.codes()\n  let ys = b.codes()\n  var i = xs.len() - 1\n  var j = ys.len() - 1\n  var carry = 0\n  var digits: List[Str] = []\n  while i >= 0 or j >= 0 or carry > 0 {\n    var total = carry\n    if i >= 0 {\n      total = total + xs.get_or(i, 48) - 48\n    }\n    if j >= 0 {\n      total = total + ys.get_or(j, 48) - 48\n    }\n    let d = total % 10\n    digits = digits.push(DIGITS.slice(d, d + 1))\n    carry = total / 10\n    i = i - 1\n    j = j - 1\n  }\n  if digits.is_empty() {\n    return \"0\"\n  }\n  var out = digits.reverse().join(\"\")\n  while out.len() > 1 and out.slice(0, 1) == \"0\" {\n    out = out.slice(1, out.len())\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

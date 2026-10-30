@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn unit_rank(c: Str) -> Int {\n  if c == \"d\" {\n    return 0\n  }\n  if c == \"h\" {\n    return 1\n  }\n  if c == \"m\" {\n    return 2\n  }\n  if c == \"s\" {\n    return 3\n  }\n  return -1\n}\n\nfn unit_secs(rank: Int) -> Int {\n  if rank == 0 {\n    return 86400\n  }\n  if rank == 1 {\n    return 3600\n  }\n  if rank == 2 {\n    return 60\n  }\n  return 1\n}\n\npub fn duration(s: Str) -> Result[Int, Str] {\n  var total = 0\n  var num = \"\"\n  var prev = -1\n  for c in s.chars() {\n    if \"0123456789\".contains(c) {\n      num = num + c\n    } else {\n      let r = unit_rank(c)\n      if num == \"\" or r < 0 or r <= prev {\n        return Err(\"invalid duration\")\n      }\n      total = total + num.to_int().unwrap_or(0) * unit_secs(r)\n      num = \"\"\n      prev = r\n    }\n  }\n  if num != \"\" or prev < 0 {\n    return Err(\"invalid duration\")\n  }\n  return Ok(total)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "from collections import OrderedDict\n\n\ndef lru(capacity: int, ops: list[str]) -> list[str]:\n    cache = OrderedDict()\n    results = []\n    for op in ops:\n        parts = op.split(\" \", 2)\n        if parts[0] == \"put\":\n            key, value = parts[1], parts[2]\n            if capacity <= 0:\n                continue\n            if key in cache:\n                cache.move_to_end(key)\n                cache[key] = value\n            else:\n                if len(cache) >= capacity:\n                    cache.popitem(last=False)\n                cache[key] = value\n        else:\n            key = parts[1]\n            if key in cache:\n                cache.move_to_end(key)\n                results.append(cache[key])\n            else:\n                results.append(\"-\")\n    return results\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

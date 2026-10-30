@@ -1,0 +1,850 @@
+#### money
+«¦import math
+
+
+»def plain(«amount: float¦cents: int») -> str:
+    """Money as digits: "12.50"."""
+    «return f"{amount:.2f}"¦a = abs(cents)
+    sign = "-" if cents < 0 else ""
+    return f"{sign}{a // 100}.{a % 100:02d}"»
+
+
+def fmt(«amount: float¦cents: int») -> str:
+    """Money as text: "$12.50"."""
+    return «"$" + plain(amount)¦"$" + plain(cents)»
+
+
+«def round2(amount: float) -> float:
+    """An amount rounded to the cent."""
+    return round(amount, 2)
+¦def pct(cents: int, rate: float) -> int:
+    """A share of an amount, rounded half up to the cent."""
+    return math.floor(cents * rate + 0.5)
+
+
+def avg(total: int, n: int) -> int:
+    """The average of `n` amounts, rounded half up."""
+    if n <= 0:
+        return 0
+    return (2 * total + n) // (2 * n)
+»
+#### model
+from dataclasses import dataclass
+from enum import Enum
+
+
+class Status(Enum):
+    """Where an order is in its life."""
+    DRAFT = "draft"
+    PAID = "paid"«¦
+    ON_HOLD = "on_hold"»
+    PACKED = "packed"
+    SHIPPED = "shipped"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+
+class Tier(Enum):
+    BASIC = "basic"
+    SILVER = "silver"
+    GOLD = "gold"
+
+
+class Category(Enum):
+    BOOK = "book"
+    TOY = "toy"
+    FOOD = "food"
+    TOOL = "tool"
+    GARDEN = "garden"
+
+
+@dataclass(frozen=True)
+class Product:
+    sku: str
+    name: str
+    price: «float¦int»
+    weight: float
+    category: Category
+    stock: int
+    supplier: int
+
+
+@dataclass(frozen=True)
+class Customer:
+    id: int
+    «name: str¦first_name: str
+    last_name: str»
+    email: str
+    tier: Tier
+    city: str
+
+
+@dataclass(frozen=True)
+class Line:
+    sku: str
+    qty: int
+    unit_price: «float¦int»
+
+
+@dataclass(frozen=True)
+class Order:
+    id: int
+    customer: int
+    lines: list[Line]
+    status: Status
+    shipping: «float¦int»
+    day: int
+#### orders
+from dataclasses import replace
+
+from model import Line, Order, Status
+
+
+def line_total(l: Line) -> «float¦int»:
+    """The price of one line."""
+    return l.unit_price * l.qty
+
+
+def subtotal(o: Order) -> «float¦int»:
+    """The goods of an order, without shipping."""
+    return sum(line_total(l) for l in o.lines)
+
+
+def grand_total(o: Order) -> «float¦int»:
+    """What the customer pays."""
+    return subtotal(o) + o.shipping
+
+
+def item_count(o: Order) -> int:
+    """The number of items in an order."""
+    return sum(l.qty for l in o.lines)
+
+
+STATUS_LABELS = {
+    Status.DRAFT: "Draft",
+    Status.PAID: "Paid",«¦
+    Status.ON_HOLD: "On hold",»
+    Status.PACKED: "Packed",
+    Status.SHIPPED: "Shipped",
+    Status.DELIVERED: "Delivered",
+    Status.CANCELLED: "Cancelled",
+}
+
+
+def status_label(s: Status) -> str:
+    """The status as people read it."""
+    return STATUS_LABELS[s]
+
+
+def is_open(s: Status) -> bool:
+    """True while there is still work to do on the order."""
+    return s in (Status.DRAFT, Status.PAID, «¦Status.ON_HOLD, »Status.PACKED, Status.SHIPPED)
+
+
+def next_status(s: Status) -> Status:
+    """The next step of an order."""
+    match s:
+        case Status.DRAFT:
+            return Status.PAID
+        case Status.PAID:
+            return Status.PACKED«¦
+        case Status.ON_HOLD:
+            return Status.ON_HOLD»
+        case Status.PACKED:
+            return Status.SHIPPED
+        case Status.SHIPPED:
+            return Status.DELIVERED
+        case Status.DELIVERED:
+            return Status.DELIVERED
+        case Status.CANCELLED:
+            return Status.CANCELLED
+
+
+def can_cancel(s: Status) -> bool:
+    """True while the customer can still cancel."""
+    return s in (Status.DRAFT, Status.PAID«¦, Status.ON_HOLD»)
+
+
+def is_revenue(s: Status) -> bool:
+    """True when money was received for the order."""
+    return s not in (Status.DRAFT, Status.CANCELLED)
+
+
+def advance(o: Order) -> Order:
+    """The order one step further."""
+    return replace(o, status=next_status(o.status))
+
+
+def cancel(o: Order) -> Order:
+    """The order cancelled, if that is still possible."""
+    return replace(o, status=Status.CANCELLED) if can_cancel(o.status) else o
+«¦
+
+def hold(o: Order) -> Order:
+    """Fraud review freezes a paid order."""
+    return replace(o, status=Status.ON_HOLD) if o.status == Status.PAID else o
+
+
+def release(o: Order) -> Order:
+    """Fraud review lets a frozen order go."""
+    return replace(o, status=Status.PAID) if o.status == Status.ON_HOLD else o
+»
+#### catalog
+from model import Category, Product
+from money import fmt, «round2¦avg, pct»
+
+
+def price_band(p: Product) -> str:
+    """How a product is shelved."""
+    if p.price < «10.0¦1000»:
+        return "cheap"
+    if p.price < «100.0¦10000»:
+        return "regular"
+    return "premium"
+
+
+def sale_price(p: Product, off: float) -> «float¦int»:
+    """The price after taking off a share of it."""
+    return «round2(p.price - p.price * off)¦p.price - pct(p.price, off)»
+
+
+def stock_value(p: Product) -> «float¦int»:
+    """The value of the stock of a product."""
+    return p.price * p.stock
+
+
+def catalog_value(ps: list[Product]) -> «float¦int»:
+    """The value of all the stock."""
+    return sum(stock_value(p) for p in ps)
+
+
+def average_price(ps: list[Product]) -> «float¦int»:
+    """The average price, or nothing for no products."""
+    «if not ps:
+        return 0.0
+    return round2(sum(p.price for p in ps) / len(ps))¦return avg(sum(p.price for p in ps), len(ps))»
+
+
+def most_expensive(ps: list[Product]) -> Product | None:
+    """The dearest product."""
+    return max(ps, key=lambda p: p.price, default=None)
+
+
+def within_budget(ps: list[Product], budget: «float¦int») -> list[Product]:
+    """Products one can buy with a budget."""
+    return [p for p in ps if p.price <= budget]
+
+
+def price_label(p: Product) -> str:
+    """A shelf label."""
+    return f"{p.name}: {fmt(p.price)}"
+
+
+def is_gift(p: Product) -> bool:
+    """True when a product counts as a gift: not food, and under 25.00."""
+    return p.category != Category.FOOD and p.price < «25.0¦2500»
+
+
+def in_category(ps: list[Product], c: Category) -> list[Product]:
+    """Products of one category, dearest first."""
+    return sorted((p for p in ps if p.category == c), key=lambda p: -p.price)
+#### tax
+from model import Category, Line, Order, Product, Status
+from money import fmt, «round2¦pct»
+from orders import line_total
+
+
+def rate_for(c: Category) -> float:
+    """The tax rate of a category."""
+    match c:
+        case Category.BOOK:
+            return 0.0
+        case Category.FOOD:
+            return 0.05
+        case Category.TOY | Category.TOOL:
+            return 0.2
+        case Category.GARDEN:
+            return 0.1
+
+
+def category_of(sku: str, ps: list[Product]) -> Category:
+    for p in ps:
+        if p.sku == sku:
+            return p.category
+    return Category.BOOK
+
+
+def line_tax(l: Line, ps: list[Product]) -> «float¦int»:
+    """The tax of one line."""
+    rate = rate_for(category_of(l.sku, ps))
+    return «round2(line_total(l) * rate)¦pct(line_total(l), rate)»
+
+
+def order_tax(o: Order, ps: list[Product]) -> «float¦int»:
+    """The tax of an order: nothing until it is paid, nothing when cancelled."""
+    if not taxable(o.status):
+        return «0.0¦0»
+    return sum(line_tax(l, ps) for l in o.lines)
+
+
+def taxable(s: Status) -> bool:
+    """True when the order owes tax."""
+    return s not in (Status.DRAFT, Status.CANCELLED)
+
+
+def tax_note(t: «float¦int») -> str:
+    """The tax line of a receipt."""
+    if t == 0:
+        return "tax free"
+    return f"tax {fmt(t)}"
+#### discount
+from model import Tier
+from money import «round2¦pct»
+
+
+def tier_rate(t: Tier) -> float:
+    """The share a tier takes off."""
+    match t:
+        case Tier.BASIC:
+            return 0.0
+        case Tier.SILVER:
+            return 0.05
+        case Tier.GOLD:
+            return 0.1
+
+
+def volume_rate(amount: «float¦int») -> float:
+    """The share a large basket takes off."""
+    if amount >= «500.0¦50000»:
+        return 0.1
+    if amount >= «200.0¦20000»:
+        return 0.05
+    return 0.0
+
+
+def discount_for(amount: «float¦int», t: Tier) -> «float¦int»:
+    """The discount: the better of the tier and the basket."""
+    rate = max(tier_rate(t), volume_rate(amount))
+    return «round2(amount * rate)¦pct(amount, rate)»
+
+
+COUPONS = {"FIVE": «5.0¦500», "TEN": «10.0¦1000»}
+
+
+def coupon_value(code: str, amount: «float¦int») -> «float¦int»:
+    """What a coupon takes off, never more than the basket."""
+    return min(COUPONS.get(code, «0.0¦0»), amount)
+
+
+def net_amount(amount: «float¦int», t: Tier, code: str) -> «float¦int»:
+    """The basket after the discount and the coupon."""
+    return amount - discount_for(amount, t) - coupon_value(code, amount)
+#### shipping
+from model import Tier
+from money import fmt, «round2¦pct»
+
+FREE_OVER = «50.0¦5000»  # baskets from this amount ship free
+
+
+def shipping_cost(amount: «float¦int», weight: float) -> «float¦int»:
+    """The cost of sending a parcel."""
+    if amount >= FREE_OVER:
+        return «0.0¦0»
+    return «round2(4.99 + weight * 1.5)¦499 + pct(150, weight)»
+
+
+def member_cost(cost: «float¦int», t: Tier) -> «float¦int»:
+    """The cost for a member: gold members pay half."""
+    if t == Tier.GOLD:
+        return «round2(cost * 0.5)¦pct(cost, 0.5)»
+    return cost
+
+
+SURCHARGES = {"Harbour": «7.5¦750», "Summit": «12.0¦1200»}
+
+
+def surcharge(city: str) -> «float¦int»:
+    """A surcharge for hard to reach places."""
+    return SURCHARGES.get(city, «0.0¦0»)
+
+
+def shipping_label(cost: «float¦int») -> str:
+    """The shipping line of a receipt."""
+    if cost == 0:
+        return "free shipping"
+    return f"shipping {fmt(cost)}"
+#### loyalty
+from model import Tier
+
+
+def points_for(total: «float¦int») -> int:
+    """One point for every whole 10.00."""
+    return «int(total // 10)¦total // 1000»
+
+
+def tier_after(spent: «float¦int») -> Tier:
+    """The tier that a year of spending earns."""
+    if spent >= «1000.0¦100000»:
+        return Tier.GOLD
+    if spent >= «300.0¦30000»:
+        return Tier.SILVER
+    return Tier.BASIC
+
+
+def redeem_value(points: int) -> «float¦int»:
+    """The money that points are worth: 0.10 each."""
+    return points * «0.1¦10»
+
+
+def to_next_point(total: «float¦int») -> «float¦int»:
+    """Points still missing for the next whole 10.00."""
+    return «10.0 - total % 10¦1000 - total % 1000»
+#### fraud
+from model import Customer, Order, Status, Tier
+from orders import grand_total, item_count
+
+
+def risk_score(o: Order, c: Customer) -> int:
+    """How suspicious an order looks."""
+    score = 0
+    if grand_total(o) >= «1000.0¦100000»:
+        score += 3
+    elif grand_total(o) >= «300.0¦30000»:
+        score += 1
+    if item_count(o) > 20:
+        score += 1
+    if c.tier == Tier.BASIC:
+        score += 1
+    return score
+
+
+def needs_review(o: Order, c: Customer) -> bool:
+    """True when fraud review should look at the order."""
+    return is_reviewable(o.status) and risk_score(o, c) >= 3
+
+
+def is_reviewable(s: Status) -> bool:
+    """True when the order can still be stopped by a review."""
+    return s in (Status.PAID, «¦Status.ON_HOLD, »Status.PACKED)
+#### refunds
+from model import Order, Status
+from money import fmt, «round2¦pct»
+from orders import grand_total
+
+REFUND_SHARES = {
+    Status.DRAFT: 0.0,
+    Status.PAID: 1.0,«¦
+    Status.ON_HOLD: 1.0,»
+    Status.PACKED: 1.0,
+    Status.SHIPPED: 0.95,
+    Status.DELIVERED: 0.9,
+    Status.CANCELLED: 0.0,
+}
+
+
+def refund_share(s: Status) -> float:
+    """The share of the money that comes back."""
+    return REFUND_SHARES[s]
+
+
+def refund_amount(o: Order) -> «float¦int»:
+    """The money that comes back for an order."""
+    return «round2(grand_total(o) * refund_share(o.status))¦pct(grand_total(o), refund_share(o.status))»
+
+
+def refund_note(o: Order) -> str:
+    """A line for the customer."""
+    return f"Refund {fmt(refund_amount(o))} for order {o.id}"
+
+
+def return_fee(amount: «float¦int») -> «float¦int»:
+    """The fee for sending goods back: 3.50 below 20.00, otherwise free."""
+    if amount < «20.0¦2000»:
+        return «3.5¦350»
+    return «0.0¦0»
+#### notify
+from model import Customer, Order, Status
+from money import fmt
+from orders import grand_total
+
+
+def message_for(o: Order, c: Customer) -> str:
+    """What the customer is told about an order."""
+    who = «c.name¦f"{c.first_name} {c.last_name}"»
+    if o.status == Status.DRAFT:
+        return f"{who}, your order {o.id} is not paid yet"
+    if o.status == Status.PAID:
+        return f"{who}, we received {fmt(grand_total(o))} for order {o.id}"«¦
+    if o.status == Status.ON_HOLD:
+        return f"{who}, your order {o.id} is on hold"»
+    if o.status == Status.PACKED:
+        return f"{who}, your order {o.id} is packed"
+    if o.status == Status.SHIPPED:
+        return f"{who}, your order {o.id} is on its way"
+    if o.status == Status.DELIVERED:
+        return f"{who}, your order {o.id} arrived"
+    return f"{who}, your order {o.id} was cancelled"
+
+
+def reminder(c: Customer, amount: «float¦int») -> str:
+    """A reminder to pay."""
+    return f"{«c.name¦c.first_name} {c.last_name»}: please pay {fmt(amount)}"
+
+
+def should_notify(s: Status) -> bool:
+    """True when the customer should get a message."""
+    return s != Status.DRAFT
+#### analytics
+from model import Customer, Order
+from money import «round2¦avg»
+from orders import grand_total, is_revenue
+
+
+def revenue(os: list[Order]) -> «float¦int»:
+    """The money received over the given orders."""
+    return sum(grand_total(o) for o in os if is_revenue(o.status))
+
+
+def average_order(os: list[Order]) -> «float¦int»:
+    """The average value of the orders that brought money."""
+    counted = [o for o in os if is_revenue(o.status)]
+    «if not counted:
+        return 0.0
+    return round2(revenue(counted) / len(counted))¦return avg(revenue(counted), len(counted))»
+
+
+def full_name(id: int, cs: list[Customer]) -> str:
+    for c in cs:
+        if c.id == id:
+            return «c.name¦f"{c.first_name} {c.last_name}"»
+    return "unknown"
+
+
+def spend_by_customer(os: list[Order], cs: list[Customer]) -> dict[str, «float¦int»]:
+    """The money per customer's name."""
+    m: dict[str, «float¦int»] = {}
+    for o in os:
+        if is_revenue(o.status):
+            who = full_name(o.customer, cs)
+            m[who] = m.get(who, «0.0¦0») + grand_total(o)
+    return m
+
+
+def top_customers(os: list[Order], cs: list[Customer], n: int) -> list[str]:
+    """The customers who spent the most, by name."""
+    ranked = sorted(spend_by_customer(os, cs).items(), key=lambda e: -e[1])
+    return [e[0] for e in ranked[:n]]
+
+
+def revenue_by_city(os: list[Order], cs: list[Customer]) -> dict[str, «float¦int»]:
+    """The money per city."""
+    cities = {c.id: c.city for c in cs}
+    m: dict[str, «float¦int»] = {}
+    for o in os:
+        if is_revenue(o.status):
+            city = cities.get(o.customer, "unknown")
+            m[city] = m.get(city, «0.0¦0») + grand_total(o)
+    return m
+
+
+def orders_over(os: list[Order], limit: «float¦int») -> list[Order]:
+    """Orders worth at least this much."""
+    return [o for o in os if grand_total(o) >= limit]
+
+
+def big_orders(os: list[Order]) -> int:
+    """The number of orders worth at least 1000.00."""
+    return len(orders_over(os, «1000.0¦100000»))
+
+
+def daily_revenue(os: list[Order], day: int) -> «float¦int»:
+    """The orders of a day that brought money."""
+    return revenue([o for o in os if o.day == day])
+#### invoice
+from model import Customer, Line, Order
+from money import fmt
+from orders import grand_total, line_total, subtotal
+
+
+def header(o: Order, c: Customer) -> str:
+    """The first line of an invoice."""
+    return f"Invoice {o.id} for «{c.name}¦{c.first_name} {c.last_name}», {c.city}"
+
+
+def line_text(l: Line) -> str:
+    """One line of goods."""
+    return f"  {l.qty} x {l.sku} @ {fmt(l.unit_price)} = {fmt(line_total(l))}"
+
+
+def due_note(total: «float¦int») -> str:
+    """How long the customer has to pay."""
+    if total > «100.0¦10000»:
+        return "payable in 30 days"
+    return "payable in 14 days"
+
+
+def invoice_text(o: Order, c: Customer) -> str:
+    """A whole invoice."""
+    rows = [line_text(l) for l in o.lines]
+    tail = [
+        f"goods: {fmt(subtotal(o))}",
+        f"shipping: {fmt(o.shipping)}",
+        f"total: {fmt(grand_total(o))}",
+        due_note(grand_total(o)),
+    ]
+    return "\n".join([header(o, c), *rows, *tail])
+#### crm
+from model import Customer, Tier
+
+
+def display_name(c: Customer) -> str:
+    """The customer's name as people read it."""
+    return «c.name¦f"{c.first_name} {c.last_name}"»
+
+
+def sorted_customers(cs: list[Customer]) -> list[Customer]:
+    """Customers in alphabetical order."""
+    return sorted(cs, key=lambda c: «c.name¦(c.last_name, c.first_name)»)
+
+
+def find_by_name(cs: list[Customer], text: str) -> list[Customer]:
+    """Customers whose name contains the text, in any case."""
+    q = text.lower()
+    return [c for c in cs if «q in c.name.lower()¦q in c.first_name.lower() or q in c.last_name.lower()»]
+
+
+def initials(c: Customer) -> str:
+    """The initials of a customer: "AL" for "Ada Lovelace"."""
+    return «"".join(w[:1].upper() for w in c.name.split(" "))¦(c.first_name[:1] + c.last_name[:1]).upper()»
+
+
+def greeting(c: Customer) -> str:
+    """The opening of a letter."""
+    return f"Dear {«c.name¦c.first_name} {c.last_name»}"
+
+
+def mailing_line(c: Customer) -> str:
+    """An address line."""
+    return f"{«c.name¦c.first_name} {c.last_name»} <{c.email}>"
+
+
+TIERS = {"gold": Tier.GOLD, "silver": Tier.SILVER}
+
+
+def tier_text(t: Tier) -> str:
+    return t.value
+
+
+def parse_customer(row: str) -> Customer | None:
+    """A customer from a row of the customer file."""
+    cells = row.split(",")
+    if len(cells) != «5¦6» or not cells[0].isdigit():
+        return None
+    «return Customer(int(cells[0]), cells[1], cells[2], TIERS.get(cells[3], Tier.BASIC), cells[4])¦return Customer(int(cells[0]), cells[1], cells[2], cells[3], TIERS.get(cells[4], Tier.BASIC), cells[5])»
+
+
+def customer_header() -> str:
+    """The first row of the customer file."""
+    return «"id,name,email,tier,city"¦"id,first_name,last_name,email,tier,city"»
+
+
+def customer_row(c: Customer) -> str:
+    """A row of the customer file."""
+    return f"{c.id},«{c.name}¦{c.first_name},{c.last_name}»,{c.email},{tier_text(c.tier)},{c.city}"
+
+
+def validate_customer(c: Customer) -> list[str]:
+    """What is wrong with a customer."""
+    errors = []
+    «if not c.name:
+        errors.append("name is empty")¦if not c.first_name:
+        errors.append("first name is empty")
+    if not c.last_name:
+        errors.append("last name is empty")»
+    if "@" not in c.email:
+        errors.append("bad email")
+    return errors
+
+
+def same_person(a: Customer, b: Customer) -> bool:
+    """True for two records of the same person."""
+    return «a.name.lower() == b.name.lower()¦a.first_name.lower() == b.first_name.lower() and a.last_name.lower() == b.last_name.lower()» and a.email == b.email
+#### export
+from model import Order, Product, Status
+from money import plain
+from orders import grand_total, status_label
+
+STATUS_CODES = {
+    Status.DRAFT: "D",
+    Status.PAID: "P",«¦
+    Status.ON_HOLD: "H",»
+    Status.PACKED: "K",
+    Status.SHIPPED: "S",
+    Status.DELIVERED: "V",
+    Status.CANCELLED: "X",
+}
+
+
+def status_code(s: Status) -> str:
+    """A one-letter code for the warehouse system."""
+    return STATUS_CODES[s]
+
+
+def order_row(o: Order) -> str:
+    """A row of the orders file."""
+    return f"{o.id},{status_code(o.status)},{status_label(o.status)},{plain(grand_total(o))}"
+
+
+def product_row(p: Product) -> str:
+    """A row of the products file."""
+    return f"{p.sku},{p.name},{plain(p.price)},{p.weight:.2f}"
+
+
+def orders_file(os: list[Order]) -> str:
+    """The orders file."""
+    return "\n".join(["id,code,status,total", *(order_row(o) for o in os)])
+#### dashboard
+from analytics import revenue
+from model import Order, Status
+from money import fmt
+from orders import grand_total, is_open, status_label
+
+
+def all_statuses() -> list[Status]:
+    """Every status, in the order the dashboard shows them."""
+    return [Status.DRAFT, Status.PAID, «¦Status.ON_HOLD, »Status.PACKED, Status.SHIPPED, Status.DELIVERED, Status.CANCELLED]
+
+
+def status_counts(os: list[Order]) -> list[str]:
+    """One line per status: "Paid: 3"."""
+    return [f"{status_label(s)}: {sum(1 for o in os if o.status == s)}" for s in all_statuses()]
+
+
+def status_color(s: Status) -> str:
+    """The colour of a status on the board."""
+    if s == Status.DRAFT:
+        return "grey"
+    if s in (Status.PAID, Status.PACKED):
+        return "blue"«¦
+    if s == Status.ON_HOLD:
+        return "amber"»
+    if s in (Status.SHIPPED, Status.DELIVERED):
+        return "green"
+    return "red"
+
+
+def open_value(os: list[Order]) -> «float¦int»:
+    """The money tied up in open orders."""
+    return sum(grand_total(o) for o in os if is_open(o.status))
+
+
+def headline(os: list[Order]) -> str:
+    """The headline of the board."""
+    return f"{len(os)} orders, {fmt(revenue(os))} received, {fmt(open_value(os))} open"
+
+
+def value_alert(os: list[Order]) -> bool:
+    """True when the board should flag the money tied up: over 5000.00."""
+    return open_value(os) > «5000.0¦500000»
+#### picking
+from model import Order, Status
+from orders import item_count
+
+
+def can_pack(s: Status) -> bool:
+    """True when the warehouse may pack the order."""
+    return s == Status.PAID
+
+
+def packing_queue(os: list[Order]) -> list[Order]:
+    """The orders waiting to be packed."""
+    return [o for o in os if can_pack(o.status)]
+
+
+def items_to_pack(os: list[Order]) -> int:
+    """The items waiting to be packed."""
+    return sum(item_count(o) for o in packing_queue(os))
+#### commission
+from model import Order
+from money import «round2¦pct»
+from orders import grand_total
+
+
+def commission_rate(total: «float¦int») -> float:
+    """The share an agent earns on a sale."""
+    if total >= «1000.0¦100000»:
+        return 0.08
+    if total >= «100.0¦10000»:
+        return 0.05
+    return 0.02
+
+
+def commission(total: «float¦int») -> «float¦int»:
+    """The agent's money for a sale."""
+    return «round2(total * commission_rate(total))¦pct(total, commission_rate(total))»
+
+
+def commission_total(os: list[Order]) -> «float¦int»:
+    """The agent's money over several orders."""
+    return sum(commission(grand_total(o)) for o in os)
+
+
+def earned_bonus(amount: «float¦int») -> bool:
+    """True when an agent earned the monthly bonus: 250.00 in commission."""
+    return amount >= «250.0¦25000»
+#### audit
+from model import Order, Status
+from orders import can_cancel, next_status
+
+
+def check_order(o: Order) -> list[str]:
+    """What is wrong with an order."""
+    errors = []
+    if not o.lines:
+        errors.append("no lines")
+    if o.shipping < 0:
+        errors.append("negative shipping")
+    if any(l.unit_price <= 0 for l in o.lines):
+        errors.append("bad price")
+    if any(l.qty <= 0 for l in o.lines):
+        errors.append("bad quantity")
+    return errors
+
+
+def valid_step(start: Status, to: Status) -> bool:
+    """True when an order may go from one status to another."""
+    «¦if start == Status.PAID and to == Status.ON_HOLD:
+        return True
+    if start == Status.ON_HOLD and to == Status.PAID:
+        return True
+    »if to == Status.CANCELLED:
+        return can_cancel(start)
+    return start != to and next_status(start) == to
+#### sample
+from model import Category, Customer, Line, Order, Product, Status, Tier
+
+
+def sample_products() -> list[Product]:
+    """Products for the demo and for trying things out."""
+    return [
+        Product("B1", "Atlas", «24.5¦2450», 1.2, Category.BOOK, 4, 1),
+        Product("T1", "Kite", «12.0¦1200», 0.4, Category.TOY, 9, 2),
+        Product("F1", "Tea", «6.75¦675», 0.2, Category.FOOD, 30, 3),
+        Product("H1", "Spade", «135.0¦13500», 2.5, Category.GARDEN, 2, 2),
+    ]
+
+
+def sample_customers() -> list[Customer]:
+    """Customers for the demo."""
+    return [
+        Customer(1, «"Ada Lovelace"¦"Ada", "Lovelace"», "ada@example.org", Tier.GOLD, "Harbour"),
+        Customer(2, «"Alan Turing"¦"Alan", "Turing"», "alan@example.org", Tier.BASIC, "Summit"),
+    ]
+
+
+def sample_orders() -> list[Order]:
+    """Orders for the demo."""
+    return [
+        Order(100, 1, [Line("B1", 2, «24.5¦2450»)], Status.PAID, «4.99¦499», 1),
+        Order(101, 2, [Line("H1", 1, «135.0¦13500»), Line("F1", 4, «6.75¦675»)], Status.SHIPPED, «0.0¦0», 2),
+    ]

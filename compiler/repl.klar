@@ -1,15 +1,591 @@
-{
- "attempts": [
-  {
-   "files": {
-    "cart.klar": "use catalog.{Item}\n\n/// Minimum amount (after discount, before tax) for free shipping: $50.00, in cents.\npub const FREE_SHIPPING_MIN: Int = 5000\n\npub type Line { item: Item, qty: Int }\n\npub type Cart { lines: List[Line], code: Option[Str] }\n\npub fn new_cart() -> Cart {\n  return Cart { lines: [], code: None }\n}\n\npub fn add_line(cart: Cart, item: Item, qty: Int) -> Result[Cart, Str] {\n  if qty < 1 or qty > 99 {\n    return Err(\"invalid quantity: {qty}\")\n  }\n  return Ok(cart with { lines: cart.lines.push(Line { item: item, qty: qty }) })\n}\n\n/// Percentage taken off by a discount code, None for an unknown code.\npub fn discount_percent(code: Str) -> Option[Int] {\n  return match code {\n    \"SAVE10\" => Some(10),\n    \"WELCOME5\" => Some(5),\n    \"VIP15\" => Some(15),\n    \"HALF\" => Some(50),\n    _ => None,\n  }\n}\n\npub fn apply_code(cart: Cart, code: Str) -> Result[Cart, Str] {\n  if discount_percent(code).is_none() {\n    return Err(\"unknown code: {code}\")\n  }\n  return Ok(cart with { code: Some(code) })\n}\n\npub fn item_count(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + l.qty)\n}\n\n/// Total of one line in cents.\npub fn line_total(line: Line) -> Int {\n  return line.item.price_cents * line.qty\n}\n\npub fn largest_line(cart: Cart) -> Option[Line] {\n  return cart.lines.max_by(fn(l) => line_total(l))\n}\n\npub fn subtotal(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + line_total(l))\n}\n\n/// The discount for the cart's code in cents, rounded to the nearest cent, halves up (0 without a code).\npub fn discount(cart: Cart) -> Int {\n  let percent = match cart.code {\n    Some(c) => discount_percent(c).unwrap_or(0),\n    None => 0,\n  }\n  return (subtotal(cart) * percent + 50) / 100\n}\n\n/// Tax in cents on the subtotal after the discount; the rate is in basis points (825 = 8.25%).\npub fn tax(cart: Cart, rate_bp: Int) -> Int {\n  let taxable = subtotal(cart) - discount(cart)\n  return (taxable * rate_bp + 5000) / 10000\n}\n\npub fn total(cart: Cart, rate_bp: Int) -> Int {\n  return subtotal(cart) - discount(cart) + tax(cart, rate_bp)\n}\n\n/// How much more must be bought (after discount) to get free shipping, in cents.\npub fn free_shipping_gap(cart: Cart) -> Int {\n  let net = subtotal(cart) - discount(cart)\n  if net >= FREE_SHIPPING_MIN {\n    return 0\n  }\n  return FREE_SHIPPING_MIN - net\n}\n",
-    "catalog.klar": "use money.{format_amount}\n\npub type Item { name: Str, price_cents: Int }\n\n/// Builds a validated item: the name must not be blank and the price must be positive (in cents).\npub fn make_item(name: Str, price_cents: Int) -> Result[Item, Str] {\n  if name.trim().is_empty() {\n    return Err(\"empty name\")\n  }\n  if price_cents <= 0 {\n    return Err(\"invalid price for {name}\")\n  }\n  return Ok(Item { name: name, price_cents: price_cents })\n}\n\npub fn default_catalog() -> List[Item] {\n  return [\n    Item { name: \"Widget\", price_cents: 350 },\n    Item { name: \"Gadget\", price_cents: 1250 },\n    Item { name: \"Gizmo\", price_cents: 4999 },\n    Item { name: \"Cable\", price_cents: 725 },\n    Item { name: \"Case\", price_cents: 2400 },\n  ]\n}\n\npub fn find_item(items: List[Item], name: Str) -> Option[Item] {\n  return items.find(fn(i) => i.name == name)\n}\n\n/// Cheapest first.\npub fn sorted_by_price(items: List[Item]) -> List[Item] {\n  return items.sort_by(fn(i) => i.price_cents)\n}\n\npub fn cheapest(items: List[Item]) -> Option[Item] {\n  return items.min_by(fn(i) => i.price_cents)\n}\n\n/// One line per item: \"Widget - $3.50\".\npub fn catalog_text(items: List[Item]) -> Str {\n  return items.map(fn(i) => \"{i.name} - {format_amount(i.price_cents)}\").join(\"\\n\")\n}\n",
-    "money.klar": "/// Formats an amount in cents: 1250 -> \"$12.50\", -250 -> \"-$2.50\", 5 -> \"$0.05\".\npub fn format_amount(cents: Int) -> Str {\n  let sign = match cents < 0 {\n    true => \"-\",\n    false => \"\",\n  }\n  let magnitude = cents.abs()\n  let dollars = magnitude / 100\n  let rest = (magnitude % 100).to_str().pad_left(2, \"0\")\n  return \"{sign}${dollars}.{rest}\"\n}\n\n/// Whether the text is one or more ASCII digits.\nfn is_digits(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  return s.chars().all(fn(c) => \"0123456789\".contains(c))\n}\n\n/// Parses \"12.5\", \"12\" or \"$12.50\" (surrounding spaces allowed) into cents: \"12.5\" -> 1250.\npub fn parse_amount(text: Str) -> Result[Int, Str] {\n  var t = text.trim()\n  if t.starts_with(\"$\") {\n    t = t.slice(1, t.len())\n  }\n  let parts = t.split(\".\")\n  let whole = parts.get_or(0, \"\")\n  let fraction = parts.get_or(1, \"\")\n  let fraction_ok = parts.len() == 1 or (fraction.len() >= 1 and fraction.len() <= 2 and is_digits(fraction))\n  if parts.len() > 2 or not is_digits(whole) or not fraction_ok {\n    return Err(\"invalid amount: \" + text)\n  }\n  let dollars = whole.to_int().unwrap_or(0)\n  let cents_part = fraction.pad_right(2, \"0\").to_int().unwrap_or(0)\n  return Ok(dollars * 100 + cents_part)\n}\n",
-    "receipt.klar": "use cart.{Cart, Line, discount, free_shipping_gap, item_count, line_total, subtotal, tax, total}\nuse money.{format_amount}\n\n/// \"2 x Widget @ $3.50 = $7.00\"\npub fn line_text(line: Line) -> Str {\n  return \"{line.qty} x {line.item.name} @ {format_amount(line.item.price_cents)} = {format_amount(line_total(line))}\"\n}\n\npub fn render(cart: Cart, rate_bp: Int) -> Str {\n  let discount_lines: List[Str] = match cart.code {\n    Some(c) => [\"Discount ({c}): -{format_amount(discount(cart))}\"],\n    None => [],\n  }\n  let gap = free_shipping_gap(cart)\n  let footer = match gap > 0 {\n    true => \"Add {format_amount(gap)} more for free shipping\",\n    false => \"Free shipping\",\n  }\n  let lines = cart.lines.map(line_text)\n    .push(\"Subtotal: {format_amount(subtotal(cart))}\")\n    .concat(discount_lines)\n    .push(\"Tax: {format_amount(tax(cart, rate_bp))}\")\n    .push(\"Total: {format_amount(total(cart, rate_bp))}\")\n    .push(footer)\n  return lines.join(\"\\n\")\n}\n\n/// \"3 items, total $19.00\"\npub fn summary(cart: Cart, rate_bp: Int) -> Str {\n  let n = item_count(cart)\n  let noun = match n == 1 {\n    true => \"item\",\n    false => \"items\",\n  }\n  return \"{n} {noun}, total {format_amount(total(cart, rate_bp))}\"\n}\n"
-   },
-   "stage": "pass",
-   "ok": true
+// `klarc repl`: the interactive session of klar/tools/repl.py, without Python. Every input is checked together with
+// everything entered before (one function body plus the declarations), exactly like `klar repl`, so the messages
+// are the same. To run an input, klarc builds the session as a test block and runs it natively: the earlier
+// statements run again with their output hidden, then the new ones. (So an earlier `read_line` sees no input and
+// random numbers are drawn again; the interpreter keeps the values instead.)
+use ast.{Decl, Stmt}
+use builtin_sigs.{global_sigs, klar_version, method_sigs}
+use checker.{Diag}
+use commands.{std_modules}
+use dev.{DEFAULT_TIMEOUT, host_target, native_image, parse_rt, save_exe, temp_path, test_items}
+use inspect.{UMod, doc_lookup, doc_text, user_modules}
+use loader.{Ld, load_program_with, load_runtime}
+use parser.{parse_program}
+use types.{show}
+
+const ENTRY: Str = "klar_repl_entry"
+const VALUE: Str = "klar_repl_value"
+const MARK: Str = "\0klar-repl\0"
+
+fn help_text() -> Str {
+  return "Enter Klar statements, expressions or declarations (fn, type, enum, const, trait, impl, use).\n" +
+    "  :type <expr>    show the type without running\n" +
+    "  :doc <name>     signature and examples of a built-in or of your function\n" +
+    "  :load <file>    add the declarations of a .klar file (its `main` is not run)\n" +
+    "  :defs           the declarations of this session\n" + "  :reset          forget everything\n" +
+    "  :quit           leave (also Ctrl-D)"
+}
+
+/// How many brackets are still open (strings and comments ignored).
+fn balance(text: Str) -> Int {
+  let cs = text.chars()
+  var depth = 0
+  var in_str = false
+  var k = 0
+  while k < cs.len() {
+    let c = cs.get_or(k, "")
+    var step = 1
+    if in_str {
+      if c == "\\" {
+        step = 2
+      } else if c == "\"" {
+        in_str = false
+      }
+    } else if c == "\"" {
+      in_str = true
+    } else if c == "/" and cs.get_or(k + 1, "") == "/" {
+      var nl = k
+      while nl < cs.len() and cs.get_or(nl, "") != "\n" {
+        nl = nl + 1
+      }
+      step = (nl - k).max(1)
+      if nl >= cs.len() {
+        step = cs.len() - k
+      }
+    } else if c == "(" or c == "[" or c == "\{" {
+      depth = depth + 1
+    } else if c == ")" or c == "]" or c == "\}" {
+      depth = depth - 1
+    }
+    k = k + step
   }
- ],
- "solved": true
+  return depth
+}
+
+fn needs_more(text: Str) -> Bool {
+  let stripped = text.trim_end()
+  if stripped == "" {
+    return false
+  }
+  if balance(text) > 0 {
+    return true
+  }
+  let endings = ["+", "-", "*", "/", "%", "=", "and", "or", "not", ",", "->", "=>", "==", "!=", "<", ">", "<=", ">="]
+  return endings.any(fn(e) => stripped.ends_with(e)) and not stripped.ends_with("()")
+}
+
+fn is_word_char(c: Str) -> Bool {
+  return c == "_" or (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9")
+}
+
+/// The text after `pub ` and spaces (Python's `(pub\s+)?`).
+fn after_pub(text: Str) -> Str {
+  if text.starts_with("pub") and text.len() > 3 and [" ", "\t"].contains(text.slice(3, 4)) {
+    return text.slice(3, text.len()).trim_start()
+  }
+  return text
+}
+
+/// `^(pub\s+)?(fn|type|enum|const|trait|impl|test|property)\b`
+fn decl_start(text: Str) -> Bool {
+  for kw in ["fn", "type", "enum", "const", "trait", "impl", "test", "property"] {
+    for t in [text, after_pub(text)] {
+      if t.starts_with(kw) and not is_word_char(t.slice(kw.len(), (kw.len() + 1).min(t.len()))) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/// `\s*(?:pub\s+)?(?:fn|type|enum|const|trait)\s+([A-Za-z_][A-Za-z0-9_]*)`
+fn decl_name(text: Str) -> Option[Str] {
+  let t = after_pub(text.trim_start())
+  for kw in ["fn", "type", "enum", "const", "trait"] {
+    if t.starts_with(kw) and t.len() > kw.len() and [" ", "\t", "\n"].contains(t.slice(kw.len(), kw.len() + 1)) {
+      let rest = t.slice(kw.len(), t.len()).trim_start()
+      var name = ""
+      for c in rest.chars() {
+        if is_word_char(c) {
+          name = name + c
+        } else {
+          return finish_name(name)
+        }
+      }
+      return finish_name(name)
+    }
+  }
+  return None
+}
+
+fn finish_name(name: Str) -> Option[Str] {
+  if name == "" or (name.slice(0, 1) >= "0" and name.slice(0, 1) <= "9") {
+    return None
+  }
+  return Some(name)
+}
+
+type ReplSession { cwd: Str, lib: Str, use_lines: List[Str], decls: List[Str], stmts: List[Str], prompts: Bool }
+
+fn head_of(s: ReplSession, extra_decls: List[Str], extra_uses: List[Str]) -> Str {
+  return s.use_lines.concat(extra_uses).map(fn(u) => u + "\n").join("") + s.decls.concat(extra_decls).map(fn(d) =>
+    strip_newlines(d) + "\n\n").join("")
+}
+
+fn strip_newlines(s: Str) -> Str {
+  var out = s
+  while out.ends_with("\n") {
+    out = out.slice(0, out.len() - 1)
+  }
+  return out
+}
+
+fn indent(stmts: List[Str]) -> Str {
+  var out = ""
+  for s in stmts {
+    for ln in s.split("\n") {
+      out = out + "  " + ln + "\n"
+    }
+  }
+  return out
+}
+
+/// The session as a program (with extra statements / declarations), and the line where the new statements start.
+fn source(s: ReplSession, extra_stmts: List[Str], extra_decls: List[Str], extra_uses: List[Str]) -> Pair[Str, Int] {
+  let head = head_of(s: s, extra_decls: extra_decls, extra_uses: extra_uses)
+  var start = head.count("\n") + 2
+  for st in s.stmts {
+    start = start + st.count("\n") + 1
+  }
+  return Pair { first: head + "fn " + ENTRY + "() uses io, time, rand, fs \{\n" + indent(s.stmts.concat(extra_stmts)) +
+      "\}\n", second: start }
+}
+
+fn repl_path(s: ReplSession) -> Str {
+  return s.cwd + "/repl.klar"
+}
+
+fn check(s: ReplSession, src: Str) -> Ld uses fs {
+  return load_program_with(path: repl_path(s), lib: s.lib, overlay: Map {}.set(repl_path(s), src))
+}
+
+fn errors_of(ld: Ld) -> List[Diag] {
+  return ld.diags.filter(fn(d) => d.severity == "error")
+}
+
+/// `(first declared at repl.klar:L:C)` -> `(in an earlier input)`, then `repl.klar:L:C` -> `an earlier input`.
+fn earlier(msg: Str) -> Str {
+  var out = msg
+  for pat in ["(first declared at repl.klar:", "repl.klar:"] {
+    var done = false
+    while not done {
+      match out.index_of(pat) {
+        Some(i) => {
+          let cs = out.chars()
+          var j = i + pat.chars().len()
+          var digits1 = 0
+          while j < cs.len() and cs.get_or(j, "") >= "0" and cs.get_or(j, "") <= "9" {
+            j = j + 1
+            digits1 = digits1 + 1
+          }
+          var ok = digits1 > 0 and cs.get_or(j, "") == ":"
+          var digits2 = 0
+          if ok {
+            j = j + 1
+            while j < cs.len() and cs.get_or(j, "") >= "0" and cs.get_or(j, "") <= "9" {
+              j = j + 1
+              digits2 = digits2 + 1
+            }
+            ok = digits2 > 0
+          }
+          if ok and pat.starts_with("(") {
+            ok = cs.get_or(j, "") == ")"
+            j = j + 1
+          }
+          if ok {
+            var repl = "an earlier input"
+            if pat.starts_with("(") {
+              repl = "(in an earlier input)"
+            }
+            out = cs.take(i).join("") + repl + cs.drop(j).join("")
+          } else {
+            done = true
+          }
+        },
+        None => {
+          done = true
+        },
+      }
+    }
+  }
+  return out
+}
+
+fn show_errors(errors: List[Diag], start: Int, kind: Str, multiline: Bool) uses io {
+  for d in errors.take(5) {
+    var where_ = ""
+    if d.file == "repl.klar" and kind == "stmt" and d.span.line >= start and multiline {
+      where_ = " (line {d.span.line - start + 1} of the input)"
+    } else if d.file != "repl.klar" and d.file != "" {
+      where_ = " ({d.file}:{d.span.line}:{d.span.col})"
+    }
+    print("error[" + d.code + "]: " + earlier(d.message) + where_)
+    match d.hint {
+      Some(h) => {
+        if h != "" {
+          print("  hint: " + h)
+        }
+      },
+      None => {},
+    }
+  }
+}
+
+fn add_decl(s: ReplSession, text: Str, is_use: Bool) -> ReplSession uses io, fs {
+  var extra_uses: List[Str] = []
+  var extra_decls: List[Str] = []
+  if is_use {
+    extra_uses = [text]
+  } else {
+    extra_decls = [text]
+  }
+  let src = source(s: s, extra_stmts: [], extra_decls: extra_decls, extra_uses: extra_uses)
+  let errors = errors_of(check(s, src.first))
+  if not errors.is_empty() {
+    show_errors(errors: errors, start: src.second, kind: "decl", multiline: false)
+    return s
+  }
+  if is_use {
+    return s with { use_lines: s.use_lines.push(text) }
+  }
+  let name = decl_name(text)
+  let kept = s.decls.filter(fn(d) => name == None or decl_name(d) != name)
+  match name {
+    Some(n) => {
+      print("defined " + n)
+    },
+    None => {},
+  }
+  return s with { decls: kept.push(text) }
+}
+
+fn is_expression(text: Str) -> Bool {
+  return match parse_program("fn f() \{\n  let " + VALUE + " = " + text + "\n\}\n") {
+    Ok(p) => match p.decls.get(0) {
+      Some(Decl.Fn(f)) => f.body.map(fn(b) => b.stmts.len() == 1).unwrap_or(false),
+      _ => false,
+    },
+    Err(_) => false,
+  }
+}
+
+/// The type of the value of `let klar_repl_value = ...` on line `line`.
+fn value_type(ld: Ld, path: Str, line: Int) -> Str {
+  let types = match ld.by_path.get(path) {
+    Some(m) => match m.checker {
+      Some(c) => c.types,
+      None => Map {},
+    },
+    None => Map {},
+  }
+  let prefix = "repl.klar:{line}:{10 + VALUE.len()}:"
+  var best = "?"
+  var best_end = -1
+  for e in types.entries() {
+    if e.key.starts_with(prefix) {
+      let rest = e.key.slice(prefix.len(), e.key.len()).split(":")
+      let end = rest.get_or(0, "0").to_int().unwrap_or(0) * 1000000 + rest.get_or(1, "0").to_int().unwrap_or(0)
+      if end > best_end {
+        best_end = end
+        best = show(Map {}, e.value)
+      }
+    }
+  }
+  return best
+}
+
+/// Runs the session natively: the earlier statements (output hidden), then `new`; [stdout, stderr] of the new part.
+fn run_native(s: ReplSession, new: List[Str], show_value: Bool) -> Result[List[Str], Str] uses io, fs, proc {
+  var body = indent(s.stmts) + "  print_raw(\"\\0klar-repl\\0\")\n  eprint(\"\\0klar-repl\\0\")\n" + indent(new)
+  if show_value {
+    body = body + "  print_raw(\"\\0value\\0\")\n  print([" + VALUE + "])\n"
+  }
+  let src = head_of(s: s, extra_decls: [], extra_uses: []) + "test \"" + ENTRY + "\" \{\n" + body + "\}\n"
+  let path = repl_path(s)
+  let ld = load_runtime(load_program_with(path: path, lib: s.lib, overlay: Map {}.set(path, src)))
+  if ld.diags.any(fn(d) => d.severity == "error") {
+    return Err("klarc cannot run this input natively")
+  }
+  let index = test_items(ld, path).filter(fn(t) => t.name == ENTRY).get(0).map(fn(t) => t.index).unwrap_or(0)
+  let exe = temp_path(path, "repl")
+  save_exe(exe, native_image(ld: ld, main_path: path, target: host_target(), tests: true, limit: DEFAULT_TIMEOUT))?
+  let res = run_capture(args: [exe, "100", "0", index.to_str()], dir: s.cwd, input: "")?
+  let out = res.get_or(1, "").split(MARK)
+  let err = res.get_or(2, "").split(MARK + "\n")
+  return Ok([out.drop(1).join(MARK), err.drop(1).join(MARK + "\n"), res.get_or(0, "0")])
+}
+
+fn run_input(s: ReplSession, text: Str, type_only: Bool) -> ReplSession uses io, fs, proc {
+  let expr = is_expression(text)
+  var new = [text]
+  if expr {
+    new = ["let " + VALUE + " = " + text]
+  }
+  let src = source(s: s, extra_stmts: new, extra_decls: [], extra_uses: [])
+  let ld = check(s, src.first)
+  let errors = errors_of(ld)
+  if not errors.is_empty() {
+    show_errors(errors: errors, start: src.second, kind: "stmt", multiline: text.contains("\n"))
+    return s
+  }
+  var typ = "?"
+  if expr {
+    typ = value_type(ld: ld, path: repl_path(s), line: src.second)
+    if type_only {
+      print(typ)
+      return s
+    }
+  }
+  let shown = expr and typ != "Unit"
+  let res = match run_native(s: s, new: new, show_value: shown) {
+    Ok(r) => r,
+    Err(e) => {
+      print("internal error: " + e)
+      return s
+    },
+  }
+  var out = res.get_or(0, "")
+  var value = ""
+  if shown {
+    let parts = out.split("\0value\0")
+    out = parts.get_or(0, "")
+    value = strip_newlines(parts.drop(1).join(""))
+    value = value.slice(1, (value.len() - 1).max(1))
+  }
+  print_raw(out)
+  let err = res.get_or(1, "")
+  match parse_rt(err) {
+    Some(e) => {
+      let own = err.split("runtime error[").get_or(0, "")
+      print_raw(own)
+      print("runtime error[" + e.code + "]: " + e.msg)
+      if not e.values.is_empty() {
+        print("  note: values: " + e.values.join(", "))
+      }
+      if e.hint != "" {
+        print("  hint: " + e.hint)
+      }
+      return s
+    },
+    None => {
+      print_raw(err)
+    },
+  }
+  if expr {
+    if shown {
+      print(value + " : " + typ)
+    }
+    return s
+  }
+  return s with { stmts: s.stmts.push(text) }
+}
+
+/// The variables of the session (`let` / `var` of the statements), in the order they were first set.
+fn session_vars(s: ReplSession) -> List[Str] {
+  var names: List[Str] = []
+  for st in s.stmts {
+    match parse_program("fn f() \{\n" + st + "\n\}\n") {
+      Ok(p) => {
+        match p.decls.get(0) {
+          Some(Decl.Fn(f)) => {
+            for x in f.body.map(fn(b) => b.stmts).unwrap_or([]) {
+              match x {
+                Stmt.Let(_, name, _, _, _, _, _) => {
+                  if not names.contains(name) {
+                    names = names.push(name)
+                  }
+                },
+                _ => {},
+              }
+            }
+          },
+          _ => {},
+        }
+      },
+      Err(_) => {},
+    }
+  }
+  return names
+}
+
+/// `name = value` of each variable (the session runs again natively to compute them).
+fn show_vars(s: ReplSession) uses io, fs, proc {
+  let names = session_vars(s)
+  if names.is_empty() {
+    return
+  }
+  let lines = names.map(fn(n) => "print_raw(\"\\0var\\0\")\nprint([" + n + "])")
+  match run_native(s: s, new: lines, show_value: false) {
+    Ok(res) => {
+      let parts = res.get_or(0, "").split("\0var\0").drop(1)
+      var i = 0
+      for n in names {
+        let v = strip_newlines(parts.get_or(i, ""))
+        print(n + " = " + v.slice(1, (v.len() - 1).max(1)))
+        i = i + 1
+      }
+    },
+    Err(_) => {},
+  }
+}
+
+/// Top-level declarations of a source file as separate texts (by bracket balance).
+fn split_decls(src: Str) -> List[Str] {
+  var out: List[Str] = []
+  var cur: List[Str] = []
+  for line in src.split("\n") {
+    if not (cur.is_empty() and (line.trim() == "" or line.trim().starts_with("//"))) {
+      cur = cur.push(line)
+      let text = cur.join("\n")
+      if balance(text) == 0 and not needs_more(text) and not line.trim_end().ends_with("\{") {
+        let t = line.trim_start()
+        let opens = ["fn", "requires", "ensures"].any(fn(k) => t.starts_with(k) and not is_word_char(t.slice(k.len(),
+          (k.len() + 1).min(t.len()))))
+        if not (opens and not line.trim_end().ends_with("\}")) {
+          out = out.push(text)
+          cur = []
+        }
+      }
+    }
+  }
+  if not cur.is_empty() {
+    out = out.push(cur.join("\n"))
+  }
+  return out
+}
+
+fn is_main_fn(d: Str) -> Bool {
+  let t = d.trim_start()
+  if not t.starts_with("fn") {
+    return false
+  }
+  let rest = t.slice(2, t.len())
+  if rest == "" or not [" ", "\t"].contains(rest.slice(0, 1)) {
+    return false
+  }
+  let r2 = rest.trim_start()
+  return r2.starts_with("main") and r2.slice(4, r2.len()).trim_start().starts_with("(")
+}
+
+fn command(s0: ReplSession, text: Str) -> Pair[ReplSession, Bool] uses io, fs, proc {
+  var s = s0
+  let sp = text.index_of(" ").unwrap_or(text.len())
+  let cmd = text.slice(0, sp)
+  let arg = text.slice(sp, text.len()).trim()
+  if [":q", ":quit", ":exit"].contains(cmd) {
+    return Pair { first: s, second: false }
+  }
+  if [":h", ":help", ":?"].contains(cmd) {
+    print(help_text())
+  } else if cmd == ":t" or cmd == ":type" {
+    s = run_input(s: s, text: arg, type_only: true)
+  } else if cmd == ":doc" {
+    var mods: List[UMod] = []
+    if not s.decls.is_empty() {
+      let ld = check(s, source(s: s, extra_stmts: [], extra_decls: [], extra_uses: []).first)
+      mods = user_modules(ld)
+    }
+    let tests = read_file(s.lib + "/../tests/stdlib/builtins_test.klar").unwrap_or("").split("\n")
+    print(doc_text(results: doc_lookup(query: arg, globals: global_sigs(), methods: method_sigs(), test_lines: tests,
+      std: std_modules(s.lib), mods: mods), limit: 6))
+  } else if cmd == ":load" {
+    match read_file(s.cwd + "/" + arg) {
+      Ok(src) => {
+        for d in split_decls(src) {
+          if d.trim_start().starts_with("use ") {
+            s = add_decl(s: s, text: d.trim(), is_use: true)
+          } else if not is_main_fn(d) and decl_start(d.trim_start()) {
+            s = add_decl(s: s, text: d, is_use: false)
+          }
+        }
+      },
+      Err(_) => {
+        print("cannot read " + arg + ": No such file or directory")
+      },
+    }
+  } else if cmd == ":defs" {
+    for u in s.use_lines {
+      print(u)
+    }
+    for d in s.decls {
+      var line = d.split("\n").get_or(0, "")
+      if d.contains("\n") {
+        line = line + " ..."
+      }
+      print(line)
+    }
+    show_vars(s)
+  } else if cmd == ":reset" {
+    s = s with { use_lines: [], decls: [], stmts: [] }
+    print("session cleared")
+  } else {
+    print("unknown command " + cmd + " (:help lists them)")
+  }
+  return Pair { first: s, second: true }
+}
+
+fn feed(s: ReplSession, text0: Str) -> Pair[ReplSession, Bool] uses io, fs, proc {
+  var text = text0
+  while text.starts_with("\n") {
+    text = text.slice(1, text.len())
+  }
+  text = strip_newlines(text)
+  if text.trim() == "" {
+    return Pair { first: s, second: true }
+  }
+  if text.starts_with(":") {
+    return command(s, text)
+  }
+  if text.trim_start().starts_with("use ") {
+    return Pair { first: add_decl(s: s, text: text.trim(), is_use: true), second: true }
+  }
+  if decl_start(text.trim_start()) {
+    return Pair { first: add_decl(s: s, text: text, is_use: false), second: true }
+  }
+  return Pair { first: run_input(s: s, text: text, type_only: false), second: true }
+}
+
+/// `klarc repl [--plain]`: the session reads standard input (`--plain`: no banner or prompts).
+pub fn repl_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
+  var s = ReplSession { cwd: current_dir(), lib: lib, use_lines: [], decls: [], stmts: [], prompts: not args.contains("--plain") }
+  if s.prompts {
+    print("Klar " + klar_version() + " — :help for commands, :quit to leave")
+  }
+  var buf: List[Str] = []
+  var going = true
+  while going {
+    if s.prompts {
+      if buf.is_empty() {
+        print_raw("klar> ")
+      } else {
+        print_raw("....> ")
+      }
+    }
+    match read_line() {
+      None => {
+        going = false
+      },
+      Some(line) => {
+        buf = buf.push(line)
+        let text = buf.join("\n")
+        if not needs_more(text) {
+          buf = []
+          let r = feed(s, text)
+          s = r.first
+          going = r.second
+        }
+      },
+    }
+  }
+  return 0
 }

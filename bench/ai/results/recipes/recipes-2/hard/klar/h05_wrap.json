@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn split_word(w: Str, width: Int) -> List[Str] {\n  return w.chars().chunks(width).map(fn(c) => c.join(\"\"))\n}\n\npub fn wrap(text: Str, width: Int) -> List[Str] {\n  let words = text.split(\" \").filter(fn(w) => w.len() > 0).flat_map(fn(w) => split_word(w, width))\n  var lines: List[Str] = []\n  var cur = \"\"\n  for w in words {\n    if cur == \"\" {\n      cur = w\n    } else if cur.len() + 1 + w.len() <= width {\n      cur = cur + \" \" + w\n    } else {\n      lines = lines.push(cur)\n      cur = w\n    }\n  }\n  if cur != \"\" {\n    lines = lines.push(cur)\n  }\n  return lines\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

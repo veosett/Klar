@@ -1,0 +1,64 @@
+use model.{Order, Customer, Status}
+use money.{round2}
+use orders.{grand_total, is_revenue}
+
+/// The money received over the given orders.
+pub fn revenue(os: List[Order]) -> Float {
+  return os.filter(fn(o) => is_revenue(o.status)).map(fn(o) => grand_total(o)).sum_float()
+}
+
+/// The average value of the orders that brought money.
+pub fn average_order(os: List[Order]) -> Float {
+  let counted = os.filter(fn(o) => is_revenue(o.status))
+  if counted.is_empty() {
+    return 0.0
+  }
+  return round2(revenue(counted) / counted.len().to_float())
+}
+
+fn full_name(id: Int, cs: List[Customer]) -> Str {
+  return match cs.find(fn(c) => c.id == id) {
+    Some(c) => c.name,
+    None => "unknown",
+  }
+}
+
+/// The money per customer's name.
+pub fn spend_by_customer(os: List[Order], cs: List[Customer]) -> Map[Str, Float] {
+  var m: Map[Str, Float] = Map {}
+  for o in os.filter(fn(x) => is_revenue(x.status)) {
+    m = m.update(full_name(o.customer, cs), 0.0, fn(v) => v + grand_total(o))
+  }
+  return m
+}
+
+/// The customers who spent the most, by name.
+pub fn top_customers(os: List[Order], cs: List[Customer], n: Int) -> List[Str] {
+  let ranked = spend_by_customer(os, cs).entries().sort_by(fn(e) => 0.0 - e.value)
+  return ranked.take(n).map(fn(e) => e.key)
+}
+
+/// The money per city.
+pub fn revenue_by_city(os: List[Order], cs: List[Customer]) -> Map[Str, Float] {
+  var m: Map[Str, Float] = Map {}
+  for o in os.filter(fn(x) => is_revenue(x.status)) {
+    let city = cs.find(fn(c) => c.id == o.customer).map(fn(c) => c.city).unwrap_or("unknown")
+    m = m.update(city, 0.0, fn(v) => v + grand_total(o))
+  }
+  return m
+}
+
+/// Orders worth at least this much.
+pub fn orders_over(os: List[Order], limit: Float) -> List[Order] {
+  return os.filter(fn(o) => grand_total(o) >= limit)
+}
+
+/// The number of orders worth at least 1000.00.
+pub fn big_orders(os: List[Order]) -> Int {
+  return orders_over(os, 1000.0).len()
+}
+
+/// The orders of a day that brought money.
+pub fn daily_revenue(os: List[Order], day: Int) -> Float {
+  return revenue(os.filter(fn(o) => o.day == day))
+}

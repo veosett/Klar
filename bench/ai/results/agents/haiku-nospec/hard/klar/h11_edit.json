@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn chars_list(s: Str) -> List[Str] {\n    var out: List[Str] = []\n    for c in s.chars() {\n        out = out.push(c)\n    }\n    return out\n}\n\nfn str_at(xs: List[Str], i: Int) -> Str {\n    match xs.get(i) {\n        Some(v) => {\n            return v\n        }\n        None => {\n            return \"\"\n        }\n    }\n}\n\nfn int_at(xs: List[Int], i: Int) -> Int {\n    match xs.get(i) {\n        Some(v) => {\n            return v\n        }\n        None => {\n            return 0\n        }\n    }\n}\n\npub fn edit(a: Str, b: Str) -> Int {\n    let ca = chars_list(a)\n    let cb = chars_list(b)\n    let n = ca.len()\n    let m = cb.len()\n\n    var prev: List[Int] = []\n    var j = 0\n    while j <= m {\n        prev = prev.push(j)\n        j = j + 1\n    }\n\n    var i = 1\n    while i <= n {\n        var cur: List[Int] = [i]\n        var jj = 1\n        while jj <= m {\n            var cost = 1\n            if str_at(ca, i - 1) == str_at(cb, jj - 1) {\n                cost = 0\n            }\n            let left = int_at(cur, jj - 1)\n            var best = int_at(prev, jj) + 1\n            if left + 1 < best {\n                best = left + 1\n            }\n            if int_at(prev, jj - 1) + cost < best {\n                best = int_at(prev, jj - 1) + cost\n            }\n            cur = cur.push(best)\n            jj = jj + 1\n        }\n        prev = cur\n        i = i + 1\n    }\n    return int_at(prev, m)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

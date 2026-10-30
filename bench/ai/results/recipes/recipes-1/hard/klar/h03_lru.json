@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "type LruState {\n  vals: Map[Str, Str],\n  order: List[Str],\n}\n\nfn touch(order: List[Str], key: Str) -> List[Str] {\n  return order.filter(fn(k) => k != key).push(key)\n}\n\nfn evict_oldest(c: LruState) -> LruState {\n  let oldest = c.order.first().unwrap_or(\"\")\n  return LruState { vals: c.vals.remove(oldest), order: c.order.drop(1) }\n}\n\nfn put_key(c: LruState, capacity: Int, key: Str, value: Str) -> LruState {\n  if capacity <= 0 {\n    return c\n  }\n  if c.vals.has(key) {\n    return LruState { vals: c.vals.set(key, value), order: touch(c.order, key) }\n  }\n  let base = match c.vals.len() >= capacity {\n    true => evict_oldest(c),\n    false => c,\n  }\n  return LruState { vals: base.vals.set(key, value), order: base.order.push(key) }\n}\n\npub fn lru(capacity: Int, ops: List[Str]) -> List[Str] {\n  let empty_vals: Map[Str, Str] = Map {}\n  let no_order: List[Str] = []\n  var c = LruState { vals: empty_vals, order: no_order }\n  var out: List[Str] = []\n  for op in ops {\n    let parts = op.split(\" \")\n    if parts.get_or(0, \"\") == \"put\" {\n      c = put_key(c, capacity, parts.get_or(1, \"\"), parts.get_or(2, \"\"))\n    } else {\n      let key = parts.get_or(1, \"\")\n      out = out.push(c.vals.get(key).unwrap_or(\"-\"))\n      if c.vals.has(key) {\n        c = LruState { vals: c.vals, order: touch(c.order, key) }\n      }\n    }\n  }\n  return out\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "type LruState {\n  vals: Map[Str, Str],\n  order: List[Str],\n}\n\nfn touch(order: List[Str], key: Str) -> List[Str] {\n  return order.filter(fn(k) => k != key).push(key)\n}\n\nfn evict_oldest(c: LruState) -> LruState {\n  let oldest = c.order.first().unwrap_or(\"\")\n  return LruState { vals: c.vals.remove(oldest), order: c.order.drop(1) }\n}\n\nfn put_key(c: LruState, capacity: Int, key: Str, value: Str) -> LruState {\n  if capacity <= 0 {\n    return c\n  }\n  if c.vals.has(key) {\n    return LruState { vals: c.vals.set(key, value), order: touch(c.order, key) }\n  }\n  let base = match c.vals.len() >= capacity {\n    true => evict_oldest(c),\n    false => c,\n  }\n  return LruState { vals: base.vals.set(key, value), order: base.order.push(key) }\n}\n\npub fn lru(capacity: Int, ops: List[Str]) -> List[Str] {\n  let empty_vals: Map[Str, Str] = Map {}\n  let no_order: List[Str] = []\n  var c = LruState { vals: empty_vals, order: no_order }\n  var out: List[Str] = []\n  for op in ops {\n    let parts = op.split(\" \")\n    if parts.get_or(0, \"\") == \"put\" {\n      c = put_key(c: c, capacity: capacity, key: parts.get_or(1, \"\"), value: parts.get_or(2, \"\"))\n    } else {\n      let key = parts.get_or(1, \"\")\n      out = out.push(c.vals.get(key).unwrap_or(\"-\"))\n      if c.vals.has(key) {\n        c = LruState { vals: c.vals, order: touch(c.order, key) }\n      }\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

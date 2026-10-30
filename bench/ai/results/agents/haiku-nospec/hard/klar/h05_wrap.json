@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn words_of(s: Str) -> List[Str] {\n    var out: List[Str] = []\n    var cur = \"\"\n    for c in s.chars() {\n        if c == \" \" {\n            if cur != \"\" {\n                out = out.push(cur)\n                cur = \"\"\n            }\n        } else {\n            cur = cur + c\n        }\n    }\n    if cur != \"\" {\n        out = out.push(cur)\n    }\n    return out\n}\n\nfn str_len(s: Str) -> Int {\n    var n = 0\n    for c in s.chars() {\n        n = n + 1\n    }\n    return n\n}\n\nfn pieces_of(w: Str, width: Int) -> List[Str] {\n    var out: List[Str] = []\n    var cur = \"\"\n    var n = 0\n    for c in w.chars() {\n        cur = cur + c\n        n = n + 1\n        if n == width {\n            out = out.push(cur)\n            cur = \"\"\n            n = 0\n        }\n    }\n    if n > 0 {\n        out = out.push(cur)\n    }\n    return out\n}\n\npub fn wrap(text: Str, width: Int) -> List[Str] {\n    var lines: List[Str] = []\n    var line = \"\"\n    var linelen = 0\n    for w in words_of(text) {\n        for p in pieces_of(w, width) {\n            let plen = str_len(p)\n            if linelen == 0 {\n                line = p\n                linelen = plen\n            } else if linelen + 1 + plen <= width {\n                line = line + \" \" + p\n                linelen = linelen + 1 + plen\n            } else {\n                lines = lines.push(line)\n                line = p\n                linelen = plen\n            }\n        }\n    }\n    if linelen > 0 {\n        lines = lines.push(line)\n    }\n    return lines\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

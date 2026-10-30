@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def spiral(m: list[list[int]]) -> list[int]:\n    result = []\n    if not m or not m[0]:\n        return result\n    top, bottom = 0, len(m) - 1\n    left, right = 0, len(m[0]) - 1\n    while top <= bottom and left <= right:\n        for c in range(left, right + 1):\n            result.append(m[top][c])\n        for r in range(top + 1, bottom + 1):\n            result.append(m[r][right])\n        if top < bottom and left < right:\n            for c in range(right - 1, left - 1, -1):\n                result.append(m[bottom][c])\n            for r in range(bottom - 1, top, -1):\n                result.append(m[r][left])\n        top += 1\n        bottom -= 1\n        left += 1\n        right -= 1\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

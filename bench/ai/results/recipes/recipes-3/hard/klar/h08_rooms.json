@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rooms(meetings: List[List[Int]]) -> Int {\n  var best = 0\n  for m in meetings {\n    let t = m.get_or(0, 0)\n    let here = meetings.count(fn(o) => o.get_or(0, 0) <= t and o.get_or(1, 0) > t)\n    if here > best {\n      best = here\n    }\n  }\n  return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

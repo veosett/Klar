@@ -1,0 +1,56 @@
+use model.{Order, Line, Product, Category, Status}
+use money.{fmt, pct}
+use orders.{line_total}
+
+/// The tax rate of a category.
+pub fn rate_for(c: Category) -> Float {
+  return match c {
+    Category.Book => 0.0,
+    Category.Food => 0.05,
+    Category.Toy => 0.2,
+    Category.Tool => 0.2,
+    Category.Garden => 0.1,
+  }
+}
+
+fn category_of(sku: Str, ps: List[Product]) -> Category {
+  return match ps.find(fn(p) => p.sku == sku) {
+    Some(p) => p.category,
+    None => Category.Book,
+  }
+}
+
+/// The tax of one line.
+pub fn line_tax(l: Line, ps: List[Product]) -> Int {
+  let rate = rate_for(category_of(l.sku, ps))
+  return pct(line_total(l), rate)
+}
+
+/// The tax of an order: nothing until it is paid, nothing when cancelled.
+pub fn order_tax(o: Order, ps: List[Product]) -> Int {
+  return match taxable(o.status) {
+    true => o.lines.map(fn(l) => line_tax(l, ps)).sum(),
+    false => 0,
+  }
+}
+
+/// True when the order owes tax.
+pub fn taxable(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    Status.Paid => true,
+    Status.OnHold => true,
+    Status.Packed => true,
+    Status.Shipped => true,
+    Status.Delivered => true,
+    Status.Cancelled => false,
+  }
+}
+
+/// The tax line of a receipt.
+pub fn tax_note(t: Int) -> Str {
+  if t == 0 {
+    return "tax free"
+  }
+  return "tax {fmt(t)}"
+}

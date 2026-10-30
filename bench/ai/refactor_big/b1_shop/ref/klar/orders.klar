@@ -1,0 +1,113 @@
+use model.{Order, Line, Status}
+
+/// The price of one line.
+pub fn line_total(l: Line) -> Int {
+  return l.unit_price * l.qty
+}
+
+/// The goods of an order, without shipping.
+pub fn subtotal(o: Order) -> Int {
+  return o.lines.map(fn(l) => line_total(l)).sum()
+}
+
+/// What the customer pays.
+pub fn grand_total(o: Order) -> Int {
+  return subtotal(o) + o.shipping
+}
+
+/// The number of items in an order.
+pub fn item_count(o: Order) -> Int {
+  return o.lines.map(fn(l) => l.qty).sum()
+}
+
+/// The status as people read it.
+pub fn status_label(s: Status) -> Str {
+  return match s {
+    Status.Draft => "Draft",
+    Status.Paid => "Paid",
+    Status.OnHold => "On hold",
+    Status.Packed => "Packed",
+    Status.Shipped => "Shipped",
+    Status.Delivered => "Delivered",
+    Status.Cancelled => "Cancelled",
+  }
+}
+
+/// True while there is still work to do on the order.
+pub fn is_open(s: Status) -> Bool {
+  return match s {
+    Status.Draft => true,
+    Status.Paid => true,
+    Status.OnHold => true,
+    Status.Packed => true,
+    Status.Shipped => true,
+    _ => false,
+  }
+}
+
+/// The next step of an order.
+pub fn next_status(s: Status) -> Status {
+  return match s {
+    Status.Draft => Status.Paid,
+    Status.Paid => Status.Packed,
+    Status.OnHold => Status.OnHold,
+    Status.Packed => Status.Shipped,
+    Status.Shipped => Status.Delivered,
+    Status.Delivered => Status.Delivered,
+    Status.Cancelled => Status.Cancelled,
+  }
+}
+
+/// True while the customer can still cancel.
+pub fn can_cancel(s: Status) -> Bool {
+  return match s {
+    Status.Draft => true,
+    Status.Paid => true,
+    Status.OnHold => true,
+    Status.Packed => false,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}
+
+/// True when money was received for the order.
+pub fn is_revenue(s: Status) -> Bool {
+  return match s {
+    Status.Paid => true,
+    Status.OnHold => true,
+    Status.Packed => true,
+    Status.Shipped => true,
+    Status.Delivered => true,
+    _ => false,
+  }
+}
+
+/// The order one step further.
+pub fn advance(o: Order) -> Order {
+  return o with { status: next_status(o.status) }
+}
+
+/// The order cancelled, if that is still possible.
+pub fn cancel(o: Order) -> Order {
+  return match can_cancel(o.status) {
+    true => o with { status: Status.Cancelled },
+    false => o,
+  }
+}
+
+/// Fraud review freezes a paid order.
+pub fn hold(o: Order) -> Order {
+  return match o.status {
+    Status.Paid => o with { status: Status.OnHold },
+    _ => o,
+  }
+}
+
+/// Fraud review lets a frozen order go.
+pub fn release(o: Order) -> Order {
+  return match o.status {
+    Status.OnHold => o with { status: Status.Paid },
+    _ => o,
+  }
+}

@@ -1,0 +1,937 @@
+#### money
+/// Money as digits: "12.50".
+pub fn plain(«amount: Float¦cents: Int») -> Str {
+  «return amount.fixed(2)¦let a = cents.abs()
+  let sign = match cents < 0 { true => "-", false => "" }
+  let rest = (a % 100).to_str().pad_left(2, "0")
+  return "{sign}{a / 100}.{rest}"»
+}
+
+/// Money as text: "$12.50".
+pub fn fmt(«amount: Float¦cents: Int») -> Str {
+  return «"${plain(amount)}"¦"${plain(cents)}"»
+}
+
+«/// An amount rounded to the cent.
+pub fn round2(amount: Float) -> Float {
+  return amount.round_to(2)
+}
+¦/// A share of an amount, rounded half up to the cent.
+pub fn pct(cents: Int, rate: Float) -> Int {
+  return (cents.to_float() * rate + 0.5).floor()
+}
+
+/// The average of `n` amounts, rounded half up.
+pub fn avg(total: Int, n: Int) -> Int {
+  if n <= 0 {
+    return 0
+  }
+  return (2 * total + n) / (2 * n)
+}
+»
+#### model
+/// Where an order is in its life.
+pub enum Status {
+  Draft
+  Paid«¦
+  OnHold»
+  Packed
+  Shipped
+  Delivered
+  Cancelled
+}
+
+pub enum Tier {
+  Basic
+  Silver
+  Gold
+}
+
+pub enum Category {
+  Book
+  Toy
+  Food
+  Tool
+  Garden
+}
+
+pub type Product {
+  sku: Str
+  name: Str
+  price: «Float¦Int»
+  weight: Float
+  category: Category
+  stock: Int
+  supplier: Int
+}
+
+pub type Customer {
+  id: Int
+  «name: Str¦first_name: Str
+  last_name: Str»
+  email: Str
+  tier: Tier
+  city: Str
+}
+
+pub type Line {
+  sku: Str
+  qty: Int
+  unit_price: «Float¦Int»
+}
+
+pub type Order {
+  id: Int
+  customer: Int
+  lines: List[Line]
+  status: Status
+  shipping: «Float¦Int»
+  day: Int
+}
+#### orders
+use model.{Order, Line, Status}
+
+/// The price of one line.
+pub fn line_total(l: Line) -> «Float¦Int» {
+  return «l.unit_price * l.qty.to_float()¦l.unit_price * l.qty»
+}
+
+/// The goods of an order, without shipping.
+pub fn subtotal(o: Order) -> «Float¦Int» {
+  return o.lines.map(fn(l) => line_total(l)).«sum_float¦sum»()
+}
+
+/// What the customer pays.
+pub fn grand_total(o: Order) -> «Float¦Int» {
+  return subtotal(o) + o.shipping
+}
+
+/// The number of items in an order.
+pub fn item_count(o: Order) -> Int {
+  return o.lines.map(fn(l) => l.qty).sum()
+}
+
+/// The status as people read it.
+pub fn status_label(s: Status) -> Str {
+  return match s {
+    Status.Draft => "Draft",
+    Status.Paid => "Paid",«¦
+    Status.OnHold => "On hold",»
+    Status.Packed => "Packed",
+    Status.Shipped => "Shipped",
+    Status.Delivered => "Delivered",
+    Status.Cancelled => "Cancelled",
+  }
+}
+
+/// True while there is still work to do on the order.
+pub fn is_open(s: Status) -> Bool {
+  return match s {
+    Status.Draft => true,
+    Status.Paid => true,«¦
+    Status.OnHold => true,»
+    Status.Packed => true,
+    Status.Shipped => true,
+    _ => false,
+  }
+}
+
+/// The next step of an order.
+pub fn next_status(s: Status) -> Status {
+  return match s {
+    Status.Draft => Status.Paid,
+    Status.Paid => Status.Packed,«¦
+    Status.OnHold => Status.OnHold,»
+    Status.Packed => Status.Shipped,
+    Status.Shipped => Status.Delivered,
+    Status.Delivered => Status.Delivered,
+    Status.Cancelled => Status.Cancelled,
+  }
+}
+
+/// True while the customer can still cancel.
+pub fn can_cancel(s: Status) -> Bool {
+  return match s {
+    Status.Draft => true,
+    Status.Paid => true,«¦
+    Status.OnHold => true,»
+    Status.Packed => false,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}
+
+/// True when money was received for the order.
+pub fn is_revenue(s: Status) -> Bool {
+  return match s {
+    Status.Paid => true,«¦
+    Status.OnHold => true,»
+    Status.Packed => true,
+    Status.Shipped => true,
+    Status.Delivered => true,
+    _ => false,
+  }
+}
+
+/// The order one step further.
+pub fn advance(o: Order) -> Order {
+  return o with { status: next_status(o.status) }
+}
+
+/// The order cancelled, if that is still possible.
+pub fn cancel(o: Order) -> Order {
+  return match can_cancel(o.status) {
+    true => o with { status: Status.Cancelled },
+    false => o,
+  }
+}
+«¦
+/// Fraud review freezes a paid order.
+pub fn hold(o: Order) -> Order {
+  return match o.status {
+    Status.Paid => o with { status: Status.OnHold },
+    _ => o,
+  }
+}
+
+/// Fraud review lets a frozen order go.
+pub fn release(o: Order) -> Order {
+  return match o.status {
+    Status.OnHold => o with { status: Status.Paid },
+    _ => o,
+  }
+}
+»
+#### catalog
+use model.{Product, Category}
+use money.{fmt, «round2¦pct, avg»}
+
+/// How a product is shelved.
+pub fn price_band(p: Product) -> Str {
+  if p.price < «10.0¦1000» {
+    return "cheap"
+  }
+  if p.price < «100.0¦10000» {
+    return "regular"
+  }
+  return "premium"
+}
+
+/// The price after taking off a share of it.
+pub fn sale_price(p: Product, off: Float) -> «Float¦Int» {
+  return «round2(p.price - p.price * off)¦p.price - pct(p.price, off)»
+}
+
+/// The value of the stock of a product.
+pub fn stock_value(p: Product) -> «Float¦Int» {
+  return p.price * «p.stock.to_float()¦p.stock»
+}
+
+/// The value of all the stock.
+pub fn catalog_value(ps: List[Product]) -> «Float¦Int» {
+  return ps.map(fn(p) => stock_value(p)).«sum_float¦sum»()
+}
+
+/// The average price, or nothing for no products.
+pub fn average_price(ps: List[Product]) -> «Float¦Int» {
+  «if ps.is_empty() {
+    return 0.0
+  }
+  return round2(ps.map(fn(p) => p.price).sum_float() / ps.len().to_float())¦return avg(ps.map(fn(p) => p.price).sum(), ps.len())»
+}
+
+/// The dearest product.
+pub fn most_expensive(ps: List[Product]) -> Option[Product] {
+  return ps.max_by(fn(p) => p.price)
+}
+
+/// Products one can buy with a budget.
+pub fn within_budget(ps: List[Product], budget: «Float¦Int») -> List[Product] {
+  return ps.filter(fn(p) => p.price <= budget)
+}
+
+/// A shelf label.
+pub fn price_label(p: Product) -> Str {
+  return "{p.name}: {fmt(p.price)}"
+}
+
+/// True when a product counts as a gift: not food, and under 25.00.
+pub fn is_gift(p: Product) -> Bool {
+  return p.category != Category.Food and p.price < «25.0¦2500»
+}
+
+/// Products of one category, dearest first.
+pub fn in_category(ps: List[Product], c: Category) -> List[Product] {
+  return ps.filter(fn(p) => p.category == c).sort_by(fn(p) => «0.0 - p.price¦0 - p.price»)
+}
+#### tax
+use model.{Order, Line, Product, Category, Status}
+use money.{fmt, «round2¦pct»}
+use orders.{line_total}
+
+/// The tax rate of a category.
+pub fn rate_for(c: Category) -> Float {
+  return match c {
+    Category.Book => 0.0,
+    Category.Food => 0.05,
+    Category.Toy => 0.2,
+    Category.Tool => 0.2,
+    Category.Garden => 0.1,
+  }
+}
+
+fn category_of(sku: Str, ps: List[Product]) -> Category {
+  return match ps.find(fn(p) => p.sku == sku) {
+    Some(p) => p.category,
+    None => Category.Book,
+  }
+}
+
+/// The tax of one line.
+pub fn line_tax(l: Line, ps: List[Product]) -> «Float¦Int» {
+  let rate = rate_for(category_of(l.sku, ps))
+  return «round2(line_total(l) * rate)¦pct(line_total(l), rate)»
+}
+
+/// The tax of an order: nothing until it is paid, nothing when cancelled.
+pub fn order_tax(o: Order, ps: List[Product]) -> «Float¦Int» {
+  return match taxable(o.status) {
+    true => o.lines.map(fn(l) => line_tax(l, ps)).«sum_float¦sum»(),
+    false => «0.0¦0»,
+  }
+}
+
+/// True when the order owes tax.
+pub fn taxable(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    Status.Paid => true,«¦
+    Status.OnHold => true,»
+    Status.Packed => true,
+    Status.Shipped => true,
+    Status.Delivered => true,
+    Status.Cancelled => false,
+  }
+}
+
+/// The tax line of a receipt.
+pub fn tax_note(t: «Float¦Int») -> Str {
+  if t == «0.0¦0» {
+    return "tax free"
+  }
+  return "tax {fmt(t)}"
+}
+#### discount
+use model.{Tier}
+use money.{«round2¦pct»}
+
+/// The share a tier takes off.
+pub fn tier_rate(t: Tier) -> Float {
+  return match t {
+    Tier.Basic => 0.0,
+    Tier.Silver => 0.05,
+    Tier.Gold => 0.1,
+  }
+}
+
+/// The share a large basket takes off.
+pub fn volume_rate(amount: «Float¦Int») -> Float {
+  if amount >= «500.0¦50000» {
+    return 0.1
+  }
+  if amount >= «200.0¦20000» {
+    return 0.05
+  }
+  return 0.0
+}
+
+/// The discount: the better of the tier and the basket.
+pub fn discount_for(amount: «Float¦Int», t: Tier) -> «Float¦Int» {
+  let rate = tier_rate(t).max(volume_rate(amount))
+  return «round2(amount * rate)¦pct(amount, rate)»
+}
+
+/// What a coupon takes off, never more than the basket.
+pub fn coupon_value(code: Str, amount: «Float¦Int») -> «Float¦Int» {
+  let off = match code {
+    "FIVE" => «5.0¦500»,
+    "TEN" => «10.0¦1000»,
+    _ => «0.0¦0»,
+  }
+  return off.min(amount)
+}
+
+/// The basket after the discount and the coupon.
+pub fn net_amount(amount: «Float¦Int», t: Tier, code: Str) -> «Float¦Int» {
+  return amount - discount_for(amount, t) - coupon_value(code, amount)
+}
+#### shipping
+use model.{Tier}
+use money.{fmt, «round2¦pct»}
+
+/// Baskets from this amount ship free.
+pub const FREE_OVER: «Float¦Int» = «50.0¦5000»
+
+/// The cost of sending a parcel.
+pub fn shipping_cost(amount: «Float¦Int», weight: Float) -> «Float¦Int» {
+  if amount >= FREE_OVER {
+    return «0.0¦0»
+  }
+  return «round2(4.99 + weight * 1.5)¦499 + pct(150, weight)»
+}
+
+/// The cost for a member: gold members pay half.
+pub fn member_cost(cost: «Float¦Int», t: Tier) -> «Float¦Int» {
+  return match t {
+    Tier.Gold => «round2(cost * 0.5)¦pct(cost, 0.5)»,
+    _ => cost,
+  }
+}
+
+/// A surcharge for hard to reach places.
+pub fn surcharge(city: Str) -> «Float¦Int» {
+  return match city {
+    "Harbour" => «7.5¦750»,
+    "Summit" => «12.0¦1200»,
+    _ => «0.0¦0»,
+  }
+}
+
+/// The shipping line of a receipt.
+pub fn shipping_label(cost: «Float¦Int») -> Str {
+  if cost == «0.0¦0» {
+    return "free shipping"
+  }
+  return "shipping {fmt(cost)}"
+}
+#### loyalty
+use model.{Tier}
+
+/// One point for every whole 10.00.
+pub fn points_for(total: «Float¦Int») -> Int {
+  return «(total / 10.0).floor()¦total / 1000»
+}
+
+/// The tier that a year of spending earns.
+pub fn tier_after(spent: «Float¦Int») -> Tier {
+  if spent >= «1000.0¦100000» {
+    return Tier.Gold
+  }
+  if spent >= «300.0¦30000» {
+    return Tier.Silver
+  }
+  return Tier.Basic
+}
+
+/// The money that points are worth: 0.10 each.
+pub fn redeem_value(points: Int) -> «Float¦Int» {
+  return «points.to_float() * 0.1¦points * 10»
+}
+
+/// Points still missing for the next whole 10.00.
+pub fn to_next_point(total: «Float¦Int») -> «Float¦Int» {
+  return «10.0 - (total - (total / 10.0).floor().to_float() * 10.0)¦1000 - total % 1000»
+}
+#### fraud
+use model.{Order, Customer, Status, Tier}
+use orders.{grand_total, item_count}
+
+/// How suspicious an order looks.
+pub fn risk_score(o: Order, c: Customer) -> Int {
+  var score = 0
+  if grand_total(o) >= «1000.0¦100000» {
+    score = score + 3
+  } else if grand_total(o) >= «300.0¦30000» {
+    score = score + 1
+  }
+  if item_count(o) > 20 {
+    score = score + 1
+  }
+  if c.tier == Tier.Basic {
+    score = score + 1
+  }
+  return score
+}
+
+/// True when fraud review should look at the order.
+pub fn needs_review(o: Order, c: Customer) -> Bool {
+  return is_reviewable(o.status) and risk_score(o, c) >= 3
+}
+
+/// True when the order can still be stopped by a review.
+pub fn is_reviewable(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    Status.Paid => true,«¦
+    Status.OnHold => true,»
+    Status.Packed => true,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}
+#### refunds
+use model.{Order, Status}
+use money.{fmt, «round2¦pct»}
+use orders.{grand_total}
+
+/// The share of the money that comes back.
+pub fn refund_share(s: Status) -> Float {
+  return match s {
+    Status.Draft => 0.0,
+    Status.Paid => 1.0,«¦
+    Status.OnHold => 1.0,»
+    Status.Packed => 1.0,
+    Status.Shipped => 0.95,
+    Status.Delivered => 0.9,
+    Status.Cancelled => 0.0,
+  }
+}
+
+/// The money that comes back for an order.
+pub fn refund_amount(o: Order) -> «Float¦Int» {
+  return «round2(grand_total(o) * refund_share(o.status))¦pct(grand_total(o), refund_share(o.status))»
+}
+
+/// A line for the customer.
+pub fn refund_note(o: Order) -> Str {
+  return "Refund {fmt(refund_amount(o))} for order {o.id}"
+}
+
+/// The fee for sending goods back: 3.50 below 20.00, otherwise free.
+pub fn return_fee(amount: «Float¦Int») -> «Float¦Int» {
+  if amount < «20.0¦2000» {
+    return «3.5¦350»
+  }
+  return «0.0¦0»
+}
+#### notify
+use model.{Order, Customer, Status}
+use money.{fmt}
+use orders.{grand_total}
+
+/// What the customer is told about an order.
+pub fn message_for(o: Order, c: Customer) -> Str {
+  let who = «c.name¦"{c.first_name} {c.last_name}"»
+  return match o.status {
+    Status.Draft => "{who}, your order {o.id} is not paid yet",
+    Status.Paid => "{who}, we received {fmt(grand_total(o))} for order {o.id}",«¦
+    Status.OnHold => "{who}, your order {o.id} is on hold",»
+    Status.Packed => "{who}, your order {o.id} is packed",
+    Status.Shipped => "{who}, your order {o.id} is on its way",
+    Status.Delivered => "{who}, your order {o.id} arrived",
+    Status.Cancelled => "{who}, your order {o.id} was cancelled",
+  }
+}
+
+/// A reminder to pay.
+pub fn reminder(c: Customer, amount: «Float¦Int») -> Str {
+  return "{«c.name¦c.first_name} {c.last_name»}: please pay {fmt(amount)}"
+}
+
+/// True when the customer should get a message.
+pub fn should_notify(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    _ => true,
+  }
+}
+#### analytics
+use model.{Order, Customer, Status}
+use money.{«round2¦avg»}
+use orders.{grand_total, is_revenue}
+
+/// The money received over the given orders.
+pub fn revenue(os: List[Order]) -> «Float¦Int» {
+  return os.filter(fn(o) => is_revenue(o.status)).map(fn(o) => grand_total(o)).«sum_float¦sum»()
+}
+
+/// The average value of the orders that brought money.
+pub fn average_order(os: List[Order]) -> «Float¦Int» {
+  let counted = os.filter(fn(o) => is_revenue(o.status))
+  «if counted.is_empty() {
+    return 0.0
+  }
+  return round2(revenue(counted) / counted.len().to_float())¦return avg(revenue(counted), counted.len())»
+}
+
+fn full_name(id: Int, cs: List[Customer]) -> Str {
+  return match cs.find(fn(c) => c.id == id) {
+    Some(c) => «c.name¦"{c.first_name} {c.last_name}"»,
+    None => "unknown",
+  }
+}
+
+/// The money per customer's name.
+pub fn spend_by_customer(os: List[Order], cs: List[Customer]) -> Map[Str, «Float¦Int»] {
+  var m: Map[Str, «Float¦Int»] = Map {}
+  for o in os.filter(fn(x) => is_revenue(x.status)) {
+    m = m.update(full_name(o.customer, cs), «0.0¦0», fn(v) => v + grand_total(o))
+  }
+  return m
+}
+
+/// The customers who spent the most, by name.
+pub fn top_customers(os: List[Order], cs: List[Customer], n: Int) -> List[Str] {
+  let ranked = spend_by_customer(os, cs).entries().sort_by(fn(e) => «0.0 - e.value¦0 - e.value»)
+  return ranked.take(n).map(fn(e) => e.key)
+}
+
+/// The money per city.
+pub fn revenue_by_city(os: List[Order], cs: List[Customer]) -> Map[Str, «Float¦Int»] {
+  var m: Map[Str, «Float¦Int»] = Map {}
+  for o in os.filter(fn(x) => is_revenue(x.status)) {
+    let city = cs.find(fn(c) => c.id == o.customer).map(fn(c) => c.city).unwrap_or("unknown")
+    m = m.update(city, «0.0¦0», fn(v) => v + grand_total(o))
+  }
+  return m
+}
+
+/// Orders worth at least this much.
+pub fn orders_over(os: List[Order], limit: «Float¦Int») -> List[Order] {
+  return os.filter(fn(o) => grand_total(o) >= limit)
+}
+
+/// The number of orders worth at least 1000.00.
+pub fn big_orders(os: List[Order]) -> Int {
+  return orders_over(os, «1000.0¦100000»).len()
+}
+
+/// The orders of a day that brought money.
+pub fn daily_revenue(os: List[Order], day: Int) -> «Float¦Int» {
+  return revenue(os.filter(fn(o) => o.day == day))
+}
+#### invoice
+use model.{Order, Customer, Line}
+use money.{fmt}
+use orders.{line_total, subtotal, grand_total}
+
+/// The first line of an invoice.
+pub fn header(o: Order, c: Customer) -> Str {
+  return "Invoice {o.id} for «{c.name}¦{c.first_name} {c.last_name}», {c.city}"
+}
+
+/// One line of goods.
+pub fn line_text(l: Line) -> Str {
+  return "  {l.qty} x {l.sku} @ {fmt(l.unit_price)} = {fmt(line_total(l))}"
+}
+
+/// How long the customer has to pay.
+pub fn due_note(total: «Float¦Int») -> Str {
+  if total > «100.0¦10000» {
+    return "payable in 30 days"
+  }
+  return "payable in 14 days"
+}
+
+/// A whole invoice.
+pub fn invoice_text(o: Order, c: Customer) -> Str {
+  let rows = o.lines.map(fn(l) => line_text(l))
+  let tail = [
+    "goods: {fmt(subtotal(o))}",
+    "shipping: {fmt(o.shipping)}",
+    "total: {fmt(grand_total(o))}",
+    due_note(grand_total(o)),
+  ]
+  return [header(o, c)].concat(rows).concat(tail).join("\n")
+}
+#### crm
+use model.{Customer, Tier}
+
+/// The customer's name as people read it.
+pub fn display_name(c: Customer) -> Str {
+  return «c.name¦"{c.first_name} {c.last_name}"»
+}
+
+/// Customers in alphabetical order.
+pub fn sorted_customers(cs: List[Customer]) -> List[Customer] {
+  return cs.sort_by(fn(c) => «c.name¦"{c.last_name}\t{c.first_name}"»)
+}
+
+/// Customers whose name contains the text, in any case.
+pub fn find_by_name(cs: List[Customer], text: Str) -> List[Customer] {
+  let q = text.lower()
+  return cs.filter(fn(c) => «c.name.lower().contains(q)¦c.first_name.lower().contains(q) or c.last_name.lower().contains(q)»)
+}
+
+fn initial(word: Str) -> Str {
+  return word.slice(0, 1).upper()
+}
+
+/// The initials of a customer: "AL" for "Ada Lovelace".
+pub fn initials(c: Customer) -> Str {
+  return «c.name.split(" ").map(fn(w) => initial(w)).join("")¦"{initial(c.first_name)}{initial(c.last_name)}"»
+}
+
+/// The opening of a letter.
+pub fn greeting(c: Customer) -> Str {
+  return "Dear {«c.name¦c.first_name} {c.last_name»}"
+}
+
+/// An address line.
+pub fn mailing_line(c: Customer) -> Str {
+  return "{«c.name¦c.first_name} {c.last_name»} <{c.email}>"
+}
+
+fn tier_of(text: Str) -> Tier {
+  return match text {
+    "gold" => Tier.Gold,
+    "silver" => Tier.Silver,
+    _ => Tier.Basic,
+  }
+}
+
+fn tier_text(t: Tier) -> Str {
+  return match t {
+    Tier.Gold => "gold",
+    Tier.Silver => "silver",
+    Tier.Basic => "basic",
+  }
+}
+
+/// A customer from a row of the customer file.
+pub fn parse_customer(row: Str) -> Option[Customer] {
+  let cells = row.split(",")
+  if cells.len() != «5¦6» {
+    return None
+  }
+  let id = cells.get_or(0, "").to_int()?
+  return Some(Customer {
+    id: id,
+    «name: cells.get_or(1, ""),
+    email: cells.get_or(2, ""),
+    tier: tier_of(cells.get_or(3, "")),
+    city: cells.get_or(4, ""),¦first_name: cells.get_or(1, ""),
+    last_name: cells.get_or(2, ""),
+    email: cells.get_or(3, ""),
+    tier: tier_of(cells.get_or(4, "")),
+    city: cells.get_or(5, ""),»
+  })
+}
+
+/// The first row of the customer file.
+pub fn customer_header() -> Str {
+  return «"id,name,email,tier,city"¦"id,first_name,last_name,email,tier,city"»
+}
+
+/// A row of the customer file.
+pub fn customer_row(c: Customer) -> Str {
+  return "{c.id},«{c.name}¦{c.first_name},{c.last_name}»,{c.email},{tier_text(c.tier)},{c.city}"
+}
+
+/// What is wrong with a customer.
+pub fn validate_customer(c: Customer) -> List[Str] {
+  var errors: List[Str] = []
+  «if c.name.is_empty() {
+    errors = errors.push("name is empty")
+  }¦if c.first_name.is_empty() {
+    errors = errors.push("first name is empty")
+  }
+  if c.last_name.is_empty() {
+    errors = errors.push("last name is empty")
+  }»
+  if not c.email.contains("@") {
+    errors = errors.push("bad email")
+  }
+  return errors
+}
+
+/// True for two records of the same person.
+pub fn same_person(a: Customer, b: Customer) -> Bool {
+  return «a.name.lower() == b.name.lower()¦a.first_name.lower() == b.first_name.lower() and a.last_name.lower() == b.last_name.lower()» and a.email == b.email
+}
+#### export
+use model.{Order, Product, Status}
+use money.{plain}
+use orders.{grand_total, status_label}
+
+/// A one-letter code for the warehouse system.
+pub fn status_code(s: Status) -> Str {
+  return match s {
+    Status.Draft => "D",
+    Status.Paid => "P",«¦
+    Status.OnHold => "H",»
+    Status.Packed => "K",
+    Status.Shipped => "S",
+    Status.Delivered => "V",
+    Status.Cancelled => "X",
+  }
+}
+
+/// A row of the orders file.
+pub fn order_row(o: Order) -> Str {
+  return "{o.id},{status_code(o.status)},{status_label(o.status)},{plain(grand_total(o))}"
+}
+
+/// A row of the products file.
+pub fn product_row(p: Product) -> Str {
+  return "{p.sku},{p.name},{plain(p.price)},{p.weight.fixed(2)}"
+}
+
+/// The orders file.
+pub fn orders_file(os: List[Order]) -> Str {
+  return ["id,code,status,total"].concat(os.map(fn(o) => order_row(o))).join("\n")
+}
+#### dashboard
+use model.{Order, Status}
+use money.{fmt}
+use orders.{grand_total, is_open, status_label}
+use analytics.{revenue}
+
+/// Every status, in the order the dashboard shows them.
+pub fn all_statuses() -> List[Status] {
+  return [Status.Draft, Status.Paid, «¦Status.OnHold, »Status.Packed, Status.Shipped, Status.Delivered, Status.Cancelled]
+}
+
+/// One line per status: "Paid: 3".
+pub fn status_counts(os: List[Order]) -> List[Str] {
+  return all_statuses().map(fn(s) => "{status_label(s)}: {os.count(fn(o) => o.status == s)}")
+}
+
+/// The colour of a status on the board.
+pub fn status_color(s: Status) -> Str {
+  return match s {
+    Status.Draft => "grey",
+    Status.Paid => "blue",«¦
+    Status.OnHold => "amber",»
+    Status.Packed => "blue",
+    Status.Shipped => "green",
+    Status.Delivered => "green",
+    Status.Cancelled => "red",
+  }
+}
+
+/// The money tied up in open orders.
+pub fn open_value(os: List[Order]) -> «Float¦Int» {
+  return os.filter(fn(o) => is_open(o.status)).map(fn(o) => grand_total(o)).«sum_float¦sum»()
+}
+
+/// The headline of the board.
+pub fn headline(os: List[Order]) -> Str {
+  return "{os.len()} orders, {fmt(revenue(os))} received, {fmt(open_value(os))} open"
+}
+
+/// True when the board should flag the money tied up: over 5000.00.
+pub fn value_alert(os: List[Order]) -> Bool {
+  return open_value(os) > «5000.0¦500000»
+}
+#### picking
+use model.{Order, Status}
+use orders.{item_count}
+
+/// True when the warehouse may pack the order.
+pub fn can_pack(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    Status.Paid => true,«¦
+    Status.OnHold => false,»
+    Status.Packed => false,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}
+
+/// The orders waiting to be packed.
+pub fn packing_queue(os: List[Order]) -> List[Order] {
+  return os.filter(fn(o) => can_pack(o.status))
+}
+
+/// The items waiting to be packed.
+pub fn items_to_pack(os: List[Order]) -> Int {
+  return packing_queue(os).map(fn(o) => item_count(o)).sum()
+}
+#### commission
+use model.{Order}
+use money.{«round2¦pct»}
+use orders.{grand_total}
+
+/// The share an agent earns on a sale.
+pub fn commission_rate(total: «Float¦Int») -> Float {
+  if total >= «1000.0¦100000» {
+    return 0.08
+  }
+  if total >= «100.0¦10000» {
+    return 0.05
+  }
+  return 0.02
+}
+
+/// The agent's money for a sale.
+pub fn commission(total: «Float¦Int») -> «Float¦Int» {
+  return «round2(total * commission_rate(total))¦pct(total, commission_rate(total))»
+}
+
+/// The agent's money over several orders.
+pub fn commission_total(os: List[Order]) -> «Float¦Int» {
+  return os.map(fn(o) => commission(grand_total(o))).«sum_float¦sum»()
+}
+
+/// True when an agent earned the monthly bonus: 250.00 in commission.
+pub fn earned_bonus(amount: «Float¦Int») -> Bool {
+  return amount >= «250.0¦25000»
+}
+#### audit
+use model.{Order, Status}
+use orders.{next_status, can_cancel}
+
+/// What is wrong with an order.
+pub fn check_order(o: Order) -> List[Str] {
+  var errors: List[Str] = []
+  if o.lines.is_empty() {
+    errors = errors.push("no lines")
+  }
+  if o.shipping < «0.0¦0» {
+    errors = errors.push("negative shipping")
+  }
+  if o.lines.any(fn(l) => l.unit_price <= «0.0¦0») {
+    errors = errors.push("bad price")
+  }
+  if o.lines.any(fn(l) => l.qty <= 0) {
+    errors = errors.push("bad quantity")
+  }
+  return errors
+}
+
+/// True when an order may go from one status to another.
+pub fn valid_step(from: Status, to: Status) -> Bool {
+  «¦if from == Status.Paid and to == Status.OnHold {
+    return true
+  }
+  if from == Status.OnHold and to == Status.Paid {
+    return true
+  }
+  »if to == Status.Cancelled {
+    return can_cancel(from)
+  }
+  return from != to and next_status(from) == to
+}
+#### sample
+use model.{Product, Customer, Line, Order, Status, Tier, Category}
+
+/// Products for the demo and for trying things out.
+pub fn sample_products() -> List[Product] {
+  return [
+    Product { sku: "B1", name: "Atlas", price: «24.5¦2450», weight: 1.2, category: Category.Book, stock: 4, supplier: 1 },
+    Product { sku: "T1", name: "Kite", price: «12.0¦1200», weight: 0.4, category: Category.Toy, stock: 9, supplier: 2 },
+    Product { sku: "F1", name: "Tea", price: «6.75¦675», weight: 0.2, category: Category.Food, stock: 30, supplier: 3 },
+    Product { sku: "H1", name: "Spade", price: «135.0¦13500», weight: 2.5, category: Category.Garden, stock: 2, supplier: 2 },
+  ]
+}
+
+/// Customers for the demo.
+pub fn sample_customers() -> List[Customer] {
+  return [
+    Customer { id: 1, «name: "Ada Lovelace"¦first_name: "Ada", last_name: "Lovelace"», email: "ada@example.org", tier: Tier.Gold, city: "Harbour" },
+    Customer { id: 2, «name: "Alan Turing"¦first_name: "Alan", last_name: "Turing"», email: "alan@example.org", tier: Tier.Basic, city: "Summit" },
+  ]
+}
+
+/// Orders for the demo.
+pub fn sample_orders() -> List[Order] {
+  return [
+    Order { id: 100, customer: 1, lines: [Line { sku: "B1", qty: 2, unit_price: «24.5¦2450» }], status: Status.Paid, shipping: «4.99¦499», day: 1 },
+    Order { id: 101, customer: 2, lines: [Line { sku: "H1", qty: 1, unit_price: «135.0¦13500» }, Line { sku: "F1", qty: 4, unit_price: «6.75¦675» }], status: Status.Shipped, shipping: «0.0¦0», day: 2 },
+  ]
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type Cand { len: Int, seq: List[Int] }\n\nfn none_cand() -> Cand {\n  let empty: List[Int] = []\n  return Cand { len: 0, seq: empty }\n}\n\nfn lex_less(a: List[Int], b: List[Int]) -> Bool {\n  if a.is_empty() or b.is_empty() {\n    return false\n  }\n  let x = a.first().unwrap_or(0)\n  let y = b.first().unwrap_or(0)\n  if x != y {\n    return x < y\n  }\n  return lex_less(a: a.drop(1), b: b.drop(1))\n}\n\nfn better(a: Cand, b: Cand) -> Bool {\n  if a.len != b.len {\n    return a.len > b.len\n  }\n  return lex_less(a: a.seq, b: b.seq)\n}\n\nfn prefer(acc: Cand, c: Cand) -> Cand {\n  if better(a: c, b: acc) {\n    return c\n  }\n  return acc\n}\n\nfn consider(acc: Cand, c: Cand, x: Int) -> Cand {\n  let tail_val = c.seq.last().unwrap_or(0)\n  if tail_val < x {\n    return prefer(acc: acc, c: c)\n  }\n  return acc\n}\n\nfn new_cand(cands: List[Cand], x: Int) -> Cand {\n  let prev = cands.fold(none_cand(), fn(acc, c) => consider(acc: acc, c: c, x: x))\n  if prev.len == 0 {\n    return Cand { len: 1, seq: [x] }\n  }\n  return Cand { len: prev.len + 1, seq: prev.seq.push(x) }\n}\n\npub fn lis(xs: List[Int]) -> List[Int] {\n  let none: List[Cand] = []\n  let cands = xs.fold(none, fn(cs, x) => cs.push(new_cand(cands: cs, x: x)))\n  let best = cands.fold(none_cand(), fn(acc, c) => prefer(acc: acc, c: c))\n  return best.seq\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

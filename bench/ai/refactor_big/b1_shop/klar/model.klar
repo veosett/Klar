@@ -1,0 +1,56 @@
+/// Where an order is in its life.
+pub enum Status {
+  Draft
+  Paid
+  Packed
+  Shipped
+  Delivered
+  Cancelled
+}
+
+pub enum Tier {
+  Basic
+  Silver
+  Gold
+}
+
+pub enum Category {
+  Book
+  Toy
+  Food
+  Tool
+  Garden
+}
+
+pub type Product {
+  sku: Str
+  name: Str
+  price: Float
+  weight: Float
+  category: Category
+  stock: Int
+  supplier: Int
+}
+
+pub type Customer {
+  id: Int
+  name: Str
+  email: Str
+  tier: Tier
+  city: Str
+}
+
+pub type Line {
+  sku: Str
+  qty: Int
+  unit_price: Float
+}
+
+pub type Order {
+  id: Int
+  customer: Int
+  lines: List[Line]
+  status: Status
+  shipping: Float
+  day: Int
+}

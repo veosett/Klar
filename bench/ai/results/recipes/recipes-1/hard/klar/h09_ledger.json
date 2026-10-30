@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_digit(c: Str) -> Bool {\n  return c == \"0\" or c == \"1\" or c == \"2\" or c == \"3\" or c == \"4\" or c == \"5\" or c == \"6\" or c == \"7\" or c == \"8\" or c == \"9\"\n}\n\nfn amount(s: Str) -> Option[Int] {\n  if s.is_empty() or (not (s.chars().all(fn(c) => is_digit(c)))) {\n    return None\n  }\n  let v = s.to_int().unwrap_or(0)\n  if v > 0 {\n    return Some(v)\n  }\n  return None\n}\n\nfn apply_op(accounts: Map[Str, Int], op: Str) -> Result[Map[Str, Int], Str] {\n  let parts = op.split(\" \")\n  let kind = parts.get_or(0, \"\")\n  let a = parts.get_or(1, \"\")\n  if kind == \"open\" and parts.len() == 2 {\n    if accounts.has(a) {\n      return Err(\"exists {a}\")\n    }\n    return Ok(accounts.set(a, 0))\n  }\n  if kind == \"dep\" and parts.len() == 3 {\n    let n = amount(parts.get_or(2, \"\")).ok_or(\"bad op\")?\n    if not (accounts.has(a)) {\n      return Err(\"unknown {a}\")\n    }\n    return Ok(accounts.set(a, accounts.get(a).unwrap_or(0) + n))\n  }\n  if kind == \"wd\" and parts.len() == 3 {\n    let n = amount(parts.get_or(2, \"\")).ok_or(\"bad op\")?\n    if not (accounts.has(a)) {\n      return Err(\"unknown {a}\")\n    }\n    let bal = accounts.get(a).unwrap_or(0)\n    if bal < n {\n      return Err(\"insufficient {a}\")\n    }\n    return Ok(accounts.set(a, bal - n))\n  }\n  if kind == \"move\" and parts.len() == 4 {\n    let b = parts.get_or(2, \"\")\n    let n = amount(parts.get_or(3, \"\")).ok_or(\"bad op\")?\n    if not (accounts.has(a)) {\n      return Err(\"unknown {a}\")\n    }\n    if not (accounts.has(b)) {\n      return Err(\"unknown {b}\")\n    }\n    let bal = accounts.get(a).unwrap_or(0)\n    if bal < n {\n      return Err(\"insufficient {a}\")\n    }\n    let after_take = accounts.set(a, bal - n)\n    return Ok(after_take.set(b, after_take.get(b).unwrap_or(0) + n))\n  }\n  return Err(\"bad op\")\n}\n\npub fn ledger(ops: List[Str]) -> Result[Map[Str, Int], Str] {\n  var accounts: Map[Str, Int] = Map {}\n  for op in ops {\n    accounts = apply_op(accounts, op)?\n  }\n  return Ok(accounts)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

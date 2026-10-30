@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def wrap(text: str, width: int) -> list[str]:\n    words = []\n    for word in text.split():\n        for i in range(0, len(word), width):\n            words.append(word[i:i + width])\n\n    lines = []\n    current = \"\"\n    for word in words:\n        if not current:\n            current = word\n        elif len(current) + 1 + len(word) <= width:\n            current = current + \" \" + word\n        else:\n            lines.append(current)\n            current = word\n    if current:\n        lines.append(current)\n    return lines\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

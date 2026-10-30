@@ -179,12 +179,13 @@ class Loader:
         m.source = source
         self.sources[display] = source
         self.by_path[path] = m
-        try:
-            m.program = parse(source, display)
-        except KlarSyntaxError as ex:
-            self.diags.append(ex.diag)
+        # every recoverable syntax error at once (klar/parser.py `parse_recovering`): the module is still checked
+        program, syntax_errors = parse_recovering(source, display)
+        self.diags.extend(syntax_errors)
+        if program is None:
             m.failed = True
             return m
+        m.program = program
         self.stack.append(path)
         imports = {}
         if self.prelude is not None and self.prelude.exports:
@@ -265,6 +266,9 @@ class Loader:
                     self.error("E0603", f"module `{dep_name}` has no item `{item}`", sp, hint=hint)
         self.stack.pop()
         m.checker = Checker(m.program, display, self.universe, imports, module=name, sys=m.is_sys)
+        # names whose import failed (already reported): their uses are not errors again
+        m.checker.unresolved = {item for d in m.program.decls if isinstance(d, N.UseDecl) for item in d.items
+                                if item not in imports}
         m.diags = m.checker.run()
         if not m.is_sys and not any(d.severity == "error" for d in m.diags):
             from .safety import analyze
@@ -349,4 +353,4 @@ def load_source(source, file="main.klar", root=None, with_runtime=False, overlay
     return _finish(loader, main)
 
 
-from .parser import parse  # noqa: E402  (late import keeps module graph simple)
+from .parser import parse, parse_recovering  # noqa: E402  (late import keeps module graph simple)

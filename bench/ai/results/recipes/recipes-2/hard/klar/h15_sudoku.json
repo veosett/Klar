@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(rows: List[Str], r: Int, c: Int) -> Str {\n  return rows.get_or(r, \"\").slice(c, c + 1)\n}\n\nfn no_repeat(cells: List[Str]) -> Bool {\n  let digits = cells.filter(fn(ch) => ch != \".\")\n  return digits.unique().len() == digits.len()\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n  if rows.len() != 9 {\n    return false\n  }\n  let shape_ok = rows.all(fn(row) => row.len() == 9 and row.chars().all(fn(ch) => \"123456789.\".contains(ch)))\n  if not shape_ok {\n    return false\n  }\n  let idx = range(0, 9)\n  let row_groups = idx.map(fn(r) => idx.map(fn(c) => cell(rows: rows, r: r, c: c)))\n  let col_groups = idx.map(fn(c) => idx.map(fn(r) => cell(rows: rows, r: r, c: c)))\n  let box_groups = idx.map(fn(b) => idx.map(fn(k) => cell(rows: rows, r: (b / 3) * 3 + k / 3, c: (b % 3) * 3 + k % 3)))\n  let all_groups = row_groups.concat(col_groups).concat(box_groups)\n  return all_groups.all(fn(g) => no_repeat(g))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

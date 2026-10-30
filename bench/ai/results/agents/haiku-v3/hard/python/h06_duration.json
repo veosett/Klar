@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import re\n\n_PATTERN = re.compile(\n    r\"(?:([0-9]+)d)?(?:([0-9]+)h)?(?:([0-9]+)m)?(?:([0-9]+)s)?\"\n)\n\n\ndef duration(s: str) -> int:\n    m = _PATTERN.fullmatch(s)\n    if m is None or not s:\n        raise ValueError(\"invalid duration\")\n    days, hours, minutes, seconds = (int(g) if g is not None else 0 for g in m.groups())\n    return days * 86400 + hours * 3600 + minutes * 60 + seconds\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

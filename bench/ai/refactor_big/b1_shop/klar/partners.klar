@@ -1,0 +1,144 @@
+/// The kinds of partner records.
+pub enum PartnerKind {
+  Reseller
+  Affiliate
+  Agent
+}
+
+pub type Partner {
+  id: Int
+  name: Str
+  city: Str
+  kind: PartnerKind
+  referrals: Int
+  share: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn partners_find(xs: List[Partner], id: Int) -> Option[Partner] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn partners_in_city(xs: List[Partner], city: Str) -> List[Partner] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn partners_active(xs: List[Partner]) -> List[Partner] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn partners_names(xs: List[Partner]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of referrals.
+pub fn partners_total_referrals(xs: List[Partner]) -> Int {
+  return xs.map(fn(x) => x.referrals).sum()
+}
+
+/// The sum of share.
+pub fn partners_total_share(xs: List[Partner]) -> Float {
+  return xs.map(fn(x) => x.share).sum_float()
+}
+
+/// The mean of share, 0 for no records.
+pub fn partners_average_share(xs: List[Partner]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return partners_total_share(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn partners_kind_label(k: PartnerKind) -> Str {
+  return match k {
+    PartnerKind.Reseller => "Reseller",
+    PartnerKind.Affiliate => "Affiliate",
+    PartnerKind.Agent => "Agent",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn partners_kind_weight(k: PartnerKind) -> Float {
+  return match k {
+    PartnerKind.Reseller => 1.0,
+    PartnerKind.Affiliate => 1.5,
+    PartnerKind.Agent => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn partners_describe(x: Partner) -> Str {
+  return "{x.name} ({x.city}), {partners_kind_label(x.kind)}: {x.referrals} referrals, {x.share.fixed(2)} share"
+}
+
+/// The records of one kind.
+pub fn partners_by_kind(xs: List[Partner], k: PartnerKind) -> List[Partner] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most referrals first.
+pub fn partners_ranked(xs: List[Partner]) -> List[Partner] {
+  return xs.sort_by(fn(x) => 0 - x.referrals)
+}
+
+/// The first few of the ranking.
+pub fn partners_top(xs: List[Partner], n: Int) -> List[Partner] {
+  return partners_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn partners_validate(x: Partner) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.referrals < 0 {
+    errors = errors.push("negative referrals")
+  }
+  if x.share < 0.0 {
+    errors = errors.push("negative share")
+  }
+  return errors
+}
+
+/// The record with share and referrals weighed together.
+pub fn partners_score(x: Partner) -> Float {
+  return x.share * partners_kind_weight(x.kind) + x.referrals.to_float()
+}
+
+/// A row of the export file.
+pub fn partners_row(x: Partner) -> Str {
+  return "{x.id},{x.name},{x.city},{partners_kind_label(x.kind)},{x.referrals},{x.share.fixed(2)}"
+}
+
+/// The export file.
+pub fn partners_file(xs: List[Partner]) -> Str {
+  return ["id,name,city,kind,referrals,share"].concat(xs.map(fn(x) => partners_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn partners_per_city(xs: List[Partner]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of share.
+pub fn partners_over(xs: List[Partner], limit: Float) -> List[Partner] {
+  return xs.filter(fn(x) => x.share > limit)
+}
+
+/// A line for the dashboard.
+pub fn partners_summary(xs: List[Partner]) -> Str {
+  return "{xs.len()} partner records, {partners_active(xs).len()} active, {partners_total_share(xs).fixed(2)} share"
+}

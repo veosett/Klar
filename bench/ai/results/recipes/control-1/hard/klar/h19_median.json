@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn medians(xs: List[Int], k: Int) -> List[Float] {\n  var out: List[Float] = []\n  if k < 1 or k > xs.len() {\n    return out\n  }\n  for s in range(0, xs.len() - k + 1) {\n    let window = xs.slice(s, s + k).sort()\n    let mid = k / 2\n    if k % 2 == 1 {\n      out = out.push(window.get_or(mid, 0).to_float())\n    } else {\n      let pair_sum = window.get_or(mid - 1, 0) + window.get_or(mid, 0)\n      out = out.push(pair_sum.to_float() / 2.0)\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,61 @@
+use model.{Product, Category}
+use money.{fmt, round2}
+
+/// How a product is shelved.
+pub fn price_band(p: Product) -> Str {
+  if p.price < 10.0 {
+    return "cheap"
+  }
+  if p.price < 100.0 {
+    return "regular"
+  }
+  return "premium"
+}
+
+/// The price after taking off a share of it.
+pub fn sale_price(p: Product, off: Float) -> Float {
+  return round2(p.price - p.price * off)
+}
+
+/// The value of the stock of a product.
+pub fn stock_value(p: Product) -> Float {
+  return p.price * p.stock.to_float()
+}
+
+/// The value of all the stock.
+pub fn catalog_value(ps: List[Product]) -> Float {
+  return ps.map(fn(p) => stock_value(p)).sum_float()
+}
+
+/// The average price, or nothing for no products.
+pub fn average_price(ps: List[Product]) -> Float {
+  if ps.is_empty() {
+    return 0.0
+  }
+  return round2(ps.map(fn(p) => p.price).sum_float() / ps.len().to_float())
+}
+
+/// The dearest product.
+pub fn most_expensive(ps: List[Product]) -> Option[Product] {
+  return ps.max_by(fn(p) => p.price)
+}
+
+/// Products one can buy with a budget.
+pub fn within_budget(ps: List[Product], budget: Float) -> List[Product] {
+  return ps.filter(fn(p) => p.price <= budget)
+}
+
+/// A shelf label.
+pub fn price_label(p: Product) -> Str {
+  return "{p.name}: {fmt(p.price)}"
+}
+
+/// True when a product counts as a gift: not food, and under 25.00.
+pub fn is_gift(p: Product) -> Bool {
+  return p.category != Category.Food and p.price < 25.0
+}
+
+/// Products of one category, dearest first.
+pub fn in_category(ps: List[Product], c: Category) -> List[Product] {
+  return ps.filter(fn(p) => p.category == c).sort_by(fn(p) => 0.0 - p.price)
+}

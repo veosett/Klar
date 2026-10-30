@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn rooms(meetings: List[List[Int]]) -> Int {\n  let starts = meetings.map(fn(m) => m.get_or(0, 0))\n  let counts = starts.map(fn(s) => meetings.count(fn(m) => (m.get_or(0, 0) <= s) and (s < m.get_or(1, 0))))\n  return counts.max().unwrap_or(0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

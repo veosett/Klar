@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn edit(a: Str, b: Str) -> Int {\n  let ca = a.chars()\n  let cb = b.chars()\n  let m = cb.len()\n  var prev: List[Int] = range(0, m + 1)\n  for i in range(1, ca.len() + 1) {\n    let x = ca.get_or(i - 1, \"\")\n    var row: List[Int] = [i]\n    for j in range(1, m + 1) {\n      let y = cb.get_or(j - 1, \"\")\n      let subst_cost = match x == y {\n        true => 0,\n        false => 1,\n      }\n      let up = prev.get_or(j, 0) + 1\n      let left = row.get_or(j - 1, 0) + 1\n      let diag = prev.get_or(j - 1, 0) + subst_cost\n      row = row.push(up.min(left).min(diag))\n    }\n    prev = row\n  }\n  return prev.get_or(m, 0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

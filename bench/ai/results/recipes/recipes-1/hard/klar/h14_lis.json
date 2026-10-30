@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn lis(xs: List[Int]) -> List[Int] {\n  let n = xs.len()\n  // best[i] = length of the longest increasing subsequence that starts at index i\n  var best: List[Int] = range(0, n).map(fn(_i) => 0)\n  for i in range(0, n).reverse() {\n    var bi = 1\n    for j in range(i + 1, n) {\n      if xs.get_or(j, 0) > xs.get_or(i, 0) and best.get_or(j, 0) + 1 > bi {\n        bi = best.get_or(j, 0) + 1\n      }\n    }\n    best = best.set(i, bi)\n  }\n  let longest = best.max().unwrap_or(0)\n  var out: List[Int] = []\n  var cur = -1\n  var prev_val = 0\n  var has_prev = false\n  var need = longest\n  while need > 0 {\n    var pick = -1\n    var pick_val = 0\n    for j in range(cur + 1, n) {\n      let v = xs.get_or(j, 0)\n      let fits = (not has_prev) or v > prev_val\n      if best.get_or(j, 0) == need and fits and (pick < 0 or v < pick_val) {\n        pick = j\n        pick_val = v\n      }\n    }\n    out = out.push(pick_val)\n    cur = pick\n    prev_val = pick_val\n    has_prev = true\n    need = need - 1\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

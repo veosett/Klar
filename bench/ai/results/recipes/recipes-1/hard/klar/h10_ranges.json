@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn run_text(first: Int, last: Int) -> List[Str] {\n  if last - first >= 2 {\n    return [first.to_str() + \"-\" + last.to_str()]\n  }\n  if last - first == 1 {\n    return [first.to_str(), last.to_str()]\n  }\n  return [first.to_str()]\n}\n\npub fn ranges(xs: List[Int]) -> Str {\n  let sorted_unique = xs.unique().sort()\n  var parts: List[Str] = []\n  var start = 0\n  var prev = 0\n  var started = false\n  for x in sorted_unique {\n    if not started {\n      start = x\n      started = true\n    } else if x != prev + 1 {\n      parts = parts.concat(run_text(start, prev))\n      start = x\n    }\n    prev = x\n  }\n  if started {\n    parts = parts.concat(run_text(start, prev))\n  }\n  return parts.join(\",\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

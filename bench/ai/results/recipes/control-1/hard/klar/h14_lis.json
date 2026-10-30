@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn lis(xs: List[Int]) -> List[Int] {\n  let n = xs.len()\n  // lens[i]: length of the longest increasing subsequence that starts at i\n  var lens: List[Int] = []\n  for _u in range(0, n) {\n    lens = lens.push(1)\n  }\n  var i = n - 1\n  while i >= 0 {\n    var best = 1\n    var j = i + 1\n    while j < n {\n      if xs.get_or(j, 0) > xs.get_or(i, 0) and lens.get_or(j, 0) + 1 > best {\n        best = lens.get_or(j, 0) + 1\n      }\n      j = j + 1\n    }\n    lens = lens.set(i, best)\n    i = i - 1\n  }\n  var max_len = 0\n  for l in lens {\n    if l > max_len {\n      max_len = l\n    }\n  }\n  // Walk forward: each next element must extend the chain by one and be the\n  // smallest such value (the earliest one on ties) to get the smallest sequence.\n  var out: List[Int] = []\n  var cur = -1\n  var need = max_len\n  while need > 0 {\n    var pick = -1\n    var k = cur + 1\n    while k < n {\n      let fits = cur < 0 or xs.get_or(k, 0) > xs.get_or(cur, 0)\n      if fits and lens.get_or(k, 0) == need {\n        if pick < 0 or xs.get_or(k, 0) < xs.get_or(pick, 0) {\n          pick = k\n        }\n      }\n      k = k + 1\n    }\n    cur = pick\n    out = out.push(xs.get_or(pick, 0))\n    need = need - 1\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,144 @@
+/// The kinds of contract records.
+pub enum ContractKind {
+  Lease
+  Service
+  Licence
+}
+
+pub type Contract {
+  id: Int
+  name: Str
+  city: Str
+  kind: ContractKind
+  months: Int
+  fee: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn contracts_find(xs: List[Contract], id: Int) -> Option[Contract] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn contracts_in_city(xs: List[Contract], city: Str) -> List[Contract] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn contracts_active(xs: List[Contract]) -> List[Contract] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn contracts_names(xs: List[Contract]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of months.
+pub fn contracts_total_months(xs: List[Contract]) -> Int {
+  return xs.map(fn(x) => x.months).sum()
+}
+
+/// The sum of fee.
+pub fn contracts_total_fee(xs: List[Contract]) -> Float {
+  return xs.map(fn(x) => x.fee).sum_float()
+}
+
+/// The mean of fee, 0 for no records.
+pub fn contracts_average_fee(xs: List[Contract]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return contracts_total_fee(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn contracts_kind_label(k: ContractKind) -> Str {
+  return match k {
+    ContractKind.Lease => "Lease",
+    ContractKind.Service => "Service",
+    ContractKind.Licence => "Licence",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn contracts_kind_weight(k: ContractKind) -> Float {
+  return match k {
+    ContractKind.Lease => 1.0,
+    ContractKind.Service => 1.5,
+    ContractKind.Licence => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn contracts_describe(x: Contract) -> Str {
+  return "{x.name} ({x.city}), {contracts_kind_label(x.kind)}: {x.months} months, {x.fee.fixed(2)} fee"
+}
+
+/// The records of one kind.
+pub fn contracts_by_kind(xs: List[Contract], k: ContractKind) -> List[Contract] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most months first.
+pub fn contracts_ranked(xs: List[Contract]) -> List[Contract] {
+  return xs.sort_by(fn(x) => 0 - x.months)
+}
+
+/// The first few of the ranking.
+pub fn contracts_top(xs: List[Contract], n: Int) -> List[Contract] {
+  return contracts_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn contracts_validate(x: Contract) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.months < 0 {
+    errors = errors.push("negative months")
+  }
+  if x.fee < 0.0 {
+    errors = errors.push("negative fee")
+  }
+  return errors
+}
+
+/// The record with fee and months weighed together.
+pub fn contracts_score(x: Contract) -> Float {
+  return x.fee * contracts_kind_weight(x.kind) + x.months.to_float()
+}
+
+/// A row of the export file.
+pub fn contracts_row(x: Contract) -> Str {
+  return "{x.id},{x.name},{x.city},{contracts_kind_label(x.kind)},{x.months},{x.fee.fixed(2)}"
+}
+
+/// The export file.
+pub fn contracts_file(xs: List[Contract]) -> Str {
+  return ["id,name,city,kind,months,fee"].concat(xs.map(fn(x) => contracts_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn contracts_per_city(xs: List[Contract]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of fee.
+pub fn contracts_over(xs: List[Contract], limit: Float) -> List[Contract] {
+  return xs.filter(fn(x) => x.fee > limit)
+}
+
+/// A line for the dashboard.
+pub fn contracts_summary(xs: List[Contract]) -> Str {
+  return "{xs.len()} contract records, {contracts_active(xs).len()} active, {contracts_total_fee(xs).fixed(2)} fee"
+}

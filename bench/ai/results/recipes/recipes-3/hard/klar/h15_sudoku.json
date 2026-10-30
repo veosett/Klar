@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(rows: List[Str], r: Int, c: Int) -> Str {\n  return rows.get_or(r, \"\").slice(c, c + 1)\n}\n\nfn has_dup(cells: List[Str]) -> Bool {\n  let filled = cells.filter(fn(x) => x != \".\")\n  return filled.unique().len() != filled.len()\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n  if rows.len() != 9 {\n    return false\n  }\n  for r in range(0, 9) {\n    let row = rows.get_or(r, \"\")\n    if row.len() != 9 {\n      return false\n    }\n    for c in range(0, 9) {\n      let ch = cell(rows: rows, r: r, c: c)\n      if not \"123456789.\".contains(ch) {\n        return false\n      }\n    }\n  }\n  for u in range(0, 9) {\n    var rowc: List[Str] = []\n    var colc: List[Str] = []\n    var boxc: List[Str] = []\n    for k in range(0, 9) {\n      rowc = rowc.push(cell(rows: rows, r: u, c: k))\n      colc = colc.push(cell(rows: rows, r: k, c: u))\n      let br = 3 * (u / 3) + k / 3\n      let bc = 3 * (u % 3) + k % 3\n      boxc = boxc.push(cell(rows: rows, r: br, c: bc))\n    }\n    if has_dup(rowc) or has_dup(colc) or has_dup(boxc) {\n      return false\n    }\n  }\n  return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

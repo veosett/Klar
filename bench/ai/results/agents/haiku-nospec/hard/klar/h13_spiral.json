@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(m: List[List[Int]], r: Int, c: Int) -> Int {\n    match m.get(r) {\n        Some(row) => {\n            match row.get(c) {\n                Some(v) => {\n                    return v\n                }\n                None => {\n                    return 0\n                }\n            }\n        }\n        None => {\n            return 0\n        }\n    }\n}\n\nfn row_len(m: List[List[Int]]) -> Int {\n    match m.get(0) {\n        Some(row) => {\n            return row.len()\n        }\n        None => {\n            return 0\n        }\n    }\n}\n\npub fn spiral(m: List[List[Int]]) -> List[Int] {\n    var out: List[Int] = []\n    if m.len() == 0 {\n        return out\n    }\n    var top = 0\n    var bottom = m.len() - 1\n    var left = 0\n    var right = row_len(m: m) - 1\n\n    while top <= bottom and left <= right {\n        var c = left\n        while c <= right {\n            out = out.push(cell(m: m, r: top, c: c))\n            c = c + 1\n        }\n        top = top + 1\n\n        var r = top\n        while r <= bottom {\n            out = out.push(cell(m: m, r: r, c: right))\n            r = r + 1\n        }\n        right = right - 1\n\n        if top <= bottom {\n            c = right\n            while c >= left {\n                out = out.push(cell(m: m, r: bottom, c: c))\n                c = c - 1\n            }\n            bottom = bottom - 1\n        }\n\n        if left <= right {\n            r = bottom\n            while r >= top {\n                out = out.push(cell(m: m, r: r, c: left))\n                r = r - 1\n            }\n            left = left + 1\n        }\n    }\n    return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

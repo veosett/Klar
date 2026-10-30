@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn relax(dist: List[Int], edge: List[Int]) -> List[Int] {\n  let u = edge.get_or(0, 0)\n  let v = edge.get_or(1, 0)\n  let w = edge.get_or(2, 0)\n  let d_u = dist.get_or(u, -1)\n  if d_u < 0 {\n    return dist\n  }\n  let d_v = dist.get_or(v, -1)\n  let cand = d_u + w\n  if d_v < 0 or cand < d_v {\n    return dist.set(v, cand)\n  }\n  return dist\n}\n\nfn sweep(dist: List[Int], edges: List[List[Int]]) -> List[Int] {\n  return edges.fold(dist, fn(d, e) => relax(d, e))\n}\n\nfn settle(dist: List[Int], edges: List[List[Int]], rounds: Int) -> List[Int] {\n  if rounds <= 0 {\n    return dist\n  }\n  return settle(dist: sweep(dist: dist, edges: edges), edges: edges, rounds: rounds - 1)\n}\n\npub fn paths(n: Int, edges: List[List[Int]], src: Int) -> List[Int] {\n  let start = range(0, n).map(fn(_i) => -1).set(src, 0)\n  return settle(dist: start, edges: edges, rounds: n)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

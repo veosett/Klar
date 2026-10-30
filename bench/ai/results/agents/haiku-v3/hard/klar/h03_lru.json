@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn touch(keys: List[Str], k: Str) -> List[Str] {\n  return keys.filter(fn(x) => x != k).push(k)\n}\n\npub fn lru(capacity: Int, ops: List[Str]) -> List[Str] {\n  var keys: List[Str] = []\n  var vals: Map[Str, Str] = Map {}\n  var results: List[Str] = []\n  for op in ops {\n    let parts = op.split(\" \")\n    let cmd = parts.get_or(0, \"\")\n    let k = parts.get_or(1, \"\")\n    if cmd == \"put\" {\n      let v = parts.get_or(2, \"\")\n      if capacity > 0 {\n        if (not vals.has(k)) and (keys.len() >= capacity) {\n          let oldest = keys.get_or(0, \"\")\n          keys = keys.drop(1)\n          vals = vals.remove(oldest)\n        }\n        vals = vals.set(k, v)\n        keys = touch(keys, k)\n      }\n    } else {\n      if vals.has(k) {\n        results = results.push(vals.get(k).unwrap_or(\"-\"))\n        keys = touch(keys, k)\n      } else {\n        results = results.push(\"-\")\n      }\n    }\n  }\n  return results\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

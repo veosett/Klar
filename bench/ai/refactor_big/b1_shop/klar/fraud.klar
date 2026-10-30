@@ -1,0 +1,36 @@
+use model.{Order, Customer, Status, Tier}
+use orders.{grand_total, item_count}
+
+/// How suspicious an order looks.
+pub fn risk_score(o: Order, c: Customer) -> Int {
+  var score = 0
+  if grand_total(o) >= 1000.0 {
+    score = score + 3
+  } else if grand_total(o) >= 300.0 {
+    score = score + 1
+  }
+  if item_count(o) > 20 {
+    score = score + 1
+  }
+  if c.tier == Tier.Basic {
+    score = score + 1
+  }
+  return score
+}
+
+/// True when fraud review should look at the order.
+pub fn needs_review(o: Order, c: Customer) -> Bool {
+  return is_reviewable(o.status) and risk_score(o, c) >= 3
+}
+
+/// True when the order can still be stopped by a review.
+pub fn is_reviewable(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    Status.Paid => true,
+    Status.Packed => true,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}

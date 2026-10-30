@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn busy_at(meetings: List[List[Int]], t: Int) -> Int {\n  return meetings.count(fn(o) => o.get_or(0, 0) <= t and o.get_or(1, 0) > t)\n}\n\npub fn rooms(meetings: List[List[Int]]) -> Int {\n  let counts = meetings.map(fn(m) => busy_at(meetings, m.get_or(0, 0)))\n  return counts.max().unwrap_or(0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

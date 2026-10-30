@@ -30,6 +30,19 @@ jobs:
           python -m klar run examples/features.klar
           python -m klar build examples/shapes.klar -o shapes-bin
 
+  no-python:
+    # Python only makes the seed; everything after it runs in a container that has no Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Seed compiler
+        run: python -m klar build compiler/klarc.klar -o seed-klarc
+      - name: From the seed to a working klarc, without Python
+        run: docker run --rm -v "$PWD:/w" -w /w -e KLARC=/w/seed-klarc debian:stable-slim sh tests/no_python.sh
+
   vscode:
     # the VS Code extension against a real VS Code: diagnostics, hover, definition, completion, references, quick fix
     runs-on: ubuntu-latest

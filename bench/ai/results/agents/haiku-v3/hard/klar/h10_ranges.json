@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn ranges(xs: List[Int]) -> Str {\n  let sorted = xs.unique().sort()\n  var parts: List[Str] = []\n  var i = 0\n  while i < sorted.len() {\n    let first = sorted.get_or(i, 0)\n    var j = i\n    while j + 1 < sorted.len() and sorted.get_or(j + 1, 0) == sorted.get_or(j, 0) + 1 {\n      j = j + 1\n    }\n    let last = sorted.get_or(j, 0)\n    if j - i >= 2 {\n      parts = parts.push(first.to_str() + \"-\" + last.to_str())\n    } else if j - i == 1 {\n      parts = parts.push(first.to_str())\n      parts = parts.push(last.to_str())\n    } else {\n      parts = parts.push(first.to_str())\n    }\n    i = j + 1\n  }\n  return parts.join(\",\")\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

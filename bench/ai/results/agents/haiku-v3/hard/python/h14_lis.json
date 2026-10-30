@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def lis(xs: list[int]) -> list[int]:\n    n = len(xs)\n    if n == 0:\n        return []\n\n    # f[i] = length of the longest strictly increasing subsequence starting at i.\n    f = [1] * n\n    for i in range(n - 1, -1, -1):\n        best = 1\n        for j in range(i + 1, n):\n            if xs[j] > xs[i] and f[j] + 1 > best:\n                best = f[j] + 1\n        f[i] = best\n\n    total = max(f)\n    result = []\n    prev_index = -1\n    need = total\n    while need > 0:\n        # Pick the smallest value that can still start a subsequence of the\n        # remaining length after prev_index (earliest index on ties).\n        chosen = -1\n        for j in range(prev_index + 1, n):\n            if f[j] != need:\n                continue\n            if prev_index >= 0 and xs[j] <= xs[prev_index]:\n                continue\n            if chosen == -1 or xs[j] < xs[chosen]:\n                chosen = j\n        result.append(xs[chosen])\n        prev_index = chosen\n        need -= 1\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

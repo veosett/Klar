@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn turn_rest(rows: List[List[Int]], cols: Int) -> List[List[Int]] {\n  let col_indexes = range(0, cols)\n  let columns = col_indexes.map(fn(c) => rows.map(fn(r) => r.get_or(c, 0)))\n  return columns.reverse()\n}\n\npub fn spiral(m: List[List[Int]]) -> List[Int] {\n  let empty_row: List[Int] = []\n  let head = m.first().unwrap_or(empty_row)\n  let rest = m.drop(1)\n  let cols = head.len()\n  if rest.is_empty() or cols == 0 {\n    return head\n  }\n  let next = turn_rest(rows: rest, cols: cols)\n  return head.concat(spiral(next))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

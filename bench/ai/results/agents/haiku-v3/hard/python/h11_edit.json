@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def edit(a: str, b: str) -> int:\n    if len(a) < len(b):\n        a, b = b, a\n    previous = list(range(len(b) + 1))\n    for i, ca in enumerate(a, start=1):\n        current = [i]\n        for j, cb in enumerate(b, start=1):\n            cost = 0 if ca == cb else 1\n            current.append(min(previous[j] + 1,\n                               current[j - 1] + 1,\n                               previous[j - 1] + cost))\n        previous = current\n    return previous[-1]\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

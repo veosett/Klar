@@ -1,0 +1,14 @@
+/// Money as digits: "12.50".
+pub fn plain(amount: Float) -> Str {
+  return amount.fixed(2)
+}
+
+/// Money as text: "$12.50".
+pub fn fmt(amount: Float) -> Str {
+  return "${plain(amount)}"
+}
+
+/// An amount rounded to the cent.
+pub fn round2(amount: Float) -> Float {
+  return amount.round_to(2)
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn add_decimal(a: Str, b: Str) -> Str {\n  let total = a.to_int().unwrap_or(0) + b.to_int().unwrap_or(0)\n  return total.to_str()\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

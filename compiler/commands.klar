@@ -1,15 +1,1060 @@
-{
- "attempts": [
-  {
-   "files": {
-    "cart.klar": "use catalog.{Item}\n\n/// Minimum amount (after discount, before tax) for free shipping: $50.00, in cents.\npub const FREE_SHIPPING_MIN: Int = 5000\n\npub type Line { item: Item, qty: Int }\n\npub type Cart { lines: List[Line], code: Option[Str] }\n\npub fn new_cart() -> Cart {\n  return Cart { lines: [], code: None }\n}\n\npub fn add_line(cart: Cart, item: Item, qty: Int) -> Result[Cart, Str] {\n  if qty < 1 or qty > 99 {\n    return Err(\"invalid quantity: {qty}\")\n  }\n  return Ok(cart with { lines: cart.lines.push(Line { item: item, qty: qty }) })\n}\n\n/// Percentage taken off by a discount code, None for an unknown code.\npub fn discount_percent(code: Str) -> Option[Int] {\n  return match code {\n    \"SAVE10\" => Some(10),\n    \"WELCOME5\" => Some(5),\n    \"VIP15\" => Some(15),\n    \"HALF\" => Some(50),\n    _ => None,\n  }\n}\n\npub fn apply_code(cart: Cart, code: Str) -> Result[Cart, Str] {\n  if discount_percent(code).is_none() {\n    return Err(\"unknown code: {code}\")\n  }\n  return Ok(cart with { code: Some(code) })\n}\n\npub fn item_count(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + l.qty)\n}\n\n/// Total of one line in cents.\npub fn line_total(line: Line) -> Int {\n  return line.item.price_cents * line.qty\n}\n\npub fn largest_line(cart: Cart) -> Option[Line] {\n  return cart.lines.max_by(fn(l) => line_total(l))\n}\n\npub fn subtotal(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + line_total(l))\n}\n\n/// The discount for the cart's code in cents, rounded to the nearest cent, halves up (0 without a code).\npub fn discount(cart: Cart) -> Int {\n  let percent = match cart.code {\n    Some(c) => discount_percent(c).unwrap_or(0),\n    None => 0,\n  }\n  return (subtotal(cart) * percent + 50) / 100\n}\n\n/// Tax in cents on the subtotal after the discount; the rate is in basis points (825 = 8.25%).\npub fn tax(cart: Cart, rate_bp: Int) -> Int {\n  let taxable = subtotal(cart) - discount(cart)\n  return (taxable * rate_bp + 5000) / 10000\n}\n\npub fn total(cart: Cart, rate_bp: Int) -> Int {\n  return subtotal(cart) - discount(cart) + tax(cart, rate_bp)\n}\n\n/// How much more must be bought (after discount) to get free shipping, in cents.\npub fn free_shipping_gap(cart: Cart) -> Int {\n  let net = subtotal(cart) - discount(cart)\n  if net >= FREE_SHIPPING_MIN {\n    return 0\n  }\n  return FREE_SHIPPING_MIN - net\n}\n",
-    "catalog.klar": "use money.{format_amount}\n\npub type Item { name: Str, price_cents: Int }\n\n/// Builds a validated item: the name must not be blank and the price must be positive (in cents).\npub fn make_item(name: Str, price_cents: Int) -> Result[Item, Str] {\n  if name.trim().is_empty() {\n    return Err(\"empty name\")\n  }\n  if price_cents <= 0 {\n    return Err(\"invalid price for {name}\")\n  }\n  return Ok(Item { name: name, price_cents: price_cents })\n}\n\npub fn default_catalog() -> List[Item] {\n  return [\n    Item { name: \"Widget\", price_cents: 350 },\n    Item { name: \"Gadget\", price_cents: 1250 },\n    Item { name: \"Gizmo\", price_cents: 4999 },\n    Item { name: \"Cable\", price_cents: 725 },\n    Item { name: \"Case\", price_cents: 2400 },\n  ]\n}\n\npub fn find_item(items: List[Item], name: Str) -> Option[Item] {\n  return items.find(fn(i) => i.name == name)\n}\n\n/// Cheapest first.\npub fn sorted_by_price(items: List[Item]) -> List[Item] {\n  return items.sort_by(fn(i) => i.price_cents)\n}\n\npub fn cheapest(items: List[Item]) -> Option[Item] {\n  return items.min_by(fn(i) => i.price_cents)\n}\n\n/// One line per item: \"Widget - $3.50\".\npub fn catalog_text(items: List[Item]) -> Str {\n  return items.map(fn(i) => \"{i.name} - {format_amount(i.price_cents)}\").join(\"\\n\")\n}\n",
-    "money.klar": "/// Formats an amount in cents: 1250 -> \"$12.50\", -250 -> \"-$2.50\", 5 -> \"$0.05\".\npub fn format_amount(cents: Int) -> Str {\n  let sign = match cents < 0 {\n    true => \"-\",\n    false => \"\",\n  }\n  let magnitude = cents.abs()\n  let dollars = magnitude / 100\n  let rest = (magnitude % 100).to_str().pad_left(2, \"0\")\n  return \"{sign}${dollars}.{rest}\"\n}\n\n/// Whether the text is one or more ASCII digits.\nfn is_digits(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  return s.chars().all(fn(c) => \"0123456789\".contains(c))\n}\n\n/// Parses \"12.5\", \"12\" or \"$12.50\" (surrounding spaces allowed) into cents: \"12.5\" -> 1250.\npub fn parse_amount(text: Str) -> Result[Int, Str] {\n  var t = text.trim()\n  if t.starts_with(\"$\") {\n    t = t.slice(1, t.len())\n  }\n  let parts = t.split(\".\")\n  let whole = parts.get_or(0, \"\")\n  let fraction = parts.get_or(1, \"\")\n  let fraction_ok = parts.len() == 1 or (fraction.len() >= 1 and fraction.len() <= 2 and is_digits(fraction))\n  if parts.len() > 2 or not is_digits(whole) or not fraction_ok {\n    return Err(\"invalid amount: \" + text)\n  }\n  let dollars = whole.to_int().unwrap_or(0)\n  let cents_part = fraction.pad_right(2, \"0\").to_int().unwrap_or(0)\n  return Ok(dollars * 100 + cents_part)\n}\n",
-    "receipt.klar": "use cart.{Cart, Line, discount, free_shipping_gap, item_count, line_total, subtotal, tax, total}\nuse money.{format_amount}\n\n/// \"2 x Widget @ $3.50 = $7.00\"\npub fn line_text(line: Line) -> Str {\n  return \"{line.qty} x {line.item.name} @ {format_amount(line.item.price_cents)} = {format_amount(line_total(line))}\"\n}\n\npub fn render(cart: Cart, rate_bp: Int) -> Str {\n  let discount_lines: List[Str] = match cart.code {\n    Some(c) => [\"Discount ({c}): -{format_amount(discount(cart))}\"],\n    None => [],\n  }\n  let gap = free_shipping_gap(cart)\n  let footer = match gap > 0 {\n    true => \"Add {format_amount(gap)} more for free shipping\",\n    false => \"Free shipping\",\n  }\n  let lines = cart.lines.map(line_text)\n    .push(\"Subtotal: {format_amount(subtotal(cart))}\")\n    .concat(discount_lines)\n    .push(\"Tax: {format_amount(tax(cart, rate_bp))}\")\n    .push(\"Total: {format_amount(total(cart, rate_bp))}\")\n    .push(footer)\n  return lines.join(\"\\n\")\n}\n\n/// \"3 items, total $19.00\"\npub fn summary(cart: Cart, rate_bp: Int) -> Str {\n  let n = item_count(cart)\n  let noun = match n == 1 {\n    true => \"item\",\n    false => \"items\",\n  }\n  return \"{n} {noun}, total {format_amount(total(cart, rate_bp))}\"\n}\n"
-   },
-   "stage": "pass",
-   "ok": true
+// The developer tools of `klarc` (the counterparts of klar/tools/commands.py), written in Klar. Their output is the
+// output of the Python commands, line for line.
+use difflib.{lines_keep, unified_diff}
+use fmt.{format_checked}
+use ast.{Decl, Span, TypeExpr}
+use astjson.{ast_text}
+use builtin_sigs.{agents_template, diag_codes, global_sigs, lib_template, main_template, method_sigs}
+use checker.{Diag, FixEdit}
+use context.{DEFAULT_TOKENS, context, context_json, context_text}
+use inspect.{NameOcc, UMod, doc_json, doc_lookup, doc_text, name_occurrences, outline, outline_json, outline_text}
+use inspect.{main_module, sig_text, user_modules}
+use jsonout.{J, compact, json_list, pretty}
+use loader.{Ld, load_program}
+use libfs.{list_source_dir, read_source}
+use parser.{ParseError, parse_program}
+use report.{diag_json, edit_file, render_report, user_diags}
+
+/// The .klar files of the given paths: files as given, directories walked in sorted order (files of a directory
+/// before its subdirectories; hidden directories, `build`, `__pycache__` and `node_modules` skipped).
+pub fn klar_files(paths: List[Str]) -> List[Str] uses fs {
+  var out: List[Str] = []
+  for p in paths {
+    if is_dir(p) {
+      out = out.concat(walk(p))
+    } else {
+      out = out.push(p)
+    }
   }
- ],
- "solved": true
+  return out
+}
+
+fn join_path(dir: Str, name: Str) -> Str {
+  if dir.ends_with("/") or dir.ends_with("\\") {
+    return dir + name
+  }
+  return dir + "/" + name
+}
+
+fn walk(dir: Str) -> List[Str] uses fs {
+  let names = list_dir(dir).unwrap_or([])
+  var files: List[Str] = []
+  var dirs: List[Str] = []
+  for name in names {
+    let path = join_path(dir, name)
+    if is_dir(path) {
+      if not name.starts_with(".") and not ["build", "__pycache__", "node_modules"].contains(name) {
+        dirs = dirs.push(path)
+      }
+    } else if name.ends_with(".klar") {
+      files = files.push(path)
+    }
+  }
+  for d in dirs {
+    files = files.concat(walk(d))
+  }
+  return files
+}
+
+/// `klarc fmt [paths] [--check] [--diff] [--json]`: the exit code.
+pub fn fmt_command(args: List[Str]) -> Int uses io, fs {
+  let check = args.contains("--check")
+  let diff = args.contains("--diff")
+  let json = args.contains("--json")
+  var paths = args.filter(fn(a) => not a.starts_with("--"))
+  if paths.is_empty() {
+    paths = ["."]
+  }
+  var changed: List[Str] = []
+  var failed: List[Str] = []
+  for path in klar_files(paths) {
+    match read_file(path) {
+      Err(e) => {
+        failed = failed.push(path)
+        if not json {
+          eprint("{path}: {e}")
+        }
+      },
+      Ok(raw) => {
+        // (like Python's text mode: \r\n and \r read as \n)
+        let src = raw.replace("\r\n", "\n").replace("\r", "\n")
+        match format_checked(src) {
+          Err(msg) => {
+            failed = failed.push(path)
+            if not json {
+              eprint("{path}: {msg}")
+            }
+          },
+          Ok(text) => {
+            if text != src {
+              changed = changed.push(path)
+              if diff {
+                print_raw(unified_diff(a: lines_keep(src), b: lines_keep(text), from_file: path,
+                  to_file: path + " (formatted)"))
+              }
+              if not check and not diff {
+                match write_file(path, text) {
+                  Ok(_) => {},
+                  Err(e) => {
+                    eprint("{path}: {e}")
+                  },
+                }
+              }
+            }
+          },
+        }
+      },
+    }
+  }
+  if diff and not json {
+    // (only the diff)
+  } else if json {
+    let ok = failed.is_empty() and not (check and not changed.is_empty())
+    print("\{\"ok\":{ok},\"changed\":{json_list(changed)},\"failed\":{json_list(failed)}\}")
+  } else {
+    var verb = "formatted"
+    if check {
+      verb = "would reformat"
+    }
+    for p in changed {
+      print("{verb} {p}")
+    }
+    if changed.is_empty() and failed.is_empty() {
+      print("all files are formatted")
+    }
+  }
+  if not failed.is_empty() or (check and not changed.is_empty()) {
+    return 1
+  }
+  return 0
+}
+
+// ---- fix ------------------------------------------------------------------------------------------------------
+
+/// The offset of (line, col) in the text (1-based, columns in characters).
+fn offset_of(lines: List[Str], line: Int, col: Int) -> Int {
+  var n = 0
+  var k = 0
+  while k < line - 1 {
+    n = n + lines.get_or(k, "").len() + 1
+    k = k + 1
+  }
+  return n + col - 1
+}
+
+/// Applies non-overlapping edits (later edits first; an edit overlapping one already applied waits for the next
+/// round).
+pub fn apply_edits(text: Str, edits: List[FixEdit]) -> Str {
+  let lines = text.split("\n")
+  var ranges: List[Edit3] = []
+  for e in edits {
+    ranges = ranges.push(Edit3 { start: offset_of(lines: lines, line: e.span.line, col: e.span.col),
+      end: offset_of(lines: lines, line: e.span.end_line, col: e.span.end_col), text: e.text })
+  }
+  // by (start, end), last first; equal keys keep their order (like Python's sort with reverse=True)
+  ranges = ranges.sort_by(fn(r) => 0 - (r.start * 1000000000 + r.end))
+  var out = text
+  var last_start = -1
+  for r in ranges {
+    if last_start < 0 or r.end <= last_start {
+      out = out.slice(0, r.start) + r.text + out.slice(r.end, out.len())
+      last_start = r.start
+    }
+  }
+  return out
+}
+
+type Edit3 { start: Int, end: Int, text: Str }
+
+type Applied { code: Str, at: Str, message: Str }
+
+fn short_at(d: Diag) -> Str {
+  return "{d.file}:{d.span.line}:{d.span.col}"
+}
+
+/// `klar dev`'s compact form of a diagnostic (klar/cli.py, compact).
+pub fn compact_diag(d: Diag) -> J {
+  var out = [Pair { first: "code", second: J.JStr(d.code) }, Pair { first: "msg", second: J.JStr(d.message) }, Pair {
+    first: "at", second: J.JStr(short_at(d)) }]
+  match d.hint {
+    Some(h) => {
+      if h != "" {
+        out = out.push(Pair { first: "hint", second: J.JStr(h) })
+      }
+    },
+    None => {},
+  }
+  match d.fix {
+    Some(f) => {
+      let edits = f.edits.map(fn(e) => J.JObj([Pair { first: "at", second: J.JStr("{e.span.line}:{e.span.col}-" +
+          "{e.span.end_line}:{e.span.end_col}") }, Pair { first: "text", second: J.JStr(e.text) }]))
+      out = out.push(Pair { first: "fix", second: J.JArr(edits) })
+      out = out.push(Pair { first: "auto", second: J.JBool(f.safe) })
+    },
+    None => {},
+  }
+  return J.JObj(out)
+}
+
+fn dir_of(path: Str) -> Str {
+  let p = path.replace("\\", "/")
+  return match p.split("/").len() > 1 {
+    true => p.slice(0, p.len() - p.split("/").last().unwrap_or("").len() - 1),
+    false => ".",
+  }
+}
+
+fn read_text(path: Str) -> Str uses fs {
+  return read_file(path).unwrap_or("").replace("\r\n", "\n").replace("\r", "\n")
+}
+
+/// The arguments that are not options (`--lib` takes a value).
+pub fn positional(args: List[Str]) -> List[Str] {
+  var out: List[Str] = []
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--lib" {
+      i = i + 2
+    } else {
+      if not a.starts_with("--") {
+        out = out.push(a)
+      }
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/// `klarc fix FILE [--dry-run] [--all] [--warnings] [--json]`: applies the machine fixes of the diagnostics until
+/// nothing changes; the exit code.
+pub fn fix_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  let file = positional(args).get_or(0, "")
+  let dry = args.contains("--dry-run")
+  let all = args.contains("--all")
+  let warnings = args.contains("--warnings")
+  let json = args.contains("--json")
+  let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let root = dir_of(file)
+  var applied: List[Applied] = []
+  var round = 0
+  while round < 50 {
+    let ld = load_program(file, lib)
+    var names: List[Str] = []
+    var per_file: Map[Str, List[Pair[Diag, FixEdit]]] = Map {}
+    for d in user_diags(ld, shown) {
+      match d.fix {
+        Some(f) => {
+          if (d.severity == "error" or warnings) and (f.safe or all) {
+            for e in f.edits {
+              let fname = edit_file(e.file, d.file)
+              if not fname.starts_with("std/") and not fname.starts_with("rt/") and fname != "prelude.klar" {
+                if not per_file.has(fname) {
+                  names = names.push(fname)
+                }
+                per_file = per_file.set(fname, per_file.get(fname).unwrap_or([]).push(Pair { first: d, second: e }))
+              }
+            }
+          }
+        },
+        None => {},
+      }
+    }
+    if names.is_empty() {
+      round = 50
+    } else {
+      var changed = false
+      for fname in names {
+        let pairs = per_file.get(fname).unwrap_or([])
+        let path = root + "/" + fname
+        let text = read_text(path)
+        let new_text = apply_edits(text, pairs.map(fn(p) => p.second))
+        if new_text != text {
+          changed = true
+          var seen: List[Diag] = []
+          for p in pairs {
+            if not seen.contains(p.first) {
+              seen = seen.push(p.first)
+            }
+          }
+          applied = applied.concat(seen.map(fn(d) => Applied { code: d.code, at: short_at(d), message: d.message }))
+          if not dry {
+            match write_file(path, new_text) {
+              Ok(_) => {},
+              Err(e) => {
+                eprint(e)
+              },
+            }
+          }
+        }
+      }
+      if not changed or dry {
+        round = 50
+      }
+    }
+    round = round + 1
+  }
+  let ld = load_program(file, lib)
+  let remaining = user_diags(ld, shown)
+  let errors = ld.diags.any(fn(d) => d.severity == "error")
+  if json {
+    let done = applied.map(fn(a) => J.JObj([Pair { first: "code", second: J.JStr(a.code) }, Pair { first: "at",
+      second: J.JStr(a.at) }, Pair { first: "message", second: J.JStr(a.message) }]))
+    print(pretty(J.JObj([Pair { first: "ok", second: J.JBool(not errors) }, Pair { first: "applied",
+      second: J.JArr(done) }, Pair { first: "remaining", second: J.JArr(remaining.map(compact_diag)) }]), 0))
+  } else {
+    for a in applied {
+      print("fixed  {a.code}  {a.at}  {a.message}")
+    }
+    if applied.is_empty() {
+      print("nothing to fix automatically")
+    }
+    if remaining.is_empty() {
+      print("ok: no problems left")
+    } else {
+      print("")
+      let text = render_report(ld, remaining)
+      print(text.slice(0, text.len() - 1))
+    }
+  }
+  if errors {
+    return 1
+  }
+  return 0
+}
+
+// ---- explain --------------------------------------------------------------------------------------------------
+
+/// The text of `klar explain CODE`.
+pub fn explain(code0: Str) -> Str {
+  let code = code0.upper()
+  for row in diag_codes() {
+    if row.get_or(0, "") == code {
+      let title = row.get_or(1, "")
+      let text = row.get_or(2, "")
+      return "{code}: {title}\n\n{text}"
+    }
+  }
+  return "unknown code {code}. Known: " + diag_codes().map(fn(r) => r.get_or(0, "")).sort().join(", ")
+}
+
+// ---- new ------------------------------------------------------------------------------------------------------
+
+/// A template with Python's str.format fields `{name}` and `{pkg}` (`{{` and `}}` are literal braces).
+fn fill(template: Str, name: Str, pkg: Str) -> Str {
+  let cs = template.chars()
+  var out = ""
+  var i = 0
+  while i < cs.len() {
+    let c = cs.get_or(i, "")
+    let d = cs.get_or(i + 1, "")
+    if c == "\{" and d == "\{" {
+      out = out + "\{"
+      i = i + 2
+    } else if c == "\}" and d == "\}" {
+      out = out + "\}"
+      i = i + 2
+    } else if c == "\{" {
+      var j = i + 1
+      var field = ""
+      while j < cs.len() and cs.get_or(j, "") != "\}" {
+        field = field + cs.get_or(j, "")
+        j = j + 1
+      }
+      if field == "name" {
+        out = out + name
+      } else if field == "pkg" {
+        out = out + pkg
+      }
+      i = j + 1
+    } else {
+      out = out + c
+      i = i + 1
+    }
+  }
+  return out
+}
+
+/// A snake_case package name from a directory name (`My-App` -> `my_app`).
+pub fn package_name(dir: Str) -> Str {
+  var out = ""
+  for c in dir.lower().chars() {
+    if (c >= "a" and c <= "z" and c.len() == 1) or (c >= "0" and c <= "9" and c.len() == 1) or c == "_" {
+      out = out + c
+    } else {
+      out = out + "_"
+    }
+  }
+  while out.starts_with("_") {
+    out = out.slice(1, out.len())
+  }
+  while out.ends_with("_") {
+    out = out.slice(0, out.len() - 1)
+  }
+  if out == "" {
+    out = "app"
+  }
+  let first = out.slice(0, 1)
+  if not (first >= "a" and first <= "z") {
+    out = "p_" + out
+  }
+  return out
+}
+
+fn base_name(path: Str) -> Str uses fs {
+  var p = path.replace("\\", "/")
+  while p.len() > 1 and p.ends_with("/") {
+    p = p.slice(0, p.len() - 1)
+  }
+  if p == "." or p == "" {
+    p = current_dir().replace("\\", "/")
+  }
+  return p.split("/").last().unwrap_or(p)
+}
+
+/// `klarc new PATH [--lib]`: a new project (klar.toml, main.klar or lib.klar, AGENTS.md, README.md, .gitignore).
+pub fn new_command(args: List[Str]) -> Int uses io, fs {
+  let path = positional(args).get_or(0, "")
+  let lib = args.contains("--lib")
+  let name = base_name(path)
+  let pkg = package_name(name)
+  if is_dir(path) and not list_dir(path).unwrap_or([]).is_empty() {
+    eprint("error: {path} exists and is not empty")
+    return 1
+  }
+  match make_dir(path) {
+    Ok(_) => {},
+    Err(e) => {
+      eprint("error: {e}")
+      return 1
+    },
+  }
+  var entry = "main.klar"
+  var run = "klar run main.klar\nklar test main.klar\nklar build main.klar\n"
+  var code = fill(template: main_template(), name: name, pkg: pkg)
+  if lib {
+    entry = "lib.klar"
+    run = "klar test lib.klar\n"
+    code = fill(template: lib_template(), name: name, pkg: pkg)
+  }
+  let files = [
+    Pair { first: "klar.toml", second: "[package]\nname = \"{pkg}\"\nversion = \"0.1.0\"\n\n[dependencies]\n" },
+    Pair { first: entry, second: code },
+    Pair { first: "AGENTS.md", second: fill(template: agents_template(), name: name, pkg: pkg).replace("main.klar",
+      entry) },
+    Pair { first: "README.md", second: "# {name}\n\nWritten in [Klar](https://github.com/veosett/Klar).\n\n```sh\n" +
+        run + "```\n" },
+    Pair { first: ".gitignore", second: "build/\n*.exe\n.klar/\n" },
+  ]
+  for f in files {
+    match write_file(path + "/" + f.first, f.second) {
+      Ok(_) => {},
+      Err(e) => {
+        eprint("error: {e}")
+        return 1
+      },
+    }
+  }
+  let names = files.map(fn(f) => f.first).sort().join(", ")
+  print("created {path}/: {names}")
+  var stem = "main"
+  if lib {
+    stem = "lib"
+  }
+  print("next: cd {path} && klar dev {stem}.klar")
+  return 0
+}
+
+// ---- outline / refs / rename ----------------------------------------------------------------------------------
+
+/// The program of FILE when its main module parsed (None: print the hint of `klar outline` and stop).
+fn loaded_main(file: Str, lib: Str) -> Option[Ld] uses fs {
+  let ld = load_program(file, lib)
+  return match ld.by_path.get(file) {
+    Some(m) => match m.checker {
+      Some(_) => Some(ld),
+      None => None,
+    },
+    None => None,
+  }
+}
+
+/// `klarc outline FILE [--all] [--json]`.
+pub fn outline_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  let file = positional(args).get_or(0, "")
+  return match loaded_main(file, lib) {
+    None => {
+      eprint("cannot parse the file; run `klar check` first")
+      return 1
+    },
+    Some(ld) => {
+      let main = main_module(ld, file).unwrap_or(UMod { display: "", path: "", lines: [], decls: [], res: Map {} })
+      let data = outline(mods: user_modules(ld), main: main, all: args.contains("--all"))
+      if args.contains("--json") {
+        print(outline_json(data))
+      } else {
+        print(outline_text(data))
+      }
+      return 0
+    },
+  }
+}
+
+fn line_of(ld: Ld, file: Str, line: Int) -> Str {
+  return ld.sources.get(file).unwrap_or("").split("\n").get_or(line - 1, "").trim()
+}
+
+/// `klarc refs FILE NAME [--json]`.
+pub fn refs_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  let pos = positional(args)
+  let file = pos.get_or(0, "")
+  let name = pos.get_or(1, "")
+  return match loaded_main(file, lib) {
+    None => {
+      eprint("cannot parse the file; run `klar check` first")
+      return 1
+    },
+    Some(ld) => {
+      let occ = name_occurrences(mods: user_modules(ld), name: name)
+      if args.contains("--json") {
+        let items = occ.map(fn(o) => J.JObj([Pair { first: "file", second: J.JStr(o.file) }, Pair { first: "line",
+          second: J.JInt(o.span.line) }, Pair { first: "col", second: J.JInt(o.span.col) }, Pair { first: "role",
+            second: J.JStr(o.role) }, Pair { first: "code", second: J.JStr(line_of(ld: ld, file: o.file,
+              line: o.span.line)) }]))
+        print(compact(J.JObj([Pair { first: "ok", second: J.JBool(true) }, Pair { first: "name", second: J.JStr(name) },
+          Pair { first: "occurrences", second: J.JArr(items) }])))
+        return 0
+      }
+      if occ.is_empty() {
+        print("`{name}` is not used in the program")
+        return 1
+      }
+      for o in occ {
+        let code = line_of(ld: ld, file: o.file, line: o.span.line)
+        let shown = code.slice(0, code.len().min(80))
+        print("{o.file}:{o.span.line}:" + o.span.col.to_str().pad_right(4, " ") + " " + o.role.pad_right(18, " ") + " " +
+            shown)
+      }
+      return 0
+    },
+  }
+}
+
+/// `klarc context FILE NAME [--max-tokens N] [--json]`.
+pub fn context_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  var pos: List[Str] = []
+  var max_tokens = DEFAULT_TOKENS
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--lib" {
+      i = i + 2
+    } else if a == "--max-tokens" {
+      max_tokens = args.get_or(i + 1, "").to_int().unwrap_or(DEFAULT_TOKENS)
+      i = i + 2
+    } else {
+      if not a.starts_with("--") {
+        pos = pos.push(a)
+      }
+      i = i + 1
+    }
+  }
+  let file = pos.get_or(0, "")
+  let name = pos.get_or(1, "")
+  return match loaded_main(file, lib) {
+    None => {
+      eprint("cannot parse the file; run `klar check` first")
+      return 1
+    },
+    Some(ld) => {
+      match context(mods: user_modules(ld), name: name, max_tokens: max_tokens) {
+        Some(c) => {
+          if args.contains("--json") {
+            print(context_json(c))
+          } else {
+            print(context_text(c, true))
+          }
+          return 0
+        },
+        None => {
+          let msg = "no function, type or constant `{name}` in the program"
+          if args.contains("--json") {
+            print(compact(J.JObj([Pair { first: "ok", second: J.JBool(false) }, Pair { first: "error",
+              second: J.JStr(msg) }])))
+          } else {
+            eprint("error: " + msg)
+          }
+          return 1
+        },
+      }
+    },
+  }
+}
+
+fn is_name(s: Str) -> Bool {
+  if s == "" {
+    return false
+  }
+  var first = true
+  for c in s.chars() {
+    let letter = (c >= "a" and c <= "z" and c.len() == 1) or (c >= "A" and c <= "Z" and c.len() == 1) or c == "_"
+    let digit = c >= "0" and c <= "9" and c.len() == 1
+    if not letter and not (digit and not first) {
+      return false
+    }
+    first = false
+  }
+  return true
+}
+
+fn starts_upper(s: Str) -> Bool {
+  let c = s.slice(0, s.len().min(1))
+  return c >= "A" and c <= "Z" and c != ""
+}
+
+pub fn absolute(path: Str) -> Str uses fs {
+  if path.starts_with("/") or path.contains(":\\") or path.contains(":/") {
+    return path
+  }
+  var p = path
+  while p.starts_with("./") {
+    p = p.slice(2, p.len())
+  }
+  return current_dir() + "/" + p
+}
+
+/// The new text of each file for renaming `old` to `new`, and the occurrences; or why the rename is unsafe.
+pub fn plan_rename(ld: Ld, old: Str, new: Str) -> Result[Pair[List[Pair[Str, Str]], List[NameOcc]], Str] uses io, fs {
+  if not is_name(new) {
+    return Err("`{new}` is not a valid name")
+  }
+  if starts_upper(old) != starts_upper(new) {
+    return Err("a rename must keep the case convention (types/variants PascalCase, values snake_case)")
+  }
+  let mods = user_modules(ld)
+  if not name_occurrences(mods: mods, name: new).is_empty() {
+    return Err("`{new}` is already used in the program (Klar forbids shadowing)")
+  }
+  let occ = name_occurrences(mods: mods, name: old)
+  if occ.is_empty() {
+    return Err("`{old}` is not used in the program")
+  }
+  var files: List[Str] = []
+  for o in occ {
+    if not files.contains(o.file) {
+      files = files.push(o.file)
+    }
+  }
+  var result: List[Pair[Str, Str]] = []
+  for f in files {
+    var lines = ld.sources.get(f).unwrap_or("").split("\n")
+    let spans = occ.filter(fn(o) => o.file == f).map(fn(o) => o.span).sort_by(fn(s) => 0 - (s.line * 1000000 + s.col))
+    for sp in spans {
+      let text = lines.get_or(sp.line - 1, "")
+      let start = (sp.col - 1).min(text.len())
+      let stop = (sp.col - 1 + old.len()).min(text.len())
+      if text.slice(start, stop) == old {
+        lines = lines.set(sp.line - 1, text.slice(0, start) + new + text.slice(stop, text.len()))
+      }
+    }
+    let path = mods.filter(fn(m) => m.display == f).get(0).map(fn(m) => m.path).unwrap_or(f)
+    result = result.push(Pair { first: absolute(path), second: lines.join("\n") })
+  }
+  return Ok(Pair { first: result, second: occ })
+}
+
+/// `klarc rename FILE OLD NEW [--dry-run] [--json]`.
+pub fn rename_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  let pos = positional(args)
+  let file = pos.get_or(0, "")
+  let old = pos.get_or(1, "")
+  let new = pos.get_or(2, "")
+  let json = args.contains("--json")
+  let dry = args.contains("--dry-run")
+  let ld = load_program(file, lib)
+  if ld.diags.any(fn(d) => d.severity == "error") {
+    eprint("the program has errors; fix them first (`klar check`) so the rename is exact")
+    return 1
+  }
+  let planned = match plan_rename(ld: ld, old: old, new: new) {
+    Ok(p) => p,
+    Err(why) => {
+      if json {
+        print(compact(J.JObj([Pair { first: "ok", second: J.JBool(false) }, Pair { first: "error", second: J.JStr(why)
+        }])))
+      } else {
+        eprint("error: {why}")
+      }
+      return 1
+    },
+  }
+  let files = planned.first
+  if not dry {
+    for f in files {
+      match write_file(f.first, f.second) {
+        Ok(_) => {},
+        Err(e) => {
+          eprint(e)
+        },
+      }
+    }
+    // the renamed program must still type-check
+    let after = load_program(file, lib)
+    let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+    let bad = user_diags(after, shown).filter(fn(d) => d.severity == "error")
+    if not bad.is_empty() {
+      eprint("warning: the program has errors after the rename:")
+      for d in bad.take(5) {
+        eprint("  {d.file}:{d.span.line}:{d.span.col}: {d.message}")
+      }
+    }
+  }
+  if json {
+    print(compact(J.JObj([Pair { first: "ok", second: J.JBool(true) }, Pair { first: "renamed",
+      second: J.JInt(planned.second.len()) }, Pair { first: "files", second: J.JArr(files.map(fn(f) => f.first).sort()
+          .map(fn(x) => J.JStr(x))) }])))
+  } else {
+    var verb = "renamed"
+    if dry {
+      verb = "would rename"
+    }
+    print("{verb} {planned.second.len()} occurrence(s) of `{old}` → `{new}` in {files.len()} file(s)")
+  }
+  return 0
+}
+
+// ---- doc ------------------------------------------------------------------------------------------------------
+
+/// The value of an option (`--in FILE`), or "".
+fn option_value(args: List[Str], name: Str) -> Str {
+  return match args.index_of(name) {
+    Some(k) => args.get_or(k + 1, ""),
+    None => "",
+  }
+}
+
+/// Whether a declaration of a std module is a helper a program cannot import (a function, type or constant without
+/// `pub`).
+fn std_helper(d: Decl) -> Bool {
+  return match d {
+    Decl.Fn(f) => f.owner_kind == None and not f.public,
+    Decl.TypeD(_, _, _, _, _, public) => not public,
+    Decl.EnumD(_, _, _, _, _, public) => not public,
+    Decl.Const(_, _, _, _, _, _, public) => not public,
+    Decl.Alias(_, _, _, _, _, public) => not public,
+    _ => false,
+  }
+}
+
+/// The std modules: (name, (source lines, declarations without the helpers)), in file order.
+pub fn std_modules(lib: Str) -> List[Pair[Str, Pair[List[Str], List[Decl]]]] uses fs {
+  var out: List[Pair[Str, Pair[List[Str], List[Decl]]]] = []
+  for f in list_source_dir(lib + "/std").unwrap_or([]) {
+    if f.ends_with(".klar") {
+      let src = read_source(lib + "/std/" + f).unwrap_or("")
+      match parse_program(src) {
+        Ok(p) => {
+          out = out.push(Pair { first: f.slice(0, f.len() - 5), second: Pair { first: src.split("\n"),
+            second: p.decls.filter(fn(d) => not std_helper(d)) } })
+        },
+        Err(_) => {},
+      }
+    }
+  }
+  return out
+}
+
+/// `klarc doc QUERY [--in FILE] [--limit N] [--json]`.
+pub fn doc_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  var query = ""
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if a == "--in" or a == "--limit" or a == "--lib" {
+      i = i + 2
+    } else {
+      if not a.starts_with("--") and query == "" {
+        query = a
+      }
+      i = i + 1
+    }
+  }
+  let file = option_value(args, "--in")
+  let limit = option_value(args, "--limit").to_int().unwrap_or(12)
+  var mods: List[UMod] = []
+  if file != "" {
+    match loaded_main(file, lib) {
+      Some(ld) => {
+        mods = user_modules(ld)
+      },
+      None => {},
+    }
+  }
+  let tests = read_file(lib + "/../tests/stdlib/builtins_test.klar").unwrap_or("").split("\n")
+  let res = doc_lookup(query: query, globals: global_sigs(), methods: method_sigs(), test_lines: tests,
+    std: std_modules(lib), mods: mods)
+  if args.contains("--json") {
+    print(doc_json(results: res, limit: limit))
+  } else {
+    print(doc_text(results: res, limit: limit))
+  }
+  if res.is_empty() {
+    return 1
+  }
+  return 0
+}
+
+// ---- spec -----------------------------------------------------------------------------------------------------
+
+fn src_text(lines: List[Str], sp: Span) -> Str {
+  let line = lines.get_or(sp.line - 1, "")
+  if sp.line == sp.end_line {
+    return line.slice((sp.col - 1).min(line.len()), (sp.end_col - 1).min(line.len()).max((sp.col - 1).min(line.len())))
+  }
+  return line.slice((sp.col - 1).min(line.len()), line.len())
+}
+
+fn texpr_span(t: TypeExpr) -> Span {
+  return match t {
+    TypeExpr.Named(s, _, _) => s,
+    TypeExpr.FnType(s, _, _, _) => s,
+  }
+}
+
+/// The standard library part of `klar spec`, generated from the real signatures.
+fn stdlib_reference() -> Str {
+  var lines = ["## Standard library (generated from signatures)", "", "Prelude (always available): `type Pair[A, B] " +
+      "\{ first, second \}`, `type Entry[K, V] \{ key, value \}`, `type Indexed[T] \{ index, value \}`, `const PI: Float`, " +
+      "`const E: Float`.", "", "Std modules (import explicitly, e.g. `use std.math.\{gcd\}`): see `klar/std/*.klar`.", "",
+    "Global functions:"]
+  for sig in global_sigs() {
+    lines = lines.push("- `{sig}`")
+  }
+  lines = lines.push("")
+  lines = lines.push("Methods (call as `value.method(args)`), one line per type without the receiver; a method for a " +
+      "narrower receiver shows it as `self`. Every value has `.to_str()`.")
+  var owner = ""
+  var sigs: List[Str] = []
+  for m in method_sigs() {
+    if m.first != owner and not sigs.is_empty() {
+      lines = lines.push(methods_line(sigs))
+      sigs = []
+    }
+    owner = m.first
+    sigs = sigs.push(m.second)
+  }
+  if not sigs.is_empty() {
+    lines = lines.push(methods_line(sigs))
+  }
+  return lines.join("\n")
+}
+
+/// `text` split at commas outside brackets.
+fn split_top(text: Str) -> List[Str] {
+  var out: List[Str] = []
+  var depth = 0
+  var cur = ""
+  for c in text.chars() {
+    if c == "(" or c == "[" {
+      depth = depth + 1
+    } else if c == ")" or c == "]" {
+      depth = depth - 1
+    }
+    if c == "," and depth == 0 {
+      out = out.push(cur.trim())
+      cur = ""
+    } else {
+      cur = cur + c
+    }
+  }
+  if cur.trim() != "" {
+    out = out.push(cur.trim())
+  }
+  return out
+}
+
+/// A method signature taken apart: `fn map[T, U](self: List[T], f: fn(T) -> U) -> List[U]` has the name `map`, the
+/// type parameters `T, U`, the receiver `List[T]`, the other parameters and the rest (` -> List[U]`).
+type MethodSig { name: Str, tps: List[Str], recv: Str, params: List[Str], rest: Str }
+
+fn method_parts(sig: Str) -> MethodSig {
+  var s = sig
+  if s.starts_with("fn ") {
+    s = s.slice(3, s.len())
+  }
+  let cs = s.chars()
+  let open_at = s.index_of("(").unwrap_or(0)
+  let head = s.slice(0, open_at)
+  var name = head
+  var tps: List[Str] = []
+  match head.index_of("[") {
+    Some(k) => {
+      name = head.slice(0, k)
+      tps = split_top(head.slice(k + 1, head.len() - 1))
+    },
+    None => {},
+  }
+  // the bracket that closes the parameters
+  var depth = 1
+  var i = open_at + 1
+  while i < cs.len() and depth > 0 {
+    let c = cs.get_or(i, "")
+    if c == "(" or c == "[" {
+      depth = depth + 1
+    } else if c == ")" or c == "]" {
+      depth = depth - 1
+    }
+    i = i + 1
+  }
+  let params = split_top(s.slice(open_at + 1, i - 1))
+  let first = params.get_or(0, "")
+  if first.starts_with("self:") {
+    return MethodSig { name: name, tps: tps, recv: first.slice(5, first.len()).trim(), params: params.drop(1),
+      rest: s.slice(i, s.len()) }
+  }
+  return MethodSig { name: name, tps: tps, recv: "", params: params, rest: s.slice(i, s.len()) }
+}
+
+/// The methods of one type on one line: `List[T]: len() -> Int, map[U](f: fn(T) -> U) -> List[U], ...` (the most
+/// common receiver; a method for another one shows it as `self`).
+fn methods_line(sigs: List[Str]) -> Str {
+  let parts = sigs.map(method_parts)
+  var owner = ""
+  var best = 0
+  for p in parts {
+    let n = parts.filter(fn(q) => q.recv == p.recv).len()
+    if n > best {
+      owner = p.recv
+      best = n
+    }
+  }
+  // the receiver's own type parameters (`T` of `List[T]`) are left out of each method's
+  let own: List[Str] = match owner.index_of("[") {
+    Some(k) => split_top(owner.slice(k + 1, owner.len() - 1)),
+    None => [],
+  }
+  var out: List[Str] = []
+  for p in parts {
+    var tps = p.tps
+    var params = p.params
+    if p.recv == owner {
+      tps = tps.filter(fn(t) => not own.contains(t.split(":").get_or(0, "").trim()))
+    } else {
+      params = ["self: " + p.recv].concat(params)
+    }
+    var tp = ""
+    if not tps.is_empty() {
+      tp = "[" + tps.join(", ") + "]"
+    }
+    out = out.push(p.name + tp + "(" + params.join(", ") + ")" + p.rest)
+  }
+  return owner + ": " + out.join(", ")
+}
+
+/// ` — ` and the first line of a doc comment ("" without one).
+fn first_doc_line(doc: Option[Str]) -> Str {
+  return match doc {
+    Some(text) => " — " + text.split("\n").get_or(0, ""),
+    None => "",
+  }
+}
+
+/// A module on one line of `klarc spec`: its types and the names of its functions.
+fn std_module_line(lines: List[Str], name: Str, decls: List[Decl]) -> Str {
+  var types: List[Str] = []
+  var names: List[Str] = []
+  for d in decls {
+    match d {
+      Decl.TypeD(_, _, _, _, _, _) => {
+        types = types.push("`" + sig_text(lines, d, false) + "`")
+      },
+      Decl.EnumD(_, _, _, _, _, _) => {
+        types = types.push("`" + sig_text(lines, d, false) + "`")
+      },
+      Decl.Fn(f) => {
+        names = names.push(f.name)
+      },
+      _ => {},
+    }
+  }
+  return "- `std.{name}`: " + types.push(names.join(", ")).join("; ")
+}
+
+fn std_modules_reference(lib: Str, full: Bool) -> Str uses fs {
+  var out = ["", "## Std modules"]
+  if not full {
+    out = out.push("Import with `use std.NAME.\{a, b\}`. `klar doc a` shows the signature and examples of a function; " +
+        "`klar spec --full` lists them all.\n")
+  }
+  for entry in std_modules(lib) {
+    let lines = entry.second.first
+    if not full {
+      out = out.push(std_module_line(lines, entry.first, entry.second.second))
+      continue
+    }
+    out = out.push("\n`use std.{entry.first}.\{...\}`:")
+    for d in entry.second.second {
+      match d {
+        Decl.TypeD(_, _, _, _, doc, _) => {
+          out = out.push("- `" + sig_text(lines, d, false) + "`" + first_doc_line(doc))
+        },
+        Decl.EnumD(_, _, _, _, doc, _) => {
+          out = out.push("- `" + sig_text(lines, d, false) + "`" + first_doc_line(doc))
+        },
+        Decl.Fn(f) => {
+          let ps = f.params.map(fn(p) => p.name + ": " + match p.ty {
+            Some(t) => src_text(lines, texpr_span(t)),
+            None => "",
+          }).join(", ")
+          let ret = match f.ret {
+            Some(t) => " -> " + src_text(lines, texpr_span(t)),
+            None => "",
+          }
+          var tps = ""
+          if not f.type_params.is_empty() {
+            tps = "[" + f.type_params.join(", ") + "]"
+          }
+          out = out.push("- `{f.name}{tps}({ps}){ret}`" + first_doc_line(f.doc))
+        },
+        _ => {},
+      }
+    }
+  }
+  return out.join("\n")
+}
+
+/// `klarc spec`: the compact language reference for AI authors.
+pub fn spec_command(lib: Str, full: Bool) -> Int uses io, fs {
+  print(read_source(lib + "/ai_reference.md").unwrap_or(""))
+  print(stdlib_reference())
+  print(std_modules_reference(lib, full))
+  return 0
+}
+
+// ---- ast ------------------------------------------------------------------------------------------------------
+
+/// `klarc ast FILE [--pretty]`: the syntax tree as JSON with node ids (the ids `klar patch` accepts).
+pub fn ast_command(args: List[Str], lib: Str) -> Int uses io, fs {
+  let file = positional(args).get_or(0, "")
+  let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let ld = load_program(file, lib)
+  let parsed = match ld.by_path.get(file) {
+    Some(m) => match m.checker {
+      Some(_) => parse_program(ld.sources.get(shown).unwrap_or("")),
+      None => Err(ParseError { code: "", message: "", hint: None, line: 0, col: 0, end_line: 0, end_col: 0, fix: None }),
+    },
+    None => Err(ParseError { code: "", message: "", hint: None, line: 0, col: 0, end_line: 0, end_col: 0, fix: None }),
+  }
+  return match parsed {
+    Ok(p) => {
+      print(ast_text(p: p, file: shown, pretty: args.contains("--pretty")))
+      return 0
+    },
+    Err(_) => {
+      let diags = user_diags(ld, shown)
+      print(pretty(J.JObj([Pair { first: "ok", second: J.JBool(false) }, Pair { first: "diagnostics",
+        second: J.JArr(diags.map(diag_json)) }]), 0))
+      return 1
+    },
+  }
 }

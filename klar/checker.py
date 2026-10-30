@@ -245,6 +245,7 @@ def suggest(name, candidates):
 class Checker:
     def __init__(self, program: N.Program, file: str, universe=None, imports=None, module=None, sys=False):
         self.sys = sys
+        self.unresolved = set()     # names whose import failed (reported by the loader): no errors at their uses
         self.globals = dict(BUILTIN_GLOBALS)
         if sys:
             self.globals.update(sys_globals())
@@ -787,6 +788,8 @@ class Checker:
                    "list": "List", "dict": "Map", "HashMap": "Map", "Dict": "Map", "Optional": "Option",
                    "Maybe": "Option", "Either": "Result", "Tuple": "Pair", "bytes": "Bytes", "bytearray": "Bytes",
                    "Buffer": "Bytes", "ByteArray": "Bytes", "u8": "Int", "byte": "Int"}
+        if name in self.unresolved:
+            return ANY
         cands = self.type_names_visible() | set(tps)
         if name == "Self":
             self.error("E0104", "`Self` is only available in `trait` and `impl` methods", te.span,
@@ -1314,6 +1317,8 @@ class Checker:
             else:
                 hint = f"write `{rep}`" if rep else "Klar has no methods with `self`; pass the value as the first parameter"
             fix = {"span": e.span, "text": rep} if rep else None
+        elif e.name in self.unresolved:
+            return ANY
         else:
             hint, fix = self.did_you_mean(e.name, self.visible_names(), e.span)
         self.error("E0201", f"unknown name `{e.name}`", e.span, hint=hint, fix=fix)
@@ -1596,6 +1601,8 @@ class Checker:
                     self.error("E0210", "`None` takes no arguments", c.span, hint="write `None`")
                 elif c.name in self.consts:
                     self.error("E0210", f"constant `{c.name}` is not a function", c.span)
+                elif c.name in self.unresolved:
+                    pass
                 else:
                     special = {"len": "use the method: `xs.len()`", "str": "use `.to_str()`",
                                "int": "use `s.to_int()` (returns Option[Int])", "println": "use `print(...)`",
@@ -1873,6 +1880,8 @@ class Checker:
                            hint=f"construct a variant: `{name}.Variant(...)`")
             elif name in self.aliases:
                 self.error("E0104", f"`{name}` is a type alias; construct the underlying type instead", e.span)
+            elif name in self.unresolved:
+                pass
             else:
                 hint, fix = self.did_you_mean(name, [r for r in self.records if r in self.visible], e.span)
                 self.error("E0104", f"unknown record type `{name}`", e.span, hint=hint)

@@ -1,0 +1,27 @@
+use model.{Product, Customer, Line, Order, Status, Tier, Category}
+
+/// Products for the demo and for trying things out.
+pub fn sample_products() -> List[Product] {
+  return [
+    Product { sku: "B1", name: "Atlas", price: 2450, weight: 1.2, category: Category.Book, stock: 4, supplier: 1 },
+    Product { sku: "T1", name: "Kite", price: 1200, weight: 0.4, category: Category.Toy, stock: 9, supplier: 2 },
+    Product { sku: "F1", name: "Tea", price: 675, weight: 0.2, category: Category.Food, stock: 30, supplier: 3 },
+    Product { sku: "H1", name: "Spade", price: 13500, weight: 2.5, category: Category.Garden, stock: 2, supplier: 2 },
+  ]
+}
+
+/// Customers for the demo.
+pub fn sample_customers() -> List[Customer] {
+  return [
+    Customer { id: 1, first_name: "Ada", last_name: "Lovelace", email: "ada@example.org", tier: Tier.Gold, city: "Harbour" },
+    Customer { id: 2, first_name: "Alan", last_name: "Turing", email: "alan@example.org", tier: Tier.Basic, city: "Summit" },
+  ]
+}
+
+/// Orders for the demo.
+pub fn sample_orders() -> List[Order] {
+  return [
+    Order { id: 100, customer: 1, lines: [Line { sku: "B1", qty: 2, unit_price: 2450 }], status: Status.Paid, shipping: 499, day: 1 },
+    Order { id: 101, customer: 2, lines: [Line { sku: "H1", qty: 1, unit_price: 13500 }, Line { sku: "F1", qty: 4, unit_price: 675 }], status: Status.Shipped, shipping: 0, day: 2 },
+  ]
+}

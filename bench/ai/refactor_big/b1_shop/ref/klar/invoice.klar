@@ -1,0 +1,33 @@
+use model.{Order, Customer, Line}
+use money.{fmt}
+use orders.{line_total, subtotal, grand_total}
+
+/// The first line of an invoice.
+pub fn header(o: Order, c: Customer) -> Str {
+  return "Invoice {o.id} for {c.first_name} {c.last_name}, {c.city}"
+}
+
+/// One line of goods.
+pub fn line_text(l: Line) -> Str {
+  return "  {l.qty} x {l.sku} @ {fmt(l.unit_price)} = {fmt(line_total(l))}"
+}
+
+/// How long the customer has to pay.
+pub fn due_note(total: Int) -> Str {
+  if total > 10000 {
+    return "payable in 30 days"
+  }
+  return "payable in 14 days"
+}
+
+/// A whole invoice.
+pub fn invoice_text(o: Order, c: Customer) -> Str {
+  let rows = o.lines.map(fn(l) => line_text(l))
+  let tail = [
+    "goods: {fmt(subtotal(o))}",
+    "shipping: {fmt(o.shipping)}",
+    "total: {fmt(grand_total(o))}",
+    due_note(grand_total(o)),
+  ]
+  return [header(o, c)].concat(rows).concat(tail).join("\n")
+}

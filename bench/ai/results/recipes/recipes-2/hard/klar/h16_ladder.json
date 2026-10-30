@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn one_off(a: Str, b: Str) -> Bool {\n  let ca = a.chars()\n  let cb = b.chars()\n  if ca.len() != cb.len() {\n    return false\n  }\n  let diffs = range(0, ca.len()).count(fn(k) => ca.get_or(k, \"\") != cb.get_or(k, \"\"))\n  return diffs == 1\n}\n\npub fn ladder(start: Str, goal: Str, words: List[Str]) -> Int {\n  if start == goal {\n    return 1\n  }\n  let nodes = [start].concat(words)\n  let n = nodes.len()\n  var dist: List[Int] = range(0, n).map(fn(_k) => -1)\n  dist = dist.set(0, 1)\n  var queue: List[Int] = [0]\n  var head = 0\n  while head < queue.len() {\n    let cur = queue.get_or(head, 0)\n    head = head + 1\n    let cur_word = nodes.get_or(cur, \"\")\n    for j in range(0, n) {\n      if dist.get_or(j, -1) == -1 and one_off(cur_word, nodes.get_or(j, \"\")) {\n        dist = dist.set(j, dist.get_or(cur, 0) + 1)\n        queue = queue.push(j)\n      }\n    }\n  }\n  let final_dist = dist\n  let reached = range(0, n).filter(fn(j) => nodes.get_or(j, \"\") == goal and final_dist.get_or(j, -1) != -1)\n  return reached.map(fn(j) => final_dist.get_or(j, 0)).min().unwrap_or(0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

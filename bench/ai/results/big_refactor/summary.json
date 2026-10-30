@@ -1,0 +1,53 @@
+{
+ "note": "Klar and Python with mypy, Haiku, task refactor_big/b1_shop. tokens, tool_uses and ms as the agent runner reported them; output_tokens and turns from the transcripts. All runs: 1 submission, 0 of 45 visible and 0 of 40 held-out checks failed, main printed the same as the reference.",
+ "runs": {
+  "python-1": {
+   "tokens": 150317,
+   "output_tokens": 44239,
+   "turns": 13,
+   "tool_uses": 56,
+   "ms": 206365,
+   "checker_runs": 1
+  },
+  "klar-1": {
+   "tokens": 149063,
+   "output_tokens": 48199,
+   "turns": 21,
+   "tool_uses": 24,
+   "ms": 252262,
+   "checker_runs": 3
+  },
+  "python-2": {
+   "tokens": 128851,
+   "output_tokens": 45937,
+   "turns": 15,
+   "tool_uses": 34,
+   "ms": 216720,
+   "checker_runs": 1
+  },
+  "klar-2": {
+   "tokens": 183265,
+   "output_tokens": 53099,
+   "turns": 32,
+   "tool_uses": 74,
+   "ms": 310746,
+   "checker_runs": 1
+  },
+  "python-3": {
+   "tokens": 132010,
+   "output_tokens": 42652,
+   "turns": 16,
+   "tool_uses": 18,
+   "ms": 209074,
+   "checker_runs": 1
+  },
+  "klar-3": {
+   "tokens": 176633,
+   "output_tokens": 60569,
+   "turns": 26,
+   "tool_uses": 44,
+   "ms": 349099,
+   "checker_runs": 2
+  }
+ }
+}

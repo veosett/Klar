@@ -1,0 +1,43 @@
+use model.{Tier}
+use money.{round2}
+
+/// The share a tier takes off.
+pub fn tier_rate(t: Tier) -> Float {
+  return match t {
+    Tier.Basic => 0.0,
+    Tier.Silver => 0.05,
+    Tier.Gold => 0.1,
+  }
+}
+
+/// The share a large basket takes off.
+pub fn volume_rate(amount: Float) -> Float {
+  if amount >= 500.0 {
+    return 0.1
+  }
+  if amount >= 200.0 {
+    return 0.05
+  }
+  return 0.0
+}
+
+/// The discount: the better of the tier and the basket.
+pub fn discount_for(amount: Float, t: Tier) -> Float {
+  let rate = tier_rate(t).max(volume_rate(amount))
+  return round2(amount * rate)
+}
+
+/// What a coupon takes off, never more than the basket.
+pub fn coupon_value(code: Str, amount: Float) -> Float {
+  let off = match code {
+    "FIVE" => 5.0,
+    "TEN" => 10.0,
+    _ => 0.0,
+  }
+  return off.min(amount)
+}
+
+/// The basket after the discount and the coupon.
+pub fn net_amount(amount: Float, t: Tier, code: Str) -> Float {
+  return amount - discount_for(amount, t) - coupon_value(code, amount)
+}

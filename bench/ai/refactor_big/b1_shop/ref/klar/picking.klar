@@ -1,0 +1,25 @@
+use model.{Order, Status}
+use orders.{item_count}
+
+/// True when the warehouse may pack the order.
+pub fn can_pack(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    Status.Paid => true,
+    Status.OnHold => false,
+    Status.Packed => false,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}
+
+/// The orders waiting to be packed.
+pub fn packing_queue(os: List[Order]) -> List[Order] {
+  return os.filter(fn(o) => can_pack(o.status))
+}
+
+/// The items waiting to be packed.
+pub fn items_to_pack(os: List[Order]) -> Int {
+  return packing_queue(os).map(fn(o) => item_count(o)).sum()
+}

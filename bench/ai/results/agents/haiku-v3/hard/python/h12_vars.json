@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import re\n\n_TERM = r\"(?:-?[0-9]+|[a-z]+)\"\n_LINE = re.compile(\n    r\"([a-z]+) = (\" + _TERM + r\")((?: [+-] \" + _TERM + r\")*)\"\n)\n_REST = re.compile(r\" ([+-]) (\" + _TERM + r\")\")\n\n\ndef run_vars(lines: list[str]) -> dict[str, int]:\n    variables: dict[str, int] = {}\n\n    def value_of(term: str) -> int:\n        if term[0] == \"-\" or term[0].isdigit():\n            return int(term)\n        if term not in variables:\n            raise ValueError(\"undefined \" + term)\n        return variables[term]\n\n    for line in lines:\n        m = _LINE.fullmatch(line)\n        if m is None:\n            raise ValueError(\"syntax error\")\n        name, first, rest = m.group(1), m.group(2), m.group(3)\n        steps = _REST.findall(rest)\n\n        total = value_of(first)\n        for op, term in steps:\n            v = value_of(term)\n            total = total + v if op == \"+\" else total - v\n        variables[name] = total\n    return variables\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

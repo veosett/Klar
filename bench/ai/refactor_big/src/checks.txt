@@ -1,0 +1,229 @@
+# One test per place the change touches: `<visible or holdout> <name>`, then `actual == expected` lines, the same text
+# for both languages (gen.py translates the enum members and true/false). `visible` tests answer the agent's submit;
+# `holdout` tests never reach it and say what would have shipped.
+
+visible money: fmt and plain
+  fmt(1250) == "$12.50"
+  plain(1205) == "12.05"
+  plain(7) == "0.07"
+visible money: pct and avg
+  pct(125, 0.1) == 13
+  avg(5, 2) == 3
+  avg(0, 0) == 0
+visible catalog: price_band
+  price_band(prod(999)) == "cheap"
+  price_band(prod(1000)) == "regular"
+  price_band(prod(9999)) == "regular"
+  price_band(prod(10000)) == "premium"
+holdout catalog: is_gift
+  is_gift(prod(2499)) == true
+  is_gift(prod(2500)) == false
+visible catalog: sale_price
+  sale_price(prod(2000), 0.25) == 1500
+holdout catalog: stock values
+  stock_value(prod(1250)) == 2500
+  catalog_value([prod(100), prod(200)]) == 600
+visible catalog: average_price
+  average_price([prod(100), prod(101)]) == 101
+holdout catalog: within_budget
+  size(within_budget([prod(100), prod(200)], 150)) == 1
+visible catalog: price_label
+  price_label(prod(1250)) == "item: $12.50"
+visible orders: totals
+  line_total(ln(1250, 3)) == 3750
+  subtotal(ord(Status.Paid, [ln(1000, 2)], 499)) == 2000
+  grand_total(ord(Status.Paid, [ln(1000, 2)], 499)) == 2499
+holdout tax: line_tax rounds half up
+  line_tax(ln(125, 1), [prodc(125, Category.Garden)]) == 13
+visible tax: order_tax
+  order_tax(ord(Status.Paid, [ln(1000, 1)], 0), [prodc(1000, Category.Toy)]) == 200
+  order_tax(ord(Status.Draft, [ln(1000, 1)], 0), [prodc(1000, Category.Toy)]) == 0
+holdout tax: tax_note
+  tax_note(0) == "tax free"
+  tax_note(1250) == "tax $12.50"
+holdout discount: volume_rate
+  volume_rate(19999) == 0.0
+  volume_rate(20000) == 0.05
+  volume_rate(49999) == 0.05
+  volume_rate(50000) == 0.1
+visible discount: discount_for
+  discount_for(10000, Tier.Gold) == 1000
+  discount_for(50, Tier.Silver) == 3
+holdout discount: coupon_value
+  coupon_value("TEN", 5000) == 1000
+  coupon_value("FIVE", 300) == 300
+  coupon_value("NONE", 300) == 0
+visible discount: net_amount
+  net_amount(10000, Tier.Basic, "FIVE") == 9500
+visible shipping: shipping_cost
+  shipping_cost(5000, 1.0) == 0
+  shipping_cost(4999, 2.0) == 799
+holdout shipping: member_cost
+  member_cost(501, Tier.Gold) == 251
+  member_cost(501, Tier.Basic) == 501
+visible shipping: surcharge
+  surcharge("Harbour") == 750
+  surcharge("Summit") == 1200
+  surcharge("Plain") == 0
+holdout shipping: shipping_label
+  shipping_label(0) == "free shipping"
+  shipping_label(499) == "shipping $4.99"
+visible loyalty: points_for
+  points_for(2599) == 2
+  points_for(999) == 0
+holdout loyalty: tier_after
+  tier_after(29999) == Tier.Basic
+  tier_after(30000) == Tier.Silver
+  tier_after(100000) == Tier.Gold
+visible loyalty: redeem_value
+  redeem_value(5) == 50
+holdout loyalty: to_next_point
+  to_next_point(2599) == 401
+visible fraud: risk_score
+  risk_score(ord(Status.Paid, [ln(100000, 1)], 0), cust("Ada", "Lovelace")) == 4
+  risk_score(ord(Status.Paid, [ln(30000, 1)], 0), custt(Tier.Gold)) == 1
+  risk_score(ord(Status.Paid, [ln(29999, 1)], 0), custt(Tier.Gold)) == 0
+holdout fraud: needs_review
+  needs_review(ord(Status.Paid, [ln(100000, 1)], 0), custt(Tier.Gold)) == true
+  needs_review(ord(Status.Paid, [ln(99999, 1)], 0), custt(Tier.Gold)) == false
+visible refunds: refund_amount
+  refund_amount(ord(Status.Paid, [ln(1000, 1)], 0)) == 1000
+  refund_amount(ord(Status.Shipped, [ln(1000, 1)], 0)) == 950
+  refund_amount(ord(Status.Delivered, [ln(1000, 1)], 0)) == 900
+holdout refunds: refund_note
+  refund_note(ord(Status.Shipped, [ln(1000, 1)], 0)) == "Refund $9.50 for order 1"
+holdout refunds: return_fee
+  return_fee(1999) == 350
+  return_fee(2000) == 0
+visible invoice: due_note
+  due_note(10000) == "payable in 14 days"
+  due_note(10001) == "payable in 30 days"
+holdout invoice: line_text
+  line_text(ln(1250, 2)) == "  2 x S @ $12.50 = $25.00"
+visible analytics: revenue and average
+  revenue([ord(Status.Paid, [ln(100, 1)], 0), ord(Status.Draft, [ln(100, 1)], 0)]) == 100
+  average_order([ord(Status.Paid, [ln(100, 1)], 0), ord(Status.Paid, [ln(101, 1)], 0)]) == 101
+holdout analytics: big_orders
+  big_orders([ord(Status.Paid, [ln(100000, 1)], 0), ord(Status.Paid, [ln(99999, 1)], 0)]) == 1
+holdout analytics: orders_over and daily_revenue
+  size(orders_over([ord(Status.Paid, [ln(500, 1)], 0)], 500)) == 1
+  daily_revenue([ord(Status.Paid, [ln(500, 1)], 0)], 1) == 500
+visible analytics: revenue_by_city
+  mget(revenue_by_city([ord(Status.Paid, [ln(500, 1)], 0)], [cust("Ada", "Lovelace")]), "Harbour") == 500
+visible commission: rate and amount
+  commission_rate(9999) == 0.02
+  commission_rate(10000) == 0.05
+  commission(10000) == 500
+holdout commission: top rate
+  commission_rate(99999) == 0.05
+  commission_rate(100000) == 0.08
+visible commission: earned_bonus and total
+  earned_bonus(25000) == true
+  earned_bonus(24999) == false
+  commission_total([ord(Status.Paid, [ln(10000, 1)], 0)]) == 500
+holdout dashboard: value_alert
+  value_alert([ord(Status.Paid, [ln(500001, 1)], 0)]) == true
+  value_alert([ord(Status.Paid, [ln(500000, 1)], 0)]) == false
+visible dashboard: open_value and headline
+  open_value([ord(Status.Paid, [ln(500, 1)], 0)]) == 500
+  headline([ord(Status.Paid, [ln(500, 1)], 0)]) == "1 orders, $5.00 received, $5.00 open"
+visible export: rows
+  product_row(prod(1250)) == "P,item,12.50,1.00"
+  order_row(ord(Status.Paid, [ln(1250, 1)], 0)) == "1,P,Paid,12.50"
+holdout audit: check_order
+  check_order(ord(Status.Paid, [ln(0, 1)], 0)) == ["bad price"]
+  size(check_order(ord(Status.Paid, [ln(1, 1)], 0))) == 0
+visible sample: products
+  catalog_value(sample_products()) == 67850
+holdout sample: orders
+  revenue(sample_orders()) == 21599
+
+visible status: label
+  status_label(Status.OnHold) == "On hold"
+visible status: is_open
+  is_open(Status.OnHold) == true
+holdout status: can_cancel
+  can_cancel(Status.OnHold) == true
+visible status: next_status
+  next_status(Status.OnHold) == Status.OnHold
+holdout status: hold
+  hold(ord(Status.Paid, [ln(1, 1)], 0)) == ord(Status.OnHold, [ln(1, 1)], 0)
+  hold(ord(Status.Draft, [ln(1, 1)], 0)) == ord(Status.Draft, [ln(1, 1)], 0)
+visible status: release
+  release(ord(Status.OnHold, [ln(1, 1)], 0)) == ord(Status.Paid, [ln(1, 1)], 0)
+  release(ord(Status.Packed, [ln(1, 1)], 0)) == ord(Status.Packed, [ln(1, 1)], 0)
+holdout status: advance
+  advance(ord(Status.OnHold, [ln(1, 1)], 0)) == ord(Status.OnHold, [ln(1, 1)], 0)
+visible status: is_revenue
+  is_revenue(Status.OnHold) == true
+holdout status: taxable
+  taxable(Status.OnHold) == true
+visible status: order_tax
+  order_tax(ord(Status.OnHold, [ln(1000, 1)], 0), [prodc(1000, Category.Toy)]) == 200
+holdout status: is_reviewable
+  is_reviewable(Status.OnHold) == true
+visible status: refund_share
+  refund_share(Status.OnHold) == 1.0
+holdout status: refund_amount
+  refund_amount(ord(Status.OnHold, [ln(1000, 1)], 0)) == 1000
+visible status: message_for
+  message_for(ord(Status.OnHold, [ln(1, 1)], 0), cust("Ada", "Lovelace")) == "Ada Lovelace, your order 1 is on hold"
+visible status: status_code
+  status_code(Status.OnHold) == "H"
+holdout status: status_color
+  status_color(Status.OnHold) == "amber"
+visible status: status_counts
+  status_counts([ord(Status.OnHold, [ln(1, 1)], 0)]) == ["Draft: 0", "Paid: 0", "On hold: 1", "Packed: 0", "Shipped: 0", "Delivered: 0", "Cancelled: 0"]
+holdout status: order_row
+  order_row(ord(Status.OnHold, [ln(1250, 1)], 0)) == "1,H,On hold,12.50"
+visible status: can_pack
+  can_pack(Status.OnHold) == false
+holdout status: packing_queue
+  size(packing_queue([ord(Status.OnHold, [ln(1, 1)], 0)])) == 0
+visible status: valid_step in and out
+  valid_step(Status.Paid, Status.OnHold) == true
+  valid_step(Status.OnHold, Status.Paid) == true
+holdout status: valid_step onwards
+  valid_step(Status.OnHold, Status.Packed) == false
+  valid_step(Status.OnHold, Status.Cancelled) == true
+holdout status: revenue
+  revenue([ord(Status.OnHold, [ln(500, 1)], 0)]) == 500
+
+visible names: display_name
+  display_name(cust("Ada", "Lovelace")) == "Ada Lovelace"
+visible names: sorted_customers
+  names(sorted_customers([cust("Zoe", "Adams"), cust("Ada", "Lovelace"), cust("Abe", "Adams")])) == ["Abe Adams", "Zoe Adams", "Ada Lovelace"]
+holdout names: find_by_name
+  names(find_by_name([cust("Ada", "Lovelace"), cust("Lovelace", "Byron"), cust("Alan", "Turing")], "LOVE")) == ["Ada Lovelace", "Lovelace Byron"]
+visible names: initials
+  initials(cust("Ada", "Lovelace")) == "AL"
+  initials(cust("mary jane", "watson")) == "MW"
+holdout names: greeting
+  greeting(cust("Ada", "Lovelace")) == "Dear Ada Lovelace"
+visible names: mailing_line
+  mailing_line(cust("Ada", "Lovelace")) == "Ada Lovelace <a@b.org>"
+visible names: parse_customer
+  parse_customer("1,Ada,Lovelace,a@b.org,basic,Harbour") == Some(cust("Ada", "Lovelace"))
+  parse_customer("1,Ada Lovelace,a@b.org,basic,Harbour") == None
+holdout names: customer_header
+  customer_header() == "id,first_name,last_name,email,tier,city"
+visible names: customer_row
+  customer_row(cust("Ada", "Lovelace")) == "1,Ada,Lovelace,a@b.org,basic,Harbour"
+visible names: validate_customer
+  validate_customer(cust("", "Lovelace")) == ["first name is empty"]
+  validate_customer(cust("Ada", "")) == ["last name is empty"]
+holdout names: same_person
+  same_person(cust("ADA", "Lovelace"), cust("ada", "LOVELACE")) == true
+  same_person(cust("Ada", "Lovelace"), cust("Ada", "Byron")) == false
+holdout names: invoice header
+  header(ord(Status.Paid, [ln(1, 1)], 0), cust("Ada", "Lovelace")) == "Invoice 1 for Ada Lovelace, Harbour"
+visible names: message_for
+  message_for(ord(Status.Packed, [ln(1, 1)], 0), cust("Ada", "Lovelace")) == "Ada Lovelace, your order 1 is packed"
+holdout names: reminder
+  reminder(cust("Ada", "Lovelace"), 500) == "Ada Lovelace: please pay $5.00"
+visible names: spend_by_customer
+  mget(spend_by_customer([ord(Status.Paid, [ln(500, 1)], 0)], [cust("Ada", "Lovelace")]), "Ada Lovelace") == 500
+holdout names: top_customers
+  top_customers([ord(Status.Paid, [ln(500, 1)], 0)], [cust("Ada", "Lovelace")], 1) == ["Ada Lovelace"]
+holdout names: sample customers
+  names(sample_customers()) == ["Ada Lovelace", "Alan Turing"]

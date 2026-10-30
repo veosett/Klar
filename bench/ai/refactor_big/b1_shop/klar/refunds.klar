@@ -1,0 +1,33 @@
+use model.{Order, Status}
+use money.{fmt, round2}
+use orders.{grand_total}
+
+/// The share of the money that comes back.
+pub fn refund_share(s: Status) -> Float {
+  return match s {
+    Status.Draft => 0.0,
+    Status.Paid => 1.0,
+    Status.Packed => 1.0,
+    Status.Shipped => 0.95,
+    Status.Delivered => 0.9,
+    Status.Cancelled => 0.0,
+  }
+}
+
+/// The money that comes back for an order.
+pub fn refund_amount(o: Order) -> Float {
+  return round2(grand_total(o) * refund_share(o.status))
+}
+
+/// A line for the customer.
+pub fn refund_note(o: Order) -> Str {
+  return "Refund {fmt(refund_amount(o))} for order {o.id}"
+}
+
+/// The fee for sending goods back: 3.50 below 20.00, otherwise free.
+pub fn return_fee(amount: Float) -> Float {
+  if amount < 20.0 {
+    return 3.5
+  }
+  return 0.0
+}

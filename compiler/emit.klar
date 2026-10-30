@@ -20,6 +20,7 @@ use x64.{align_code, shift_cl, shift_i}
 use x64.{site, sse, store, store32, store8, store_rip, syscall, test_ri8, test_rr, ucomisd, ud2}
 
 pub const MAX_DEPTH: Int = 10000
+const PAGE: Int = 4096
 
 /// The caller-saved registers the allocator hands out (regalloc.klar).
 const CALLER_SAVED: List[Int] = [6, 7, 8, 9, 10]
@@ -1450,6 +1451,13 @@ fn function_part(f0: KFn, rt: Map[Str, Str], n: Int, org: Int) -> Part {
   let frame = align16(base + 8 * (al.used.len() + 2 + xmm_used.len() + csave.len() + caller_used.len())) + outgoing
   var a = mov_rr(a: push(label(new_asm_at(n, org), f.name), RBP), dst: RBP, src: RSP)
   a = alu_ri(a: a, op: "sub", dst: RSP, imm: frame)
+  // Windows grows the stack through one guard page: a frame of more than a page must touch its pages in order, or the
+  // first write below the guard page is an access violation (the slots are not in use yet)
+  var page = PAGE
+  while page < frame {
+    a = store(a: a, base: RBP, disp: 0 - page, src: RBP)
+    page = page + PAGE
+  }
   k = 0
   for r in al.used {
     a = store(a: a, base: RBP, disp: save_off.get(k).unwrap_or(0), src: r)

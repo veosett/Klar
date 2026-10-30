@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn group_ok(cells: List[Str]) -> Bool {\n  let digits = cells.filter(fn(x) => x != \".\")\n  return digits.unique().len() == digits.len()\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n  if rows.len() != 9 {\n    return false\n  }\n  for row in rows {\n    if row.len() != 9 {\n      return false\n    }\n    for ch in row.chars() {\n      if not \"123456789.\".contains(ch) {\n        return false\n      }\n    }\n  }\n  for r in range(0, 9) {\n    let line = rows.get_or(r, \"\").chars()\n    if not group_ok(line) {\n      return false\n    }\n  }\n  for c in range(0, 9) {\n    let column = range(0, 9).map(fn(rr) => rows.get_or(rr, \"\").slice(c, c + 1))\n    if not group_ok(column) {\n      return false\n    }\n  }\n  for br in range(0, 3) {\n    for bc in range(0, 3) {\n      let box = range(0, 3).flat_map(fn(dr) => range(0, 3).map(fn(dc) => rows.get_or(br * 3 + dr, \"\").slice(bc * 3 + dc, bc * 3 + dc + 1)))\n      if not group_ok(box) {\n        return false\n      }\n    }\n  }\n  return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,25 @@
+/// Money as digits: "12.50".
+pub fn plain(cents: Int) -> Str {
+  let a = cents.abs()
+  let sign = match cents < 0 { true => "-", false => "" }
+  let rest = (a % 100).to_str().pad_left(2, "0")
+  return "{sign}{a / 100}.{rest}"
+}
+
+/// Money as text: "$12.50".
+pub fn fmt(cents: Int) -> Str {
+  return "${plain(cents)}"
+}
+
+/// A share of an amount, rounded half up to the cent.
+pub fn pct(cents: Int, rate: Float) -> Int {
+  return (cents.to_float() * rate + 0.5).floor()
+}
+
+/// The average of `n` amounts, rounded half up.
+pub fn avg(total: Int, n: Int) -> Int {
+  if n <= 0 {
+    return 0
+  }
+  return (2 * total + n) / (2 * n)
+}
