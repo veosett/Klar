@@ -996,7 +996,9 @@ def check_pkg(klarc, d):
 EVAL_CASES = [["1 + 2"], ["let x = [1, 2]", "x.map(fn(v) => v * 2)"], ['"a,b".split(",")'], ['print("hi")', "42"],
               ["nope(1)"], ['let x: Int = "s"', "x"], ["Some(3)"], ['Map {}.set("a", 1)'], ["[1, 2].get_or(5, 0) + 1.5"],
               ["2.5 * 2.0"], ['"é".len()'], ["let xs = [3, 1, 2]", "xs.sort()"], ["[1].get_or(0, 0) / 0"],
-              ['let n = "x".to_int().ok_or("bad")', "n"], ['print("before")', "assert 1 == 2", "1"], ["sq(4)"]]
+              ['let n = "x".to_int().ok_or("bad")', "n"], ['print("before")', "assert 1 == 2", "1"], ["sq(4)"],
+              ['file_exists("/no/such/file")'], ['read_file("/no/such/file").is_err()'], ["current_dir().len() > 0"],
+              ["now_ms() > 0"], ["random_int(1, 1)"], ["cli_args().len()"], ['run_capture(["true"], "", "")']]
 
 
 def check_sandbox(klarc, d):

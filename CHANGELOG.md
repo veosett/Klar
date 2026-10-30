@@ -7,6 +7,8 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- `klarc eval` ran the expression as a test block: effects other than `io` failed with E0000, and `cli_args()` showed the
+  arguments of the test runner. It now starts at the expression, like `klar eval`, with the real files and clock.
 - A long chain (`a + a + ...`, `a.b().c()...`, `- - a`, `not not a`, `else if`) of some hundreds of links crashed `klar`
   with a raw `RecursionError` and `klarc` with R0006 and its own stack. Its tree is as deep as the chain is long, so
   links now count towards the nesting limit: about 200 is the most, then E0003 with a hint. `--py` falls back to the

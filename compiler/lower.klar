@@ -3882,7 +3882,7 @@ pub fn lower_program_cov(ld: Ld, main_path: Str, tests: Bool, coverage: Bool) ->
 /// `lower_program` with coverage marks and/or profiling calls (klar/rt/cov.klar, klar/rt/profile.klar).
 pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool) -> Lw {
   return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: coverage, profile: profile, allow: None,
-    trace: TraceSpec { mode: 0, events: "", result: "" }, limit: 0)
+    trace: TraceSpec { mode: 0, events: "", result: "" }, limit: 0, entry: "main")
 }
 
 /// `lower_program` of a program that runs with the rights of `--allow` (klar/rt/sandbox.klar).
@@ -3904,8 +3904,14 @@ pub fn lower_program_traced(ld: Ld, main_path: Str, allow: Option[List[Str]], tr
 pub fn lower_program_limited(ld: Ld, main_path: Str, allow: Option[List[Str]], trace: TraceSpec, tests: Bool,
   limit: Int) -> Lw {
     return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: false, profile: false, allow: allow,
-      trace: trace, limit: limit)
+      trace: trace, limit: limit, entry: "main")
   }
+
+/// A program that starts at the function `entry` instead of `main` (`klarc eval`: a context file may have a `main`).
+pub fn lower_program_entry(ld: Ld, main_path: Str, allow: Option[List[Str]], limit: Int, entry: Str) -> Lw {
+  return lower_program_all(ld: ld, main_path: main_path, tests: false, coverage: false, profile: false, allow: allow,
+    trace: TraceSpec { mode: 0, events: "", result: "" }, limit: limit, entry: entry)
+}
 
 /// `g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc, time,
 /// rand, net, #dirs, dirs, #programs, programs, env, #variables, variables] (as `sandbox_data` in
@@ -3989,7 +3995,7 @@ fn trace_data(w0: Lw, t: TraceSpec) -> Lw {
 }
 
 fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool, allow: Option[List[Str]],
-  trace: TraceSpec, limit: Int) -> Lw {
+  trace: TraceSpec, limit: Int, entry: Str) -> Lw {
     let rt_mod = match ld.runtime {
       Some(m) => m,
       None => fail("native: the runtime is not loaded"),
@@ -4105,7 +4111,7 @@ fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profil
     for d in checker_of(main_mod).decls {
       match d {
         Decl.Fn(f) => {
-          if f.name == "main" and main_decl == None {
+          if f.name == entry and main_decl == None {
             main_decl = Some(f)
             main_idx = k
           }

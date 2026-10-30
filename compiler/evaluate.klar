@@ -1,10 +1,11 @@
 // `klarc eval`: evaluates an expression (after some statements), optionally in the context of a file, like
-// klar/tools/runtools.py — checked by the Klar checker (which also gives the type), then compiled as a test block and
-// run natively; the value comes back through `dbg`.
+// klar/tools/runtools.py — checked by the Klar checker (which also gives the type), then compiled with the expression's
+// function as the entry and run natively; the value comes back through `dbg`.
 use commands.{absolute}
-use dev.{DEFAULT_TIMEOUT, allow_of, host_target, native_image_allow, parse_rt, save_exe, temp_path, test_items}
+use dev.{DEFAULT_TIMEOUT, allow_of, host_target, image_of, parse_rt, save_exe, temp_path}
 use jsonout.{J, compact}
 use loader.{load_program_with, load_runtime}
+use lower.{lower_program_entry}
 use report.{user_diags}
 use types.{show}
 
@@ -80,25 +81,17 @@ fn evaluate(parts: List[Str], context: Str, lib: Str, allow: Option[List[Str]]) 
     None => Map {},
   }
   let typ = type_at(types: types, file: fname, line: value_line, col: 10 + VALUE.len())
-  // run it: the same statements as a test block
-  let test_src = header + "test \"" + ENTRY + "\" \{\n" + body + tail
-  let tl = load_runtime(load_program_with(path: path, lib: lib, overlay: Map {}.set(path, test_src)))
-  if tl.diags.any(fn(d) => d.severity == "error") {
-    return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
-      first: "message", second: J.JStr("klarc cannot run this expression") }]) }, Pair { first: "output",
-        second: J.JStr("") }])
-  }
-  let index = test_items(tl, path).filter(fn(t) => t.name == ENTRY).get(0).map(fn(t) => t.index).unwrap_or(0)
+  // run it as a program that starts at the entry: with the real files and clock, without arguments
+  let w = lower_program_entry(ld: load_runtime(ld), main_path: path, allow: allow, limit: DEFAULT_TIMEOUT, entry: ENTRY)
   let exe = temp_path(path, "eval")
-  match save_exe(exe, native_image_allow(ld: tl, main_path: path, target: host_target(), tests: true, allow: allow,
-    limit: DEFAULT_TIMEOUT)) {
-      Ok(_) => {},
-      Err(e) => {
-        return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
-          first: "message", second: J.JStr(e) }]) }, Pair { first: "output", second: J.JStr("") }])
-      },
-    }
-  let res = match run_capture(args: [exe, "100", "0", index.to_str()], dir: "", input: "") {
+  match save_exe(exe, image_of(w, host_target())) {
+    Ok(_) => {},
+    Err(e) => {
+      return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
+        first: "message", second: J.JStr(e) }]) }, Pair { first: "output", second: J.JStr("") }])
+    },
+  }
+  let res = match run_capture(args: [exe], dir: "", input: "") {
     Ok(r) => r,
     Err(e) => {
       return err_eval([Pair { first: "error", second: J.JObj([Pair { first: "code", second: J.JStr("E0000") }, Pair {
