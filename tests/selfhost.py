@@ -1025,6 +1025,17 @@ def check_sandbox(klarc, d):
     return bad
 
 
+def check_spec_full(klarc):
+    """`klarc spec --full` == `klar spec --full` (`klar_spec` in check_mcp covers the short one)."""
+    want = subprocess.run([sys.executable, "-m", "klar", "spec", "--full"], capture_output=True, text=True, cwd=ROOT,
+                          env=dict(os.environ, PYTHONPATH=ROOT))
+    got = subprocess.run([klarc, "spec", "--full", "--lib", os.path.join(ROOT, "klar")], capture_output=True, text=True,
+                         cwd=ROOT)
+    bad = int((want.stdout, want.returncode) != (got.stdout, got.returncode))
+    print(f"spec --full: {'different' if bad else 'identical'}")
+    return bad
+
+
 def check_limit(klarc, d):
     """`--timeout`: klarc builds the bytes klar builds, and `run` and `test` stop the same way with R0018."""
     work = os.path.join(d, "limit")
@@ -1326,7 +1337,8 @@ def check_tools_b(klarc, d):
 
 
 def check_tools_c(klarc, d):
-    return check_eval(klarc, d) + check_sandbox(klarc, d) + check_limit(klarc, d) + check_pkg(klarc, d) + \
+    return check_eval(klarc, d) + check_sandbox(klarc, d) + check_limit(klarc, d) + check_spec_full(klarc) + \
+        check_pkg(klarc, d) + \
         check_patch(klarc, [p for p in klar_files() if os.sep + "rt" + os.sep not in p
                             and os.sep + "compiler" + os.sep not in p][:80])
 

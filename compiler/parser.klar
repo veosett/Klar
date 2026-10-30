@@ -542,7 +542,7 @@ fn parse_postfix(p: Ps, start: Expr, i: Int) -> Result[Got[Expr], ParseError] {
       e = Expr.WithExpr(span: span_from(p: p, start: sp, i: j), base: e, fields: fields.value)
     } else if is_op(tk(p, j), "[") {
       return bad_h(t: tk(p, j), message: "indexing with `[]` is not supported",
-        hint: "use `.get(i)` which returns `Option[T]` (Some/None)")
+        hint: "use `.get(i)`, which returns `Option[T]`, or `.get_or(i, default)`; for a string, `.chars()` first")
     } else {
       return Ok(Got { value: e, pos: j })
     }

@@ -64,7 +64,7 @@ fn usage() -> Never uses io {
   print("       klarc new <dir> [--lib]")
   print("       klarc outline <file.klar> [--all] [--json]")
   print("       klarc refs <file.klar> <name> [--json]")
-  print("       klarc spec")
+  print("       klarc spec [--full]")
   print("       klarc ast <file.klar> [--pretty]")
   print("       klarc doc <query> [--in <file.klar>] [--limit <n>] [--json]")
   print("       klarc rename <file.klar> <old> <new> [--dry-run] [--json]")
@@ -367,7 +367,7 @@ fn main() uses io, fs, time, proc {
     exit(ast_command(args: argv.drop(1), lib: lib_dir(argv)))
   }
   if tool == "spec" {
-    exit(spec_command(lib_dir(argv)))
+    exit(spec_command(lib: lib_dir(argv), full: argv.contains("--full")))
   }
   if tool == "doc" {
     exit(doc_command(args: argv.drop(1), lib: lib_dir(argv)))

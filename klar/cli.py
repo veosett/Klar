@@ -660,13 +660,18 @@ def methods_line(sigs):
     return f"{owner}: " + ", ".join(out)
 
 
-def std_modules_reference():
+def std_modules_reference(full=False):
+    """The std modules: by default the types and the names of the functions, one line per module (few programs use
+    them: 51 of 838 agents' solutions, and the signatures were 38% of the reference); `full`: every signature."""
     std_dir = os.path.join(HERE, "std")
     if not os.path.isdir(std_dir):
         return ""
     from .parser import parse
     from .tools.inspect import sig_text
     out = ["", "## Std modules"]
+    if not full:
+        out.append("Import with `use std.NAME.{a, b}`. `klar doc a` shows the signature and examples of a function; "
+                   "`klar spec --full` lists them all.\n")
     for fname in sorted(os.listdir(std_dir)):
         if not fname.endswith(".klar"):
             continue
@@ -674,6 +679,12 @@ def std_modules_reference():
             src = f.read()
         prog = parse(src, fname)
         lines = src.split("\n")
+        if not full:
+            public = [d for d in prog.decls if getattr(d, "public", False)]
+            types = [f"`{sig_text(lines, d)}`" for d in public if isinstance(d, (TypeDecl, EnumDecl))]
+            names = [d.name for d in public if isinstance(d, FnDecl) and not d.owner_kind]
+            out.append(f"- `std.{fname[:-5]}`: " + "; ".join(types + [", ".join(names)]))
+            continue
         out.append(f"\n`use std.{fname[:-5]}.{{...}}`:")
         for d in prog.decls:
             if not getattr(d, "public", False):
@@ -699,7 +710,7 @@ def cmd_spec(args):
     with open(os.path.join(HERE, "ai_reference.md"), encoding="utf-8") as f:
         print(f.read())
     print(stdlib_reference())
-    print(std_modules_reference())
+    print(std_modules_reference(args.full))
     return 0
 
 
@@ -803,6 +814,7 @@ def build_parser():
     p.add_argument("--pretty", action="store_true")
     p.set_defaults(fn=cmd_ast)
     p = sub.add_parser("spec", help="print the compact language reference (paste it into an AI prompt)")
+    p.add_argument("--full", action="store_true", help="with the signature of every function of the std modules")
     p.set_defaults(fn=cmd_spec)
     p = sub.add_parser("explain", help="explain an error code, e.g. E0202")
     p.add_argument("code")

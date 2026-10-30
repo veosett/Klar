@@ -959,10 +959,39 @@ fn first_doc_line(doc: Option[Str]) -> Str {
   }
 }
 
-fn std_modules_reference(lib: Str) -> Str uses fs {
+/// A module on one line of `klarc spec`: its types and the names of its functions.
+fn std_module_line(lines: List[Str], name: Str, decls: List[Decl]) -> Str {
+  var types: List[Str] = []
+  var names: List[Str] = []
+  for d in decls {
+    match d {
+      Decl.TypeD(_, _, _, _, _, _) => {
+        types = types.push("`" + sig_text(lines, d, false) + "`")
+      },
+      Decl.EnumD(_, _, _, _, _, _) => {
+        types = types.push("`" + sig_text(lines, d, false) + "`")
+      },
+      Decl.Fn(f) => {
+        names = names.push(f.name)
+      },
+      _ => {},
+    }
+  }
+  return "- `std.{name}`: " + types.push(names.join(", ")).join("; ")
+}
+
+fn std_modules_reference(lib: Str, full: Bool) -> Str uses fs {
   var out = ["", "## Std modules"]
+  if not full {
+    out = out.push("Import with `use std.NAME.\{a, b\}`. `klar doc a` shows the signature and examples of a function; " +
+        "`klar spec --full` lists them all.\n")
+  }
   for entry in std_modules(lib) {
     let lines = entry.second.first
+    if not full {
+      out = out.push(std_module_line(lines, entry.first, entry.second.second))
+      continue
+    }
     out = out.push("\n`use std.{entry.first}.\{...\}`:")
     for d in entry.second.second {
       match d {
@@ -995,10 +1024,10 @@ fn std_modules_reference(lib: Str) -> Str uses fs {
 }
 
 /// `klarc spec`: the compact language reference for AI authors.
-pub fn spec_command(lib: Str) -> Int uses io, fs {
+pub fn spec_command(lib: Str, full: Bool) -> Int uses io, fs {
   print(read_source(lib + "/ai_reference.md").unwrap_or(""))
   print(stdlib_reference())
-  print(std_modules_reference(lib))
+  print(std_modules_reference(lib, full))
   return 0
 }
 

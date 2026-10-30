@@ -90,6 +90,11 @@ A security review of the language, the runtime and the tools (`SECURITY.md` desc
   variables, resource limits, links on Windows, programs found through PATH).
 
 ### Changed
+- `klar spec` is 30% shorter: the std modules are one line each, with their types and the names of their functions
+  (`klar doc NAME` shows a signature, `klar spec --full` lists them all). In 838 solutions by agents 51 used a std
+  module, while the signatures took 38% of the reference, which every agent reads once. The effect on agents' tokens
+  is not measured yet.
+- The hint for `xs[i]` also names `.get_or(i, default)`: models that knew only `.get(i)` wrote the helper themselves.
 - `klar spec` is 5% shorter with the same content: the methods are one line per type, without the receiver
   (a line such as `List[T]: len() -> Int, map[U](f: fn(T) -> U) -> List[U], ...`; a different receiver such as
   `sum(self: List[Int])` is still shown).

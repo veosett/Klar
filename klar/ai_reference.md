@@ -138,7 +138,7 @@ xs.push(1)                 // ERROR E0405: result discarded, xs unchanged
 var m: Map[Str, Int] = Map {}
 m = m.set("k", 1)
 ```
-No indexing `xs[i]`: use `xs.get(i)` → `Option[T]`. No `unwrap`: use `?`, `match`, `.unwrap_or(d)`.
+No indexing `xs[i]`: use `xs.get(i)` → `Option[T]` or `xs.get_or(i, default)`. No `unwrap`: use `?`, `match`, `.unwrap_or(d)`.
 
 ## Traits (shared methods of different types)
 ```klar

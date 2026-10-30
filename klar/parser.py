@@ -869,7 +869,7 @@ class Parser:
                 fields = self.parse_field_inits()
                 expr = N.WithExpr(span=self.span_from(expr.span), base=expr, fields=fields)
             elif self.at_op("["):
-                self.fail("indexing with `[]` is not supported", hint="use `.get(i)` which returns `Option[T]` (Some/None)")
+                self.fail("indexing with `[]` is not supported", hint="use `.get(i)`, which returns `Option[T]`, or `.get_or(i, default)`; for a string, `.chars()` first")
             else:
                 self.depth = base
                 return expr

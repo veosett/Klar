@@ -2575,6 +2575,27 @@ fn main() uses io {
         self.check_code("fn main(x: Int) { }", "E0502")
 
 
+class Reference(unittest.TestCase):
+    """`klar spec`: short by default (few programs use the std modules), and nothing is out of reach."""
+
+    def test_std_modules_are_names_and_types_by_default(self):
+        _, short, _ = cli("spec")
+        _, full, _ = cli("spec", "--full")
+        self.assertIn("- `std.text`: capitalize, title_case, words,", short)
+        self.assertIn("`enum Json { Null,", short)
+        self.assertNotIn("Non-empty words separated", short)
+        self.assertIn("- `words(s: Str) -> List[Str]` — Non-empty words separated", full)
+        self.assertLess(len(short), len(full) * 3 // 4)
+
+    def test_every_name_in_the_short_reference_has_doc(self):
+        _, short, _ = cli("spec")
+        names = re.findall(r"(?m)^- `std\.\w+`: (.*)$", short)
+        self.assertEqual(len(names), 12)
+        code, out, _ = cli("doc", names[-1].split("; ")[-1].split(", ")[0])
+        self.assertEqual(code, 0)
+        self.assertIn("use std.", out)
+
+
 class RepositoryIntegrity(unittest.TestCase):
     """Files that were hard links to one file once overwrote each other, and 124 broken files got committed."""
 
