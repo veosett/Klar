@@ -1303,8 +1303,9 @@ def check_profile(klarc):
     executions of each line (times differ: native code; built-ins are listed only by klar)."""
     bad = runs = 0
     for path in lowering_files():
-        # (not the compiler, and not the scripts that write files or run other programs: bench/, tools/, the fuzzer)
-        if any(os.sep + d + os.sep in path for d in ("compiler", "bench", "tools")) or path.endswith("fuzz.klar"):
+        # (not the compiler, not the scripts that write files or run other programs: bench/, tools/, the fuzzer, and
+        # not the programs that never end: `profile` has no time limit)
+        if any(os.sep + d + os.sep in path for d in ("compiler", "bench", "tools", "limits")) or path.endswith("fuzz.klar"):
             continue
         runs += 1
         want = cli_output(["profile", path, "--json", "--top", "1000"])
