@@ -1044,23 +1044,25 @@ def check_limit(klarc, d):
     env = dict(os.environ, PYTHONPATH=ROOT)
     lib = ["--lib", os.path.join(ROOT, "klar")]
     subprocess.run([sys.executable, "-m", "klar", "build", "p.klar", "-o", "a", "--timeout", "1"], cwd=work, env=env,
-                   check=True)
-    subprocess.run([klarc, "build", "p.klar", "-o", "b", "--timeout", "1"] + lib, cwd=work, check=True)
+                   check=True, capture_output=True)
+    subprocess.run([klarc, "build", "p.klar", "-o", "b", "--timeout", "1"] + lib, cwd=work, check=True, capture_output=True)
     with open(os.path.join(work, "a"), "rb") as a, open(os.path.join(work, "b"), "rb") as b:
         bad = int(a.read() != b.read())
     if bad:
         print("DIFF build --timeout: the executables differ")
-    jobs = (["run", "p.klar", "--timeout", "1"], ["run", "p.klar", "--timeout", "1", "--", "fib"],
-            ["test", "p.klar", "--timeout", "1"])
-    for job in jobs:
-        want = subprocess.run([sys.executable, "-m", "klar"] + job, capture_output=True, text=True, cwd=work, env=env)
-        cut = job.index("--") if "--" in job else len(job)
-        got = subprocess.run([klarc] + job[:cut] + lib + job[cut:], capture_output=True, text=True, cwd=work)
-        if (want.stdout, want.stderr, want.returncode) != (got.stdout, got.stderr, got.returncode) \
-                or "R0018" not in want.stdout + want.stderr:
+    jobs = ((["run", "--timeout", "1", "p.klar"], ["run", "p.klar", "--timeout", "1"] + lib),
+            (["run", "--timeout", "1", "p.klar", "fib"], ["run", "p.klar", "--timeout", "1"] + lib + ["--", "fib"]),
+            (["test", "p.klar", "--timeout", "1"], ["test", "p.klar", "--timeout", "1"] + lib))
+
+    def shown(proc):            # where the recursion was when the time ran out depends on the machine
+        return [re.sub(r"(?m)^.*call stack.*$", "", s) for s in (proc.stdout, proc.stderr)] + [proc.returncode]
+    for py_args, klarc_args in jobs:
+        want = shown(subprocess.run([sys.executable, "-m", "klar"] + py_args, capture_output=True, text=True, cwd=work,
+                                    env=env))
+        got = shown(subprocess.run([klarc] + klarc_args, capture_output=True, text=True, cwd=work))
+        if want != got or "R0018" not in want[0] + want[1]:
             bad += 1
-            print(f"DIFF {' '.join(job)}:\n  python: {want.stdout!r} {want.stderr[:300]!r} {want.returncode}"
-                  f"\n  klar:   {got.stdout!r} {got.stderr[:300]!r} {got.returncode}")
+            print(f"DIFF {' '.join(py_args)}:\n  python: {want!r}\n  klar:   {got!r}")
     print(f"limit: {1 + len(jobs) - bad}/{1 + len(jobs)} identical")
     return bad
 

@@ -1,8 +1,8 @@
 // A program that never ends by itself, for `--timeout` (klar/rt/limit.klar, TimeLimit in tests/test_klar.py):
 //
-//   klar run tests/limits/endless.klar --timeout 1            stops at the `while` loop with R0018
-//   klar run tests/limits/endless.klar --timeout 1 -- fib     stops in `fib` with R0018
-//   klar test tests/limits/endless.klar --timeout 1           both tests fail with R0018; the run goes on
+//   klar run --timeout 1 tests/limits/endless.klar            stops at the `while` loop with R0018
+//   klar run --timeout 1 tests/limits/endless.klar fib        stops in `fib` with R0018
+//   klar test tests/limits/endless.klar --timeout 1           the tests and the property fail with R0018; the run goes on
 
 fn spin(n: Int) -> Int {
   var i = n
