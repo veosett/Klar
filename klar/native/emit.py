@@ -15,6 +15,7 @@ from .regalloc import CALLER_SAVED
 from .x64 import (Asm, RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15, XMM0, XMM1)
 
 MAX_DEPTH = 10000
+PAGE = 4096
 
 
 def out_area(code):
@@ -182,6 +183,10 @@ class Emitter:
         frame = align16(base + 8 * (len(self.saved) + 2 + len(self.xmm_used) + len(csave) + len(self.caller_used)))
         frame += self.out_area
         a.alu_ri("sub", RSP, frame)
+        # Windows grows the stack through one guard page: a frame of more than a page must touch its pages in order, or
+        # the first write below the guard page is an access violation (the slots are not in use yet)
+        for off in range(PAGE, frame, PAGE):
+            a.store(RBP, -off, RBP)
         for r, off in zip(self.saved, self.save_off):
             a.store(RBP, off, r)
         for p in range(fn.nparams):

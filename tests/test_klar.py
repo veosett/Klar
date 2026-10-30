@@ -1256,6 +1256,22 @@ class NativeMemory(unittest.TestCase):
             small, big = peak(exe, 20000), peak(exe, 200000)
         self.assertLess(big - small, 10 * 1024, f"peak memory grew from {small} KB to {big} KB (it leaked ~120 MB)")
 
+    def test_a_frame_over_a_page_touches_every_page(self):
+        """Windows grows the stack through one guard page: a frame over 4 KB that skipped it crashed with 0xC0000005."""
+        from klar.native.build import build, host_target
+        if not host_target():
+            self.skipTest("the executable runs on this machine only")
+        n = 1200     # each value is live across calls, so it takes a stack slot: 9.6 KB
+        lets = "\n".join(f"  let a{i} = cli_args().len() + {i}" for i in range(n))
+        prints = "\n".join(f"  print(a{i})" for i in range(n))
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "big.klar")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"fn main() uses io {{\n{lets}\n{prints}\n}}\n")
+            exe, _ = build(path, out=os.path.join(d, "big.exe"))
+            r = subprocess.run([exe], capture_output=True, text=True)
+        self.assertEqual((r.returncode, r.stdout.split()), (0, [str(i) for i in range(n)]))
+
 
 class SelfHosting(unittest.TestCase):
     def test_generated_files_are_current(self):

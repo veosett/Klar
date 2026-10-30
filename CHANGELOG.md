@@ -7,6 +7,9 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- Windows: a function with a frame over 4 KB crashed with 0xC0000005, because the stack grows through one guard page
+  and the frame stepped over it. Such a function now touches every page of its frame when it starts. Smaller frames
+  build the same bytes.
 - Recovered from two broken commits (4cd2275, e210074). Groups of files in the working tree were hard links to one
   file, so writing one overwrote them all, and 124 files were committed with the contents of another (a compiler
   source holding a JSON report; `klar` did not start). Recovered exactly: the files untouched by those commits,
