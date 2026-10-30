@@ -1,5 +1,5 @@
 {
- "note": "per agent: [tokens, tool calls, wall-clock ms] as the agent runner reported them when the agent finished; the wall-clock time includes the harness (tsc is the slowest) and a busy machine; haiku/humaneval/typescript agents 0-2 were interrupted by a harness outage and resumed, their time is the sum of both parts and their tokens the total; haiku-guide: Haiku that first read the reference, docs/GUIDE.md and examples/*.klar (with the number literals and std.math.floor_div that the first runs led to); haiku-v2: Haiku with the reference only, after the changes the first runs led to (E0208 only for swappable arguments, {\"a\": 1} maps, `=> {` lambdas, literal braces, 0x/1e literals, floor_div)",
+ "note": "per agent: [tokens, tool calls, wall-clock ms] as the agent runner reported them when the agent finished; the wall-clock time includes the harness (tsc is the slowest) and a busy machine; haiku/humaneval/typescript agents 0-2 were interrupted by a harness outage and resumed, their time is the sum of both parts and their tokens the total; haiku-guide: Haiku that first read the reference, docs/GUIDE.md and examples/*.klar (with the number literals and std.math.floor_div that the first runs led to); haiku-v2: Haiku with the reference only, after the changes the first runs led to (E0208 only for swappable arguments, {\"a\": 1} maps, `=> {` lambdas, literal braces, 0x/1e literals, floor_div); haiku-nospec: Haiku without any language reference (it learns Klar from the compiler's messages)",
  "sonnet": {
   "humaneval": {
    "klar": [
@@ -311,6 +311,17 @@
      127977,
      74,
      187599
+    ]
+   ]
+  }
+ },
+ "haiku-nospec": {
+  "hard": {
+   "klar": [
+    [
+     169099,
+     78,
+     446183
     ]
    ]
   }

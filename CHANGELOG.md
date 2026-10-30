@@ -7,6 +7,15 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- A module that does not load (or is not found, or lacks the imported name) no longer buries its own error under
+  "unknown function"/"unknown type" errors at every use of what it would have exported: the importer gets one
+  E0601 / E0603, then the module's own errors. Found by the agent run without a reference, where 15 such errors
+  came before the one real error (`||`) in every report.
+- klarc showed modules next to a main file given as a relative path as `../name.klar`.
+- Syntax errors come all at once when they can: `&&`, `||`, `::`, `!` and a trailing `;` are reported and read as
+  `and`, `or`, `.`, `not` and nothing, so the rest of the file is still parsed and type-checked and the report has
+  every error (before: one lexical error, then — after a fix — the next). `klar fix` applies all of them in one
+  round. In the agent run without a reference, one task spent its three attempts on one error each.
 - Windows: a function with a frame over 4 KB crashed with 0xC0000005, because the stack grows through one guard page
   and the frame stepped over it. Such a function now touches every page of its frame when it starts. Smaller frames
   build the same bytes.

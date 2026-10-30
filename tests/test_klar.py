@@ -1474,6 +1474,29 @@ class Modules(unittest.TestCase):
             code, out, err = cli("run", main)
             self.assertEqual((code, out), (0, "18\n"), err)
 
+    def test_every_error_at_once(self):
+        """Foreign operators with a replacement (`&&`, `||`, `!`, `;`) are all reported, and the file is still
+        parsed and type-checked: one report has every error (klar/parser.py `parse_recovering`)."""
+        with tempfile.TemporaryDirectory() as d:
+            main = self.write(d, "main.klar", "fn f(a: Bool, b: Bool) -> Int {\n  if a && !b || a {\n"
+                                              "    return \"x\";\n  }\n  return 0\n}\n")
+            loaded = load_path(main)
+            self.assertEqual([x.code for x in loaded.diags if x.severity == "error"],
+                             ["E0001", "E0001", "E0001", "E0202", "E0001"])
+            code, out, _ = cli("fix", main)
+            with open(main, encoding="utf-8") as f:
+                self.assertIn("if a and not b or a {", f.read())
+
+    def test_a_failed_import_is_reported_once(self):
+        """A module that does not load is one error (E0601) plus its own errors: the uses of what it would have
+        exported are not unknown names too (the root cause first, nothing that buries it)."""
+        with tempfile.TemporaryDirectory() as d:
+            self.write(d, "a.klar", "pub type P { x: Int }\npub fn make() -> P {\n  return P { x: 1 } $\n}\n")
+            main = self.write(d, "main.klar", "use a.{P, make}\nuse b.{other}\n\nfn main() uses io {\n"
+                                              "  let p: P = make()\n  print(p.x + other(P { x: 3 }))\n}\n")
+            loaded = load_path(main)
+            self.assertEqual(sorted(x.code for x in loaded.diags if x.severity == "error"), ["E0001", "E0601", "E0601"])
+
     def test_private_names_need_import(self):
         with tempfile.TemporaryDirectory() as d:
             self.write(d, "a.klar", "type P { x: Int }\npub fn make() -> P { return P { x: 1 } }\n")

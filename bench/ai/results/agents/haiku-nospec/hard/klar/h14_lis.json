@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn at(xs: List[Int], i: Int) -> Int {\n    match xs.get(i) {\n        Some(v) => {\n            return v\n        }\n        None => {\n            return 0\n        }\n    }\n}\n\npub fn lis(xs: List[Int]) -> List[Int] {\n    let n = xs.len()\n\n    // rev[k] holds the length of the longest increasing run starting at index n - 1 - k\n    var rev: List[Int] = []\n    var i = n - 1\n    while i >= 0 {\n        var best = 1\n        var j = i + 1\n        while j < n {\n            if at(xs, j) > at(xs, i) {\n                let c = at(rev, n - 1 - j) + 1\n                if c > best {\n                    best = c\n                }\n            }\n            j = j + 1\n        }\n        rev = rev.push(best)\n        i = i - 1\n    }\n\n    var best_len = 0\n    for v in rev {\n        if v > best_len {\n            best_len = v\n        }\n    }\n\n    var out: List[Int] = []\n    var remaining = best_len\n    var pos = 0\n    var has_prev = false\n    var prev = 0\n    while remaining > 0 {\n        var found = false\n        var bestv = 0\n        var bestj = 0\n        var j = pos\n        while j < n {\n            let lj = at(rev, n - 1 - j)\n            let v = at(xs, j)\n            if lj >= remaining and (not has_prev or v > prev) {\n                if not found or v < bestv {\n                    found = true\n                    bestv = v\n                    bestj = j\n                }\n            }\n            j = j + 1\n        }\n        if not found {\n            break\n        }\n        out = out.push(bestv)\n        prev = bestv\n        has_prev = true\n        pos = bestj + 1\n        remaining = remaining - 1\n    }\n    return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

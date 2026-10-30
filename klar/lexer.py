@@ -72,7 +72,7 @@ class Token:
 
 
 class Lexer:
-    def __init__(self, src: str, file: str, line: int = 1, col: int = 1):
+    def __init__(self, src: str, file: str, line: int = 1, col: int = 1, recover: bool = False):
         self.src = src
         self.file = file
         self.i = 0
@@ -80,6 +80,10 @@ class Lexer:
         self.col = col
         self.toks: List[Token] = []
         self.stack: List[str] = []
+        # recover: a foreign operator with a replacement (`&&`, `||`, `::`, `!`, `;`) is reported in `errors` and
+        # read as its replacement, so the rest of the file is still checked and every error is reported at once
+        self.recover = recover
+        self.errors: List[Diagnostic] = []
 
     # -- helpers ----------------------------------------------------------
     def ch(self, k: int = 0) -> str:
@@ -97,9 +101,12 @@ class Lexer:
         return c
 
     def error(self, code, msg, line, col, hint=None, width=1, replacement=None):
+        raise KlarSyntaxError(self.diag(code, msg, line, col, hint, width, replacement))
+
+    def diag(self, code, msg, line, col, hint=None, width=1, replacement=None):
         span = Span(self.file, line, col, line, col + width)
         fix = {"span": span, "text": replacement} if replacement is not None else None
-        raise KlarSyntaxError(Diagnostic(code, "error", msg, span, hint, fix))
+        return Diagnostic(code, "error", msg, span, hint, fix)
 
     def add(self, kind, value, sl, sc, parts=None):
         self.toks.append(Token(kind, value, Span(self.file, sl, sc, self.line, self.col), parts))
@@ -260,8 +267,16 @@ class Lexer:
     def operator(self, c, sl, sc):
         two = c + self.ch(1)
         if two in FOREIGN and two not in TWO_CHAR:
+            replacement = {"&&": "and", "||": "or", "::": "."}.get(two)
+            if self.recover and replacement is not None:
+                self.errors.append(self.diag("E0001", f"`{two}` is not a Klar operator", sl, sc, FOREIGN[two],
+                                             width=2, replacement=replacement))
+                self.adv()
+                self.adv()
+                self.add("OP" if replacement == "." else "KW", replacement, sl, sc)
+                return
             self.error("E0001", f"`{two}` is not a Klar operator", sl, sc, FOREIGN[two], width=2,
-                       replacement={"&&": "and", "||": "or", "::": "."}.get(two))
+                       replacement=replacement)
         if two in TWO_CHAR:
             self.adv()
             self.adv()
@@ -280,6 +295,13 @@ class Lexer:
         replacement = {";": "", "!": "not "}.get(c)
         if c == ";" and self.ch(1) not in ("\n", "\r", "", " ", "\t", "/"):
             replacement = None   # `a; b` on one line needs a line break, not a deletion
+        if self.recover and replacement is not None:
+            self.errors.append(self.diag("E0001", f"unexpected character `{c}`", sl, sc, hint,
+                                         replacement=replacement))
+            self.adv()
+            if c == "!":
+                self.add("KW", "not", sl, sc)
+            return
         self.error("E0001", f"unexpected character `{c}`", sl, sc, hint, replacement=replacement)
 
 

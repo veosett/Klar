@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn contains(xs: List[Str], s: Str) -> Bool {\n    for x in xs {\n        if x == s {\n            return true\n        }\n    }\n    return false\n}\n\nfn deps_of(deps: Map[Str, List[Str]], n: Str) -> List[Str] {\n    match deps.get(n) {\n        Some(ds) => {\n            return ds\n        }\n        None => {\n            return []\n        }\n    }\n}\n\npub fn topo(deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n    var nodes: List[Str] = []\n    for k in deps.keys() {\n        if not contains(nodes, k) {\n            nodes.push(k)\n        }\n        for d in deps_of(deps, k) {\n            if not contains(nodes, d) {\n                nodes.push(d)\n            }\n        }\n    }\n\n    var done: List[Str] = []\n    while done.len() < nodes.len() {\n        var best = \"\"\n        var found = false\n        for n in nodes {\n            if not contains(done, n) {\n                var ready = true\n                for d in deps_of(deps, n) {\n                    if not contains(done, d) {\n                        ready = false\n                    }\n                }\n                if ready {\n                    if not found or n < best {\n                        best = n\n                        found = true\n                    }\n                }\n            }\n        }\n        if not found {\n            return Err(\"cycle\")\n        }\n        done.push(best)\n    }\n    return Ok(done)\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn contains(xs: List[Str], s: Str) -> Bool {\n    for x in xs {\n        if x == s {\n            return true\n        }\n    }\n    return false\n}\n\nfn deps_of(deps: Map[Str, List[Str]], n: Str) -> List[Str] {\n    match deps.get(n) {\n        Some(ds) => {\n            return ds\n        }\n        None => {\n            return []\n        }\n    }\n}\n\npub fn topo(deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n    var nodes: List[Str] = []\n    for k in deps.keys() {\n        if not contains(nodes, k) {\n            nodes = nodes.push(k)\n        }\n        for d in deps_of(deps, k) {\n            if not contains(nodes, d) {\n                nodes = nodes.push(d)\n            }\n        }\n    }\n\n    var done: List[Str] = []\n    while done.len() < nodes.len() {\n        var best = \"\"\n        var found = false\n        for n in nodes {\n            if not contains(done, n) {\n                var ready = true\n                for d in deps_of(deps, n) {\n                    if not contains(done, d) {\n                        ready = false\n                    }\n                }\n                if ready {\n                    if not found or n < best {\n                        best = n\n                        found = true\n                    }\n                }\n            }\n        }\n        if not found {\n            return Err(\"cycle\")\n        }\n        done = done.push(best)\n    }\n    return Ok(done)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

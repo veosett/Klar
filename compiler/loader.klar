@@ -12,7 +12,7 @@ use checker.{Builtins, Ck, Diag, Export, Universe, check_module, check_module_la
 use checker.{load_builtins, new_checker}
 use libfs.{read_source, source_exists}
 use checker.{DiagFix, FixEdit, private_decl}
-use parser.{ParseError, parse_program}
+use parser.{ParseError, parse_program, parse_program_recovering}
 use safety.{analyze}
 use similar.{closest}
 use manifest.{Dep, Manifest, describe, parse_manifest}
@@ -118,10 +118,11 @@ fn join(dir: Str, parts: List[Str]) -> Str {
   return normalize(dir + "/" + parts.join("/"))
 }
 
-/// `path` relative to `base` (both absolute), like Python's `os.path.relpath`.
+/// `path` relative to `base` (both absolute, or both relative to the current directory: `.` parts are skipped),
+/// like Python's `os.path.relpath`.
 fn relpath(path: Str, base: Str) -> Str {
-  let p = path.split("/").filter(fn(x) => not x.is_empty())
-  let b = base.split("/").filter(fn(x) => not x.is_empty())
+  let p = path.split("/").filter(fn(x) => not x.is_empty() and x != ".")
+  let b = base.split("/").filter(fn(x) => not x.is_empty() and x != ".")
   var k = 0
   while k < p.len() and k < b.len() and p.get_or(k, "") == b.get_or(k, "") {
     k = k + 1
@@ -400,10 +401,14 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
     },
   }
   ld = ld with { sources: ld.sources.set(display, source) }
-  let prog = match parse_program(source) {
-    Ok(p) => p,
-    Err(e) => {
-      ld = add_error(ld: ld, file: display, d: parse_diag(e))
+  // every recoverable syntax error at once (parser.klar `parse_program_recovering`): the module is still checked
+  let parsed = parse_program_recovering(source)
+  for e in parsed.second {
+    ld = add_error(ld: ld, file: display, d: parse_diag(e))
+  }
+  let prog = match parsed.first {
+    Some(p) => p,
+    None => {
       return Loaded { ld: ld with { by_path: ld.by_path.set(path, failed_module(name: name, path: path, display: display,
         is_sys: is_sys)) }, path: Some(path) }
     },
@@ -545,8 +550,22 @@ pub fn load(ld0: Ld, path: Str, name: Str, display: Str, importer: Option[Import
     }
   }
   ld = ld with { stack: ld.stack.take(ld.stack.len() - 1) }
+  // names whose import failed (already reported): their uses are not errors again
+  var unresolved: Map[Str, Bool] = Map {}
+  for d in prog.decls {
+    match d {
+      Decl.Use(_, _, items, _) => {
+        for item in items {
+          if not imports.has(item) {
+            unresolved = unresolved.set(item, true)
+          }
+        }
+      },
+      _ => {},
+    }
+  }
   let ck = check_module(new_checker(b: ld.b, universe: ld.uni, prog: prog, file: display, mod_name: name, sys: is_sys,
-    imports: imports))
+    imports: imports) with { unresolved: unresolved })
   let m = Module { name: name, path: path, display: display, failed: false, is_sys: is_sys, checker: Some(ck),
     exports: exports(ck), import_from: import_from, pkg: pkg }
   var diags = ck.diags

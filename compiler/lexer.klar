@@ -437,6 +437,24 @@ pub fn tokenize(src: Str) -> Result[List[Token], LexError] {
 
 /// Tokens of a piece of source that starts at the given line and column of a file (doc-tests, interpolations).
 pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Token], LexError] {
+  return match lex(src: src, first_line: first_line, first_col: first_col, recover: false) {
+    Ok(l) => Ok(l.toks),
+    Err(l) => Err(l.errors.get_or(0, lex_error(code: "E0001", message: "", hint: "", line: 1, col: 1))),
+  }
+}
+
+/// The tokens and the lexical errors that were read past (`tokenize_recovering`).
+pub type Lexed { toks: List[Token], errors: List[LexError] }
+
+/// Tokens of a file where a foreign operator that has a replacement (`&&`, `||`, `::`, `!`, `;`) is reported and read
+/// as that replacement, so the rest is still parsed and checked and every error comes at once (as `Lexer(recover=True)`
+/// in klar/lexer.py). Ok: the tokens and those errors; Err: they and the error that stopped the lexer.
+pub fn tokenize_recovering(src: Str) -> Result[Lexed, Lexed] {
+  return lex(src: src, first_line: 1, first_col: 1, recover: true)
+}
+
+fn lex(src: Str, first_line: Int, first_col: Int, recover: Bool) -> Result[Lexed, Lexed] {
+  var errors: List[LexError] = []
   let b = src.to_bytes()
   let n = b.len()
   // all ASCII: byte offsets are character offsets, so a token's text is a slice of the source
@@ -471,7 +489,12 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
       i = end
       col = end_col
     } else if is_digit(c) {
-      let scan = scan_number(b: b, start: i, line: line, col: col)?
+      let scan = match scan_number(b: b, start: i, line: line, col: col) {
+        Ok(x) => x,
+        Err(e) => {
+          return Err(Lexed { toks: [], errors: errors.push(e) })
+        },
+      }
       let digits = match scan.value {
         "" => text(b: b, a: i, z: scan.end).replace("_", ""),
         v => v,
@@ -485,7 +508,12 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
       i = scan.end
       col = end_col
     } else if c == 34 {
-      let scan = scan_string(b: b, start: i, line: line, col: col)?
+      let scan = match scan_string(b: b, start: i, line: line, col: col) {
+        Ok(x) => x,
+        Err(e) => {
+          return Err(Lexed { toks: [], errors: errors.push(e) })
+        },
+      }
       let end_col = col + chars_between(b: b, a: i, z: scan.end)
       toks = toks.push(token(kind: TokKind.StrLit, value: scan.value, line: line, col: col, end_line: line, end_col: end_col)
         with { parts: scan.parts })
@@ -519,8 +547,25 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
           "::" => Some("."),
           _ => None,
         }
-        return Err(LexError { code: "E0001", message: "`{two}` is not a Klar operator", hint: fix, line: line,
-          col: col, width: 2, replacement: replacement })
+        let e = LexError { code: "E0001", message: "`{two}` is not a Klar operator", hint: fix, line: line, col: col,
+          width: 2, replacement: replacement }
+        match replacement {
+          Some(rep) => {
+            if recover {
+              errors = errors.push(e)
+              let kind = match rep == "." {
+                true => TokKind.Op,
+                false => TokKind.Keyword,
+              }
+              toks = toks.push(token(kind: kind, value: rep, line: line, col: col, end_line: line, end_col: col + 2))
+              i = i + 2
+              col = col + 2
+              continue
+            }
+          },
+          None => {},
+        }
+        return Err(Lexed { toks: [], errors: errors.push(e) })
       }
       if TWO_CHAR.contains(two) {
         toks = toks.push(token(kind: TokKind.Op, value: two, line: line, col: col, end_line: line, end_col: col + 2))
@@ -549,15 +594,27 @@ pub fn tokenize_at(src: Str, first_line: Int, first_col: Int) -> Result[List[Tok
         if one == ";" and not ["\n", "\r", "", " ", "\t", "/"].contains(after) {
           replacement = None
         }
-        return Err(lex_error(code: "E0001", message: "unexpected character `{one}`",
-          hint: FOREIGN.get(one).unwrap_or(""), line: line, col: col) with { replacement: replacement })
+        let e = lex_error(code: "E0001", message: "unexpected character `{one}`", hint: FOREIGN.get(one).unwrap_or(""),
+          line: line, col: col) with { replacement: replacement }
+        if recover and replacement != None {
+          errors = errors.push(e)
+          if one == "!" {
+            toks = toks.push(token(kind: TokKind.Keyword, value: "not", line: line, col: col, end_line: line,
+              end_col: col + 1))
+          }
+          i = i + 1
+          col = col + 1
+          continue
+        }
+        return Err(Lexed { toks: [], errors: errors.push(e) })
       }
     }
   }
   if not last_is_newline(toks) {
     toks = toks.push(token(kind: TokKind.Newline, value: "\n", line: line, col: col, end_line: line, end_col: col))
   }
-  return Ok(toks.push(token(kind: TokKind.Eof, value: "", line: line, col: col, end_line: line, end_col: col)))
+  return Ok(Lexed { toks: toks.push(token(kind: TokKind.Eof, value: "", line: line, col: col, end_line: line, end_col: col)),
+    errors: errors })
 }
 
 test "a small program" {

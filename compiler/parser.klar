@@ -7,7 +7,7 @@
 use ast.{Arg, Block, Body, Decl, Else, Expr, FieldDecl, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Param}
 use ast.{Pattern, Program, Span, Stmt, StrPiece, TestUses, TypeExpr, VariantDecl, body_span, expr_span, merge, pattern_span}
 use ast.{no_uses}
-use lexer.{LexError, StrPart, TokKind, Token, tokenize_at}
+use lexer.{LexError, StrPart, TokKind, Token, tokenize_at, tokenize_recovering}
 
 /// A syntax error, positioned like the Python parser's (the token where it was found).
 /// A machine-applicable fix of a syntax error: replace `span` with `text`.
@@ -1574,6 +1574,23 @@ pub fn parse_program(src: Str) -> Result[Program, ParseError] {
       return Err(from_lex(e))
     },
   }
+  return parse_tokens(toks)
+}
+
+/// (the program or None, the syntax errors): foreign operators that have a replacement are reported and read as it
+/// (lexer.klar `tokenize_recovering`), so a program with them is still parsed and checked and every error comes in
+/// one report (as `parse_recovering` in klar/parser.py; the loader uses this).
+pub fn parse_program_recovering(src: Str) -> Pair[Option[Program], List[ParseError]] {
+  return match tokenize_recovering(src) {
+    Ok(lx) => match parse_tokens(lx.toks) {
+      Ok(prog) => Pair { first: Some(prog), second: lx.errors.map(from_lex) },
+      Err(e) => Pair { first: None, second: lx.errors.map(from_lex).push(e) },
+    },
+    Err(lx) => Pair { first: None, second: lx.errors.map(from_lex) },
+  }
+}
+
+fn parse_tokens(toks: List[Token]) -> Result[Program, ParseError] {
   let p = Ps { toks: toks, no_struct: false, depth: 0 }
   let start = span_of(tk(p, 0))
   var j = 0

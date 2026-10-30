@@ -10,7 +10,7 @@ from typing import List
 
 from . import nodes as N
 from .diagnostics import Diagnostic, KlarSyntaxError, Span
-from .lexer import Token, tokenize
+from .lexer import Lexer, Token, tokenize
 
 # the deepest nesting of expressions and types the parser accepts (E0003 beyond); the passes after the parser
 # recurse over the tree, so this keeps them far from the stack limits on every system
@@ -1073,7 +1073,23 @@ class Parser:
 
 
 def parse(src: str, file: str) -> N.Program:
-    p = Parser(tokenize(src, file), file)
+    return parse_tokens(tokenize(src, file), file)
+
+
+def parse_recovering(src: str, file: str):
+    """(program or None, errors): the lexer reads foreign operators that have a replacement (`&&`, `||`, `::`, `!`,
+    `;`) as that replacement and reports them all, so a program with them is still parsed and checked and every
+    error comes in one report (the loader uses this; `parse` stops at the first error)."""
+    lx = Lexer(src, file, recover=True)
+    try:
+        toks = lx.run()
+        return parse_tokens(toks, file), lx.errors
+    except KlarSyntaxError as ex:
+        return None, lx.errors + [ex.diag]
+
+
+def parse_tokens(toks, file: str) -> N.Program:
+    p = Parser(toks, file)
 
     def run():
         try:

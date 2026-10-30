@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn at(xs: List[Int], i: Int) -> Int {\n    match xs.get(i) {\n        Some(v) => {\n            return v\n        }\n        None => {\n            return 0\n        }\n    }\n}\n\npub fn rooms(meetings: List[List[Int]]) -> Int {\n    var best = 0\n    for m in meetings {\n        let t = at(m, 0)\n        var cnt = 0\n        for o in meetings {\n            if at(o, 0) <= t and t < at(o, 1) {\n                cnt = cnt + 1\n            }\n        }\n        if cnt > best {\n            best = cnt\n        }\n    }\n    return best\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

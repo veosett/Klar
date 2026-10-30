@@ -3646,3 +3646,24 @@ fn f(g: List[Int], r: Int, c: Int, nr: Int, i: Int, j: Int, p: P) -> Int {
   let b = cell(g, 0, 1) + cell(g, i, j) + cell(g, c, r) + cell(g, _r, c_)
   return a + b
 }
+=== failed imports are reported once
+use shapes.{Circle, area, Kind}
+use nothere.{helper}
+use util.{missing, twice}
+
+fn main() uses io {
+  let c = Circle { r: 2 }
+  let k: Kind = Kind.Big
+  print(area(c) + helper(1) + missing(2) + twice(3))
+  print(k)
+}
+--- shapes.klar
+pub type Circle { r: Int }
+
+pub fn area(c: Circle) -> Int {
+  return c.r $ 1
+}
+--- util.klar
+pub fn twice(n: Int) -> Int {
+  return n * 2
+}

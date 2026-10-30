@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_digit(c: Str) -> Bool {\n    return c == \"0\" or c == \"1\" or c == \"2\" or c == \"3\" or c == \"4\" or c == \"5\" or c == \"6\" or c == \"7\" or c == \"8\" or c == \"9\"\n}\n\nfn digit_value(c: Str) -> Int {\n    if c == \"0\" {\n        return 0\n    }\n    if c == \"1\" {\n        return 1\n    }\n    if c == \"2\" {\n        return 2\n    }\n    if c == \"3\" {\n        return 3\n    }\n    if c == \"4\" {\n        return 4\n    }\n    if c == \"5\" {\n        return 5\n    }\n    if c == \"6\" {\n        return 6\n    }\n    if c == \"7\" {\n        return 7\n    }\n    if c == \"8\" {\n        return 8\n    }\n    return 9\n}\n\npub fn duration(s: Str) -> Result[Int, Str] {\n    var total = 0\n    var num = 0\n    var have_digits = false\n    var last_rank = -1\n    var seen_any = false\n\n    for c in s.chars() {\n        if is_digit(c) {\n            num = num * 10 + digit_value(c)\n            have_digits = true\n        } else {\n            var rank = -1\n            var mult = 0\n            if c == \"d\" {\n                rank = 0\n                mult = 86400\n            } else if c == \"h\" {\n                rank = 1\n                mult = 3600\n            } else if c == \"m\" {\n                rank = 2\n                mult = 60\n            } else if c == \"s\" {\n                rank = 3\n                mult = 1\n            } else {\n                return Err(\"invalid duration\")\n            }\n            if not have_digits or rank <= last_rank {\n                return Err(\"invalid duration\")\n            }\n            total = total + num * mult\n            num = 0\n            have_digits = false\n            last_rank = rank\n            seen_any = true\n        }\n    }\n\n    if have_digits or not seen_any {\n        return Err(\"invalid duration\")\n    }\n    return Ok(total)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

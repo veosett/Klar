@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn str_at(xs: List[Str], i: Int) -> Str {\n    match xs.get(i) {\n        Some(v) => {\n            return v\n        }\n        None => {\n            return \"\"\n        }\n    }\n}\n\nfn valid_char(c: Str) -> Bool {\n    return c == \".\" or (c >= \"1\" and c <= \"9\")\n}\n\nfn same_unit(a: Int, b: Int) -> Bool {\n    let ar = a / 9\n    let ac = a - ar * 9\n    let br = b / 9\n    let bc = b - br * 9\n    if ar == br or ac == bc {\n        return true\n    }\n    return ar / 3 == br / 3 and ac / 3 == bc / 3\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n    if rows.len() != 9 {\n        return false\n    }\n    var flat: List[Str] = []\n    for row in rows {\n        var n = 0\n        for c in row.chars() {\n            if not valid_char(c) {\n                return false\n            }\n            flat = flat.push(c)\n            n = n + 1\n        }\n        if n != 9 {\n            return false\n        }\n    }\n\n    var p = 0\n    while p < 81 {\n        let v = str_at(flat, p)\n        if v != \".\" {\n            var q = 0\n            while q < 81 {\n                if q != p and str_at(flat, q) == v and same_unit(a: p, b: q) {\n                    return false\n                }\n                q = q + 1\n            }\n        }\n        p = p + 1\n    }\n    return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}
