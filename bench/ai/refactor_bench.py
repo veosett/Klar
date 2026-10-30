@@ -44,7 +44,7 @@ def sources(d, lang):
 
 def run(cmd, cwd, timeout=120):
     try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                            env=dict(os.environ, PYTHONPATH=ROOT, NO_COLOR="1"))
         return p.returncode, (p.stdout + p.stderr).strip()
     except subprocess.TimeoutExpired:

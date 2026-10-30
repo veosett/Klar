@@ -1,15 +1,217 @@
-{
- "attempts": [
-  {
-   "files": {
-    "cart.klar": "use catalog.{Item}\n\n/// Minimum amount (after discount, before tax) for free shipping: $50.00, in cents.\npub const FREE_SHIPPING_MIN: Int = 5000\n\npub type Line { item: Item, qty: Int }\n\npub type Cart { lines: List[Line], code: Option[Str] }\n\npub fn new_cart() -> Cart {\n  return Cart { lines: [], code: None }\n}\n\npub fn add_line(cart: Cart, item: Item, qty: Int) -> Result[Cart, Str] {\n  if qty < 1 or qty > 99 {\n    return Err(\"invalid quantity: {qty}\")\n  }\n  return Ok(cart with { lines: cart.lines.push(Line { item: item, qty: qty }) })\n}\n\n/// Percentage taken off by a discount code, None for an unknown code.\npub fn discount_percent(code: Str) -> Option[Int] {\n  return match code {\n    \"SAVE10\" => Some(10),\n    \"WELCOME5\" => Some(5),\n    \"VIP15\" => Some(15),\n    \"HALF\" => Some(50),\n    _ => None,\n  }\n}\n\npub fn apply_code(cart: Cart, code: Str) -> Result[Cart, Str] {\n  if discount_percent(code).is_none() {\n    return Err(\"unknown code: {code}\")\n  }\n  return Ok(cart with { code: Some(code) })\n}\n\npub fn item_count(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + l.qty)\n}\n\n/// Total of one line in cents.\npub fn line_total(line: Line) -> Int {\n  return line.item.price_cents * line.qty\n}\n\npub fn largest_line(cart: Cart) -> Option[Line] {\n  return cart.lines.max_by(fn(l) => line_total(l))\n}\n\npub fn subtotal(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + line_total(l))\n}\n\n/// The discount for the cart's code in cents, rounded to the nearest cent, halves up (0 without a code).\npub fn discount(cart: Cart) -> Int {\n  let percent = match cart.code {\n    Some(c) => discount_percent(c).unwrap_or(0),\n    None => 0,\n  }\n  return (subtotal(cart) * percent + 50) / 100\n}\n\n/// Tax in cents on the subtotal after the discount; the rate is in basis points (825 = 8.25%).\npub fn tax(cart: Cart, rate_bp: Int) -> Int {\n  let taxable = subtotal(cart) - discount(cart)\n  return (taxable * rate_bp + 5000) / 10000\n}\n\npub fn total(cart: Cart, rate_bp: Int) -> Int {\n  return subtotal(cart) - discount(cart) + tax(cart, rate_bp)\n}\n\n/// How much more must be bought (after discount) to get free shipping, in cents.\npub fn free_shipping_gap(cart: Cart) -> Int {\n  let net = subtotal(cart) - discount(cart)\n  if net >= FREE_SHIPPING_MIN {\n    return 0\n  }\n  return FREE_SHIPPING_MIN - net\n}\n",
-    "catalog.klar": "use money.{format_amount}\n\npub type Item { name: Str, price_cents: Int }\n\n/// Builds a validated item: the name must not be blank and the price must be positive (in cents).\npub fn make_item(name: Str, price_cents: Int) -> Result[Item, Str] {\n  if name.trim().is_empty() {\n    return Err(\"empty name\")\n  }\n  if price_cents <= 0 {\n    return Err(\"invalid price for {name}\")\n  }\n  return Ok(Item { name: name, price_cents: price_cents })\n}\n\npub fn default_catalog() -> List[Item] {\n  return [\n    Item { name: \"Widget\", price_cents: 350 },\n    Item { name: \"Gadget\", price_cents: 1250 },\n    Item { name: \"Gizmo\", price_cents: 4999 },\n    Item { name: \"Cable\", price_cents: 725 },\n    Item { name: \"Case\", price_cents: 2400 },\n  ]\n}\n\npub fn find_item(items: List[Item], name: Str) -> Option[Item] {\n  return items.find(fn(i) => i.name == name)\n}\n\n/// Cheapest first.\npub fn sorted_by_price(items: List[Item]) -> List[Item] {\n  return items.sort_by(fn(i) => i.price_cents)\n}\n\npub fn cheapest(items: List[Item]) -> Option[Item] {\n  return items.min_by(fn(i) => i.price_cents)\n}\n\n/// One line per item: \"Widget - $3.50\".\npub fn catalog_text(items: List[Item]) -> Str {\n  return items.map(fn(i) => \"{i.name} - {format_amount(i.price_cents)}\").join(\"\\n\")\n}\n",
-    "money.klar": "/// Formats an amount in cents: 1250 -> \"$12.50\", -250 -> \"-$2.50\", 5 -> \"$0.05\".\npub fn format_amount(cents: Int) -> Str {\n  let sign = match cents < 0 {\n    true => \"-\",\n    false => \"\",\n  }\n  let magnitude = cents.abs()\n  let dollars = magnitude / 100\n  let rest = (magnitude % 100).to_str().pad_left(2, \"0\")\n  return \"{sign}${dollars}.{rest}\"\n}\n\n/// Whether the text is one or more ASCII digits.\nfn is_digits(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  return s.chars().all(fn(c) => \"0123456789\".contains(c))\n}\n\n/// Parses \"12.5\", \"12\" or \"$12.50\" (surrounding spaces allowed) into cents: \"12.5\" -> 1250.\npub fn parse_amount(text: Str) -> Result[Int, Str] {\n  var t = text.trim()\n  if t.starts_with(\"$\") {\n    t = t.slice(1, t.len())\n  }\n  let parts = t.split(\".\")\n  let whole = parts.get_or(0, \"\")\n  let fraction = parts.get_or(1, \"\")\n  let fraction_ok = parts.len() == 1 or (fraction.len() >= 1 and fraction.len() <= 2 and is_digits(fraction))\n  if parts.len() > 2 or not is_digits(whole) or not fraction_ok {\n    return Err(\"invalid amount: \" + text)\n  }\n  let dollars = whole.to_int().unwrap_or(0)\n  let cents_part = fraction.pad_right(2, \"0\").to_int().unwrap_or(0)\n  return Ok(dollars * 100 + cents_part)\n}\n",
-    "receipt.klar": "use cart.{Cart, Line, discount, free_shipping_gap, item_count, line_total, subtotal, tax, total}\nuse money.{format_amount}\n\n/// \"2 x Widget @ $3.50 = $7.00\"\npub fn line_text(line: Line) -> Str {\n  return \"{line.qty} x {line.item.name} @ {format_amount(line.item.price_cents)} = {format_amount(line_total(line))}\"\n}\n\npub fn render(cart: Cart, rate_bp: Int) -> Str {\n  let discount_lines: List[Str] = match cart.code {\n    Some(c) => [\"Discount ({c}): -{format_amount(discount(cart))}\"],\n    None => [],\n  }\n  let gap = free_shipping_gap(cart)\n  let footer = match gap > 0 {\n    true => \"Add {format_amount(gap)} more for free shipping\",\n    false => \"Free shipping\",\n  }\n  let lines = cart.lines.map(line_text)\n    .push(\"Subtotal: {format_amount(subtotal(cart))}\")\n    .concat(discount_lines)\n    .push(\"Tax: {format_amount(tax(cart, rate_bp))}\")\n    .push(\"Total: {format_amount(total(cart, rate_bp))}\")\n    .push(footer)\n  return lines.join(\"\\n\")\n}\n\n/// \"3 items, total $19.00\"\npub fn summary(cart: Cart, rate_bp: Int) -> Str {\n  let n = item_count(cart)\n  let noun = match n == 1 {\n    true => \"item\",\n    false => \"items\",\n  }\n  return \"{n} {noun}, total {format_amount(total(cart, rate_bp))}\"\n}\n"
-   },
-   "stage": "pass",
-   "ok": true
-  }
- ],
- "solved": true
-}
+"""`klar eval`, `klar coverage`, `klar new`.
+
+eval      evaluate an expression (optionally in the context of a file) and print `value : Type`;
+          the fastest way for an AI to check how a built-in behaves without writing a program.
+coverage  run the tests (and optionally main) and list the statements that were never executed;
+          tells an AI which code its tests do not exercise yet.
+new       create a project skeleton with a test, a doc-test and an AGENTS.md for AI assistants.
+"""
+import io
+import os
+import re
+
+from .. import nodes as N
+from ..errors import KlarRuntimeError
+from ..interpreter import Interpreter, Profiler, TimeLimit, run_with_big_stack
+from ..loader import load_path, load_source
+from ..safety import iter_nodes
+from ..types import prune, show
+
+ENTRY = "klar_eval_entry"
+VALUE = "klar_eval_value"
+
+
+# ---- eval ------------------------------------------------------------------------------------------------
+def evaluate(parts, context_file=None, sandbox=None, timeout=10):
+    """Returns a dict: {ok, value, type, output} or {ok: False, diagnostics | error} (`timeout`: seconds, R0018
+    past them; 0: no limit)."""
+    *stmts, expr = parts
+    base, root, fname = "", None, "eval.klar"
+    if context_file:
+        with open(context_file, encoding="utf-8") as f:
+            base = f.read()
+        root = os.path.dirname(os.path.abspath(context_file))
+        fname = os.path.basename(context_file)
+    header = (base.rstrip("\n") + "\n\n") if base else ""
+    offset = header.count("\n") + 1          # input line k is source line offset + k
+    body = "".join("  " + s + "\n" for s in stmts)
+    src = header + f"fn {ENTRY}() uses io, time, rand, fs {{\n{body}  let {VALUE} = {expr}\n  let _ = dbg({VALUE})\n}}\n"
+    loaded = load_source(src, fname, root=root)
+    errors = [d for d in loaded.diags if d.severity == "error" and d.span.file == fname]
+    if errors:
+        return {"ok": False, "diagnostics": [
+            {"code": d.code, "message": d.message, "hint": d.hint,
+             "line": d.span.line - offset if d.span.line > offset else d.span.line,
+             "where": "input" if d.span.line > offset else fname} for d in errors]}
+    entry = next(d for d in loaded.program.decls if isinstance(d, N.FnDecl) and d.name == ENTRY)
+    let = next(n for n in iter_nodes(entry) if isinstance(n, N.Let) and n.name == VALUE)
+    typ = show(prune(let.value.kt)) if getattr(let.value, "kt", None) is not None else "?"
+    out, err = io.StringIO(), io.StringIO()
+    interp = Interpreter(loaded, out=out, err_stream=err)
+    interp.sandbox = sandbox
+    interp.limit = TimeLimit(timeout) if timeout > 0 else None
+    try:
+        def go():
+            interp.initialize()
+            if interp.limit is not None:
+                interp.limit.start()
+            fv = interp.main_env.vars[ENTRY]
+            interp.call_value(fv, [], entry.name_span)
+        run_with_big_stack(go)
+    except KlarRuntimeError as ex:
+        return {"ok": False, "error": {"code": ex.code, "message": ex.message}, "output": out.getvalue()}
+    value = None
+    for line in err.getvalue().splitlines():
+        m = re.match(rf"\[dbg [^\]]*\] {VALUE} = (.*)$", line)
+        if m:
+            value = m.group(1)
+    return {"ok": True, "value": value, "type": typ, "output": out.getvalue()}
+
+
+# ---- coverage ----------------------------------------------------------------------------------------------
+def statement_lines(fn):
+    lines = set()
+    for n in iter_nodes(fn.body if hasattr(fn, "body") else fn):
+        if isinstance(n, N.Block):
+            for s in n.stmts:
+                lines.add(s.span.line)
+    return lines
+
+
+def coverage(path, with_main=False, runs=20):
+    loaded = load_path(path)
+    if loaded.has_errors():
+        return {"ok": False, "diagnostics": [d.to_dict() for d in loaded.diags if d.severity == "error"]}
+    interp = Interpreter(loaded, out=io.StringIO(), err_stream=io.StringIO())
+    interp.prof = prof = Profiler()
+    failed = []
+    for t in interp.tests:
+        try:
+            run_with_big_stack(lambda: interp.run_test(t, runs=runs))
+        except KlarRuntimeError:
+            failed.append(t.name)
+        except RecursionError:
+            failed.append(t.name)
+    has_main = any(isinstance(d, N.FnDecl) and d.name == "main" for d in loaded.program.decls)
+    if with_main and has_main:
+        try:
+            run_with_big_stack(interp.run_main)
+        except KlarRuntimeError:
+            failed.append("main")
+    executed = {ln for (f, ln) in prof.lines if f == loaded.main.display}
+    funcs = []
+    total = covered = 0
+    for d in loaded.program.decls:
+        if not isinstance(d, N.FnDecl) or (d.name == "main" and not with_main):
+            continue
+        lines = statement_lines(d)
+        if not lines:
+            continue
+        miss = sorted(lines - executed)
+        total += len(lines)
+        covered += len(lines) - len(miss)
+        funcs.append({"function": d.name, "line": d.span.line, "statements": len(lines),
+                      "covered": len(lines) - len(miss), "missed_lines": miss})
+    return {"ok": True, "file": loaded.main.display, "percent": round(100 * covered / total, 1) if total else 100.0,
+            "statements": total, "covered": covered, "functions": funcs, "tests_failed": failed,
+            "tests_run": len(interp.tests)}
+
+
+def coverage_text(rep, source):
+    if not rep["ok"]:
+        return "\n".join(f"error[{d['code']}]: {d['message']}" for d in rep["diagnostics"])
+    lines = source.split("\n")
+    out = [f"coverage of {rep['file']}: {rep['percent']}% of statements "
+           f"({rep['covered']}/{rep['statements']}), {rep['tests_run']} tests"]
+    if rep["tests_failed"]:
+        out.append(f"failing tests (their remaining statements count as not covered): {', '.join(rep['tests_failed'])}")
+    for f in rep["functions"]:
+        pct = 100 * f["covered"] // f["statements"]
+        mark = "  " if not f["missed_lines"] else "!!"
+        out.append(f"{mark} {pct:>3}%  {f['function']} (line {f['line']})")
+        for ln in f["missed_lines"][:8]:
+            out.append(f"         never run: {ln}: {lines[ln - 1].strip()[:70]}")
+        if len(f["missed_lines"]) > 8:
+            out.append(f"         ... {len(f['missed_lines']) - 8} more")
+    return "\n".join(out)
+
+
+# ---- new ---------------------------------------------------------------------------------------------------
+MAIN_TEMPLATE = '''/// {name}: entry point.
+fn main() uses io {{
+  print(greeting("world"))
+}}
+
+/// Builds a greeting.
+/// >>> assert greeting("Klar") == "Hello, Klar!"
+fn greeting(who: Str) -> Str {{
+  return "Hello, {{who}}!"
+}}
+
+test "greeting mentions the name" {{
+  assert greeting("AI").contains("AI")
+}}
+'''
+
+AGENTS_TEMPLATE = '''# Working on {name} (instructions for AI assistants)
+
+This project is written in **Klar**. Get the full language reference (≈2k tokens) with `klar spec`.
+
+## Loop
+1. Edit `.klar` files; keep tests next to the code (`test`, doc-tests `/// >>>`, `property`).
+2. `klar dev main.klar --json` — check + all tests + run in one step; follow the `next` field.
+3. `klar fix main.klar` applies safe fixes; `klar fmt .` normalizes the layout.
+4. Look things up instead of guessing: `klar doc split` (built-ins, std, this project), `klar outline main.klar`,
+   `klar refs name`, `klar context main.klar name` (one function with its types, tests and callers),
+   `klar eval '"a,b".split(",")'`, `klar explain E0701`.
+5. Before finishing: `klar coverage main.klar` (untested statements), `klar build main.klar` (native executable).
+6. Packages: dependencies are in `klar.toml`; `klar add name --git URL --tag v1` / `--path ../dir`, then
+   `use name.{{item}}`; `klar fetch` after cloning, `klar deps` shows the tree.
+
+## Rules that the compiler enforces
+No null/exceptions/indexing; handle `Option`/`Result`; values are immutable (`xs = xs.push(x)`);
+no shadowing; named arguments for 3+ parameters; `uses io` etc. for effects; Int division needs a
+provably non-zero divisor.
+'''
+
+
+LIB_TEMPLATE = '''// {name}: a Klar package. Other projects use it with `klar add {pkg} --git <url>` and `use {pkg}.{{greet}}`;
+// its other files are imported as `use {pkg}.<file>.{{...}}`.
+
+/// Says hello.
+/// >>> assert greet("Ada") == "Hello, Ada!"
+pub fn greet(name: Str) -> Str {{
+  return "Hello, {{name}}!"
+}}
+
+test "greets" {{
+  assert greet("x").starts_with("Hello")
+}}
+'''
+
+
+def package_name(name):
+    """A snake_case package name from a directory name (`My-App` -> `my_app`)."""
+    out = re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_") or "app"
+    return out if out[0].isalpha() else "p_" + out
+
+
+def new_project(path, lib=False):
+    name = os.path.basename(os.path.abspath(path))
+    pkg = package_name(name)
+    if os.path.exists(path) and os.listdir(path):
+        raise FileExistsError(f"{path} exists and is not empty")
+    os.makedirs(path, exist_ok=True)
+    entry = "lib.klar" if lib else "main.klar"
+    run = f"klar test {entry}\n" if lib else "klar run main.klar\nklar test main.klar\nklar build main.klar\n"
+    files = {
+        "klar.toml": f'[package]\nname = "{pkg}"\nversion = "0.1.0"\n\n[dependencies]\n',
+        entry: LIB_TEMPLATE.format(name=name, pkg=pkg) if lib else MAIN_TEMPLATE.format(name=name),
+        "AGENTS.md": AGENTS_TEMPLATE.format(name=name).replace("main.klar", entry),
+        "README.md": f"# {name}\n\nWritten in [Klar](https://github.com/veosett/Klar).\n\n```sh\n{run}```\n",
+        ".gitignore": "build/\n*.exe\n.klar/\n",
+    }
+    for fname, text in files.items():
+        with open(os.path.join(path, fname), "w", encoding="utf-8") as f:
+            f.write(text)
+    return sorted(files)

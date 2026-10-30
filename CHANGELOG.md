@@ -7,6 +7,16 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- Recovered from two broken commits (4cd2275, e210074). Groups of files in the working tree were hard links to one
+  file, so writing one overwrote them all, and 124 files were committed with the contents of another (a compiler
+  source holding a JSON report; `klar` did not start). Recovered exactly: the files untouched by those commits,
+  and from a later snapshot `tests/test_klar.py`, `docs/ROADMAP.md` and the agent report. Written again from the
+  commit messages, this file and the tests: the reference changes, the time limit, `--suite hard` and the suite
+  itself (`bench/ai/README.md` says how it was checked). Lost: the raw answers of the agent runs on the hard suite
+  and of the refactoring benchmark (`results/agents/haiku/hard`, `results/refactor`); their totals remain in the
+  report. `RepositoryIntegrity` now fails on such a state.
+- `llm_bench.py` and `refactor_bench.py` on Windows read the compiler's output in the system's encoding, so models
+  got `вЂ”` for `—` in the error messages.
 - `klar spec` / `klarc spec` and `klar doc` listed the helper functions of the std modules (`skip_ws`, `crc_table`,
   ...), which cannot be imported, and left out their public types: the reference now has exactly what a program
   can import, with the fields and variants of `Json`, `Rx`, `Set` and `DateTime` (found by the agent run on the

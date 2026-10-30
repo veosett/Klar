@@ -1,15 +1,541 @@
-{
- "attempts": [
-  {
-   "files": {
-    "cart.klar": "use catalog.{Item}\n\n/// Minimum amount (after discount, before tax) for free shipping: $50.00, in cents.\npub const FREE_SHIPPING_MIN: Int = 5000\n\npub type Line { item: Item, qty: Int }\n\npub type Cart { lines: List[Line], code: Option[Str] }\n\npub fn new_cart() -> Cart {\n  return Cart { lines: [], code: None }\n}\n\npub fn add_line(cart: Cart, item: Item, qty: Int) -> Result[Cart, Str] {\n  if qty < 1 or qty > 99 {\n    return Err(\"invalid quantity: {qty}\")\n  }\n  return Ok(cart with { lines: cart.lines.push(Line { item: item, qty: qty }) })\n}\n\n/// Percentage taken off by a discount code, None for an unknown code.\npub fn discount_percent(code: Str) -> Option[Int] {\n  return match code {\n    \"SAVE10\" => Some(10),\n    \"WELCOME5\" => Some(5),\n    \"VIP15\" => Some(15),\n    \"HALF\" => Some(50),\n    _ => None,\n  }\n}\n\npub fn apply_code(cart: Cart, code: Str) -> Result[Cart, Str] {\n  if discount_percent(code).is_none() {\n    return Err(\"unknown code: {code}\")\n  }\n  return Ok(cart with { code: Some(code) })\n}\n\npub fn item_count(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + l.qty)\n}\n\n/// Total of one line in cents.\npub fn line_total(line: Line) -> Int {\n  return line.item.price_cents * line.qty\n}\n\npub fn largest_line(cart: Cart) -> Option[Line] {\n  return cart.lines.max_by(fn(l) => line_total(l))\n}\n\npub fn subtotal(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + line_total(l))\n}\n\n/// The discount for the cart's code in cents, rounded to the nearest cent, halves up (0 without a code).\npub fn discount(cart: Cart) -> Int {\n  let percent = match cart.code {\n    Some(c) => discount_percent(c).unwrap_or(0),\n    None => 0,\n  }\n  return (subtotal(cart) * percent + 50) / 100\n}\n\n/// Tax in cents on the subtotal after the discount; the rate is in basis points (825 = 8.25%).\npub fn tax(cart: Cart, rate_bp: Int) -> Int {\n  let taxable = subtotal(cart) - discount(cart)\n  return (taxable * rate_bp + 5000) / 10000\n}\n\npub fn total(cart: Cart, rate_bp: Int) -> Int {\n  return subtotal(cart) - discount(cart) + tax(cart, rate_bp)\n}\n\n/// How much more must be bought (after discount) to get free shipping, in cents.\npub fn free_shipping_gap(cart: Cart) -> Int {\n  let net = subtotal(cart) - discount(cart)\n  if net >= FREE_SHIPPING_MIN {\n    return 0\n  }\n  return FREE_SHIPPING_MIN - net\n}\n",
-    "catalog.klar": "use money.{format_amount}\n\npub type Item { name: Str, price_cents: Int }\n\n/// Builds a validated item: the name must not be blank and the price must be positive (in cents).\npub fn make_item(name: Str, price_cents: Int) -> Result[Item, Str] {\n  if name.trim().is_empty() {\n    return Err(\"empty name\")\n  }\n  if price_cents <= 0 {\n    return Err(\"invalid price for {name}\")\n  }\n  return Ok(Item { name: name, price_cents: price_cents })\n}\n\npub fn default_catalog() -> List[Item] {\n  return [\n    Item { name: \"Widget\", price_cents: 350 },\n    Item { name: \"Gadget\", price_cents: 1250 },\n    Item { name: \"Gizmo\", price_cents: 4999 },\n    Item { name: \"Cable\", price_cents: 725 },\n    Item { name: \"Case\", price_cents: 2400 },\n  ]\n}\n\npub fn find_item(items: List[Item], name: Str) -> Option[Item] {\n  return items.find(fn(i) => i.name == name)\n}\n\n/// Cheapest first.\npub fn sorted_by_price(items: List[Item]) -> List[Item] {\n  return items.sort_by(fn(i) => i.price_cents)\n}\n\npub fn cheapest(items: List[Item]) -> Option[Item] {\n  return items.min_by(fn(i) => i.price_cents)\n}\n\n/// One line per item: \"Widget - $3.50\".\npub fn catalog_text(items: List[Item]) -> Str {\n  return items.map(fn(i) => \"{i.name} - {format_amount(i.price_cents)}\").join(\"\\n\")\n}\n",
-    "money.klar": "/// Formats an amount in cents: 1250 -> \"$12.50\", -250 -> \"-$2.50\", 5 -> \"$0.05\".\npub fn format_amount(cents: Int) -> Str {\n  let sign = match cents < 0 {\n    true => \"-\",\n    false => \"\",\n  }\n  let magnitude = cents.abs()\n  let dollars = magnitude / 100\n  let rest = (magnitude % 100).to_str().pad_left(2, \"0\")\n  return \"{sign}${dollars}.{rest}\"\n}\n\n/// Whether the text is one or more ASCII digits.\nfn is_digits(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  return s.chars().all(fn(c) => \"0123456789\".contains(c))\n}\n\n/// Parses \"12.5\", \"12\" or \"$12.50\" (surrounding spaces allowed) into cents: \"12.5\" -> 1250.\npub fn parse_amount(text: Str) -> Result[Int, Str] {\n  var t = text.trim()\n  if t.starts_with(\"$\") {\n    t = t.slice(1, t.len())\n  }\n  let parts = t.split(\".\")\n  let whole = parts.get_or(0, \"\")\n  let fraction = parts.get_or(1, \"\")\n  let fraction_ok = parts.len() == 1 or (fraction.len() >= 1 and fraction.len() <= 2 and is_digits(fraction))\n  if parts.len() > 2 or not is_digits(whole) or not fraction_ok {\n    return Err(\"invalid amount: \" + text)\n  }\n  let dollars = whole.to_int().unwrap_or(0)\n  let cents_part = fraction.pad_right(2, \"0\").to_int().unwrap_or(0)\n  return Ok(dollars * 100 + cents_part)\n}\n",
-    "receipt.klar": "use cart.{Cart, Line, discount, free_shipping_gap, item_count, line_total, subtotal, tax, total}\nuse money.{format_amount}\n\n/// \"2 x Widget @ $3.50 = $7.00\"\npub fn line_text(line: Line) -> Str {\n  return \"{line.qty} x {line.item.name} @ {format_amount(line.item.price_cents)} = {format_amount(line_total(line))}\"\n}\n\npub fn render(cart: Cart, rate_bp: Int) -> Str {\n  let discount_lines: List[Str] = match cart.code {\n    Some(c) => [\"Discount ({c}): -{format_amount(discount(cart))}\"],\n    None => [],\n  }\n  let gap = free_shipping_gap(cart)\n  let footer = match gap > 0 {\n    true => \"Add {format_amount(gap)} more for free shipping\",\n    false => \"Free shipping\",\n  }\n  let lines = cart.lines.map(line_text)\n    .push(\"Subtotal: {format_amount(subtotal(cart))}\")\n    .concat(discount_lines)\n    .push(\"Tax: {format_amount(tax(cart, rate_bp))}\")\n    .push(\"Total: {format_amount(total(cart, rate_bp))}\")\n    .push(footer)\n  return lines.join(\"\\n\")\n}\n\n/// \"3 items, total $19.00\"\npub fn summary(cart: Cart, rate_bp: Int) -> Str {\n  let n = item_count(cart)\n  let noun = match n == 1 {\n    true => \"item\",\n    false => \"items\",\n  }\n  return \"{n} {noun}, total {format_amount(total(cart, rate_bp))}\"\n}\n"
-   },
-   "stage": "pass",
-   "ok": true
+// `klarc dev` and the native test runner: build the program (and its tests) with the native backend, run them with
+// their output captured, and report like `klar dev` / `klar test` (klar/cli.py). Runtime errors come back as the text
+// the runtime prints; `parse_rt` turns that text into the compact form `klar dev` reports.
+use ast.{Decl}
+use checker.{Diag}
+use commands.{compact_diag}
+use emit.{emit_program}
+use emit_a64.{emit_a64}
+use jsonout.{J, compact}
+use link.{write_elf, write_macho, write_pe}
+use contracts.{with_contracts}
+use loader.{Ld, load_program, load_runtime}
+use lower.{Lw, TraceSpec, fnv1a, lower_program_limited}
+use report.{user_diags}
+
+/// A test of the main file (a `test` block, a doc test or a property): its name, whether it is a property, and its
+/// number in the test executable.
+pub type TestItem { name: Str, is_property: Bool, index: Int }
+
+pub fn test_items(ld: Ld, file: Str) -> List[TestItem] {
+  var out: List[TestItem] = []
+  var k = 0
+  let decls = match ld.by_path.get(file) {
+    Some(m) => match m.checker {
+      Some(c) => c.decls,
+      None => [],
+    },
+    None => [],
   }
- ],
- "solved": true
+  for d in decls {
+    match d {
+      Decl.Test(_, name, _, _) => {
+        out = out.push(TestItem { name: name, is_property: false, index: k })
+        k = k + 1
+      },
+      Decl.Property(_, name, _, _, _) => {
+        out = out.push(TestItem { name: name, is_property: true, index: k })
+        k = k + 1
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+/// Whether the main file declares `main`.
+fn has_main(ld: Ld, file: Str) -> Bool {
+  let decls = match ld.by_path.get(file) {
+    Some(m) => match m.checker {
+      Some(c) => c.decls,
+      None => [],
+    },
+    None => [],
+  }
+  return decls.any(fn(d) => match d {
+    Decl.Fn(f) => f.name == "main",
+    _ => false,
+  })
+}
+
+/// The target of this machine: Windows (by its temp directory), macOS (`uname -s`), else Linux on the CPU `uname -m`
+/// names.
+pub fn host_target() -> Str uses io, proc {
+  if env_var("TEMP").unwrap_or("").contains("\\") {
+    return "windows"
+  }
+  match run_capture(args: ["uname", "-s"], dir: "", input: "") {
+    Ok(r) => {
+      if r.get_or(1, "").trim() == "Darwin" {
+        return "macos"
+      }
+    },
+    Err(_) => {},
+  }
+  return match run_capture(args: ["uname", "-m"], dir: "", input: "") {
+    Ok(r) => match ["aarch64", "arm64"].contains(r.get_or(1, "").trim()) {
+      true => "linux-arm64",
+      false => "linux",
+    },
+    Err(_) => "linux",
+  }
+}
+
+/// The executable of a lowered program for `target`.
+pub fn image_of(w: Lw, target: Str) -> Bytes {
+  if target == "linux-arm64" {
+    return write_elf(emit_a64(w))
+  }
+  if target == "windows" {
+    return write_pe(emit_program(w, "windows"))
+  }
+  if target == "macos" {
+    return write_macho(emit_program(w, "macos"))
+  }
+  return write_elf(emit_program(w, "linux"))
+}
+
+/// The executable of a checked program (`tests`: the one that runs test #argv[1]).
+/// The rights of an `--allow` value (klar/sandbox.py), or the problem with an unknown one.
+pub fn parse_allow(spec: Str) -> Result[List[Str], Str] {
+  var out: List[Str] = []
+  for raw in spec.split(",") {
+    let r = raw.trim()
+    if r != "" {
+      let kind = r.split(":").get_or(0, "")
+      let has_colon = r.contains(":")
+      let arg = match r.index_of(":") {
+        Some(k) => r.slice(k + 1, r.len()),
+        None => "",
+      }
+      let known = ["io", "time", "rand", "net", "fs", "proc", "env"].contains(kind)
+      let takes_arg = kind == "fs" or kind == "proc" or kind == "env"
+      if not known or (arg != "" and not takes_arg) or (has_colon and arg == "") {
+        return Err("unknown right `{r}` (rights: io, time, rand, net, fs, fs:DIR, proc, proc:NAME, env, env:NAME)")
+      }
+      out = out.push(r)
+    }
+  }
+  return Ok(out)
+}
+
+/// The rights of `--allow` among the arguments: Ok(None) without it (klar/cli.py `sandbox_of`).
+pub fn allow_of(args: List[Str]) -> Result[Option[List[Str]], Str] {
+  if not args.contains("--allow") {
+    return Ok(None)
+  }
+  let r = parse_allow(str_flag(args, "--allow"))?
+  return Ok(Some(r))
+}
+
+/// `--timeout` of `test`, `dev`, `eval` and the REPL when it is not given: 10 s for each test and for main (R0018).
+pub const DEFAULT_TIMEOUT: Int = 10
+
+/// The executable of a program with the rights of `--allow` and the time limit of `--timeout` built in (seconds, 0:
+/// none).
+pub fn native_image_allow(ld: Ld, main_path: Str, target: Str, tests: Bool, allow: Option[List[Str]],
+  limit: Int) -> Bytes {
+    return image_of(lower_program_limited(ld: ld, main_path: main_path, allow: allow, trace: TraceSpec { mode: 0,
+      events: "", result: "" }, tests: tests, limit: limit), target)
+  }
+
+pub fn native_image(ld: Ld, main_path: Str, target: Str, tests: Bool, limit: Int) -> Bytes {
+  return native_image_allow(ld: ld, main_path: main_path, target: target, tests: tests, allow: None, limit: limit)
+}
+
+/// A temporary executable for this program, in a directory of this user (`~/.klar-cache/klarc`, on Windows the
+/// user's %TEMP%): a shared /tmp would let another user plant a file or symlink under the predictable name.
+pub fn temp_path(file: Str, what: Str) -> Str uses io, fs {
+  let tag = fnv1a(file + "|" + what)
+  let name = "klarc-{what}-{tag}"
+  let win = env_var("TEMP").unwrap_or("")
+  if win.contains("\\") {
+    return "{win}\\{name}.exe"
+  }
+  let dir = match env_var("HOME") {
+    Some(h) => h + "/.klar-cache/klarc",
+    None => env_var("TMPDIR").unwrap_or("/tmp"),
+  }
+  let _ = make_dir(dir)
+  return "{dir}/{name}"
+}
+
+/// Writes an executable (a new file: whatever was at the path, a symlink too, is removed first); the error if it
+/// cannot.
+pub fn save_exe(path: Str, image: Bytes) -> Result[Unit, Str] uses fs {
+  let _ = remove_file(path)
+  write_bytes(path, image)?
+  return set_executable(path)
+}
+
+/// What a program wrote to stderr, split into its own output and the runtime error the runtime printed at the end.
+pub type Stderr { own: Str, error: Str }
+
+pub fn split_stderr(err: Str) -> Stderr {
+  let marker = "runtime error["
+  let parts = err.split(marker)
+  if parts.len() < 2 {
+    return Stderr { own: err, error: "" }
+  }
+  return Stderr { own: parts.take(parts.len() - 1).join(marker), error: marker + parts.last().unwrap_or("") }
+}
+
+fn strip_newlines(s: Str) -> Str {
+  var out = s
+  while out.ends_with("\n") {
+    out = out.slice(0, out.len() - 1)
+  }
+  return out
+}
+
+/// Prints a failed test's error and output like `klar test`.
+pub fn show_failure(out: Str, err: Str) uses io {
+  let parts = split_stderr(err)
+  var error_text = parts.error
+  var extra = parts.own
+  if error_text == "" {
+    error_text = err
+    extra = ""
+  }
+  error_text = strip_newlines(error_text)
+  if error_text != "" {
+    for line in error_text.split("\n") {
+      print("        " + line)
+    }
+  }
+  if out + extra != "" {
+    print("        output:")
+    for line in strip_newlines(out + extra).split("\n") {
+      print("          " + line)
+    }
+  }
+}
+
+/// A runtime error in the compact form of `klar dev` (klar/cli.py, compact_rt).
+pub type RtError { code: Str, msg: Str, at: Str, values: List[Str], stack: List[Str], hint: Str }
+
+/// Whether a piece of the values note starts a new value (`name = ...`).
+fn starts_value(piece: Str) -> Bool {
+  let i = piece.index_of(" = ").unwrap_or(-1)
+  if i <= 0 {
+    return false
+  }
+  let name = piece.slice(0, i)
+  return not name.contains(" ") and not name.contains("\"") and not name.contains("'")
+}
+
+fn split_values(text: Str) -> List[Str] {
+  var out: List[Str] = []
+  for piece in text.split(", ") {
+    if out.is_empty() or starts_value(piece) {
+      out = out.push(piece)
+    } else {
+      out = out.set(out.len() - 1, out.last().unwrap_or("") + ", " + piece)
+    }
+  }
+  return out
+}
+
+/// `name (file:line:col)` -> `name@file:line:col`
+fn frame_of(entry: Str) -> Str {
+  let parts = entry.split(" (")
+  if parts.len() < 2 {
+    return entry
+  }
+  let loc = parts.last().unwrap_or("")
+  return parts.take(parts.len() - 1).join(" (") + "@" + loc.slice(0, (loc.len() - 1).max(0))
+}
+
+/// The runtime error the native runtime printed (`runtime error[...]: ...` and its notes), if there is one.
+pub fn parse_rt(err: Str) -> Option[RtError] {
+  let text = split_stderr(err).error
+  if text == "" {
+    return None
+  }
+  let lines = text.split("\n")
+  let first = lines.get_or(0, "")
+  let close = first.index_of("]: ").unwrap_or(first.len())
+  var e = RtError { code: first.slice(14, close.max(14)), msg: first.slice((close + 3).min(first.len()), first.len()),
+    at: "", values: [], stack: [], hint: "" }
+  for line in lines.drop(1) {
+    if line.starts_with("  --> ") {
+      e = e with { at: line.slice(6, line.len()) }
+    } else if line.starts_with("  note: values: ") {
+      e = e with { values: split_values(line.slice(16, line.len())) }
+    } else if line.starts_with("  note: call stack (innermost first): ") {
+      let entries = line.slice(38, line.len()).split(" <- ").filter(fn(x) => not x.starts_with("... "))
+      e = e with { stack: entries.take(6).map(frame_of) }
+    } else if line.starts_with("  hint: ") {
+      e = e with { hint: line.slice(8, line.len()) }
+    }
+  }
+  return Some(e)
+}
+
+pub fn rt_fields(e: RtError) -> List[Pair[Str, J]] {
+  var out = [Pair { first: "code", second: J.JStr(e.code) }, Pair { first: "msg", second: J.JStr(e.msg) }, Pair {
+    first: "at", second: J.JStr(e.at) }]
+  if not e.values.is_empty() {
+    out = out.push(Pair { first: "values", second: J.JArr(e.values.map(fn(v) => J.JStr(v))) })
+  }
+  if not e.stack.is_empty() {
+    out = out.push(Pair { first: "stack", second: J.JArr(e.stack.map(fn(v) => J.JStr(v))) })
+  }
+  if e.hint != "" {
+    out = out.push(Pair { first: "hint", second: J.JStr(e.hint) })
+  }
+  return out
+}
+
+/// The result of running a program: [exit code, stdout, stderr], or why it could not run.
+fn run_exe(exe: Str, args: List[Str], input: Str) -> Result[List[Str], Str] uses proc {
+  return run_capture(args: [exe].concat(args), dir: "", input: input)
+}
+
+fn get(fields: List[Pair[Str, J]], key: Str) -> J {
+  return fields.filter(fn(f) => f.first == key).get(0).map(fn(f) => f.second).unwrap_or(J.JNull)
+}
+
+fn jstr(j: J) -> Str {
+  return match j {
+    J.JStr(s) => s,
+    J.JInt(i) => i.to_str(),
+    _ => "",
+  }
+}
+
+fn items_of(j: J) -> List[J] {
+  return match j {
+    J.JArr(xs) => xs,
+    _ => [],
+  }
+}
+
+fn fields_of(j: J) -> List[Pair[Str, J]] {
+  return match j {
+    J.JObj(fs) => fs,
+    _ => [],
+  }
+}
+
+/// `klar dev`'s text form of the report.
+fn dev_text(report: List[Pair[Str, J]]) uses io {
+  for d in items_of(get(report, "errors")) {
+    let f = fields_of(d)
+    var line = "error " + jstr(get(f, "code")) + " " + jstr(get(f, "at")) + ": " + jstr(get(f, "msg"))
+    if jstr(get(f, "hint")) != "" {
+      line = line + "  [hint: " + jstr(get(f, "hint")) + "]"
+    }
+    print(line)
+  }
+  for d in items_of(get(report, "warnings")) {
+    let f = fields_of(d)
+    print("warn  " + jstr(get(f, "code")) + " " + jstr(get(f, "at")) + ": " + jstr(get(f, "msg")))
+  }
+  let tests = fields_of(get(report, "tests"))
+  if not tests.is_empty() {
+    let failed = items_of(get(tests, "failed"))
+    print("tests: " + jstr(get(tests, "passed")) + " passed, " + failed.len().to_str() + " failed")
+    for t in failed {
+      let f = fields_of(t)
+      let values = items_of(get(f, "values")).map(jstr).join(" ")
+      print("  FAIL " + jstr(get(f, "name")) + ": " + jstr(get(f, "code")) + " " + jstr(get(f, "at")) + " " +
+          jstr(get(f, "msg")) + " " + values)
+    }
+    for name in items_of(get(tests, "skipped")) {
+      print("  SKIP " + jstr(name) + " (property: klarc cannot run properties yet)")
+    }
+  }
+  let run = fields_of(get(report, "run"))
+  if not run.is_empty() {
+    if get(run, "ok") == J.JBool(true) {
+      print("run: ok")
+    } else {
+      let e = fields_of(get(run, "error"))
+      print("run: ERROR " + jstr(get(e, "code")) + " " + jstr(get(e, "at")) + " " + jstr(get(e, "msg")))
+    }
+    let out = jstr(get(run, "stdout"))
+    if out != "" {
+      print("stdout:\n" + strip_newlines(out))
+    }
+  }
+  print("next: " + jstr(get(report, "next")))
+}
+
+fn int_flag(args: List[Str], name: Str, default: Int) -> Int {
+  var i = 0
+  while i < args.len() {
+    if args.get_or(i, "") == name {
+      return args.get_or(i + 1, "").to_int().unwrap_or(default)
+    }
+    i = i + 1
+  }
+  return default
+}
+
+fn str_flag(args: List[Str], name: Str) -> Str {
+  var i = 0
+  while i < args.len() {
+    if args.get_or(i, "") == name {
+      return args.get_or(i + 1, "")
+    }
+    i = i + 1
+  }
+  return ""
+}
+
+/// The file argument: the first one that is neither an option nor an option's value.
+fn file_arg(args: List[Str]) -> Str {
+  let with_value = ["--lib", "--runs", "--stdin", "--max-output", "--max-warnings", "--allow"]
+  var i = 0
+  while i < args.len() {
+    let a = args.get_or(i, "")
+    if with_value.contains(a) {
+      i = i + 2
+    } else if a.starts_with("--") {
+      i = i + 1
+    } else {
+      return a
+    }
+  }
+  return ""
+}
+
+fn finish(report: List[Pair[Str, J]], json: Bool) -> Int uses io {
+  if json {
+    print(compact(J.JObj(report)))
+  } else {
+    dev_text(report)
+  }
+  if get(report, "ok") == J.JBool(true) {
+    return 0
+  }
+  return 1
+}
+
+/// `klarc dev FILE [--json] [--no-run] [--stdin TEXT] [--max-output N] [--max-warnings N]`: one step of the AI loop —
+/// check, run the tests, run `main`; one compact report.
+pub fn dev_command(args: List[Str], lib: Str) -> Int uses io, fs, proc {
+  let file = file_arg(args)
+  let json = args.contains("--json")
+  let max_output = int_flag(args: args, name: "--max-output", default: 2000)
+  let max_warnings = int_flag(args: args, name: "--max-warnings", default: 10)
+  let limit = int_flag(args: args, name: "--timeout", default: DEFAULT_TIMEOUT).max(0)
+  let rights = match allow_of(args) {
+    Ok(r) => r,
+    Err(e) => {
+      eprint("error: " + e)
+      return 2
+    },
+  }
+  let shown = file.replace("\\", "/").split("/").last().unwrap_or(file)
+  let ld = load_runtime(load_program(file, lib))
+  let diags = user_diags(ld, shown)
+  let errors = diags.filter(fn(d) => d.severity == "error")
+  let warnings = diags.filter(fn(d) => d.severity == "warning")
+  var report = [Pair { first: "ok", second: J.JBool(false) }, Pair { first: "errors", second: J.JArr(errors.map(
+    compact_diag)) }, Pair { first: "warnings", second: J.JArr(warnings.map(compact_diag).take(max_warnings.max(0))) }]
+  if not errors.is_empty() {
+    let auto = errors.filter(fn(d) => match d.fix {
+      Some(f) => f.safe,
+      None => false,
+    }).len()
+    var next = "fix {errors.len()} error(s)"
+    if auto > 0 {
+      next = next + "; {auto} can be fixed by `klar fix`"
+    }
+    return finish(report: report.push(Pair { first: "next", second: J.JStr(next) }), json: json)
+  }
+  // the tests (with the contracts of the functions as properties: compiler/contracts.klar)
+  let tld = with_contracts(ld: ld, path: file, lib: lib)
+  let items = test_items(tld, file)
+  var passed = 0
+  var failed: List[J] = []
+  let runs = int_flag(args: args, name: "--runs", default: 50)
+  if not items.is_empty() {
+    let exe = temp_path(file, "dev-test")
+    match save_exe(exe, native_image(ld: tld, main_path: file, target: host_target(), tests: true, limit: limit)) {
+      Ok(_) => {},
+      Err(e) => {
+        eprint("klarc: {e}")
+        return 1
+      },
+    }
+    for t in items {
+      match run_exe(exe: exe, args: [runs.to_str(), "0", t.index.to_str()], input: "") {
+        Ok(res) => {
+          if res.get_or(0, "") == "0" {
+            passed = passed + 1
+          } else {
+            let e = parse_rt(res.get_or(2, "")).unwrap_or(RtError { code: "R0000", msg: "the test failed (exit " +
+                "code " + res.get_or(0, "") + ")", at: shown, values: [], stack: [], hint: "" })
+            failed = failed.push(J.JObj([Pair { first: "name", second: J.JStr(t.name) }].concat(rt_fields(e))))
+          }
+        },
+        Err(e) => {
+          eprint("klarc: {e}")
+          return 1
+        },
+      }
+    }
+  }
+  let tests = [Pair { first: "passed", second: J.JInt(passed) }, Pair { first: "failed", second: J.JArr(failed) }]
+  report = report.push(Pair { first: "tests", second: J.JObj(tests) })
+  // the program
+  var run_failed = false
+  if has_main(ld, file) and not args.contains("--no-run") {
+    let exe = temp_path(file, "dev-run")
+    match save_exe(exe, native_image_allow(ld: ld, main_path: file, target: host_target(), tests: false, allow: rights,
+      limit: limit)) {
+        Ok(_) => {},
+        Err(e) => {
+          eprint("klarc: {e}")
+          return 1
+        },
+      }
+    match run_exe(exe: exe, args: [], input: str_flag(args, "--stdin")) {
+      Ok(res) => {
+        let code = res.get_or(0, "0")
+        let out = res.get_or(1, "")
+        let err = split_stderr(res.get_or(2, ""))
+        let rt = parse_rt(res.get_or(2, ""))
+        run_failed = rt != None
+        var run = [Pair { first: "ok", second: J.JBool(not run_failed) }]
+        if not run_failed and code != "0" {
+          run = run.push(Pair { first: "exit_code", second: J.JInt(code.to_int().unwrap_or(0)) })
+        }
+        var shown_out = out
+        if out.len() > max_output {
+          shown_out = out.slice(0, max_output.max(0)) + "…(truncated)"
+        }
+        run = run.push(Pair { first: "stdout", second: J.JStr(shown_out) })
+        if err.own != "" {
+          run = run.push(Pair { first: "stderr", second: J.JStr(err.own.slice(0, max_output.max(0).min(err.own.len())))
+          })
+        }
+        match rt {
+          Some(e) => {
+            run = run.push(Pair { first: "error", second: J.JObj(rt_fields(e)) })
+          },
+          None => {},
+        }
+        report = report.push(Pair { first: "run", second: J.JObj(run) })
+      },
+      Err(e) => {
+        eprint("klarc: {e}")
+        return 1
+      },
+    }
+  }
+  let ok = failed.is_empty() and not run_failed
+  report = report.set(0, Pair { first: "ok", second: J.JBool(ok) })
+  var next = "done"
+  if not failed.is_empty() {
+    next = "fix {failed.len()} failing test(s)"
+  } else if run_failed {
+    next = "fix the runtime error"
+  } else if items.is_empty() {
+    next = "add tests (`test`, `/// >>>` doc-tests or `property`)"
+  }
+  return finish(report: report.push(Pair { first: "next", second: J.JStr(next) }), json: json)
 }

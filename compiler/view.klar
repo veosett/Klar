@@ -865,13 +865,14 @@ fn html_escape(s: Str) -> Str {
 /// `klar view --run` without the interpreter: the output and the error of a native run (no call counts).
 fn run_trace(ld: Ld, file: Str, input: Str) -> J uses io, fs, proc, time {
   let exe = temp_path(file, "view")
-  match save_exe(exe, native_image(ld: load_runtime(ld), main_path: file, target: host_target(), tests: false)) {
-    Ok(_) => {},
-    Err(e) => {
-      return obj([kv("calls", J.JObj([])), kv("output", js("")), kv("error", obj([kv("code", js("E0000")), kv("message",
-        js(e)), kv("line", J.JInt(0))])), kv("total_ms", J.JInt(0))])
-    },
-  }
+  match save_exe(exe, native_image(ld: load_runtime(ld), main_path: file, target: host_target(), tests: false,
+    limit: 0)) {
+      Ok(_) => {},
+      Err(e) => {
+        return obj([kv("calls", J.JObj([])), kv("output", js("")), kv("error", obj([kv("code", js("E0000")), kv("message",
+          js(e)), kv("line", J.JInt(0))])), kv("total_ms", J.JInt(0))])
+      },
+    }
   let t0 = now_ms()
   let res = run_capture(args: [exe], dir: "", input: input).unwrap_or(["1", "", ""])
   let ms = now_ms() - t0

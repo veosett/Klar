@@ -1,15 +1,4299 @@
-{
- "attempts": [
-  {
-   "files": {
-    "cart.klar": "use catalog.{Item}\n\n/// Minimum amount (after discount, before tax) for free shipping: $50.00, in cents.\npub const FREE_SHIPPING_MIN: Int = 5000\n\npub type Line { item: Item, qty: Int }\n\npub type Cart { lines: List[Line], code: Option[Str] }\n\npub fn new_cart() -> Cart {\n  return Cart { lines: [], code: None }\n}\n\npub fn add_line(cart: Cart, item: Item, qty: Int) -> Result[Cart, Str] {\n  if qty < 1 or qty > 99 {\n    return Err(\"invalid quantity: {qty}\")\n  }\n  return Ok(cart with { lines: cart.lines.push(Line { item: item, qty: qty }) })\n}\n\n/// Percentage taken off by a discount code, None for an unknown code.\npub fn discount_percent(code: Str) -> Option[Int] {\n  return match code {\n    \"SAVE10\" => Some(10),\n    \"WELCOME5\" => Some(5),\n    \"VIP15\" => Some(15),\n    \"HALF\" => Some(50),\n    _ => None,\n  }\n}\n\npub fn apply_code(cart: Cart, code: Str) -> Result[Cart, Str] {\n  if discount_percent(code).is_none() {\n    return Err(\"unknown code: {code}\")\n  }\n  return Ok(cart with { code: Some(code) })\n}\n\npub fn item_count(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + l.qty)\n}\n\n/// Total of one line in cents.\npub fn line_total(line: Line) -> Int {\n  return line.item.price_cents * line.qty\n}\n\npub fn largest_line(cart: Cart) -> Option[Line] {\n  return cart.lines.max_by(fn(l) => line_total(l))\n}\n\npub fn subtotal(cart: Cart) -> Int {\n  return cart.lines.fold(0, fn(acc, l) => acc + line_total(l))\n}\n\n/// The discount for the cart's code in cents, rounded to the nearest cent, halves up (0 without a code).\npub fn discount(cart: Cart) -> Int {\n  let percent = match cart.code {\n    Some(c) => discount_percent(c).unwrap_or(0),\n    None => 0,\n  }\n  return (subtotal(cart) * percent + 50) / 100\n}\n\n/// Tax in cents on the subtotal after the discount; the rate is in basis points (825 = 8.25%).\npub fn tax(cart: Cart, rate_bp: Int) -> Int {\n  let taxable = subtotal(cart) - discount(cart)\n  return (taxable * rate_bp + 5000) / 10000\n}\n\npub fn total(cart: Cart, rate_bp: Int) -> Int {\n  return subtotal(cart) - discount(cart) + tax(cart, rate_bp)\n}\n\n/// How much more must be bought (after discount) to get free shipping, in cents.\npub fn free_shipping_gap(cart: Cart) -> Int {\n  let net = subtotal(cart) - discount(cart)\n  if net >= FREE_SHIPPING_MIN {\n    return 0\n  }\n  return FREE_SHIPPING_MIN - net\n}\n",
-    "catalog.klar": "use money.{format_amount}\n\npub type Item { name: Str, price_cents: Int }\n\n/// Builds a validated item: the name must not be blank and the price must be positive (in cents).\npub fn make_item(name: Str, price_cents: Int) -> Result[Item, Str] {\n  if name.trim().is_empty() {\n    return Err(\"empty name\")\n  }\n  if price_cents <= 0 {\n    return Err(\"invalid price for {name}\")\n  }\n  return Ok(Item { name: name, price_cents: price_cents })\n}\n\npub fn default_catalog() -> List[Item] {\n  return [\n    Item { name: \"Widget\", price_cents: 350 },\n    Item { name: \"Gadget\", price_cents: 1250 },\n    Item { name: \"Gizmo\", price_cents: 4999 },\n    Item { name: \"Cable\", price_cents: 725 },\n    Item { name: \"Case\", price_cents: 2400 },\n  ]\n}\n\npub fn find_item(items: List[Item], name: Str) -> Option[Item] {\n  return items.find(fn(i) => i.name == name)\n}\n\n/// Cheapest first.\npub fn sorted_by_price(items: List[Item]) -> List[Item] {\n  return items.sort_by(fn(i) => i.price_cents)\n}\n\npub fn cheapest(items: List[Item]) -> Option[Item] {\n  return items.min_by(fn(i) => i.price_cents)\n}\n\n/// One line per item: \"Widget - $3.50\".\npub fn catalog_text(items: List[Item]) -> Str {\n  return items.map(fn(i) => \"{i.name} - {format_amount(i.price_cents)}\").join(\"\\n\")\n}\n",
-    "money.klar": "/// Formats an amount in cents: 1250 -> \"$12.50\", -250 -> \"-$2.50\", 5 -> \"$0.05\".\npub fn format_amount(cents: Int) -> Str {\n  let sign = match cents < 0 {\n    true => \"-\",\n    false => \"\",\n  }\n  let magnitude = cents.abs()\n  let dollars = magnitude / 100\n  let rest = (magnitude % 100).to_str().pad_left(2, \"0\")\n  return \"{sign}${dollars}.{rest}\"\n}\n\n/// Whether the text is one or more ASCII digits.\nfn is_digits(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  return s.chars().all(fn(c) => \"0123456789\".contains(c))\n}\n\n/// Parses \"12.5\", \"12\" or \"$12.50\" (surrounding spaces allowed) into cents: \"12.5\" -> 1250.\npub fn parse_amount(text: Str) -> Result[Int, Str] {\n  var t = text.trim()\n  if t.starts_with(\"$\") {\n    t = t.slice(1, t.len())\n  }\n  let parts = t.split(\".\")\n  let whole = parts.get_or(0, \"\")\n  let fraction = parts.get_or(1, \"\")\n  let fraction_ok = parts.len() == 1 or (fraction.len() >= 1 and fraction.len() <= 2 and is_digits(fraction))\n  if parts.len() > 2 or not is_digits(whole) or not fraction_ok {\n    return Err(\"invalid amount: \" + text)\n  }\n  let dollars = whole.to_int().unwrap_or(0)\n  let cents_part = fraction.pad_right(2, \"0\").to_int().unwrap_or(0)\n  return Ok(dollars * 100 + cents_part)\n}\n",
-    "receipt.klar": "use cart.{Cart, Line, discount, free_shipping_gap, item_count, line_total, subtotal, tax, total}\nuse money.{format_amount}\n\n/// \"2 x Widget @ $3.50 = $7.00\"\npub fn line_text(line: Line) -> Str {\n  return \"{line.qty} x {line.item.name} @ {format_amount(line.item.price_cents)} = {format_amount(line_total(line))}\"\n}\n\npub fn render(cart: Cart, rate_bp: Int) -> Str {\n  let discount_lines: List[Str] = match cart.code {\n    Some(c) => [\"Discount ({c}): -{format_amount(discount(cart))}\"],\n    None => [],\n  }\n  let gap = free_shipping_gap(cart)\n  let footer = match gap > 0 {\n    true => \"Add {format_amount(gap)} more for free shipping\",\n    false => \"Free shipping\",\n  }\n  let lines = cart.lines.map(line_text)\n    .push(\"Subtotal: {format_amount(subtotal(cart))}\")\n    .concat(discount_lines)\n    .push(\"Tax: {format_amount(tax(cart, rate_bp))}\")\n    .push(\"Total: {format_amount(total(cart, rate_bp))}\")\n    .push(footer)\n  return lines.join(\"\\n\")\n}\n\n/// \"3 items, total $19.00\"\npub fn summary(cart: Cart, rate_bp: Int) -> Str {\n  let n = item_count(cart)\n  let noun = match n == 1 {\n    true => \"item\",\n    false => \"items\",\n  }\n  return \"{n} {noun}, total {format_amount(total(cart, rate_bp))}\"\n}\n"
-   },
-   "stage": "pass",
-   "ok": true
-  }
- ],
- "solved": true
+// Typed AST -> KIR, written in Klar (self-hosting, stage 4c). Mirrors klar/native/lower.py instruction for
+// instruction — tests/selfhost.py compares the KIR (and the data image) of both for every program they build.
+//
+// * Monomorphization: every generic function is instantiated per concrete type list.
+// * Uniform 64-bit values; records, enums, strings, lists, maps and closures are heap objects [rc][td][payload...].
+// * Reference counting: parameters are borrowed unless the function consumes them (own.klar), results are owned,
+//   locals own their values.
+// * Reuse: the last use of a local moves its value (own.klar): `x = x.push(v)`, `w = f(w)`,
+//   `w with { f: w.f.set(k, v) }` update unique objects in place, across function calls.
+//
+// KIR instructions are lists of `KV` (the Python tuples): the opcode first, then registers, immediates, labels,
+// symbols, argument lists or nothing.
+use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span, Stmt}
+use ast.{StrPiece, TypeExpr, expr_span, pattern_span}
+use checker.{Builtins, CallInfo, Ck, Resolution, Sig, Universe, check_body, span_key}
+use own.{Cx, OwnFn, REUSE, all_exprs, body_exprs, infer_owned, liveness_block, liveness_expr, node_key, path_of}
+use own.{root_of, sub_exprs}
+use loader.{Ld, Module}
+use types.{Type, con, show}
+
+// ---- KIR ----------------------------------------------------------------------------------------------------
+
+/// One field of an instruction.
+pub enum KV {
+  I(v: Int),
+  S(s: Str),
+  L(regs: List[Int]),
+  Nil,
 }
+
+pub type Ins = List[KV]
+
+pub type KFn { name: Str, klar_name: Str, nparams: Int, nregs: Int, code: List[Ins], labels: Int }
+
+fn op(s: Str) -> KV {
+  return KV.S(s: s)
+}
+
+fn r(v: Int) -> KV {
+  return KV.I(v: v)
+}
+
+/// A word of static data: a number, or the address of a symbol plus an addend.
+pub enum W {
+  N(v: Int),
+  A(sym: Str, add: Int),
+}
+
+pub type Reloc { off: Int, sym: Str, add: Int }
+
+/// The data part of the executable image built by the lowering.
+pub type Img {
+  data: Bytes,
+  syms: Map[Str, Int],
+  abs: List[Reloc],
+  bss_size: Int,
+  bss: Map[Str, Int],
+}
+
+const K_UNIT: Int = 0
+const K_BOOL: Int = 1
+const K_INT: Int = 2
+const K_FLOAT: Int = 3
+const K_WORD: Int = 4
+const K_STR: Int = 10
+const K_LIST: Int = 11
+const K_MAP: Int = 12
+const K_RECORD: Int = 13
+const K_ENUM: Int = 14
+const K_FN: Int = 15
+const K_BIG: Int = 16
+const K_BUF: Int = 17
+const K_BYTES: Int = 18
+
+/// A value in a register: its type and whether this code owns a reference to it.
+type V { reg: Int, t: Type, owned: Bool }
+
+type Local { reg: Int, t: Type, owned: Bool, boxed: Bool }
+
+type LScope { vars: Map[Str, Local], clean: List[Pair[Int, Str]] }
+
+type LoopT { end: Str, step: Str, depth: Int }
+
+/// A function instance waiting to be lowered.
+type QItem { name: Str, mod_name: Str, decl: FnDecl, idx: Int, file: Str, env: Map[Str, Type], kind: Str }
+
+/// The lowering state: the whole program, and the function being lowered.
+pub type Lw {
+  b: Builtins,
+  uni: Universe,
+  modules: Map[Str, Module],
+  /// the lines of each source file (split once: error messages quote them at every call site)
+  sources: Map[Str, List[Str]],
+  fns: List[KFn],
+  instances: Map[Str, Str],
+  names_used: Map[Str, Bool],
+  queue: List[QItem],
+  strings: Map[Str, Str],
+  spans: Map[Str, Str],
+  tds: Map[Str, Str],
+  static_objs: Map[Str, Str],
+  const_slots: Map[Str, Str],
+  counter: Int,
+  /// runtime function name -> its declaration index in the runtime module
+  rt: Map[Str, Int],
+  /// the checker of the runtime module, with the bodies checked so far (`check_body`), and their indices
+  rt_ck: Ck,
+  rt_checked: Map[Int, Bool],
+  img: Img,
+  // ---- the function being lowered
+  cur: KFn,
+  cur_index: Int,
+  m: Module,
+  file: Str,
+  env: Map[Str, Type],
+  is_rt: Bool,
+  scopes: List[LScope],
+  loops: List[LoopT],
+  ret_t: Type,
+  dead: Bool,
+  closure_self: Option[Int],
+  captures: Map[Str, Pair[Int, Type]],
+  decl: Option[FnDecl],
+  posts: List[Expr],
+  in_test: Bool,
+  /// module#declaration index -> the parameters that function consumes
+  owned: Map[Str, List[Int]],
+  /// uses that may move their value (own.klar liveness), by node key
+  cand: Map[Str, Bool],
+  /// path -> register of the unique record an in-place `with` is updating
+  bound: Map[Str, Int],
+  /// field uses inside such a `with` that take their field out of it
+  takeable: Map[Str, Bool],
+  /// the software math functions (rt/softmath.klar) the program calls, in name order
+  soft: List[Str],
+  /// coverage builds: the file whose statements report their line (`klarc coverage`; "" otherwise), and how many
+  /// statements report so far
+  cov_file: Str,
+  cov_count: Int,
+  /// profile builds: the profiled functions ("name (file:line)" -> number) and statements ("file\0line" -> number)
+  prof_on: Bool,
+  prof_keys: Map[Str, Int],
+  prof_lines: Map[Str, Int],
+  /// `--timeout`: seconds (0: no limit and no ticks, klar/rt/limit.klar)
+  limit: Int,
+}
+
+/// A result with the updated lowering state.
+type LR[T] { w: Lw, v: T }
+
+fn lr[T](w: Lw, v: T) -> LR[T] {
+  return LR { w: w, v: v }
+}
+
+// ---- types ----------------------------------------------------------------------------------------------------
+
+fn unit_t() -> Type {
+  return con("Unit")
+}
+
+fn tshow(t: Type) -> Str {
+  return show(Map {}, t)
+}
+
+/// The concrete type inside an instance: type parameters replaced by `env`, unknowns by Unit.
+fn zonk(t: Type, env: Map[Str, Type]) -> Type {
+  return match t {
+    Type.Param(name) => match env.get(name) {
+      Some(c) => c,
+      None => fail("native: unbound type parameter {name}"),
+    },
+    Type.Con(name, args) => Type.Con(name: name, args: args.map(fn(a) => zonk(a, env))),
+    Type.Fun(ps, ret, eff) => Type.Fun(params: ps.map(fn(p) => zonk(p, env)), ret: zonk(ret, env), eff: eff),
+    _ => unit_t(),
+  }
+}
+
+fn tname(t: Type) -> Str {
+  return match t {
+    Type.Con(name, _) => name,
+    _ => "",
+  }
+}
+
+fn targs(t: Type) -> List[Type] {
+  return match t {
+    Type.Con(_, args) => args,
+    _ => [],
+  }
+}
+
+/// Reference-count kind of a type: "int" (maybe a bignum), "obj" (a heap object) or "" (an immediate).
+fn rck(t: Type) -> Str {
+  return match t {
+    Type.Con(name, _) => match name {
+      "Int" => "int",
+      "Float" => "",
+      "Bool" => "",
+      "Unit" => "",
+      "Word" => "",
+      _ => "obj",
+    },
+    Type.Fun(_, _, _) => "obj",
+    _ => "",
+  }
+}
+
+fn tag_int(n: Int) -> Int {
+  return n * 2 + 1
+}
+
+/// 32-bit FNV-1a of the UTF-8 text (the stable short names of instances; klar/native/lower.py `fnv1a`).
+pub fn fnv1a(text: Str) -> Int {
+  var h = 2166136261
+  let bs = text.to_bytes()
+  var i = 0
+  while i < bs.len() {
+    h = (h.bit_xor(bs.get_or(i, 0)) * 16777619).bit_and(4294967295)
+    i = i + 1
+  }
+  return h
+}
+
+// ---- data ---------------------------------------------------------------------------------------------------
+
+pub fn add_data(img: Img, name: Str, payload: Bytes) -> Img {
+  var data = img.data
+  while data.len() % 8 != 0 {
+    data = data.push(0)
+  }
+  return img with { syms: img.syms.set(name, data.len()), data: data.concat(payload) }
+}
+
+pub fn add_bss(img: Img, name: Str, size: Int) -> Img {
+  let base = (img.bss_size + 15) / 16 * 16
+  return img with { bss: img.bss.set(name, base), bss_size: base + size }
+}
+
+/// Emits data words; `W.A` entries become absolute addresses.
+fn words(w: Lw, name: Str, ws: List[W]) -> Lw {
+  var payload = bytes_of([])
+  var rel: List[Reloc] = []
+  var i = 0
+  for x in ws {
+    match x {
+      W.A(sym, add) => {
+        rel = rel.push(Reloc { off: i * 8, sym: sym, add: add })
+        payload = payload.push_le(0, 8)
+      },
+      W.N(v) => {
+        payload = payload.push_le(v, 8)
+      },
+    }
+    i = i + 1
+  }
+  let img = add_data(img: w.img, name: name, payload: payload)
+  let base = img.syms.get(name).unwrap_or(0)
+  return w with { img: img with { abs: img.abs.concat(rel.map(fn(x) => x with { off: base + x.off })) } }
+}
+
+/// The immortal static Str object of a literal.
+fn str_obj(w: Lw, text: Str) -> LR[Str] {
+  match w.strings.get(text) {
+    Some(name) => {
+      return lr(w, name)
+    },
+    None => {},
+  }
+  let name = "str{w.strings.len()}"
+  let raw = text.to_bytes()
+  let payload = bytes_of([]).push_le(-1, 8).push_le(0, 8).push_le(raw.len(), 8).push_le(text.len(), 8).concat(raw).push(0)
+  let img = add_data(img: w.img, name: name, payload: payload)
+  let base = img.syms.get(name).unwrap_or(0)
+  return lr(w with { img: img with { abs: img.abs.push(Reloc { off: base + 8, sym: "td_Str", add: 0 }) },
+    strings: w.strings.set(text, name) }, name)
+}
+
+fn source_line(w: Lw, file: Str, line: Int) -> Str {
+  let lines = w.sources.get(file).unwrap_or([])
+  if line > 0 and line <= lines.len() {
+    let text = lines.get_or(line - 1, "")
+    return match text.ends_with("\r") {
+      true => text.slice(0, text.len() - 1),
+      false => text,
+    }
+  }
+  return ""
+}
+
+/// The static description of a source position (for error messages at run time).
+fn span_sym(w0: Lw, sp: Span) -> LR[Str] {
+  var w = w0
+  let key = "{w.file}:{sp.line}:{sp.col}:{sp.end_line}:{sp.end_col}"
+  match w.spans.get(key) {
+    Some(name) => {
+      return lr(w, name)
+    },
+    None => {},
+  }
+  let text = source_line(w: w, file: w.file, line: sp.line)
+  let name = "span{w.spans.len()}"
+  let f = str_obj(w, w.file)
+  let t = str_obj(f.w, text)
+  w = words(w: t.w, name: name, ws: [W.A(sym: f.v, add: 0), W.N(v: sp.line), W.N(v: sp.col), W.N(v: sp.end_line),
+    W.N(v: sp.end_col), W.A(sym: t.v, add: 0)])
+  return lr(w with { spans: w.spans.set(key, name) }, name)
+}
+
+fn str_word(w: Lw, text: Str) -> LR[W] {
+  let s = str_obj(w, text)
+  return lr(s.w, W.A(sym: s.v, add: 0))
+}
+
+fn td_word(w: Lw, t: Type) -> LR[W] {
+  let s = td(w, t)
+  return lr(s.w, W.A(sym: s.v, add: 0))
+}
+
+fn or_zero(ws: List[W]) -> List[W] {
+  return match ws.is_empty() {
+    true => [W.N(v: 0)],
+    false => ws,
+  }
+}
+
+fn tparam_env(names: List[Str], args: List[Type]) -> Map[Str, Type] {
+  var m: Map[Str, Type] = Map {}
+  var i = 0
+  for n in names {
+    match args.get(i) {
+      Some(a) => {
+        m = m.set(n, a)
+      },
+      None => {},
+    }
+    i = i + 1
+  }
+  return m
+}
+
+/// The type descriptor of a concrete type (a static object the runtime reads for show, eq, hash, free).
+fn td(w0: Lw, t: Type) -> LR[Str] {
+  var w = w0
+  let key = tshow(t)
+  match w.tds.get(key) {
+    Some(name) => {
+      return lr(w, name)
+    },
+    None => {},
+  }
+  let name = "td{w.tds.len()}"
+  w = w with { tds: w.tds.set(key, name) }
+  let h = tname(t)
+  let args = targs(t)
+  let prim = match h {
+    "Unit" => K_UNIT,
+    "Bool" => K_BOOL,
+    "Int" => K_INT,
+    "Float" => K_FLOAT,
+    "Word" => K_WORD,
+    "Str" => K_STR,
+    "Bytes" => K_BYTES,
+    _ => -1,
+  }
+  match t {
+    Type.Fun(_, _, _) => {
+      let f = str_word(w, "fn")
+      return lr(words(w: f.w, name: name, ws: [W.N(v: K_FN), f.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)]), name)
+    },
+    _ => {},
+  }
+  if prim >= 0 {
+    let s = str_word(w, h)
+    return lr(words(w: s.w, name: name, ws: [W.N(v: prim), s.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)]), name)
+  }
+  if h == "List" {
+    let s = str_word(w, "List")
+    let e = td_word(s.w, args.get_or(0, unit_t()))
+    return lr(words(w: e.w, name: name, ws: [W.N(v: K_LIST), s.v, e.v, W.N(v: 0), W.N(v: 0), W.N(v: 0)]), name)
+  }
+  if h == "Map" {
+    let s = str_word(w, "Map")
+    let k = td_word(s.w, args.get_or(0, unit_t()))
+    let v = td_word(k.w, args.get_or(1, unit_t()))
+    return lr(words(w: v.w, name: name, ws: [W.N(v: K_MAP), s.v, k.v, v.v, W.N(v: 0), W.N(v: 0)]), name)
+  }
+  if h == "Option" {
+    let variants = [Variant { name: "None", types: [], names: [] }, Variant { name: "Some", types: [args.get_or(0,
+      unit_t())], names: ["value"] }]
+    return lr(enum_td(w0: w, name: name, enum_name: h, variants: variants, style: 1), name)
+  }
+  if h == "Result" {
+    let variants = [Variant { name: "Ok", types: [args.get_or(0, unit_t())], names: ["value"] }, Variant { name: "Err",
+      types: [args.get_or(1, unit_t())], names: ["error"] }]
+    return lr(enum_td(w0: w, name: name, enum_name: h, variants: variants, style: 1), name)
+  }
+  match w.uni.records.get(h) {
+    Some(info) => {
+      let m = tparam_env(info.tparams, args)
+      let fts = info.fields.values().map(fn(ft) => zonk(ft, m))
+      var ftab: List[W] = []
+      for ft in fts {
+        let x = td_word(w, ft)
+        w = x.w
+        ftab = ftab.push(x.v)
+      }
+      w = words(w: w, name: name + "_f", ws: or_zero(ftab))
+      var ntab: List[W] = []
+      for f in info.fields.keys() {
+        let x = str_word(w, f)
+        w = x.w
+        ntab = ntab.push(x.v)
+      }
+      w = words(w: w, name: name + "_n", ws: or_zero(ntab))
+      let s = str_word(w, h)
+      return lr(words(w: s.w, name: name, ws: [W.N(v: K_RECORD), s.v, W.N(v: fts.len()), W.A(sym: name + "_f", add: 0),
+        W.A(sym: name + "_n", add: 0), W.N(v: 0)]), name)
+    },
+    None => {},
+  }
+  match w.uni.enums.get(h) {
+    Some(info) => {
+      let m = tparam_env(info.tparams, args)
+      let variants = info.variants.entries().map(fn(v) => Variant { name: v.key, types: v.value.map(fn(f) => zonk(f.second,
+        m)), names: v.value.map(fn(f) => f.first) })
+      // which variants mention the enum in a field type (property inputs avoid them deep down, like the
+      // interpreter's generator, which tests `name in repr(field type)`)
+      let recursive = info.variants.values().map(fn(fs) => match fs.any(fn(f) => tshow(f.second).contains(h)) {
+        true => 1,
+        false => 0,
+      })
+      return lr(enum_td_flags(w0: w, name: name, enum_name: h, variants: variants, style: 0, recursive: Some(recursive)),
+        name)
+    },
+    None => {},
+  }
+  return fail("native: no type descriptor for {key}")
+}
+
+type Variant { name: Str, types: List[Type], names: List[Str] }
+
+fn enum_td(w0: Lw, name: Str, enum_name: Str, variants: List[Variant], style: Int) -> Lw {
+  return enum_td_flags(w0: w0, name: name, enum_name: enum_name, variants: variants, style: style, recursive: None)
+}
+
+fn enum_td_flags(w0: Lw, name: Str, enum_name: Str, variants: List[Variant], style: Int,
+  recursive: Option[List[Int]]) -> Lw {
+    var w = w0
+    var rows: List[W] = []
+    var i = 0
+    for v in variants {
+      var ftab: List[W] = []
+      for ft in v.types {
+        let x = td_word(w, ft)
+        w = x.w
+        ftab = ftab.push(x.v)
+      }
+      w = words(w: w, name: "{name}_v{i}f", ws: or_zero(ftab))
+      var ntab: List[W] = []
+      for f in v.names {
+        let x = str_word(w, f)
+        w = x.w
+        ntab = ntab.push(x.v)
+      }
+      w = words(w: w, name: "{name}_v{i}n", ws: or_zero(ntab))
+      let s = str_word(w, v.name)
+      w = s.w
+      rows = rows.concat([s.v, W.N(v: v.types.len()), W.A(sym: "{name}_v{i}f", add: 0), W.A(sym: "{name}_v{i}n", add: 0)])
+      i = i + 1
+    }
+    w = words(w: w, name: name + "_vars", ws: rows)
+    var flags = W.N(v: 0)
+    match recursive {
+      Some(fl) => {
+        w = words(w: w, name: name + "_rec", ws: or_zero(fl.map(fn(x) => W.N(v: x))))
+        flags = W.A(sym: name + "_rec", add: 0)
+      },
+      None => {},
+    }
+    let s = str_word(w, enum_name)
+    return words(w: s.w, name: name, ws: [W.N(v: K_ENUM), s.v, W.N(v: variants.len()), W.A(sym: name + "_vars", add: 0),
+      W.N(v: style), flags])
+  }
+
+fn uid(w: Lw, prefix: Str) -> LR[Str] {
+  let n = w.counter + 1
+  return lr(w with { counter: n }, "{prefix}{n}")
+}
+
+fn closure_td(w0: Lw, caps: List[Type]) -> LR[Str] {
+  let u = uid(w0, "tdc")
+  var w = u.w
+  let name = u.v
+  var ctab: List[W] = []
+  for t in caps {
+    let x = td_word(w, t)
+    w = x.w
+    ctab = ctab.push(x.v)
+  }
+  w = words(w: w, name: name + "_c", ws: or_zero(ctab))
+  let s = str_word(w, "fn")
+  return lr(words(w: s.w, name: name, ws: [W.N(v: K_FN), s.v, W.N(v: caps.len()), W.A(sym: name + "_c", add: 0), W.N(v: 0),
+    W.N(v: 0)]), name)
+}
+
+/// The immortal object of a field-less variant (None, Color.Red, ...).
+fn static_variant(w0: Lw, t: Type, tag: Int) -> LR[Str] {
+  let key = "{tshow(t)}#{tag}"
+  match w0.static_objs.get(key) {
+    Some(name) => {
+      return lr(w0, name)
+    },
+    None => {},
+  }
+  let name = "obj{w0.static_objs.len()}"
+  let x = td_word(w0, t)
+  let w = words(w: x.w, name: name, ws: [W.N(v: -1), x.v, W.N(v: tag)])
+  return lr(w with { static_objs: w.static_objs.set(key, name) }, name)
+}
+
+fn variant_index(w: Lw, t: Type, vname: Str) -> Int {
+  let h = tname(t)
+  if h == "Option" {
+    return match vname == "Some" {
+      true => 1,
+      false => 0,
+    }
+  }
+  if h == "Result" {
+    return match vname == "Err" {
+      true => 1,
+      false => 0,
+    }
+  }
+  return w.uni.enums.get(h).map(fn(i) => i.variants.keys().index_of(vname).unwrap_or(-1)).unwrap_or(-1)
+}
+
+fn variant_fields(w: Lw, t: Type, vname: Str) -> List[Type] {
+  let h = tname(t)
+  let args = targs(t)
+  if h == "Option" {
+    return match vname == "Some" {
+      true => [args.get_or(0, unit_t())],
+      false => [],
+    }
+  }
+  if h == "Result" {
+    return match vname == "Ok" {
+      true => [args.get_or(0, unit_t())],
+      false => [args.get_or(1, unit_t())],
+    }
+  }
+  return match w.uni.enums.get(h) {
+    Some(info) => {
+      let m = tparam_env(info.tparams, args)
+      return info.variants.get(vname).unwrap_or([]).map(fn(f) => zonk(f.second, m))
+    },
+    None => [],
+  }
+}
+
+fn record_fields(w: Lw, t: Type) -> List[Pair[Str, Type]] {
+  return match w.uni.records.get(tname(t)) {
+    Some(info) => {
+      let m = tparam_env(info.tparams, targs(t))
+      return info.fields.entries().map(fn(f) => Pair { first: f.key, second: zonk(f.value, m) })
+    },
+    None => fail("native: {tshow(t)} is not a record"),
+  }
+}
+
+// ---- instances ----------------------------------------------------------------------------------------------
+
+fn module_of(w: Lw, name: Str) -> Module {
+  return match w.modules.get(name) {
+    Some(m) => m,
+    None => fail("native: unknown module {name}"),
+  }
+}
+
+fn checker_of(m: Module) -> Ck {
+  return match m.checker {
+    Some(c) => c,
+    None => fail("native: module {m.name} was not checked"),
+  }
+}
+
+/// The file a declaration of a module comes from (the runtime module is made of several files).
+fn decl_file(m: Module, idx: Int) -> Str {
+  let c = checker_of(m)
+  return c.decl_files.get(idx).unwrap_or(c.file)
+}
+
+/// The function that implements declaration `decl` of `module` for the given type arguments (queued for lowering).
+fn instance(w: Lw, md: Module, decl: FnDecl, idx: Int, type_args: List[Type], kind: Str) -> LR[Str] {
+  let shown = type_args.map(tshow)
+  let joined = shown.join("|")
+  let key = "{md.name}|{decl.name}|{joined}"
+  match w.instances.get(key) {
+    Some(name) => {
+      return lr(w, name)
+    },
+    None => {},
+  }
+  let suffix = match type_args.is_empty() {
+    true => "",
+    false => "_" + shown.map(fn(s) => (fnv1a(s) % 100000).to_str()).join("_"),
+  }
+  var name = "k_" + md.name.replace(".", "_") + "__" + decl.name + suffix
+  while w.names_used.has(name) {
+    name = name + "_"
+  }
+  let item = QItem { name: name, mod_name: md.name, decl: decl, idx: idx, file: decl_file(md, idx),
+    env: tparam_env(decl.type_params, type_args), kind: kind }
+  return lr(w with { instances: w.instances.set(key, name), names_used: w.names_used.set(name, true),
+    queue: w.queue.push(item) }, name)
+}
+
+fn rt_module(w: Lw) -> Module {
+  return module_of(w, "klar_rt")
+}
+
+fn rt_decl(w: Lw, name: Str) -> FnDecl {
+  let idx = match w.rt.get(name) {
+    Some(i) => i,
+    None => fail("native: runtime function {name} is not implemented"),
+  }
+  return match checker_of(rt_module(w)).decls.get(idx) {
+    Some(Decl.Fn(f)) => f,
+    _ => fail("native: runtime function {name} is not a function"),
+  }
+}
+
+fn rt_fn(w: Lw, name: Str) -> LR[Str] {
+  let d = rt_decl(w, name)
+  return instance(w: w, md: rt_module(w), decl: d, idx: w.rt.get(name).unwrap_or(-1), type_args: [], kind: "rt")
+}
+
+fn const_slot(w: Lw, module_name: Str, cname: Str) -> LR[Str] {
+  let key = module_name + "|" + cname
+  match w.const_slots.get(key) {
+    Some(s) => {
+      return lr(w, s)
+    },
+    None => {},
+  }
+  let sym = "const{w.const_slots.len()}"
+  return lr(w with { img: add_bss(img: w.img, name: sym, size: 8), const_slots: w.const_slots.set(key, sym) }, sym)
+}
+
+// ---- emitting code --------------------------------------------------------------------------------------------
+
+fn emit(w: Lw, ins: Ins) -> Lw {
+  if w.dead {
+    return w
+  }
+  return w with { cur: w.cur with { code: w.cur.code.push(ins) } }
+}
+
+/// Emits even after a jump (labels and the code that follows them).
+fn emit_always(w: Lw, ins: Ins) -> Lw {
+  return w with { cur: w.cur with { code: w.cur.code.push(ins) } }
+}
+
+fn reg(w: Lw) -> LR[Int] {
+  let n = w.cur.nregs
+  return lr(w with { cur: w.cur with { nregs: n + 1 } }, n)
+}
+
+fn konst(w: Lw, imm: Int) -> LR[Int] {
+  let d = reg(w)
+  return lr(emit(d.w, [op("const"), r(d.v), r(imm)]), d.v)
+}
+
+fn label(w: Lw, hint: Str) -> LR[Str] {
+  let n = w.cur.labels + 1
+  return lr(w with { cur: w.cur with { labels: n } }, ".{w.cur.name}.{hint}{n}")
+}
+
+fn place(w: Lw, lab: Str) -> Lw {
+  return emit_always(w, [op("label"), KV.S(s: lab)]) with { dead: false }
+}
+
+fn jump(w: Lw, lab: Str) -> Lw {
+  return emit(w, [op("jmp"), KV.S(s: lab)]) with { dead: true }
+}
+
+fn call(w: Lw, target: Str, args: List[Int]) -> LR[Int] {
+  let d = reg(w)
+  return lr(emit(d.w, [op("call"), r(d.v), KV.S(s: target), KV.L(regs: args)]), d.v)
+}
+
+fn call_rt(w: Lw, name: Str, args: List[Int]) -> LR[Int] {
+  let t = rt_fn(w, name)
+  return call(w: t.w, target: t.v, args: args)
+}
+
+fn addr(w: Lw, sym: Str) -> LR[Int] {
+  let d = reg(w)
+  return lr(emit(d.w, [op("addr"), r(d.v), KV.S(s: sym)]), d.v)
+}
+
+fn addr_str(w: Lw, text: Str) -> LR[Int] {
+  let s = str_obj(w, text)
+  return addr(s.w, s.v)
+}
+
+fn addr_td(w: Lw, t: Type) -> LR[Int] {
+  let s = td(w, t)
+  return addr(s.w, s.v)
+}
+
+fn addr_span(w: Lw, sp: Span) -> LR[Int] {
+  let s = span_sym(w, sp)
+  return addr(s.w, s.v)
+}
+
+fn site(w: Lw, sp: Span) -> Lw {
+  if w.is_rt {
+    return w
+  }
+  let s = span_sym(w, sp)
+  return emit(s.w, [op("site"), KV.S(s: s.v)])
+}
+
+// ---- ownership ------------------------------------------------------------------------------------------------
+
+fn own(w: Lw, v: V) -> LR[Int] {
+  if not v.owned {
+    let k = rck(v.t)
+    if k != "" {
+      return lr(emit(w, [op("retain"), KV.S(s: k), r(v.reg)]), v.reg)
+    }
+  }
+  return lr(w, v.reg)
+}
+
+fn drop(w: Lw, v: V) -> Lw {
+  if v.owned {
+    let k = rck(v.t)
+    if k != "" {
+      return emit(w, [op("release"), KV.S(s: k), r(v.reg)])
+    }
+  }
+  return w
+}
+
+fn drop_all(w0: Lw, vs: List[V]) -> Lw {
+  var w = w0
+  for v in vs {
+    w = drop(w, v)
+  }
+  return w
+}
+
+// ---- moves (own.klar) -----------------------------------------------------------------------------------------
+
+/// The local variables of a function: its parameters, `let`s and loop variables.
+fn locals_of(params: List[Str], body: Body) -> List[Str] {
+  var out = params
+  for it in walk_body(body) {
+    match it {
+      Item.LetI(n) => {
+        out = out.push(n)
+      },
+      Item.ForI(n) => {
+        out = out.push(n)
+      },
+      _ => {},
+    }
+  }
+  return out
+}
+
+fn nkey(e: Expr) -> Str {
+  return node_key(expr_span(e))
+}
+
+/// The longest path bound by an enclosing in-place `with` that `path` lies in ("" if none).
+fn bound_prefix(w: Lw, path: Str) -> Str {
+  var best = ""
+  for q in w.bound.keys() {
+    if (path == q or path.starts_with(q + ".")) and q.len() > best.len() {
+      best = q
+    }
+  }
+  return best
+}
+
+fn is_record(w: Lw, t: Type) -> Bool {
+  return match t {
+    Type.Con(name, _) => w.uni.records.has(name),
+    _ => false,
+  }
+}
+
+fn field_off(w: Lw, t: Type, name: Str) -> Int {
+  return 16 + 8 * record_fields(w, t).map(fn(f) => f.first).index_of(name).unwrap_or(0)
+}
+
+fn obj_of(e: Expr) -> Expr {
+  return match e {
+    Expr.FieldAccess(_, obj, _, _) => obj,
+    _ => e,
+  }
+}
+
+fn field_name(e: Expr) -> Str {
+  return match e {
+    Expr.FieldAccess(_, _, name, _) => name,
+    _ => "",
+  }
+}
+
+/// Does consuming `e` move a value out of a variable or a record field (instead of copying)?
+fn moves(w: Lw, e: Expr) -> Bool {
+  let k = nkey(e)
+  if w.takeable.has(k) {
+    return true
+  }
+  if not w.cand.has(k) {
+    return false
+  }
+  let p = match path_of(e) {
+    Some(x) => x,
+    None => {
+      return false
+    },
+  }
+  if bound_prefix(w, p) != "" {
+    return false
+  }
+  let t = ty(w, e)
+  let loc = match lookup(w, root_of(p)) {
+    Some(l) => l,
+    None => {
+      return false
+    },
+  }
+  if not loc.owned or loc.boxed or rck(t) == "" {
+    return false
+  }
+  if not p.contains(".") {
+    return true
+  }
+  // a field is taken out only when it can then be updated in place (a record or a collection)
+  let obj = obj_of(e)
+  return match obj {
+    Expr.Name(_, _) => is_record(w, ty(w, obj)) and (is_record(w, t) or ["List", "Map", "Bytes"].contains(tname(t))),
+    _ => false,
+  }
+}
+
+/// An expression in a consuming position: a last use moves the value.
+fn cexpr(w0: Lw, e: Expr) -> LR[V] {
+  if not moves(w0, e) {
+    return expr(w0, e)
+  }
+  let t = ty(w0, e)
+  let hole = addr(w0, "obj_None")           // immortal: releasing it does nothing
+  var w = hole.w
+  if w.takeable.has(nkey(e)) {               // a field of a record a `with` owns uniquely: take it out
+    let obj = obj_of(e)
+    let base = w.bound.get(path_of(obj).unwrap_or("")).unwrap_or(0)
+    let off = field_off(w: w, t: ty(w, obj), name: field_name(e))
+    let d = reg(w)
+    w = emit(d.w, [op("load"), r(d.v), r(base), r(off)])
+    w = emit(w, [op("store"), r(base), r(off), r(hole.v)])
+    return vv(w: w, rg: d.v, t: t, owned: true)
+  }
+  match e {
+    Expr.Name(_, name) => {                  // the variable's last use: move its value out
+      let loc = lookup(w, name).unwrap_or(Local { reg: 0, t: t, owned: true, boxed: false })
+      let d = reg(w)
+      w = emit(emit(d.w, [op("mov"), r(d.v), r(loc.reg)]), [op("mov"), r(loc.reg), r(hole.v)])
+      return vv(w: w, rg: d.v, t: t, owned: true)
+    },
+    _ => {},
+  }
+  // `a.f`, the last use of a field of an owned record: take it out if the record is unique, else share it
+  let obj_e = obj_of(e)
+  let obj = match obj_e {
+    Expr.Name(_, n) => lookup(w, n).map(fn(l) => l.reg).unwrap_or(0),
+    _ => 0,
+  }
+  let off = field_off(w: w, t: ty(w, obj_e), name: field_name(e))
+  let d = reg(w)
+  w = emit(d.w, [op("load"), r(d.v), r(obj), r(off)])
+  let rc = reg(w)
+  let c = reg(rc.w)
+  let one = konst(emit(c.w, [op("load"), r(rc.v), r(obj), r(0)]), 1)
+  w = emit(one.w, [op("cmp"), op("eq"), r(c.v), r(rc.v), r(one.v)])
+  let steal = label(w, "tk")
+  let share = label(steal.w, "sh")
+  let done = label(share.w, "tkd")
+  w = place(emit(done.w, [op("br"), r(c.v), KV.S(s: steal.v), KV.S(s: share.v)]), steal.v)
+  w = place(jump(emit(w, [op("store"), r(obj), r(off), r(hole.v)]), done.v), share.v)
+  w = place(jump(emit(w, [op("retain"), KV.S(s: rck(t)), r(d.v)]), done.v), done.v)
+  return vv(w: w, rg: d.v, t: t, owned: true)
+}
+
+/// A read of a path inside an in-place `with`: from the record being updated (borrowed).
+/// Whether `e` reads a field of a record a `with` is updating in place (see `bound_read`). Asked first, so that the
+/// caller hands its state to `bound_read` only when it is needed (a read of the state afterwards would copy it).
+fn reads_bound(w: Lw, e: Expr) -> Bool {
+  if w.bound.is_empty() {
+    return false
+  }
+  return match path_of(e) {
+    Some(p) => bound_prefix(w, p) != "",
+    None => false,
+  }
+}
+
+fn bound_read(w0: Lw, e: Expr) -> Option[LR[V]] {
+  if w0.bound.is_empty() {
+    return None
+  }
+  let p = match path_of(e) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  let q = bound_prefix(w0, p)
+  if q == "" {
+    return None
+  }
+  var chain: List[Expr] = []
+  var cur = e
+  while path_of(cur).unwrap_or("") != q {
+    chain = chain.push(cur)
+    cur = obj_of(cur)
+  }
+  var w = w0
+  var rg = w.bound.get(q).unwrap_or(0)
+  var cur_t = ty(w, cur)
+  for fa in chain.reverse() {
+    let d = reg(w)
+    w = emit(d.w, [op("load"), r(d.v), r(rg), r(field_off(w: d.w, t: cur_t, name: field_name(fa)))])
+    rg = d.v
+    cur_t = ty(w, fa)
+  }
+  return Some(vv(w: w, rg: rg, t: cur_t, owned: false))
+}
+
+/// An owned record value -> a register holding a unique copy (the value itself when it is unique).
+fn unique_record(w0: Lw, v: V) -> LR[Int] {
+  let t = v.t
+  let u = reg(w0)
+  let rc = reg(u.w)
+  let c = reg(rc.w)
+  var w = emit(c.w, [op("load"), r(rc.v), r(v.reg), r(0)])
+  let one = konst(w, 1)
+  w = emit(one.w, [op("cmp"), op("eq"), r(c.v), r(rc.v), r(one.v)])
+  let same = label(w, "uq")
+  let copy = label(same.w, "cp")
+  let done = label(copy.w, "uqd")
+  w = place(emit(done.w, [op("br"), r(c.v), KV.S(s: same.v), KV.S(s: copy.v)]), copy.v)
+  let fields = record_fields(w, t)
+  let size = konst(w, 16 + 8 * fields.len())
+  let a = addr_td(size.w, t)
+  let obj = call_rt(w: a.w, name: "obj_new", args: [size.v, a.v])
+  w = obj.w
+  var i = 0
+  for f in fields {
+    let x = reg(w)
+    w = emit(x.w, [op("load"), r(x.v), r(v.reg), r(16 + 8 * i)])
+    let k = rck(f.second)
+    if k != "" {
+      w = emit(w, [op("retain"), KV.S(s: k), r(x.v)])
+    }
+    w = emit(w, [op("store"), r(obj.v), r(16 + 8 * i), r(x.v)])
+    i = i + 1
+  }
+  w = emit(w, [op("release"), op("obj"), r(v.reg)])
+  w = jump(emit(w, [op("mov"), r(u.v), r(obj.v)]), done.v)
+  w = place(w, same.v)
+  w = jump(emit(w, [op("mov"), r(u.v), r(v.reg)]), done.v)
+  return lr(place(w, done.v), u.v)
+}
+
+/// A use inside the fields of a `with`: its path, node, the bases of the nested `with`s around it, the field it is in,
+/// and whether it lies inside a call in the arguments of that field's own update (`safe`, see `with_takes`).
+type WOcc { path: Str, key: Str, bases: List[Str], field: Int, safe: Bool }
+
+fn is_call(e: Expr) -> Bool {
+  return match e {
+    Expr.Call(_, _, _) => true,
+    Expr.MethodCall(_, _, _, _, _) => true,
+    _ => false,
+  }
+}
+
+fn with_occs(e: Expr, bases: List[Str], field: Int, in_args: Bool, safe: Bool) -> List[WOcc] {
+  match path_of(e) {
+    Some(p) => {
+      return [WOcc { path: p, key: nkey(e), bases: bases, field: field, safe: safe }]
+    },
+    None => {},
+  }
+  return match e {
+    Expr.Lambda(_, _, _, body) => all_exprs(body_exprs(body)).flat_map(fn(x) => match x {
+      Expr.Name(_, n) => [WOcc { path: n, key: nkey(x), bases: bases, field: field, safe: false }],
+      _ => [],
+    }),
+    Expr.WithExpr(_, base, fs) => {
+      let inner = match path_of(base) {
+        Some(_) => bases.push(nkey(base)),
+        None => bases,
+      }
+      return with_occs(e: base, bases: bases, field: field, in_args: in_args, safe: safe).concat(fs.flat_map(fn(f) =>
+        with_occs(e: f.value, bases: inner, field: field, in_args: in_args, safe: safe)))
+    },
+    _ => {
+      let inner_safe = safe or (in_args and is_call(e))
+      return sub_exprs(e).flat_map(fn(x) => with_occs(e: x, bases: bases, field: field, in_args: in_args,
+        safe: inner_safe))
+    },
+  }
+}
+
+/// The uses in field k's value; an update of the field itself (`c.m.set(...)`) has its arguments marked.
+fn field_occs(w: Lw, f: FieldInit, fp: Str, k: Int) -> List[WOcc] {
+  match f.value {
+    Expr.MethodCall(sp, obj, _, _, args) => {
+      let reuse = match resolution(w, sp) {
+        Some(res) => res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name),
+        None => false,
+      }
+      if reuse and path_of(obj) == Some(fp) {
+        return with_occs(e: obj, bases: [], field: k, in_args: false, safe: false).concat(args.flat_map(fn(a) =>
+          with_occs(e: a.value, bases: [], field: k, in_args: true, safe: false)))
+      }
+    },
+    _ => {},
+  }
+  return with_occs(e: f.value, bases: [], field: k, in_args: false, safe: false)
+}
+
+/// The field uses inside `e` (a `with` updating the record at path bp in place) that may take their field out: the
+/// only use of that field, in a consuming position or as the base of a nested `with`. A use of the record itself
+/// would see the holes that taken fields leave, so no field before it is taken; its own field still is when the use
+/// lies inside a call in the arguments of that field's update (klar/native/lower.py `with_takes`).
+fn with_takes(w: Lw, e: Expr, fields: List[FieldInit], bp: Str) -> Map[Str, Bool] {
+  var occs: List[WOcc] = []
+  var k = 0
+  for f in fields {
+    occs = occs.concat(field_occs(w: w, f: f, fp: bp + "." + f.name, k: k))
+    k = k + 1
+  }
+  let reads = occs.filter(fn(o) => bp == o.path or bp.starts_with(o.path + "."))
+  var last = -1
+  for o in reads {
+    last = last.max(o.field)
+  }
+  var out: Map[Str, Bool] = Map {}
+  let t = ty(w, e)
+  let fts = record_fields(w, t)
+  var fi = 0
+  for f in fields {
+    let fi_now = fi
+    fi = fi + 1
+    let blocked = fi_now < last or (fi_now == last and not reads.all(fn(o) => o.field != fi_now or o.safe))
+    let ft = fts.find(fn(x) => x.first == f.name).map(fn(x) => x.second).unwrap_or(unit_t())
+    if not blocked and rck(ft) != "" {
+      let fp = bp + "." + f.name
+      // (the reads of the record itself are handled above)
+      let near = occs.filter(fn(o) => o.path == fp or o.path.starts_with(fp + ".") or (fp.starts_with(o.path + ".") and
+          not (bp == o.path or bp.starts_with(o.path + "."))))
+      let exact = near.filter(fn(o) => o.path == fp)
+      if exact.len() == 1 {
+        let ek = exact.get_or(0, WOcc { path: "", key: "", bases: [], field: -1, safe: false }).key
+        if near.all(fn(o) => o.key == ek or o.bases.contains(ek)) {
+          out = out.set(ek, true)
+        }
+      }
+    }
+  }
+  return out
+}
+
+/// `base with {...}` on an owned value: reuse the record when it is unique (else a copy), take out the fields being
+/// replaced when nothing else reads them, then store the new values.
+fn with_in_place(w0: Lw, e: Expr, fields: List[FieldInit], src: V, bp: Str) -> LR[V] {
+  let t = src.t
+  let u = unique_record(w0, src)
+  let saved_bound = u.w.bound
+  let saved_takes = u.w.takeable
+  var w = u.w
+  if bp != "" {
+    var tk = w.takeable
+    for k in with_takes(w: w, e: e, fields: fields, bp: bp).keys() {
+      tk = tk.set(k, true)
+    }
+    w = w with { bound: w.bound.set(bp, u.v), takeable: tk }
+  }
+  var upd: List[Pair[Str, V]] = []
+  for f in fields {
+    let v = cexpr(w, f.value)
+    w = v.w
+    upd = upd.push(Pair { first: f.name, second: v.v })
+  }
+  w = w with { bound: saved_bound, takeable: saved_takes }
+  let fts = record_fields(w, t)
+  for p in upd {
+    let off = field_off(w: w, t: t, name: p.first)
+    let ft = fts.find(fn(x) => x.first == p.first).map(fn(x) => x.second).unwrap_or(unit_t())
+    let k = rck(ft)
+    let nw = own(w, p.second)
+    w = nw.w
+    if k != "" {
+      let old = reg(w)
+      w = emit(emit(old.w, [op("load"), r(old.v), r(u.v), r(off)]), [op("release"), KV.S(s: k), r(old.v)])
+    }
+    w = emit(w, [op("store"), r(u.v), r(off), r(nw.v)])
+  }
+  return vv(w: w, rg: u.v, t: t, owned: true)
+}
+
+// ---- scopes -------------------------------------------------------------------------------------------------
+
+fn push_scope(w: Lw) -> Lw {
+  return w with { scopes: w.scopes.push(LScope { vars: Map {}, clean: [] }) }
+}
+
+fn cleanup(w0: Lw, scopes: List[LScope]) -> Lw {
+  var w = w0
+  for sc in scopes.reverse() {
+    for c in sc.clean.reverse() {
+      w = emit(w, [op("release"), KV.S(s: c.second), r(c.first)])
+    }
+  }
+  return w
+}
+
+fn pop_scope(w: Lw) -> Lw {
+  let sc = w.scopes.last().unwrap_or(LScope { vars: Map {}, clean: [] })
+  return cleanup(w with { scopes: w.scopes.take(w.scopes.len() - 1) }, [sc])
+}
+
+/// A scope that only releases temporaries (a `match` subject, the list a `for` walks) when a `return`, `break` or
+/// `continue` leaves the code that uses them; the normal way out releases them itself (klar/native/lower.py `hold`).
+fn hold(w: Lw, held: List[Pair[Int, Str]]) -> Lw {
+  return w with { scopes: w.scopes.push(LScope { vars: Map {}, clean: held.filter(fn(p) => p.second != "") }) }
+}
+
+/// Leaves a scope without releasing its values (the code after it is dead).
+fn drop_scope(w: Lw) -> Lw {
+  return w with { scopes: w.scopes.take(w.scopes.len() - 1) }
+}
+
+fn declare(w: Lw, name: Str, rg: Int, t: Type, owned: Bool) -> Lw {
+  let k = w.scopes.len() - 1
+  let sc = w.scopes.get_or(k, LScope { vars: Map {}, clean: [] })
+  var clean = sc.clean
+  if owned and rck(t) != "" {
+    clean = clean.push(Pair { first: rg, second: rck(t) })
+  }
+  return w with { scopes: w.scopes.set(k, LScope { vars: sc.vars.set(name, Local { reg: rg, t: t, owned: owned,
+    boxed: false }), clean: clean }) }
+}
+
+fn lookup(w: Lw, name: Str) -> Option[Local] {
+  var i = w.scopes.len() - 1
+  while i >= 0 {
+    match w.scopes.get_or(i, LScope { vars: Map {}, clean: [] }).vars.get(name) {
+      Some(l) => {
+        return Some(l)
+      },
+      None => {},
+    }
+    i = i - 1
+  }
+  return None
+}
+
+// ---- annotations of the checker -------------------------------------------------------------------------------
+
+fn ck_of(w: Lw) -> Ck {
+  if w.m.name == "klar_rt" {
+    return w.rt_ck
+  }
+  return checker_of(w.m)
+}
+
+fn skey(w: Lw, sp: Span) -> Str {
+  return span_key(w.file, sp)
+}
+
+/// The concrete static type of an expression.
+fn ty(w: Lw, e: Expr) -> Type {
+  return match ck_of(w).types.get(skey(w, expr_span(e))) {
+    Some(t) => zonk(t, w.env),
+    None => fail("native: missing type at {w.file}:{expr_span(e).line}:{expr_span(e).col}"),
+  }
+}
+
+fn call_info(w: Lw, sp: Span) -> Option[CallInfo] {
+  return ck_of(w).calls.get(skey(w, sp))
+}
+
+fn resolution(w: Lw, sp: Span) -> Option[Resolution] {
+  return ck_of(w).resolutions.get(skey(w, sp))
+}
+
+/// Binds the type parameters of `pat` (e.g. `Box[T]`) to the parts of the concrete type `t`.
+fn bind_params(pat: Type, t: Type, out: Map[Str, Type]) -> Map[Str, Type] {
+  return match pat {
+    Type.Param(n) => out.set(n, t),
+    Type.Con(_, pat_args) => match t {
+      Type.Con(_, con_args) => {
+        var m = out
+        var i = 0
+        while i < pat_args.len() and i < con_args.len() {
+          m = bind_params(pat: pat_args.get_or(i, Type.Any), t: con_args.get_or(i, Type.Any), out: m)
+          i = i + 1
+        }
+        return m
+      },
+      _ => out,
+    },
+    _ => out,
+  }
+}
+
+fn inst_type(w: Lw, info: CallInfo, tp: Str) -> Type {
+  return zonk(info.inst.get(tp).unwrap_or(unit_t()), w.env)
+}
+
+fn split_sources(sources: Map[Str, Str]) -> Map[Str, List[Str]] {
+  var out: Map[Str, List[Str]] = Map {}
+  for en in sources.entries() {
+    out = out.set(en.key, en.value.split("\n"))
+  }
+  return out
+}
+
+/// The text of the source at a span (one line: the exact columns; several lines: the rest of the first line).
+fn src_text(w: Lw, sp: Span) -> Str {
+  let lines = w.sources.get(w.file).unwrap_or([])
+  if sp.line <= 0 or sp.line > lines.len() {
+    return "?"
+  }
+  let line = lines.get_or(sp.line - 1, "")
+  if sp.line == sp.end_line {
+    return line.slice(sp.col - 1, sp.end_col - 1)
+  }
+  return line.slice(sp.col - 1, line.len()).trim()
+}
+
+// ---- walking the AST (the order of klar/nodes.py `walk`: pre-order, fields in declaration order) -----------
+
+/// What the lowering looks for in a subtree.
+enum Item {
+  NameI(name: Str),
+  LetI(name: Str),
+  ForI(name: Str),
+  BindI(name: Str),
+  AssignI(name: Str),
+}
+
+fn walk_pattern(p: Pattern) -> List[Item] {
+  return match p {
+    Pattern.Bind(_, n) => [Item.BindI(name: n)],
+    Pattern.Variant(_, _, _, args) => args.flat_map(walk_pattern),
+    _ => [],
+  }
+}
+
+fn walk_body(b: Body) -> List[Item] {
+  return match b {
+    Body.ExprBody(e) => walk_expr(e),
+    Body.BlockBody(blk) => walk_block(blk),
+  }
+}
+
+fn walk_block(b: Block) -> List[Item] {
+  return b.stmts.flat_map(walk_stmt)
+}
+
+fn walk_opt(e: Option[Expr]) -> List[Item] {
+  return match e {
+    Some(x) => walk_expr(x),
+    None => [],
+  }
+}
+
+fn walk_stmt(s: Stmt) -> List[Item] {
+  return match s {
+    Stmt.Let(_, name, _, _, _, v, _) => [Item.LetI(name: name)].concat(walk_expr(v)),
+    Stmt.Assign(_, name, v) => [Item.AssignI(name: name)].concat(walk_expr(v)),
+    Stmt.Return(_, v) => walk_opt(v),
+    Stmt.If(_, cond, then, else_) => walk_expr(cond).concat(walk_block(then)).concat(match else_ {
+      Else.NoElse => [],
+      Else.ElseBlock(b) => walk_block(b),
+      Else.ElseIf(st) => walk_stmt(st),
+    }),
+    Stmt.While(_, cond, body) => walk_expr(cond).concat(walk_block(body)),
+    Stmt.For(_, v, _, it, body) => [Item.ForI(name: v)].concat(walk_expr(it)).concat(walk_block(body)),
+    Stmt.Assert(_, cond, m) => walk_expr(cond).concat(walk_opt(m)),
+    Stmt.ExprStmt(_, e) => walk_expr(e),
+    _ => [],
+  }
+}
+
+fn walk_expr(e: Expr) -> List[Item] {
+  return match e {
+    Expr.Name(_, n) => [Item.NameI(name: n)],
+    Expr.StrLit(_, parts) => parts.flat_map(fn(p) => match p {
+      StrPiece.Code(x) => walk_expr(x),
+      _ => [],
+    }),
+    Expr.ListLit(_, items) => items.flat_map(walk_expr),
+    Expr.MapLit(_, entries) => entries.flat_map(fn(m) => walk_expr(m.key).concat(walk_expr(m.value))),
+    Expr.Unary(_, _, x) => walk_expr(x),
+    Expr.Binary(_, _, l, rr) => walk_expr(l).concat(walk_expr(rr)),
+    Expr.Call(_, f, args) => walk_expr(f).concat(args.flat_map(fn(a) => walk_expr(a.value))),
+    Expr.MethodCall(_, o, _, _, args) => walk_expr(o).concat(args.flat_map(fn(a) => walk_expr(a.value))),
+    Expr.FieldAccess(_, o, _, _) => walk_expr(o),
+    Expr.Try(_, x) => walk_expr(x),
+    Expr.RecordLit(_, _, fs) => fs.flat_map(fn(f) => walk_expr(f.value)),
+    Expr.WithExpr(_, b, fs) => walk_expr(b).concat(fs.flat_map(fn(f) => walk_expr(f.value))),
+    Expr.Match(_, subj, arms) => walk_expr(subj).concat(arms.flat_map(fn(a) => walk_pattern(a.pattern).concat(walk_opt(
+      a.guard)).concat(walk_body(a.body)))),
+    Expr.Lambda(_, _, _, body) => walk_body(body),
+    _ => [],
+  }
+}
+
+fn names_of(items: List[Item]) -> List[Str] {
+  return items.flat_map(fn(i) => match i {
+    Item.NameI(n) => [n],
+    _ => [],
+  })
+}
+
+/// The local variables named in an expression, in order of first appearance.
+fn local_names(w: Lw, e: Expr) -> List[Str] {
+  var out: List[Str] = []
+  for n in names_of(walk_expr(e)) {
+    if not out.contains(n) and lookup(w, n) != None {
+      out = out.push(n)
+    }
+  }
+  return out
+}
+
+// ---- functions ----------------------------------------------------------------------------------------------
+
+fn unit_v(w: Lw) -> LR[V] {
+  let z = konst(w, 0)
+  return lr(z.w, V { reg: z.v, t: unit_t(), owned: true })
+}
+
+/// Starts a new function: it is appended to the program now, its code is filled while it is the current one.
+fn begin_fn(w: Lw, f: KFn) -> Lw {
+  return w with { fns: w.fns.push(f), cur: f, cur_index: w.fns.len(), scopes: [], loops: [], dead: false,
+    closure_self: None, captures: Map {}, decl: None, posts: [], in_test: false, cand: Map {}, bound: Map {},
+    takeable: Map {} }
+}
+
+/// Stores the current function back into the program.
+fn finish_fn(w: Lw) -> Lw {
+  return w with { fns: w.fns.set(w.cur_index, w.cur) }
+}
+
+fn sig_of(m: Module, d: FnDecl) -> Sig {
+  let c = checker_of(m)
+  let found = match d.owner_kind {
+    Some(_) => c.methods.get(d.name),
+    None => match c.fns.get(d.name) {
+      Some(Some(s)) => Some(s),
+      _ => None,
+    },
+  }
+  return match found {
+    Some(s) => s,
+    None => fail("native: no signature for {d.name}"),
+  }
+}
+
+fn lower_function(w1: Lw, item: QItem) -> Lw {
+  var w0 = w1
+  // the runtime is checked lazily (compiler/loader.klar `load_runtime`): the body of this function now
+  if item.mod_name == "klar_rt" and not w0.rt_checked.has(item.idx) {
+    w0 = w0 with { rt_ck: check_body(w0.rt_ck, item.idx), rt_checked: w0.rt_checked.set(item.idx, true) }
+  }
+  let m = module_of(w0, item.mod_name)
+  let d = item.decl
+  let is_rt = item.kind == "rt"
+  var w = begin_fn(w0 with { m: m, file: item.file, env: item.env, is_rt: is_rt }, KFn { name: item.name,
+    klar_name: d.name, nparams: d.params.len(), nregs: d.params.len(), code: [], labels: 0 })
+  let sig = sig_of(m, d)
+  w = push_scope(w with { ret_t: zonk(sig.ret, w.env) })
+  var owned: List[Int] = []
+  if not is_rt {
+    owned = w.owned.get("{item.mod_name}#{item.idx}").unwrap_or([])
+  }
+  var i = 0
+  for p in sig.params {
+    w = declare(w: w, name: p.first, rg: i, t: zonk(p.second, w.env), owned: owned.contains(i))
+    i = i + 1
+  }
+  if not is_rt {
+    let b = match d.body {
+      Some(blk) => blk,
+      None => Block { span: d.span, stmts: [] },
+    }
+    let keep = names_of(d.post.flat_map(walk_expr))
+    w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of(sig.params.map(fn(p) =>
+      p.first), Body.BlockBody(block: b)), no_move: keep, b: b) }
+    // the profiler label first: a later read of `w` would make `str_obj` copy the whole state (and its data section)
+    let where = d.name + " (" + w.file + ":" + d.span.line.to_str() + ")"
+    let s = str_obj(w, d.name)
+    w = tick(prof_enter_call(emit(s.w, [op("enter"), KV.S(s: s.v)]), where), d.name_span)
+  }
+  w = w with { decl: Some(d) }
+  for c in d.pre {
+    w = contract(w0: w, cond: c, code: "R0002", kind: "precondition", d: d)
+  }
+  w = w with { posts: d.post }
+  match d.body {
+    Some(b) => {
+      w = block_body(w, b)
+    },
+    None => {},
+  }
+  if not w.dead {
+    let u = unit_v(w)
+    w = do_return(u.w, u.v)
+  }
+  return finish_fn(w)
+}
+
+fn contract(w0: Lw, cond: Expr, code: Str, kind: Str, d: FnDecl) -> Lw {
+  let c = expr(w0, cond)
+  let ok = label(c.w, "ok")
+  let bad = label(ok.w, "bad")
+  var w = place(emit(bad.w, [op("br"), r(c.v.reg), KV.S(s: ok.v), KV.S(s: bad.v)]), bad.v)
+  let det = details(w, local_names(w, cond))
+  let msg = str_obj(det.w, "{kind} `{src_text(det.w, expr_span(cond))}` of `{d.name}` violated")
+  let a1 = addr_str(msg.w, code)
+  let a2 = addr(a1.w, msg.v)
+  let a3 = addr_span(a2.w, expr_span(cond))
+  let explain = match code == "R0002" {
+    true => "the caller passed arguments that the function does not accept",
+    false => "the function body returned a value that breaks its own contract",
+  }
+  let a4 = addr_str(a3.w, explain)
+  w = call_rt(w: a4.w, name: "fail_with", args: [a1.v, a2.v, a3.v, det.v, a4.v]).w
+  return place(w with { dead: true }, ok.v)
+}
+
+fn read_local(w: Lw, loc: Local) -> LR[V] {
+  if loc.boxed {
+    let d = reg(w)
+    return lr(emit(d.w, [op("load"), r(d.v), r(loc.reg), r(16)]), V { reg: d.v, t: loc.t, owned: false })
+  }
+  return lr(w, V { reg: loc.reg, t: loc.t, owned: false })
+}
+
+/// A List[Str] of `name = value` for the failure message (built only on failure paths).
+fn details(w0: Lw, names: List[Str]) -> LR[Int] {
+  let l0 = call_rt(w: w0, name: "list_new_str", args: [])
+  var w = l0.w
+  var lst = l0.v
+  for n in names {
+    match lookup(w, n) {
+      Some(loc) => {
+        let v = read_local(w, loc)
+        let t = addr_td(v.w, v.v.t)
+        let s = call_rt(w: t.w, name: "show_detail", args: [v.v.reg, t.v])
+        let a = addr_str(s.w, n)
+        let l = call_rt(w: a.w, name: "detail_add", args: [lst, a.v, s.v])
+        w = l.w
+        lst = l.v
+      },
+      None => {},
+    }
+  }
+  return lr(w, lst)
+}
+
+fn do_return(w0: Lw, v: V) -> Lw {
+  let o = own(w0, v)
+  var w = o.w
+  if not w.posts.is_empty() {
+    let ret_t = w.ret_t
+    w = declare(w: push_scope(w), name: "result", rg: o.v, t: ret_t, owned: false)
+    match w.decl {
+      Some(d) => {
+        for en in w.posts {
+          w = contract(w0: w, cond: en, code: "R0003", kind: "postcondition", d: d)
+        }
+      },
+      None => {},
+    }
+    w = drop_scope(w)
+  }
+  w = cleanup(w, w.scopes)
+  if not w.is_rt {
+    if w.prof_on {
+      w = call_rt(w: w, name: "prof_exit", args: []).w
+    }
+    w = emit(w, [op("leave")])
+  }
+  return emit(w, [op("ret"), r(o.v)]) with { dead: true }
+}
+
+// ---- statements -----------------------------------------------------------------------------------------------
+
+fn block_body(w0: Lw, b: Block) -> Lw {
+  var w = push_scope(w0)
+  for st in b.stmts {
+    if not w.dead {
+      w = stmt(w, st)
+    }
+  }
+  if w.dead {
+    return drop_scope(w)
+  }
+  return pop_scope(w)
+}
+
+fn names_name(items: List[Item], name: Str) -> Bool {
+  return names_of(items).contains(name)
+}
+
+/// In a coverage build: the statement on `line` reports it the first time it runs.
+fn cov_mark(w0: Lw, line: Int) -> Lw {
+  if w0.cov_file == "" or w0.is_rt or w0.file != w0.cov_file or w0.dead {
+    return w0
+  }
+  let k = w0.cov_count
+  var w = w0 with { cov_count: k + 1 }
+  let base = addr(w, "g_cov")
+  let seen = reg(base.w)
+  w = emit(seen.w, [op("load"), r(seen.v), r(base.v), r(8 * k)])
+  let done = label(w, "cvd")
+  let hit = label(done.w, "cvh")
+  w = place(emit(hit.w, [op("br"), r(seen.v), KV.S(s: done.v), KV.S(s: hit.v)]), hit.v)
+  let one = konst(w, 1)
+  w = emit(one.w, [op("store"), r(base.v), r(8 * k), r(one.v)])
+  let ln = konst(w, line)
+  let c = call_rt(w: ln.w, name: "cov_line", args: [ln.v])
+  return place(jump(c.w, done.v), done.v)
+}
+
+fn stmt_line_of(st: Stmt) -> Int {
+  return match st {
+    Stmt.Let(sp, _, _, _, _, _, _) => sp.line,
+    Stmt.Assign(sp, _, _) => sp.line,
+    Stmt.Return(sp, _) => sp.line,
+    Stmt.If(sp, _, _, _) => sp.line,
+    Stmt.While(sp, _, _) => sp.line,
+    Stmt.For(sp, _, _, _, _) => sp.line,
+    Stmt.Break(sp) => sp.line,
+    Stmt.Continue(sp) => sp.line,
+    Stmt.Assert(sp, _, _) => sp.line,
+    Stmt.ExprStmt(sp, _) => sp.line,
+  }
+}
+
+/// In a profile build: a call that counts the statement on `line` of the current file.
+fn prof_mark(w0: Lw, line: Int) -> Lw {
+  if not w0.prof_on or w0.is_rt or w0.dead {
+    return w0
+  }
+  let key = w0.file + "\0" + line.to_str()
+  var w = w0
+  var idx = w.prof_lines.get(key).unwrap_or(-1)
+  if idx < 0 {
+    idx = w.prof_lines.len()
+    w = w with { prof_lines: w.prof_lines.set(key, idx) }
+  }
+  let k = konst(w, idx)
+  return call_rt(w: k.w, name: "prof_line", args: [k.v]).w
+}
+
+/// The number of a profiled function's report name.
+fn prof_key(w: Lw, key: Str) -> LR[Int] {
+  let id = w.prof_keys.get(key).unwrap_or(-1)
+  if id >= 0 {
+    return LR { w: w, v: id }
+  }
+  let n = w.prof_keys.len()
+  return LR { w: w with { prof_keys: w.prof_keys.set(key, n) }, v: n }
+}
+
+/// In a profile build: the call that starts the profile of a function (`key`: what the report calls it).
+/// `--timeout`: a tick of klar/rt/limit.klar at the top of a `while` iteration or a function (as `tick` in
+/// klar/native/lower.py).
+fn tick(w0: Lw, sp: Span) -> Lw {
+  if w0.limit == 0 or w0.is_rt {
+    return w0
+  }
+  let a = addr_span(w0, sp)
+  return call_rt(w: a.w, name: "limit_tick", args: [a.v]).w
+}
+
+fn prof_enter_call(w0: Lw, key: Str) -> Lw {
+  if not w0.prof_on or w0.is_rt {
+    return w0
+  }
+  let id = prof_key(w0, key)
+  let k = konst(id.w, id.v)
+  return call_rt(w: k.w, name: "prof_enter", args: [k.v]).w
+}
+
+/// A call expression; in a profile build it is the call site that names the lambdas it calls
+/// ("<lambda> (file:line)", like klar profile).
+fn call_expr(w0: Lw, e: Expr) -> LR[V] {
+  if not w0.prof_on or w0.is_rt or w0.dead {
+    return match e {
+      Expr.Call(_, _, _) => x_call(w0, e),
+      _ => x_method_call(w0, e),
+    }
+  }
+  let id = prof_key(w0, "<lambda> (" + w0.file + ":" + expr_span(e).line.to_str() + ")")
+  let k = konst(id.w, id.v)
+  let old = call_rt(w: k.w, name: "prof_site", args: [k.v])
+  let called = match e {
+    Expr.Call(_, _, _) => x_call(old.w, e),
+    _ => x_method_call(old.w, e),
+  }
+  if called.w.dead {
+    return called
+  }
+  return LR { w: call_rt(w: called.w, name: "prof_site", args: [old.v]).w, v: called.v }
+}
+
+fn stmt(w0: Lw, st: Stmt) -> Lw {
+  var w = prof_mark(cov_mark(w0, stmt_line_of(st)), stmt_line_of(st))
+  match st {
+    Stmt.Let(_, name, _, _, _, value, _) => {
+      let v = cexpr(w, value)
+      if name == "_" {
+        return drop(v.w, v.v)
+      }
+      let o = own(v.w, v.v)
+      let d = reg(o.w)
+      return declare(w: emit(d.w, [op("mov"), r(d.v), r(o.v)]), name: name, rg: d.v, t: v.v.t, owned: true)
+    },
+    Stmt.Assign(_, name, value) => {
+      return assign(w0: w, name: name, value: value)
+    },
+    Stmt.Return(_, value) => {
+      return match value {
+        None => {
+          let u = unit_v(w)
+          return do_return(u.w, u.v)
+        },
+        Some(x) => {
+          let v = cexpr(w, x)
+          return do_return(v.w, v.v)
+        },
+      }
+    },
+    Stmt.ExprStmt(_, e) => {
+      let v = expr(w, e)
+      return drop(v.w, v.v)
+    },
+    Stmt.If(_, cond, then, else_) => {
+      return if_stmt(w0: w, cond: cond, then: then, else_: else_)
+    },
+    Stmt.While(span, cond, body) => {
+      let top = label(w, "wtop")
+      let bod = label(top.w, "wbody")
+      let end = label(bod.w, "wend")
+      w = place(jump(end.w, top.v), top.v)
+      w = tick(place(cond_branch(w: w, e: cond, lt: bod.v, lf: end.v), bod.v), span)
+      w = w with { loops: w.loops.push(LoopT { end: end.v, step: top.v, depth: w.scopes.len() }) }
+      w = block_body(w, body)
+      w = w with { loops: w.loops.take(w.loops.len() - 1) }
+      return place(jump(w, top.v), end.v)
+    },
+    Stmt.For(span, var_name, _, iter, body) => {
+      return for_stmt(w0: w, span: span, var_name: var_name, iter: iter, body: body)
+    },
+    Stmt.Break(_) => {
+      let lp = w.loops.last().unwrap_or(LoopT { end: "", step: "", depth: 0 })
+      return jump(cleanup(w, w.scopes.drop(lp.depth)), lp.end)
+    },
+    Stmt.Continue(_) => {
+      let lp = w.loops.last().unwrap_or(LoopT { end: "", step: "", depth: 0 })
+      return jump(cleanup(w, w.scopes.drop(lp.depth)), lp.step)
+    },
+    Stmt.Assert(span, cond, message) => {
+      return assert_stmt(w0: w, span: span, cond: cond, message: message)
+    },
+  }
+  return w
+}
+
+fn assign(w0: Lw, name: Str, value: Expr) -> Lw {
+  var w = w0
+  let loc = match lookup(w, name) {
+    Some(l) => l,
+    None => fail("native: assignment to non-local {name}"),
+  }
+  let k = rck(loc.t)
+  // in-place reuse: x = x.push(...), x = x + "..."
+  match value {
+    Expr.MethodCall(span, Expr.Name(_, obj_name), _, _, args) => {
+      match resolution(w, span) {
+        Some(res) => {
+          if obj_name == name and res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name) and
+            not args.any(fn(a) => names_name(walk_expr(a.value), name)) {
+            // in a profile build the call site names the lambdas it calls (as `call_expr`)
+            var old_site = -1
+            if w.prof_on and not w.is_rt and not w.dead {
+              let id = prof_key(w, "<lambda> (" + w.file + ":" + span.line.to_str() + ")")
+              let kid = konst(id.w, id.v)
+              let old = call_rt(w: kid.w, name: "prof_site", args: [kid.v])
+              w = old.w
+              old_site = old.v
+            }
+            let new = builtin_method(w: w, e: value, owner: res.owner, m: res.name, recv: Some(V { reg: loc.reg, t: loc.t,
+              owned: true }), consume: true, recv_node: None)
+            var o = own(new.w, new.v)
+            if old_site >= 0 and not o.w.dead {
+              o = LR { w: call_rt(w: o.w, name: "prof_site", args: [old_site]).w, v: o.v }
+            }
+            return emit(o.w, [op("mov"), r(loc.reg), r(o.v)])
+          }
+        },
+        None => {},
+      }
+    },
+    Expr.Binary(_, "+", Expr.Name(_, left_name), right) => {
+      if left_name == name and tname(loc.t) == "Str" and not names_name(walk_expr(right), name) {
+        let rhs = expr(w, right)
+        let new = call_rt(w: rhs.w, name: "Str_append_owned", args: [loc.reg, rhs.v.reg])
+        return emit(drop(new.w, rhs.v), [op("mov"), r(loc.reg), r(new.v)])
+      }
+    },
+    _ => {},
+  }
+  let v = cexpr(w, value)
+  let o = own(v.w, v.v)
+  w = o.w
+  if k != "" {
+    w = emit(w, [op("release"), KV.S(s: k), r(loc.reg)])
+  }
+  return emit(w, [op("mov"), r(loc.reg), r(o.v)])
+}
+
+/// Branches on a Bool expression without materializing `and` / `or` / `not` results.
+fn cond_branch(w: Lw, e: Expr, lt: Str, lf: Str) -> Lw {
+  match e {
+    Expr.Binary(_, "and", l, rr) => {
+      let mid = label(w, "sc")
+      let x = cond_branch(w: mid.w, e: l, lt: mid.v, lf: lf)
+      return cond_branch(w: place(x, mid.v), e: rr, lt: lt, lf: lf)
+    },
+    Expr.Binary(_, "or", l, rr) => {
+      let mid = label(w, "sc")
+      let x = cond_branch(w: mid.w, e: l, lt: lt, lf: mid.v)
+      return cond_branch(w: place(x, mid.v), e: rr, lt: lt, lf: lf)
+    },
+    Expr.Unary(_, "not", x) => {
+      return cond_branch(w: w, e: x, lt: lf, lf: lt)
+    },
+    _ => {},
+  }
+  let c = expr(w, e)
+  return emit(c.w, [op("br"), r(c.v.reg), KV.S(s: lt), KV.S(s: lf)])
+}
+
+fn if_stmt(w0: Lw, cond: Expr, then: Block, else_: Else) -> Lw {
+  let lt = label(w0, "then")
+  let lf = label(lt.w, "else")
+  let end = label(lf.w, "endif")
+  var w = place(cond_branch(w: end.w, e: cond, lt: lt.v, lf: lf.v), lt.v)
+  w = place(jump(block_body(w, then), end.v), lf.v)
+  w = match else_ {
+    Else.NoElse => w,
+    Else.ElseBlock(b) => block_body(w, b),
+    Else.ElseIf(st) => match st {
+      Stmt.If(_, c2, t2, e2) => if_stmt(w0: w, cond: c2, then: t2, else_: e2),
+      _ => stmt(w, st),
+    },
+  }
+  return place(jump(w, end.v), end.v)
+}
+
+fn for_stmt(w0: Lw, span: Span, var_name: Str, iter: Expr, body: Block) -> Lw {
+  var w = w0
+  let elem_t = match ck_of(w).elem_types.get(skey(w, span)) {
+    Some(t) => zonk(t, w.env),
+    None => fail("native: missing element type of a for loop"),
+  }
+  let top = label(w, "ftop")
+  let bod = label(top.w, "fbody")
+  let step = label(bod.w, "fstep")
+  let end = label(step.w, "fend")
+  w = end.w
+  let range_args = match iter {
+    Expr.Call(_, Expr.Name(_, "range"), args) => match lookup(w, "range") == None and args.len() == 2 and args.all(fn(a) =>
+      a.name == None) {
+        true => Some(args),
+        false => None,
+      },
+    _ => None,
+  }
+  match range_args {
+    Some(args) => {
+      let lo = expr(w, args.get_or(0, Arg { span: span, name: None, value: iter }).value)
+      let hi = expr(lo.w, args.get_or(1, Arg { span: span, name: None, value: iter }).value)
+      let i = reg(hi.w)
+      let lo_o = own(i.w, lo.v)
+      w = emit(lo_o.w, [op("mov"), r(i.v), r(lo_o.v)])
+      let hi_o = own(w, hi.v)
+      w = hold(hi_o.w, [Pair { first: i.v, second: "int" }, Pair { first: hi_o.v, second: "int" }])
+      w = place(jump(w, top.v), top.v)
+      let c = reg(w)
+      w = emit(c.w, [op("icmp"), op("lt"), r(c.v), r(i.v), r(hi_o.v)])
+      w = place(emit(w, [op("br"), r(c.v), KV.S(s: bod.v), KV.S(s: end.v)]), bod.v)
+      w = declare(w: push_scope(w), name: var_name, rg: i.v, t: con("Int"), owned: false)
+      w = w with { loops: w.loops.push(LoopT { end: end.v, step: step.v, depth: w.scopes.len() }) }
+      w = block_body(w, body)
+      w = drop_scope(w with { loops: w.loops.take(w.loops.len() - 1) })
+      w = place(jump(w, step.v), step.v)
+      let one = konst(w, tag_int(1))
+      w = emit(one.w, [op("iop"), op("add"), r(i.v), r(i.v), r(one.v), KV.Nil])
+      w = drop_scope(place(jump(w, top.v), end.v))
+      w = emit(w, [op("release"), op("int"), r(i.v)])
+      return emit(w, [op("release"), op("int"), r(hi_o.v)])
+    },
+    None => {},
+  }
+  let lst = expr(w, iter)
+  let lo = own(lst.w, lst.v)
+  let lreg = lo.v
+  let n = reg(hold(lo.w, [Pair { first: lreg, second: "obj" }]))
+  w = emit(n.w, [op("load"), r(n.v), r(lreg), r(16)])
+  let data = reg(w)
+  let idx = konst(data.w, 0)
+  w = place(jump(idx.w, top.v), top.v)
+  let c = reg(w)
+  w = emit(c.w, [op("cmp"), op("lt"), r(c.v), r(idx.v), r(n.v)])
+  w = place(emit(w, [op("br"), r(c.v), KV.S(s: bod.v), KV.S(s: end.v)]), bod.v)
+  w = emit(w, [op("load"), r(data.v), r(lreg), r(32)])
+  let eight = konst(w, 8)
+  let off = reg(eight.w)
+  w = emit(off.w, [op("bin"), op("mul"), r(off.v), r(idx.v), r(eight.v)])
+  let ad = reg(w)
+  w = emit(ad.w, [op("bin"), op("add"), r(ad.v), r(data.v), r(off.v)])
+  let x = reg(w)
+  w = emit(x.w, [op("load"), r(x.v), r(ad.v), r(0)])
+  w = declare(w: push_scope(w), name: var_name, rg: x.v, t: elem_t, owned: false)
+  w = w with { loops: w.loops.push(LoopT { end: end.v, step: step.v, depth: w.scopes.len() }) }
+  w = block_body(w, body)
+  w = drop_scope(w with { loops: w.loops.take(w.loops.len() - 1) })
+  w = place(jump(w, step.v), step.v)
+  let one = konst(w, 1)
+  w = emit(one.w, [op("bin"), op("add"), r(idx.v), r(idx.v), r(one.v)])
+  w = drop_scope(place(jump(w, top.v), end.v))
+  return emit(w, [op("release"), op("obj"), r(lreg)])
+}
+
+const COMPARISONS: List[Str] = ["==", "!=", "<", ">", "<=", ">="]
+
+fn assert_stmt(w0: Lw, span: Span, cond: Expr, message: Option[Expr]) -> Lw {
+  var w = w0
+  match cond {
+    Expr.Binary(_, cop, left, right) => {
+      if COMPARISONS.contains(cop) {
+        let lv = expr(w, left)
+        let rv = expr(lv.w, right)
+        let ok = compare(w0: rv.w, cop: cop, lv: lv.v, rv: rv.v)
+        let good = label(ok.w, "aok")
+        let bad = label(good.w, "abad")
+        w = place(emit(bad.w, [op("br"), r(ok.v), KV.S(s: good.v), KV.S(s: bad.v)]), bad.v)
+        let l0 = call_rt(w: w, name: "list_new_str", args: [])
+        let lt = addr_td(l0.w, lv.v.t)
+        let ls = call_rt(w: lt.w, name: "show_detail", args: [lv.v.reg, lt.v])
+        let ln = addr_str(ls.w, "left")
+        let l1 = call_rt(w: ln.w, name: "detail_add", args: [l0.v, ln.v, ls.v])
+        let rt2 = addr_td(l1.w, rv.v.t)
+        let rs = call_rt(w: rt2.w, name: "show_detail", args: [rv.v.reg, rt2.v])
+        let rn = addr_str(rs.w, "right")
+        let l2 = call_rt(w: rn.w, name: "detail_add", args: [l1.v, rn.v, rs.v])
+        w = assert_fail(w0: l2.w, span: span, cond: cond, message: message, det: l2.v)
+        w = place(w, good.v)
+        return drop(drop(w, lv.v), rv.v)
+      }
+    },
+    _ => {},
+  }
+  let v = expr(w, cond)
+  let good = label(v.w, "aok")
+  let bad = label(good.w, "abad")
+  w = place(emit(bad.w, [op("br"), r(v.v.reg), KV.S(s: good.v), KV.S(s: bad.v)]), bad.v)
+  let det = details(w, local_names(w, cond))
+  return place(assert_fail(w0: det.w, span: span, cond: cond, message: message, det: det.v), good.v)
+}
+
+fn assert_fail(w0: Lw, span: Span, cond: Expr, message: Option[Expr], det: Int) -> Lw {
+  let m0 = addr_str(w0, "assertion failed: `{src_text(w0, expr_span(cond))}`")
+  var w = m0.w
+  var msg = m0.v
+  match message {
+    Some(mx) => {
+      let m = expr(w, mx)
+      let sep = addr_str(m.w, " — ")
+      let c1 = call_rt(w: sep.w, name: "Str_concat", args: [msg, sep.v])
+      let c2 = call_rt(w: c1.w, name: "Str_concat", args: [c1.v, m.v.reg])
+      w = c2.w
+      msg = c2.v
+    },
+    None => {},
+  }
+  let code = addr_str(w, "R0005")
+  let sp = addr_span(code.w, span)
+  let empty = addr_str(sp.w, "")
+  return call_rt(w: empty.w, name: "fail_with", args: [code.v, msg, sp.v, det, empty.v]).w with { dead: true }
+}
+
+// ---- expressions ----------------------------------------------------------------------------------------------
+
+fn vv(w: Lw, rg: Int, t: Type, owned: Bool) -> LR[V] {
+  return lr(w, V { reg: rg, t: t, owned: owned })
+}
+
+fn expr(w: Lw, e: Expr) -> LR[V] {
+  return match e {
+    Expr.IntLit(_, v) => int_lit(w: w, e: e, v: v),
+    Expr.FloatLit(_, v) => {
+      let c = konst(w, v.to_bits())
+      return vv(w: c.w, rg: c.v, t: con("Float"), owned: false)
+    },
+    Expr.BoolLit(_, v) => {
+      let c = konst(w, match v {
+        true => 1,
+        false => 0,
+      })
+      return vv(w: c.w, rg: c.v, t: con("Bool"), owned: false)
+    },
+    Expr.UnitLit(_) => {
+      let c = konst(w, 0)
+      return vv(w: c.w, rg: c.v, t: unit_t(), owned: false)
+    },
+    Expr.StrLit(_, parts) => str_lit(w, parts),
+    Expr.ListLit(_, items) => list_lit(w0: w, e: e, items: items),
+    Expr.MapLit(_, entries) => {
+      let t = ty(w, e)
+      let a = addr_td(w, t)
+      let m0 = call_rt(w: a.w, name: "map_new", args: [a.v])
+      var x = m0.w
+      var mp = m0.v
+      for en in entries {
+        let k = cexpr(x, en.key)
+        let v = cexpr(k.w, en.value)
+        let ko = own(v.w, k.v)
+        let vo = own(ko.w, v.v)
+        let s = call_rt(w: vo.w, name: "Map_set_owned", args: [mp, ko.v, vo.v])
+        x = s.w
+        mp = s.v
+      }
+      return vv(w: x, rg: mp, t: t, owned: true)
+    },
+    Expr.Name(_, name) => x_name(w: w, e: e, name: name),
+    Expr.Unary(_, uop, operand) => x_unary(w0: w, uop: uop, operand: operand),
+    Expr.Binary(_, _, _, _) => x_binary(w, e),
+    Expr.Call(_, _, _) => call_expr(w, e),
+    Expr.MethodCall(_, _, _, _, _) => call_expr(w, e),
+    Expr.FieldAccess(_, _, _, _) => x_field_access(w, e),
+    Expr.Try(span, x) => x_try(w0: w, span: span, x: x),
+    Expr.RecordLit(_, _, fields) => x_record(w0: w, e: e, fields: fields),
+    Expr.WithExpr(_, base, fields) => x_with(w0: w, e: e, base: base, fields: fields),
+    Expr.Match(_, subject, arms) => x_match(w0: w, e: e, subject: subject, arms: arms),
+    Expr.Lambda(_, _, _, _) => x_lambda(w, e),
+  }
+}
+
+fn int_lit(w: Lw, e: Expr, v: Int) -> LR[V] {
+  let t = ty(w, e)
+  if tname(t) == "Word" {
+    let c = konst(w, v)
+    return vv(w: c.w, rg: c.v, t: con("Word"), owned: false)
+  }
+  let limit = 2.pow(61)
+  if v >= 0 - limit and v < limit {
+    let c = konst(w, tag_int(v))
+    return vv(w: c.w, rg: c.v, t: con("Int"), owned: false)
+  }
+  let s = addr_str(w, v.to_str())
+  let c = call_rt(w: s.w, name: "int_parse_dec", args: [s.v])
+  return vv(w: c.w, rg: c.v, t: con("Int"), owned: true)
+}
+
+fn plain_text(parts: List[StrPiece]) -> Option[Str] {
+  var out = ""
+  for p in parts {
+    match p {
+      StrPiece.Text(t) => {
+        out = out + t
+      },
+      StrPiece.Code(_) => {
+        return None
+      },
+    }
+  }
+  return Some(out)
+}
+
+fn str_lit(w0: Lw, parts: List[StrPiece]) -> LR[V] {
+  match plain_text(parts) {
+    Some(text) => {
+      let a = addr_str(w0, text)
+      return vv(w: a.w, rg: a.v, t: con("Str"), owned: false)
+    },
+    None => {},
+  }
+  let sb = call_rt(w: w0, name: "sb_new", args: [])
+  var w = sb.w
+  for p in parts {
+    match p {
+      StrPiece.Text(t) => {
+        let a = addr_str(w, t)
+        w = call_rt(w: a.w, name: "sb_add_str", args: [sb.v, a.v]).w
+      },
+      StrPiece.Code(x) => {
+        let v = expr(w, x)
+        w = v.w
+        if tname(v.v.t) == "Int" and targs(v.v.t).is_empty() {
+          w = call_rt(w: w, name: "int_show", args: [sb.v, v.v.reg]).w
+        } else if tname(v.v.t) == "Str" and targs(v.v.t).is_empty() {
+          w = call_rt(w: w, name: "sb_add_str", args: [sb.v, v.v.reg]).w
+        } else {
+          let a = addr_td(w, v.v.t)
+          let one = konst(a.w, 1)
+          w = call_rt(w: one.w, name: "show_into", args: [sb.v, v.v.reg, a.v, one.v]).w
+        }
+        w = drop(w, v.v)
+      },
+    }
+  }
+  let f = call_rt(w: w, name: "sb_finish", args: [sb.v])
+  return vv(w: f.w, rg: f.v, t: con("Str"), owned: true)
+}
+
+/// The key and the items of a list literal whose items are all constant strings, small Ints or Bools ("" when it is
+/// not one): klar/native/lower.py `static_list`.
+fn static_items(items: List[Expr]) -> Pair[Str, List[Str]] {
+  var key = ""
+  var out: List[Str] = []
+  for it in items {
+    match it {
+      Expr.StrLit(_, parts) => {
+        var text = ""
+        for p in parts {
+          match p {
+            StrPiece.Text(s) => {
+              text = text + s
+            },
+            StrPiece.Code(_) => {
+              return Pair { first: "", second: [] }
+            },
+          }
+        }
+        key = key + "|s{text.len()}:" + text
+        out = out.push("s" + text)
+      },
+      Expr.IntLit(_, v) => {
+        if v < -2305843009213693952 or v >= 2305843009213693952 {
+          return Pair { first: "", second: [] }
+        }
+        key = key + "|i{v}"
+        out = out.push("i{v}")
+      },
+      Expr.BoolLit(_, b) => {
+        key = key + "|b{b}"
+        out = out.push("b{b}")
+      },
+      _ => {
+        return Pair { first: "", second: [] }
+      },
+    }
+  }
+  return Pair { first: key, second: out }
+}
+
+/// An immortal list for a literal of constant items, so that `["mov", "i2f"].contains(op)` allocates nothing.
+fn static_list(w0: Lw, t: Type, items: List[Expr]) -> Option[LR[Str]] {
+  let si = static_items(items)
+  if si.first == "" {
+    return None
+  }
+  let key = "list:" + tshow(t) + si.first
+  match w0.static_objs.get(key) {
+    Some(name) => {
+      return Some(lr(w0, name))
+    },
+    None => {},
+  }
+  var w = w0
+  var ws: List[W] = []
+  for x in si.second {
+    let body = x.slice(1, x.len())
+    if x.starts_with("s") {
+      let s = str_obj(w, body)
+      w = s.w
+      ws = ws.push(W.A(sym: s.v, add: 0))
+    } else if x.starts_with("i") {
+      ws = ws.push(W.N(v: 2 * body.to_int().unwrap_or(0) + 1))
+    } else {
+      ws = ws.push(W.N(v: match body == "true" {
+        true => 1,
+        false => 0,
+      }))
+    }
+  }
+  let tdw = td_word(w, t)
+  let name = "obj{tdw.w.static_objs.len()}"
+  w = words(w: tdw.w, name: name + "_items", ws: ws)
+  w = words(w: w, name: name, ws: [W.N(v: -1), tdw.v, W.N(v: ws.len()), W.N(v: ws.len()), W.A(sym: name + "_items",
+    add: 0)])
+  return Some(lr(w with { static_objs: w.static_objs.set(key, name) }, name))
+}
+
+fn list_lit(w0: Lw, e: Expr, items: List[Expr]) -> LR[V] {
+  let t = ty(w0, e)
+  if not items.is_empty() and static_items(items).first != "" {
+    return match static_list(w0, t, items) {
+      Some(s) => {
+        let a = addr(s.w, s.v)
+        return vv(w: a.w, rg: a.v, t: t, owned: false)
+      },
+      None => fail("native: static list"),
+    }
+  }
+  let n = items.len()
+  let a = addr_td(w0, t)
+  let c = konst(a.w, n)
+  let l = call_rt(w: c.w, name: "list_with_cap", args: [a.v, c.v])
+  let data = reg(l.w)
+  var w = emit(data.w, [op("load"), r(data.v), r(l.v), r(32)])
+  var i = 0
+  for it in items {
+    let v = cexpr(w, it)
+    let o = own(v.w, v.v)
+    w = emit(o.w, [op("store"), r(data.v), r(8 * i), r(o.v)])
+    i = i + 1
+  }
+  let k = konst(w, n)
+  w = emit(k.w, [op("store"), r(l.v), r(16), r(k.v)])
+  return vv(w: w, rg: l.v, t: t, owned: true)
+}
+
+/// The module and name of a constant used by name, if it is one.
+fn resolve_const(w: Lw, name: Str) -> Option[Pair[Str, Str]] {
+  match w.m.import_from.get(name) {
+    Some(src) => {
+      if src.second == "const" {
+        return Some(Pair { first: src.first, second: name })
+      }
+    },
+    None => {},
+  }
+  let c = ck_of(w)
+  if c.consts.has(name) and c.decls.any(fn(d) => match d {
+    Decl.Const(_, n, _, _, _, _, _) => n == name,
+    _ => false,
+  }) {
+    return Some(Pair { first: w.m.name, second: name })
+  }
+  return None
+}
+
+fn x_name(w: Lw, e: Expr, name: Str) -> LR[V] {
+  if reads_bound(w, e) {
+    return match bound_read(w, e) {
+      Some(b) => b,
+      None => fail("native: bound read"),
+    }
+  }
+  match lookup(w, name) {
+    Some(loc) => {
+      return read_local(w, loc)
+    },
+    None => {},
+  }
+  match w.captures.get(name) {
+    Some(cap) => {
+      let env = w.closure_self.unwrap_or(0)
+      let d = reg(w)
+      return vv(w: emit(d.w, [op("load"), r(d.v), r(env), r(24 + 8 * cap.first)]), rg: d.v, t: cap.second, owned: false)
+    },
+    None => {},
+  }
+  if name == "None" {
+    let t = ty(w, e)
+    let s = static_variant(w0: w, t: t, tag: 0)
+    let a = addr(s.w, s.v)
+    return vv(w: a.w, rg: a.v, t: t, owned: false)
+  }
+  match resolve_const(w, name) {
+    Some(c) => {
+      let d = reg(w)
+      let slot = const_slot(w: d.w, module_name: c.first, cname: c.second)
+      let a = addr(slot.w, slot.v)
+      let ct = ty(a.w, e)
+      return vv(w: emit(a.w, [op("load"), r(d.v), r(a.v), r(0)]), rg: d.v, t: ct, owned: false)
+    },
+    None => {},
+  }
+  return match call_info(w, expr_span(e)) {
+    Some(info) => match info.sig.fdecl {
+      Some(_) => fn_value(w0: w, e: e, info: info),
+      None => fail("native: name `{name}` as a value"),
+    },
+    None => fail("native: name `{name}` as a value"),
+  }
+}
+
+/// A top-level function used as a value: an immortal closure with a trampoline.
+fn fn_value(w0: Lw, e: Expr, info: CallInfo) -> LR[V] {
+  let ft = ty(w0, e)
+  let sig = info.sig
+  let tm = module_of(w0, sig.mod_name)
+  let decl = match sig.fdecl {
+    Some(d) => d,
+    None => fail("native: no declaration"),
+  }
+  let type_args = sig.tparams.map(fn(tp) => inst_type(w: w0, info: info, tp: tp))    // (before `w0` moves: see user_call)
+  let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: type_args, kind: "user")
+  var w = target.w
+  let key = "fnval#" + target.v
+  if not w.static_objs.has(key) {
+    let nps = match ft {
+      Type.Fun(ps, _, _) => ps.len(),
+      _ => 0,
+    }
+    var tramp = KFn { name: target.v + "__tramp", klar_name: target.v + "__tramp", nparams: 1 + nps, nregs: 1 + nps, code: [],
+      labels: 0 }
+    var code: List[Ins] = []
+    let fps = match ft {
+      Type.Fun(ps, _, _) => ps,
+      _ => [],
+    }
+    for i in w.owned.get("{sig.mod_name}#{sig.decl}").unwrap_or([]).sort() {
+      let k = rck(fps.get_or(i, unit_t()))
+      if k != "" {
+        code = code.push([op("retain"), KV.S(s: k), r(1 + i)])       // closure callers lend their arguments
+      }
+    }
+    let d = tramp.nregs
+    tramp = tramp with { nregs: d + 1 }
+    tramp = tramp with { code: code.concat([[op("call"), r(d), KV.S(s: target.v), KV.L(regs: range(1, 1 + nps))], [op(
+      "ret"), r(d)]]) }
+    w = w with { fns: w.fns.push(tramp) }
+    let sym = "fnv{w.static_objs.len()}"
+    let ctd = closure_td(w, [])
+    w = words(w: ctd.w, name: sym, ws: [W.N(v: -1), W.A(sym: ctd.v, add: 0), W.A(sym: tramp.name, add: 0)])
+    w = w with { static_objs: w.static_objs.set(key, sym) }
+  }
+  let a = addr(w, w.static_objs.get(key).unwrap_or(""))
+  return vv(w: a.w, rg: a.v, t: ft, owned: false)
+}
+
+fn x_unary(w0: Lw, uop: Str, operand: Expr) -> LR[V] {
+  let v = expr(w0, operand)
+  let t = v.v.t
+  let d = reg(v.w)
+  var w = d.w
+  if uop == "not" {
+    let one = konst(w, 1)
+    return vv(w: emit(one.w, [op("bin"), op("xor"), r(d.v), r(v.v.reg), r(one.v)]), rg: d.v, t: con("Bool"), owned: false)
+  }
+  if tname(t) == "Int" {
+    w = emit(w, [op("ineg"), r(d.v), r(v.v.reg)])
+    return vv(w: drop(w, v.v), rg: d.v, t: con("Int"), owned: true)
+  }
+  if tname(t) == "Float" {
+    let sign = konst(w, 0 - 2.pow(63))
+    return vv(w: emit(sign.w, [op("bin"), op("xor"), r(d.v), r(v.v.reg), r(sign.v)]), rg: d.v, t: con("Float"),
+      owned: false)
+  }
+  let zero = konst(w, 0)
+  return vv(w: emit(zero.w, [op("bin"), op("sub"), r(d.v), r(zero.v), r(v.v.reg)]), rg: d.v, t: t, owned: false)
+}
+
+fn cc_of(cop: Str) -> Str {
+  return match cop {
+    "==" => "eq",
+    "!=" => "ne",
+    "<" => "lt",
+    ">" => "gt",
+    "<=" => "le",
+    _ => "ge",
+  }
+}
+
+fn compare(w0: Lw, cop: Str, lv: V, rv: V) -> LR[Int] {
+  let t = lv.t
+  let h = tname(t)
+  let d = reg(w0)
+  var w = d.w
+  let cc = cc_of(cop)
+  if h == "Int" {
+    return lr(emit(w, [op("icmp"), op(cc), r(d.v), r(lv.reg), r(rv.reg)]), d.v)
+  }
+  if h == "Float" {
+    return lr(emit(w, [op("fcmp"), op(cc), r(d.v), r(lv.reg), r(rv.reg)]), d.v)
+  }
+  if h == "Bool" or h == "Unit" or h == "Word" {
+    return lr(emit(w, [op("cmp"), op(cc), r(d.v), r(lv.reg), r(rv.reg)]), d.v)
+  }
+  if h == "Str" and (cop == "==" or cop == "!=") {
+    let x = call_rt(w: w, name: "Str_eq", args: [lv.reg, rv.reg])
+    return lr(negate_or_move(w: x.w, d: d.v, x: x.v, negate: cop == "!="), d.v)
+  }
+  if h == "Str" {
+    let x = call_rt(w: w, name: "Str_cmp", args: [lv.reg, rv.reg])
+    let z = konst(x.w, 0)
+    return lr(emit(z.w, [op("cmp"), op(cc), r(d.v), r(x.v), r(z.v)]), d.v)
+  }
+  if cop == "==" or cop == "!=" {
+    let a = addr_td(w, t)
+    let x = call_rt(w: a.w, name: "eq_v", args: [lv.reg, rv.reg, a.v])
+    return lr(negate_or_move(w: x.w, d: d.v, x: x.v, negate: cop == "!="), d.v)
+  }
+  return fail("native: ordering on {tshow(t)}")
+}
+
+fn negate_or_move(w: Lw, d: Int, x: Int, negate: Bool) -> Lw {
+  if negate {
+    let one = konst(w, 1)
+    return emit(one.w, [op("bin"), op("xor"), r(d), r(x), r(one.v)])
+  }
+  return emit(w, [op("mov"), r(d), r(x)])
+}
+
+fn x_binary(w0: Lw, e: Expr) -> LR[V] {
+  let parts = match e {
+    Expr.Binary(span, bop, l, rr) => Pair { first: Pair { first: span, second: bop }, second: Pair { first: l, second: rr } },
+    _ => fail("native: not a binary expression"),
+  }
+  let span = parts.first.first
+  let bop = parts.first.second
+  if bop == "and" or bop == "or" {
+    let res = reg(w0)
+    let lv = expr(res.w, parts.second.first)
+    var w = emit(lv.w, [op("mov"), r(res.v), r(lv.v.reg)])
+    let rhs = label(w, "sc")
+    let end = label(rhs.w, "scend")
+    w = match bop == "and" {
+      true => emit(end.w, [op("br"), r(lv.v.reg), KV.S(s: rhs.v), KV.S(s: end.v)]),
+      false => emit(end.w, [op("br"), r(lv.v.reg), KV.S(s: end.v), KV.S(s: rhs.v)]),
+    }
+    w = place(w, rhs.v)
+    let rv = expr(w, parts.second.second)
+    w = jump(emit(rv.w, [op("mov"), r(res.v), r(rv.v.reg)]), end.v)
+    return vv(w: place(w, end.v), rg: res.v, t: con("Bool"), owned: false)
+  }
+  let lv = expr(w0, parts.second.first)
+  let rv = expr(lv.w, parts.second.second)
+  var w = rv.w
+  if COMPARISONS.contains(bop) {
+    let d = compare(w0: w, cop: bop, lv: lv.v, rv: rv.v)
+    return vv(w: drop(drop(d.w, lv.v), rv.v), rg: d.v, t: con("Bool"), owned: false)
+  }
+  let t = lv.v.t
+  let h = tname(t)
+  let d = reg(w)
+  w = d.w
+  if h == "Int" {
+    let iop = match bop {
+      "+" => "add",
+      "-" => "sub",
+      "*" => "mul",
+      "/" => "div",
+      _ => "mod",
+    }
+    var sp = KV.Nil
+    if bop == "/" or bop == "%" {
+      let s = span_sym(w, span)
+      w = s.w
+      sp = KV.S(s: s.v)
+    }
+    w = emit(w, [op("iop"), op(iop), r(d.v), r(lv.v.reg), r(rv.v.reg), sp])
+    return vv(w: drop(drop(w, lv.v), rv.v), rg: d.v, t: con("Int"), owned: true)
+  }
+  if h == "Float" {
+    if bop == "/" and w.is_rt {
+      return vv(w: emit(w, [op("fbin"), op("div"), r(d.v), r(lv.v.reg), r(rv.v.reg)]), rg: d.v, t: con("Float"),
+        owned: false)
+    }
+    if bop == "/" or bop == "%" {
+      let name = match bop == "/" {
+        true => "float_div",
+        false => "float_mod",
+      }
+      let s = addr_span(w, span)
+      let x = call_rt(w: s.w, name: name, args: [lv.v.reg, rv.v.reg, s.v])
+      return vv(w: x.w, rg: x.v, t: con("Float"), owned: false)
+    }
+    let fop = match bop {
+      "+" => "add",
+      "-" => "sub",
+      _ => "mul",
+    }
+    return vv(w: emit(w, [op("fbin"), op(fop), r(d.v), r(lv.v.reg), r(rv.v.reg)]), rg: d.v, t: con("Float"), owned: false)
+  }
+  if h == "Word" {
+    let wop = match bop {
+      "+" => "add",
+      "-" => "sub",
+      "*" => "mul",
+      "/" => "sdiv",
+      _ => "srem",
+    }
+    return vv(w: emit(w, [op("bin"), op(wop), r(d.v), r(lv.v.reg), r(rv.v.reg)]), rg: d.v, t: con("Word"), owned: false)
+  }
+  if h == "Str" and bop == "+" {
+    let x = call_rt(w: w, name: "Str_concat", args: [lv.v.reg, rv.v.reg])
+    return vv(w: drop(drop(x.w, lv.v), rv.v), rg: x.v, t: con("Str"), owned: true)
+  }
+  return fail("native: operator {bop} on {tshow(t)}")
+}
+
+// ---- calls --------------------------------------------------------------------------------------------------
+
+/// Evaluates the arguments in source order; returns them in parameter order, and in evaluation order.
+fn args_in_param_order(w0: Lw, names: List[Str], args: List[Arg]) -> LR[Pair[List[V], List[V]]] {
+  var w = w0
+  var vals: Map[Str, V] = Map {}
+  var order: List[V] = []
+  var pos = 0
+  for a in args {
+    let v = expr(w, a.value)
+    w = v.w
+    let name = match a.name {
+      Some(n) => n,
+      None => names.get_or(pos, ""),
+    }
+    if a.name == None {
+      pos = pos + 1
+    }
+    vals = vals.set(name, v.v)
+    order = order.push(v.v)
+  }
+  var ordered: List[V] = []
+  for n in names {
+    match vals.get(n) {
+      Some(v) => {
+        ordered = ordered.push(v)
+      },
+      None => {},
+    }
+  }
+  return lr(w, Pair { first: ordered, second: order })
+}
+
+/// The arguments of a variant constructor, in parameter order; each one is consumed.
+fn args_consumed(w0: Lw, names: List[Str], args: List[Arg]) -> LR[Pair[List[V], List[V]]] {
+  var w = w0
+  var vals: Map[Str, V] = Map {}
+  var pos = 0
+  for a in args {
+    let v = cexpr(w, a.value)
+    w = v.w
+    let name = match a.name {
+      Some(n) => n,
+      None => names.get_or(pos, ""),
+    }
+    if a.name == None {
+      pos = pos + 1
+    }
+    vals = vals.set(name, v.v)
+  }
+  var ordered: List[V] = []
+  for n in names {
+    match vals.get(n) {
+      Some(v) => {
+        ordered = ordered.push(v)
+      },
+      None => {},
+    }
+  }
+  return lr(w, Pair { first: ordered, second: [] })
+}
+
+fn regs_of(vs: List[V]) -> List[Int] {
+  return vs.map(fn(v) => v.reg)
+}
+
+fn call_parts(e: Expr) -> Pair[Pair[Span, Expr], List[Arg]] {
+  return match e {
+    Expr.Call(span, callee, args) => Pair { first: Pair { first: span, second: callee }, second: args },
+    Expr.MethodCall(span, obj, _, _, args) => Pair { first: Pair { first: span, second: obj }, second: args },
+    _ => fail("native: not a call"),
+  }
+}
+
+fn x_call(w0: Lw, e: Expr) -> LR[V] {
+  let parts = call_parts(e)
+  let span = parts.first.first
+  let callee = parts.first.second
+  let args = parts.second
+  match callee {
+    Expr.Name(_, name) => {
+      if lookup(w0, name) == None and not w0.captures.has(name) {
+        let info = call_info(w0, span)
+        let has_decl = info.map(fn(i) => i.sig.fdecl != None).unwrap_or(false)
+        if w0.is_rt and w0.b.sys.has(name) and not has_decl {
+          return intrinsic(w0: w0, e: e, name: name)
+        }
+        match info {
+          Some(i) => {
+            if has_decl {
+              return user_call(w0: w0, e: e, sig: i.sig, info: i, recv: None)
+            }
+          },
+          None => {},
+        }
+        if w0.b.globals.has(name) {
+          return builtin_global(w0: w0, e: e, name: name)
+        }
+        return fail("native: call of {name}")
+      }
+    },
+    _ => {},
+  }
+  let f = expr(w0, callee)
+  var w = f.w
+  var vals: List[V] = []
+  for a in args {
+    let v = expr(w, a.value)
+    w = v.w
+    vals = vals.push(v.v)
+  }
+  let res = closure_call(w: w, f: f.v, args: vals, ret_t: ty(w, e))
+  return lr(drop(drop_all(res.w, vals), f.v), res.v)
+}
+
+fn closure_call(w: Lw, f: V, args: List[V], ret_t: Type) -> LR[V] {
+  let fp = reg(w)
+  let x = emit(fp.w, [op("load"), r(fp.v), r(f.reg), r(16)])
+  let d = reg(x)
+  return vv(w: emit(d.w, [op("callind"), r(d.v), r(fp.v), KV.L(regs: [f.reg].concat(regs_of(args)))]), rg: d.v, t: ret_t,
+    owned: true)
+}
+
+/// recv: the receiver expression of a method-style call (the first argument).
+fn user_call(w0: Lw, e: Expr, sig: Sig, info: CallInfo, recv: Option[Expr]) -> LR[V] {
+  let parts = call_parts(e)
+  let tm = module_of(w0, sig.mod_name)
+  let decl = match sig.fdecl {
+    Some(d) => d,
+    None => fail("native: call without a declaration"),
+  }
+  let kind = match tm.is_sys {
+    true => "rt",
+    false => "user",
+  }
+  // the type arguments first: a read of `w0` after `instance` would keep a second reference to the whole state, and
+  // every update below (strings, spans, the data section) would copy it
+  let type_args = sig.tparams.map(fn(tp) => inst_type(w: w0, info: info, tp: tp))
+  let target = instance(w: w0, md: tm, decl: decl, idx: sig.decl, type_args: type_args, kind: kind)
+  var w = target.w
+  let owned = match tm.is_sys {
+    true => [],
+    false => w.owned.get("{sig.mod_name}#{sig.decl}").unwrap_or([]),
+  }
+  let names = sig.params.map(fn(p) => p.first)
+  var exprs: List[Pair[Int, Expr]] = []
+  var rest = names
+  match recv {
+    Some(x) => {
+      exprs = exprs.push(Pair { first: 0, second: x })
+      rest = names.drop(1)
+    },
+    None => {},
+  }
+  var pos = 0
+  for a in parts.second {
+    let name = match a.name {
+      Some(n) => n,
+      None => rest.get_or(pos, ""),
+    }
+    if a.name == None {
+      pos = pos + 1
+    }
+    exprs = exprs.push(Pair { first: names.index_of(name).unwrap_or(0), second: a.value })
+  }
+  var vals: Map[Int, V] = Map {}
+  var later: List[Pair[Int, Expr]] = []
+  for x in exprs {
+    if owned.contains(x.first) and moves(w, x.second) {
+      later = later.push(x)       // moved after the other arguments are evaluated (they may read it)
+    } else {
+      let v = expr(w, x.second)
+      w = v.w
+      vals = vals.set(x.first, v.v)
+    }
+  }
+  for x in later {
+    let v = cexpr(w, x.second)
+    w = v.w
+    vals = vals.set(x.first, v.v)
+  }
+  var regs: List[Int] = []
+  var keep: List[V] = []
+  var i = 0
+  while i < names.len() {
+    var v = vals.get(i).unwrap_or(V { reg: 0, t: unit_t(), owned: false })
+    if owned.contains(i) {
+      let o = own(w, v)
+      w = o.w
+      regs = regs.push(o.v)
+    } else {
+      if not later.is_empty() and not v.owned and rck(v.t) != "" {
+        w = emit(w, [op("retain"), KV.S(s: rck(v.t)), r(v.reg)])   // a borrowed view must outlive the moved value
+        v = V { reg: v.reg, t: v.t, owned: true }
+      }
+      keep = keep.push(v)
+      regs = regs.push(v.reg)
+    }
+    i = i + 1
+  }
+  w = site(w, expr_span(e))
+  let d = call(w: w, target: target.v, args: regs)
+  let rt = ty(d.w, e)
+  return vv(w: drop_all(d.w, keep), rg: d.v, t: rt, owned: true)
+}
+
+/// The extra arguments a runtime function declares after the real ones: the result's type descriptor (`rtd`), the
+/// call's source position (`sp`) or a type argument's descriptor (`td_T`).
+fn magic_args(w0: Lw, rt: FnDecl, n_real: Int, e: Expr, info: Option[CallInfo]) -> LR[List[Int]] {
+  var w = w0
+  var out: List[Int] = []
+  for p in rt.params.drop(n_real) {
+    if p.name == "rtd" {
+      let a = addr_td(w, ty(w, e))
+      w = a.w
+      out = out.push(a.v)
+    } else if p.name == "sp" {
+      let a = addr_span(w, expr_span(e))
+      w = a.w
+      out = out.push(a.v)
+    } else if p.name.starts_with("td_") {
+      let tp = p.name.slice(3, p.name.len())
+      let t = match info {
+        Some(i) => match i.inst.get(tp) {
+          Some(x) => zonk(x, w.env),
+          None => fail("native: no type argument {tp}"),
+        },
+        None => fail("native: no type argument {tp}"),
+      }
+      let a = addr_td(w, t)
+      w = a.w
+      out = out.push(a.v)
+    } else {
+      return fail("native: runtime parameter {p.name}")
+    }
+  }
+  return lr(w, out)
+}
+
+fn builtin_global(w0: Lw, e: Expr, name: Str) -> LR[V] {
+  let parts = call_parts(e)
+  let span = parts.first.first
+  let args = parts.second
+  let first = args.get_or(0, Arg { span: span, name: None, value: e }).value
+  if name == "Some" or name == "Ok" or name == "Err" {
+    let t = ty(w0, e)
+    let v = cexpr(w0, first)
+    let tagv = match name == "Some" or name == "Err" {
+      true => 1,
+      false => 0,
+    }
+    let size = konst(v.w, 32)
+    let a = addr_td(size.w, t)
+    let obj = call_rt(w: a.w, name: "obj_new", args: [size.v, a.v])
+    let tg = konst(obj.w, tagv)
+    var w = emit(tg.w, [op("store"), r(obj.v), r(16), r(tg.v)])
+    let o = own(w, v.v)
+    w = emit(o.w, [op("store"), r(obj.v), r(24), r(o.v)])
+    return vv(w: w, rg: obj.v, t: t, owned: true)
+  }
+  if name == "dbg" {
+    let v = expr(w0, first)
+    var text = src_text(v.w, span)
+    if text.starts_with("dbg(") and text.ends_with(")") {
+      text = text.slice(4, text.len() - 1)
+    }
+    let a1 = addr_td(v.w, v.v.t)
+    let a2 = addr_str(a1.w, text)
+    let a3 = addr_span(a2.w, span)
+    let c = call_rt(w: a3.w, name: "b_dbg", args: [v.v.reg, a1.v, a2.v, a3.v])
+    return lr(c.w, v.v)
+  }
+  let sig = match w0.b.globals.get(name) {
+    Some(s) => s,
+    None => fail("native: unknown built-in {name}"),
+  }
+  let target = rt_fn(w0, "b_" + name)
+  let rd = rt_decl(target.w, "b_" + name)
+  let a = args_in_param_order(w0: target.w, names: sig.params.map(fn(p) => p.first), args: args)
+  let extra = magic_args(w0: a.w, rt: rd, n_real: sig.params.len(), e: e, info: call_info(a.w, span))
+  let w = site(extra.w, span)
+  let d = call(w: w, target: target.v, args: regs_of(a.v.first).concat(extra.v))
+  let t = ty(d.w, e)
+  return vv(w: drop_all(d.w, a.v.second), rg: d.v, t: t, owned: rck(t) != "")
+}
+
+fn x_method_call(w0: Lw, e: Expr) -> LR[V] {
+  let parts = call_parts(e)
+  let span = parts.first.first
+  let obj = parts.first.second
+  let args = parts.second
+  let res = match resolution(w0, span) {
+    Some(x) => x,
+    None => fail("native: unresolved method call"),
+  }
+  if res.kind == "variant" {
+    return variant_ctor(w0: w0, e: e, enum_name: res.owner, vname: res.name)
+  }
+  if res.kind == "builtin" and res.owner == "Option" and res.name == "unwrap_or" {
+    match get_or(w0, e) {
+      Some(fused) => {
+        return fused
+      },
+      None => {},
+    }
+  }
+  if res.kind == "ufcs" or res.kind == "trait" {
+    let info = match call_info(w0, span) {
+      Some(i) => i,
+      None => fail("native: method call without a signature"),
+    }
+    if res.kind == "ufcs" {
+      return user_call(w0: w0, e: e, sig: info.sig, info: info, recv: Some(obj))
+    }
+    // static dispatch: inside an instance every type parameter is a concrete type
+    let concrete = inst_type(w: w0, info: info, tp: "Self")
+    let entry = match w0.uni.type_methods.get(tname(concrete)) {
+      Some(table) => table.get(res.name),
+      None => None,
+    }
+    return match entry {
+      Some(en) => {
+        let sig = en.second
+        var dispatch = info
+        if sig.tparams.any(fn(tp) => tp != "Self") {
+          // a generic impl: its type parameters come from the receiver's type
+          let self_t = sig.params.get(0).map(fn(p) => p.second).unwrap_or(unit_t())
+          dispatch = CallInfo { sig: sig, inst: bind_params(pat: self_t, t: concrete, out: Map {}) }
+        }
+        return user_call(w0: w0, e: e, sig: sig, info: dispatch, recv: Some(obj))
+      },
+      None => fail("native: no impl of `{res.owner}.{res.name}` for {tshow(concrete)}"),
+    }
+  }
+  let reuse = res.kind == "builtin" and REUSE.contains(res.owner + "." + res.name)
+  if reuse and moves(w0, obj) {
+    return builtin_method(w: w0, e: e, owner: res.owner, m: res.name, recv: None, consume: true, recv_node: Some(obj))
+  }
+  let recv = expr(w0, obj)
+  var w = recv.w
+  if reuse and recv.v.owned and path_of(obj) == None {        // a temporary: update it in place
+    return builtin_method(w: w, e: e, owner: res.owner, m: res.name, recv: Some(recv.v), consume: true, recv_node: None)
+  }
+  if res.kind == "to_str" {
+    let a = addr_td(w, recv.v.t)
+    let x = call_rt(w: a.w, name: "show_to_str", args: [recv.v.reg, a.v])
+    return vv(w: drop(x.w, recv.v), rg: x.v, t: con("Str"), owned: true)
+  }
+  if res.kind == "field_fn" {
+    let fields = record_fields(w, recv.v.t)
+    let idx = fields.map(fn(f) => f.first).index_of(res.name).unwrap_or(0)
+    let f = reg(w)
+    w = emit(f.w, [op("load"), r(f.v), r(recv.v.reg), r(16 + 8 * idx)])
+    var vals: List[V] = []
+    for a in args {
+      let v = expr(w, a.value)
+      w = v.w
+      vals = vals.push(v.v)
+    }
+    let ft = fields.get_or(idx, Pair { first: "", second: unit_t() }).second
+    let out = closure_call(w: w, f: V { reg: f.v, t: ft, owned: false }, args: vals, ret_t: ty(w, e))
+    return lr(drop(drop_all(out.w, vals), recv.v), out.v)
+  }
+  if res.kind == "builtin" {
+    return builtin_method(w: w, e: e, owner: res.owner, m: res.name, recv: Some(recv.v), consume: false, recv_node: None)
+  }
+  return fail("native: {res.kind}")
+}
+
+/// A literal (without interpolation, `-` allowed), an empty list or map, or a name: no calls, no effects (as
+/// `plain_value` in klar/native/lower.py).
+fn plain_value(e: Expr) -> Bool {
+  return match e {
+    Expr.IntLit(_, _) => true,
+    Expr.FloatLit(_, _) => true,
+    Expr.BoolLit(_, _) => true,
+    Expr.UnitLit(_) => true,
+    Expr.Name(_, _) => true,
+    Expr.StrLit(_, parts) => parts.all(fn(p) => match p {
+      StrPiece.Text(_) => true,
+      StrPiece.Code(_) => false,
+    }),
+    Expr.Unary(_, uop, operand) => uop == "-" and match operand {
+      Expr.IntLit(_, _) => true,
+      Expr.FloatLit(_, _) => true,
+      _ => false,
+    },
+    Expr.ListLit(_, items) => items.is_empty(),
+    Expr.MapLit(_, entries) => entries.is_empty(),
+    _ => false,
+  }
+}
+
+/// `xs.get(i).unwrap_or(d)` / `m.get(k).unwrap_or(d)` with a plain `d` (evaluating it before the lookup changes
+/// nothing): one call, no Option (as `get_or` in klar/native/lower.py).
+fn get_or(w0: Lw, e: Expr) -> Option[LR[V]] {
+  let outer = call_parts(e)
+  let g = outer.first.second
+  let gspan = match g {
+    Expr.MethodCall(sp, _, _, _, _) => sp,
+    _ => {
+      return None
+    },
+  }
+  let res = match resolution(w0, gspan) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  let dflt = match outer.second.get(0) {
+    Some(a) => a.value,
+    None => {
+      return None
+    },
+  }
+  if res.kind != "builtin" or res.name != "get" or (res.owner != "List" and res.owner != "Map") or
+    outer.second.len() != 1 or not plain_value(dflt) {
+    return None
+  }
+  let sig = match w0.b.methods.get(res.owner) {
+    Some(ms) => match ms.get("get") {
+      Some(s) => s,
+      None => fail("native: no built-in {res.owner}.get"),
+    },
+    None => fail("native: no built-in {res.owner}.get"),
+  }
+  let parts = call_parts(g)
+  let recv = expr(w0, parts.first.second)
+  let a = args_in_param_order(w0: recv.w, names: sig.params.drop(1).map(fn(p) => p.first), args: parts.second)
+  let d = expr(a.w, dflt)
+  let t = ty(d.w, e)
+  let key = a.v.first.get_or(0, recv.v).reg
+  var out = lr(d.w, 0)
+  if res.owner == "List" {
+    let td_a = addr_td(out.w, t)
+    out = call_rt(w: td_a.w, name: "List_get_or", args: [recv.v.reg, key, d.v.reg, td_a.v])
+  } else {
+    out = call_rt(w: out.w, name: "map_get_or", args: [recv.v.reg, key, d.v.reg])
+  }
+  return Some(vv(w: drop(drop_all(drop(out.w, d.v), a.v.second), recv.v), rg: out.v, t: t, owned: rck(t) != ""))
+}
+
+fn builtin_method(w: Lw, e: Expr, owner: Str, m: Str, recv: Option[V], consume: Bool, recv_node: Option[Expr]) -> LR[V] {
+  let parts = call_parts(e)
+  let span = parts.first.first
+  let sig = match w.b.methods.get(owner) {
+    Some(ms) => match ms.get(m) {
+      Some(s) => s,
+      None => fail("native: no built-in {owner}.{m}"),
+    },
+    None => fail("native: no built-in {owner}.{m}"),
+  }
+  let rt_name = "{owner}_{m}" + match consume {
+    true => "_owned",
+    false => "",
+  }
+  let target = rt_fn(w, rt_name)
+  let rd = rt_decl(target.w, rt_name)
+  let a = args_in_param_order(w0: target.w, names: sig.params.drop(1).map(fn(p) => p.first), args: parts.second)
+  var x = a.w
+  var ordered = a.v.first
+  var order = a.v.second
+  if consume {
+    var owned: List[V] = []
+    for v in ordered {
+      let o = own(x, v)
+      x = o.w
+      owned = owned.push(V { reg: o.v, t: v.t, owned: true })
+    }
+    ordered = owned
+    order = []
+  }
+  var rv = recv.unwrap_or(V { reg: 0, t: unit_t(), owned: false })
+  match recv_node {
+    Some(node) => {
+      let c = cexpr(x, node)        // the receiver's last use: moved after the arguments
+      x = c.w
+      rv = c.v
+    },
+    None => {},
+  }
+  let extra = magic_args(w0: x, rt: rd, n_real: sig.params.len(), e: e, info: call_info(x, span))
+  let s = site(extra.w, span)
+  let d = call(w: s, target: target.v, args: [rv.reg].concat(regs_of(ordered)).concat(extra.v))
+  var out = drop_all(d.w, order)
+  if not consume {
+    out = drop(out, rv)
+  }
+  let t = ty(out, e)
+  return vv(w: out, rg: d.v, t: t, owned: rck(t) != "")
+}
+
+fn variant_ctor(w0: Lw, e: Expr, enum_name: Str, vname: Str) -> LR[V] {
+  let t = ty(w0, e)
+  let names = match w0.uni.enums.get(enum_name) {
+    Some(info) => info.variants.get(vname).unwrap_or([]).map(fn(f) => f.first),
+    None => [],
+  }
+  let a = args_consumed(w0: w0, names: names, args: call_parts(e).second)
+  let tagv = variant_index(w: a.w, t: t, vname: vname)
+  let size = konst(a.w, 24 + 8 * names.len())
+  let td_a = addr_td(size.w, t)
+  let obj = call_rt(w: td_a.w, name: "obj_new", args: [size.v, td_a.v])
+  let tg = konst(obj.w, tagv)
+  var w = emit(tg.w, [op("store"), r(obj.v), r(16), r(tg.v)])
+  var i = 0
+  for v in a.v.first {
+    let o = own(w, v)
+    w = emit(o.w, [op("store"), r(obj.v), r(24 + 8 * i), r(o.v)])
+    i = i + 1
+  }
+  return vv(w: w, rg: obj.v, t: t, owned: true)
+}
+
+// ---- records, Try, match --------------------------------------------------------------------------------------
+
+fn x_field_access(w0: Lw, e: Expr) -> LR[V] {
+  if reads_bound(w0, e) {
+    return match bound_read(w0, e) {
+      Some(b) => b,
+      None => fail("native: bound read"),
+    }
+  }
+  let parts = match e {
+    Expr.FieldAccess(_, obj, name, _) => Pair { first: obj, second: name },
+    _ => fail("native: not a field access"),
+  }
+  let obj = parts.first
+  let name = parts.second
+  match obj {
+    Expr.Name(_, n) => {
+      if lookup(w0, n) == None and not w0.captures.has(n) and w0.uni.enums.has(n) {
+        let t = ty(w0, e)
+        let s = static_variant(w0: w0, t: t, tag: variant_index(w: w0, t: t, vname: name))
+        let a = addr(s.w, s.v)
+        return vv(w: a.w, rg: a.v, t: t, owned: false)
+      }
+    },
+    _ => {},
+  }
+  let base = expr(w0, obj)
+  let idx = record_fields(base.w, base.v.t).map(fn(f) => f.first).index_of(name).unwrap_or(0)
+  let d = reg(base.w)
+  var w = emit(d.w, [op("load"), r(d.v), r(base.v.reg), r(16 + 8 * idx)])
+  let t = ty(w, e)
+  if base.v.owned {
+    let k = rck(t)
+    if k != "" {
+      w = emit(w, [op("retain"), KV.S(s: k), r(d.v)])
+    }
+    return vv(w: drop(w, base.v), rg: d.v, t: t, owned: true)
+  }
+  return vv(w: w, rg: d.v, t: t, owned: false)
+}
+
+fn x_try(w0: Lw, span: Span, x: Expr) -> LR[V] {
+  let v = expr(w0, x)
+  let t = v.v.t
+  let good_tag = match tname(t) == "Option" {
+    true => 1,
+    false => 0,
+  }
+  let tagr = reg(v.w)
+  var w = emit(tagr.w, [op("load"), r(tagr.v), r(v.v.reg), r(16)])
+  let c = reg(w)
+  let gt = konst(c.w, good_tag)
+  w = emit(gt.w, [op("cmp"), op("eq"), r(c.v), r(tagr.v), r(gt.v)])
+  let good = label(w, "tgood")
+  let bad = label(good.w, "tbad")
+  w = place(emit(bad.w, [op("br"), r(c.v), KV.S(s: good.v), KV.S(s: bad.v)]), bad.v)
+  if w.in_test {
+    let td_a = addr_td(w, t)
+    let shown = call_rt(w: td_a.w, name: "show_detail", args: [v.v.reg, td_a.v])
+    let pre = addr_str(shown.w, "`{src_text(shown.w, expr_span(x))}?` produced ")
+    let m1 = call_rt(w: pre.w, name: "Str_concat", args: [pre.v, shown.v])
+    let post = addr_str(m1.w, " inside a test")
+    let m2 = call_rt(w: post.w, name: "Str_concat", args: [m1.v, post.v])
+    let code = addr_str(m2.w, "R0008")
+    let sp = addr_span(code.w, span)
+    let z = konst(sp.w, 0)
+    let empty = addr_str(z.w, "")
+    w = call_rt(w: empty.w, name: "fail_with", args: [code.v, m2.v, sp.v, z.v, empty.v]).w with { dead: true }
+  } else {
+    w = do_return(w, v.v)
+  }
+  w = place(w, good.v)
+  let inner = reg(w)
+  w = emit(inner.w, [op("load"), r(inner.v), r(v.v.reg), r(24)])
+  let it = targs(t).get_or(0, unit_t())
+  if v.v.owned {
+    let k = rck(it)
+    if k != "" {
+      w = emit(w, [op("retain"), KV.S(s: k), r(inner.v)])
+    }
+    return vv(w: drop(w, v.v), rg: inner.v, t: it, owned: true)
+  }
+  return vv(w: w, rg: inner.v, t: it, owned: false)
+}
+
+fn x_record(w0: Lw, e: Expr, fields: List[FieldInit]) -> LR[V] {
+  let t = ty(w0, e)
+  let names = record_fields(w0, t).map(fn(f) => f.first)
+  var w = w0
+  var vals: Map[Str, V] = Map {}
+  for f in fields {
+    let v = cexpr(w, f.value)
+    w = v.w
+    vals = vals.set(f.name, v.v)
+  }
+  let size = konst(w, 16 + 8 * names.len())
+  let a = addr_td(size.w, t)
+  let obj = call_rt(w: a.w, name: "obj_new", args: [size.v, a.v])
+  w = obj.w
+  var i = 0
+  for n in names {
+    match vals.get(n) {
+      Some(v) => {
+        let o = own(w, v)
+        w = emit(o.w, [op("store"), r(obj.v), r(16 + 8 * i), r(o.v)])
+      },
+      None => {},
+    }
+    i = i + 1
+  }
+  return vv(w: w, rg: obj.v, t: t, owned: true)
+}
+
+fn x_with(w0: Lw, e: Expr, base: Expr, fields: List[FieldInit]) -> LR[V] {
+  let bp = path_of(base)
+  let moved = moves(w0, base)
+  if moved or bp == None {
+    let src = cexpr(w0, base)
+    if src.v.owned {
+      let path = match moved {
+        true => bp.unwrap_or(""),
+        false => "",
+      }
+      return with_in_place(w0: src.w, e: e, fields: fields, src: src.v, bp: path)
+    }
+    return with_copy(b: src, fields: fields)
+  }
+  return with_copy(b: expr(w0, base), fields: fields)
+}
+
+/// `base with {...}` on a value that is not owned: a new record with the other fields retained.
+fn with_copy(b: LR[V], fields: List[FieldInit]) -> LR[V] {
+  let t = b.v.t
+  let fs = record_fields(b.w, t)
+  var w = b.w
+  var upd: Map[Str, V] = Map {}
+  for f in fields {
+    let v = expr(w, f.value)
+    w = v.w
+    upd = upd.set(f.name, v.v)
+  }
+  let size = konst(w, 16 + 8 * fs.len())
+  let a = addr_td(size.w, t)
+  let obj = call_rt(w: a.w, name: "obj_new", args: [size.v, a.v])
+  w = obj.w
+  var i = 0
+  for f in fs {
+    match upd.get(f.first) {
+      Some(v) => {
+        let o = own(w, v)
+        w = emit(o.w, [op("store"), r(obj.v), r(16 + 8 * i), r(o.v)])
+      },
+      None => {
+        let x = reg(w)
+        w = emit(x.w, [op("load"), r(x.v), r(b.v.reg), r(16 + 8 * i)])
+        let k = rck(f.second)
+        if k != "" {
+          w = emit(w, [op("retain"), KV.S(s: k), r(x.v)])
+        }
+        w = emit(w, [op("store"), r(obj.v), r(16 + 8 * i), r(x.v)])
+      },
+    }
+    i = i + 1
+  }
+  return vv(w: drop(w, b.v), rg: obj.v, t: t, owned: true)
+}
+
+/// "List" / "Map" for `match xs.get(i)` / `match m.get(k)` with only `Some(..)`, `None` and `_` arms, whose
+/// element is found and matched without allocating the Option (as `option_slot` in klar/native/lower.py).
+fn option_get(w: Lw, subject: Expr, arms: List[MatchArm]) -> Option[Str] {
+  let span = match subject {
+    Expr.MethodCall(sp, _, _, _, _) => sp,
+    _ => {
+      return None
+    },
+  }
+  let res = match resolution(w, span) {
+    Some(x) => x,
+    None => {
+      return None
+    },
+  }
+  if res.kind != "builtin" or res.name != "get" or (res.owner != "List" and res.owner != "Map") {
+    return None
+  }
+  for arm in arms {
+    let ok = match arm.pattern {
+      Pattern.Wild(_) => true,
+      Pattern.Variant(_, en, variant, _) => (en == None or en == Some("Option")) and (variant == "Some" or
+          variant == "None"),
+      _ => false,
+    }
+    if not ok {
+      return None
+    }
+  }
+  return Some(res.owner)
+}
+
+/// The element of `xs.get(i)` / `m.get(k)` without the Option: (the register that is 1 when it is missing, the
+/// element, retained — a stand-in that needs no release when it is missing).
+fn option_slot(w0: Lw, subject: Expr, owner: Str) -> LR[Pair[Int, V]] {
+  let parts = call_parts(subject)
+  let et = targs(ty(w0, subject)).get_or(0, unit_t())
+  let sig = match w0.b.methods.get(owner) {
+    Some(ms) => match ms.get("get") {
+      Some(s) => s,
+      None => fail("native: no built-in {owner}.get"),
+    },
+    None => fail("native: no built-in {owner}.get"),
+  }
+  let recv = expr(w0, parts.first.second)
+  let a = args_in_param_order(w0: recv.w, names: sig.params.drop(1).map(fn(p) => p.first), args: parts.second)
+  let is_list = owner == "List"
+  let slot = call_rt(w: a.w, name: match is_list {
+    true => "list_slot",
+    false => "map_slot",
+  }, args: [recv.v.reg, a.v.first.get_or(0, recv.v).reg])
+  let missing = reg(slot.w)
+  let zero = konst(missing.w, 0)
+  let elem = reg(emit(zero.w, [op("cmp"), op("lt"), r(missing.v), r(slot.v), r(zero.v)]))
+  let found = label(elem.w, "gfound")
+  let absent = label(found.w, "gnone")
+  let joined = label(absent.w, "gjoin")
+  var w = place(emit(joined.w, [op("br"), r(missing.v), KV.S(s: absent.v), KV.S(s: found.v)]), found.v)
+  let took = call_rt(w: w, name: match is_list {
+    true => "list_take",
+    false => "map_take",
+  }, args: [recv.v.reg, slot.v])
+  w = place(jump(emit(took.w, [op("mov"), r(elem.v), r(took.v)]), joined.v), absent.v)
+  let k = rck(et)
+  let stand_in = match k == "obj" {
+    true => call_rt(w: w, name: "none", args: []),
+    false => konst(w, match k == "int" {
+      true => 1,
+      false => 0,
+    }),
+  }
+  w = place(emit(stand_in.w, [op("mov"), r(elem.v), r(stand_in.v)]), joined.v)
+  w = drop(drop_all(w, a.v.second), recv.v)
+  return lr(w, Pair { first: missing.v, second: V { reg: elem.v, t: et, owned: true } })
+}
+
+/// The arms of a match on an Option that is not allocated (`option_slot`).
+fn match_option(w0: Lw, e: Expr, arms: List[MatchArm], missing: Int, elem: V) -> LR[V] {
+  let t = ty(w0, e)
+  let res = reg(hold(w0, [Pair { first: elem.reg, second: rck(elem.t) }]))
+  var w = emit(res.w, [op("const"), r(res.v), r(0)])
+  let end = label(w, "mend")
+  w = end.w
+  for arm in arms {
+    let nxt = label(w, "marm")
+    w = push_scope(nxt.w)
+    match arm.pattern {
+      Pattern.Variant(_, _, variant, args) => {
+        let ok = label(w, "pv")
+        if variant == "Some" {
+          w = place(emit(ok.w, [op("br"), r(missing), KV.S(s: nxt.v), KV.S(s: ok.v)]), ok.v)
+          match args.get(0) {
+            Some(Pattern.Wild(_)) => {},
+            Some(sub) => {
+              w = pattern(w: w, p: sub, rg: elem.reg, t: elem.t, fail_to: nxt.v)
+            },
+            None => {},
+          }
+        } else {
+          w = place(emit(ok.w, [op("br"), r(missing), KV.S(s: ok.v), KV.S(s: nxt.v)]), ok.v)
+        }
+      },
+      _ => {},
+    }
+    match arm.guard {
+      Some(g) => {
+        let gv = expr(w, g)
+        let ok = label(gv.w, "mg")
+        w = place(emit(ok.w, [op("br"), r(gv.v.reg), KV.S(s: ok.v), KV.S(s: nxt.v)]), ok.v)
+      },
+      None => {},
+    }
+    match arm.body {
+      Body.BlockBody(b) => {
+        w = block_body(w, b)
+        if not w.dead {
+          w = emit(w, [op("const"), r(res.v), r(0)])
+        }
+      },
+      Body.ExprBody(x) => {
+        let v = expr(w, x)
+        let o = own(v.w, v.v)
+        w = emit(o.w, [op("mov"), r(res.v), r(o.v)])
+      },
+    }
+    w = match w.dead {
+      false => pop_scope(w),
+      true => drop_scope(w),
+    }
+    w = place(jump(w, end.v), nxt.v)
+  }
+  w = call_rt(w: w, name: "unreachable", args: []).w with { dead: true }
+  w = drop_scope(place(w, end.v))
+  return vv(w: drop(w, elem), rg: res.v, t: t, owned: rck(t) != "")
+}
+
+fn x_match(w0: Lw, e: Expr, subject: Expr, arms: List[MatchArm]) -> LR[V] {
+  match option_get(w0, subject, arms) {
+    Some(owner) => {
+      let got = option_slot(w0, subject, owner)
+      return match_option(w0: got.w, e: e, arms: arms, missing: got.v.first, elem: got.v.second)
+    },
+    None => {},
+  }
+  let subj = expr(w0, subject)
+  let t = ty(subj.w, e)
+  let held = match subj.v.owned {
+    true => [Pair { first: subj.v.reg, second: rck(subj.v.t) }],
+    false => [],
+  }
+  let res = reg(hold(subj.w, held))
+  var w = emit(res.w, [op("const"), r(res.v), r(0)])
+  let end = label(w, "mend")
+  w = end.w
+  for arm in arms {
+    let nxt = label(w, "marm")
+    w = pattern(w: push_scope(nxt.w), p: arm.pattern, rg: subj.v.reg, t: subj.v.t, fail_to: nxt.v)
+    match arm.guard {
+      Some(g) => {
+        let gv = expr(w, g)
+        let ok = label(gv.w, "mg")
+        w = place(emit(ok.w, [op("br"), r(gv.v.reg), KV.S(s: ok.v), KV.S(s: nxt.v)]), ok.v)
+      },
+      None => {},
+    }
+    match arm.body {
+      Body.BlockBody(b) => {
+        w = block_body(w, b)
+        if not w.dead {
+          w = emit(w, [op("const"), r(res.v), r(0)])
+        }
+      },
+      Body.ExprBody(x) => {
+        let v = expr(w, x)
+        let o = own(v.w, v.v)
+        w = emit(o.w, [op("mov"), r(res.v), r(o.v)])
+      },
+    }
+    w = match w.dead {
+      false => pop_scope(w),
+      true => drop_scope(w),
+    }
+    w = place(jump(w, end.v), nxt.v)
+  }
+  w = call_rt(w: w, name: "unreachable", args: []).w with { dead: true }
+  w = drop_scope(place(w, end.v))
+  return vv(w: drop(w, subj.v), rg: res.v, t: t, owned: rck(t) != "")
+}
+
+fn pattern(w: Lw, p: Pattern, rg: Int, t: Type, fail_to: Str) -> Lw {
+  return match p {
+    Pattern.Wild(_) => w,
+    Pattern.Bind(_, name) => declare(w: w, name: name, rg: rg, t: t, owned: false),
+    Pattern.Lit(_, v) => {
+      let c = match v {
+        LitValue.StrV(s) => {
+          let a = addr_str(w, s)
+          return pattern_branch(w: call_rt(w: a.w, name: "Str_eq", args: [rg, a.v]), fail_to: fail_to)
+        },
+        LitValue.BoolV(b) => {
+          let d = reg(w)
+          let k = konst(d.w, match b {
+            true => 1,
+            false => 0,
+          })
+          return pattern_branch(w: lr(emit(k.w, [op("cmp"), op("eq"), r(d.v), r(rg), r(k.v)]), d.v), fail_to: fail_to)
+        },
+        LitValue.FloatV(x) => {
+          let d = reg(w)
+          let k = konst(d.w, x.to_bits())
+          return pattern_branch(w: lr(emit(k.w, [op("fcmp"), op("eq"), r(d.v), r(rg), r(k.v)]), d.v), fail_to: fail_to)
+        },
+        LitValue.IntV(n) => {
+          let d = reg(w)
+          let k = konst(d.w, tag_int(n))
+          return pattern_branch(w: lr(emit(k.w, [op("icmp"), op("eq"), r(d.v), r(rg), r(k.v)]), d.v), fail_to: fail_to)
+        },
+      }
+      return c
+    },
+    Pattern.Variant(_, _, variant, args) => {
+      let idx = variant_index(w: w, t: t, vname: variant)
+      let tagr = reg(w)
+      var x = emit(tagr.w, [op("load"), r(tagr.v), r(rg), r(16)])
+      let c = reg(x)
+      let k = konst(c.w, idx)
+      x = emit(k.w, [op("cmp"), op("eq"), r(c.v), r(tagr.v), r(k.v)])
+      let ok = label(x, "pv")
+      x = place(emit(ok.w, [op("br"), r(c.v), KV.S(s: ok.v), KV.S(s: fail_to)]), ok.v)
+      let fts = variant_fields(w: x, t: t, vname: variant)
+      var i = 0
+      for sub in args {
+        if i < fts.len() {
+          match sub {
+            Pattern.Wild(_) => {},
+            _ => {
+              let fr = reg(x)
+              x = emit(fr.w, [op("load"), r(fr.v), r(rg), r(24 + 8 * i)])
+              x = pattern(w: x, p: sub, rg: fr.v, t: fts.get_or(i, unit_t()), fail_to: fail_to)
+            },
+          }
+        }
+        i = i + 1
+      }
+      return x
+    },
+  }
+}
+
+fn pattern_branch(w: LR[Int], fail_to: Str) -> Lw {
+  let ok = label(w.w, "pl")
+  return place(emit(ok.w, [op("br"), r(w.v), KV.S(s: ok.v), KV.S(s: fail_to)]), ok.v)
+}
+
+// ---- lambdas --------------------------------------------------------------------------------------------------
+
+fn param_names(ps: List[Param]) -> List[Str] {
+  return ps.map(fn(p) => p.name)
+}
+
+fn x_lambda(w0: Lw, e: Expr) -> LR[V] {
+  let parts = match e {
+    Expr.Lambda(_, params, _, body) => Pair { first: params, second: body },
+    _ => fail("native: not a lambda"),
+  }
+  let params = parts.first
+  let body = parts.second
+  let ft = ty(w0, e)
+  let items = walk_body(body)
+  var own_names = param_names(params)
+  for it in items {
+    match it {
+      Item.LetI(n) => {
+        own_names = own_names.push(n)
+      },
+      Item.ForI(n) => {
+        own_names = own_names.push(n)
+      },
+      Item.BindI(n) => {
+        own_names = own_names.push(n)
+      },
+      _ => {},
+    }
+  }
+  // the free variables, in order of appearance: locals of the enclosing function, or its own captures
+  var free: List[Pair[Str, Option[Local]]] = []
+  for it in items {
+    let found = match it {
+      Item.NameI(n) => Some(Pair { first: n, second: false }),
+      Item.AssignI(n) => Some(Pair { first: n, second: true }),
+      _ => None,
+    }
+    match found {
+      Some(f) => {
+        let nm = f.first
+        if not own_names.contains(nm) and not free.any(fn(x) => x.first == nm) {
+          match lookup(w0, nm) {
+            Some(loc) => {
+              if f.second {
+                return fail("native: lambda assigns a captured variable")
+              }
+              free = free.push(Pair { first: nm, second: Some(loc) })
+            },
+            None => {
+              if w0.captures.has(nm) {
+                free = free.push(Pair { first: nm, second: None })
+              }
+            },
+          }
+        }
+      },
+      None => {},
+    }
+  }
+  for it in items {
+    match it {
+      Item.AssignI(n) => {
+        if not own_names.contains(n) {
+          return fail("native: lambda assigns a captured variable")
+        }
+      },
+      _ => {},
+    }
+  }
+  var w = w0
+  var cap_types: List[Type] = []
+  var cap_vals: List[V] = []
+  for f in free {
+    match f.second {
+      Some(loc) => {
+        if bound_prefix(w, f.first) == f.first {
+          cap_types = cap_types.push(loc.t)
+          cap_vals = cap_vals.push(V { reg: w.bound.get(f.first).unwrap_or(0), t: loc.t, owned: false })
+        } else {
+          let v = read_local(w, loc)
+          w = v.w
+          cap_types = cap_types.push(v.v.t)
+          cap_vals = cap_vals.push(v.v)
+        }
+      },
+      None => {
+        let cap = w.captures.get(f.first).unwrap_or(Pair { first: 0, second: unit_t() })
+        let d = reg(w)
+        w = emit(d.w, [op("load"), r(d.v), r(w.closure_self.unwrap_or(0)), r(24 + 8 * cap.first)])
+        cap_types = cap_types.push(cap.second)
+        cap_vals = cap_vals.push(V { reg: d.v, t: cap.second, owned: false })
+      },
+    }
+  }
+  let name = uid(w, w.cur.name + "__lam")
+  var captured: Map[Str, Pair[Int, Type]] = Map {}
+  var i = 0
+  for f in free {
+    captured = captured.set(f.first, Pair { first: i, second: cap_types.get_or(i, unit_t()) })
+    i = i + 1
+  }
+  w = lambda_fn(w0: name.w, name: name.v, params: params, body: body, ft: ft, captured: captured)
+  let ctd = closure_td(w, cap_types)
+  let size = konst(ctd.w, 24 + 8 * cap_vals.len())
+  let a = addr(size.w, ctd.v)
+  let obj = call_rt(w: a.w, name: "obj_new", args: [size.v, a.v])
+  let fp = addr(obj.w, name.v)
+  w = emit(fp.w, [op("store"), r(obj.v), r(16), r(fp.v)])
+  i = 0
+  for v in cap_vals {
+    let o = own(w, v)
+    w = emit(o.w, [op("store"), r(obj.v), r(24 + 8 * i), r(o.v)])
+    i = i + 1
+  }
+  return vv(w: w, rg: obj.v, t: ft, owned: true)
+}
+
+/// Lowers the body of a lambda as a function of its own (closure object first, then the parameters).
+/// The state of the function being lowered, kept aside while a lambda inside it is lowered. (Keeping the whole `Lw`
+/// would share its tables with the lambda's state, and every update of them would copy them.)
+type FnState {
+  cur: KFn,
+  cur_index: Int,
+  scopes: List[LScope],
+  loops: List[LoopT],
+  ret_t: Type,
+  dead: Bool,
+  closure_self: Option[Int],
+  captures: Map[Str, Pair[Int, Type]],
+  decl: Option[FnDecl],
+  posts: List[Expr],
+  in_test: Bool,
+  cand: Map[Str, Bool],
+  bound: Map[Str, Int],
+  takeable: Map[Str, Bool],
+}
+
+fn fn_state(w: Lw) -> FnState {
+  return FnState {
+    cur: w.cur,
+    cur_index: w.cur_index,
+    scopes: w.scopes,
+    loops: w.loops,
+    ret_t: w.ret_t,
+    dead: w.dead,
+    closure_self: w.closure_self,
+    captures: w.captures,
+    decl: w.decl,
+    posts: w.posts,
+    in_test: w.in_test,
+    cand: w.cand,
+    bound: w.bound,
+    takeable: w.takeable,
+  }
+}
+
+fn lambda_fn(w0: Lw, name: Str, params: List[Param], body: Body, ft: Type, captured: Map[Str, Pair[Int, Type]]) -> Lw {
+  let outer = fn_state(w0)
+  let fps = match ft {
+    Type.Fun(ps, _, _) => ps,
+    _ => [],
+  }
+  let ret = match ft {
+    Type.Fun(_, rt, _) => rt,
+    _ => unit_t(),
+  }
+  var w = begin_fn(w0, KFn { name: name, klar_name: "<lambda>", nparams: 1 + params.len(), nregs: 1 + params.len(), code: [],
+    labels: 0 }) with { closure_self: Some(0), captures: captured, ret_t: ret }
+  w = push_scope(w)
+  var i = 0
+  for p in params {
+    w = declare(w: w, name: p.name, rg: 1 + i, t: fps.get_or(i, unit_t()), owned: false)
+    i = i + 1
+  }
+  if not w.is_rt {
+    let cx = Cx { ck: ck_of(w), file: w.file }
+    let names = locals_of(params.map(fn(p) => p.name), body)
+    w = w with { cand: match body {
+      Body.BlockBody(b) => liveness_block(cx: cx, locals: names, no_move: [], b: b),
+      Body.ExprBody(x) => liveness_expr(cx: cx, locals: names, e: x),
+    } }
+    let s = str_obj(w, "<lambda>")
+    w = emit(s.w, [op("enter"), KV.S(s: s.v)])
+    if w.prof_on {
+      w = call_rt(w: w, name: "prof_enter_site", args: []).w
+    }
+  }
+  match body {
+    Body.BlockBody(b) => {
+      w = block_body(w, b)
+      if not w.dead {
+        let u = unit_v(w)
+        w = do_return(u.w, u.v)
+      }
+    },
+    Body.ExprBody(x) => {
+      let v = expr(w, x)
+      w = do_return(v.w, v.v)
+    },
+  }
+  w = finish_fn(w)
+  return w with {
+    cur: outer.cur,
+    cur_index: outer.cur_index,
+    scopes: outer.scopes,
+    loops: outer.loops,
+    ret_t: outer.ret_t,
+    dead: outer.dead,
+    closure_self: outer.closure_self,
+    captures: outer.captures,
+    decl: outer.decl,
+    posts: outer.posts,
+    in_test: outer.in_test,
+    cand: outer.cand,
+    bound: outer.bound,
+    takeable: outer.takeable,
+  }
+}
+
+// ---- system intrinsics (runtime modules only) -----------------------------------------------------------------
+
+fn simple_op(name: Str) -> Str {
+  return match name {
+    "w_and" => "and",
+    "w_or" => "or",
+    "w_xor" => "xor",
+    "w_shl" => "shl",
+    "w_shr" => "shr",
+    "w_sar" => "sar",
+    "w_udiv" => "udiv",
+    "w_urem" => "urem",
+    "w_mulhi" => "umulhi",
+    _ => "",
+  }
+}
+
+fn intrinsic(w0: Lw, e: Expr, name: Str) -> LR[V] {
+  let args = call_parts(e).second
+  var w = w0
+  var vals: List[V] = []
+  for a in args {
+    let v = expr(w, a.value)
+    w = v.w
+    vals = vals.push(v.v)
+  }
+  let regs = regs_of(vals)
+  let a0 = regs.get_or(0, 0)
+  let a1 = regs.get_or(1, 0)
+  let dd = reg(w)
+  w = dd.w
+  let d = dd.v
+  if name == "peek" {
+    return vv(w: emit(w, [op("load"), r(d), r(a0), r(0)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "poke" {
+    return vv(w: emit(w, [op("store"), r(a0), r(0), r(a1)]), rg: d, t: unit_t(), owned: false)
+  }
+  if name == "peek8" or name == "peek32" {
+    let o = match name == "peek8" {
+      true => "load8",
+      false => "load32",
+    }
+    return vv(w: emit(w, [op(o), r(d), r(a0), r(0)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "poke8" or name == "poke32" {
+    let o = match name == "poke8" {
+      true => "store8",
+      false => "store32",
+    }
+    return vv(w: emit(w, [op(o), r(a0), r(0), r(a1)]), rg: d, t: unit_t(), owned: false)
+  }
+  if simple_op(name) != "" {
+    return vv(w: emit(w, [op("bin"), op(simple_op(name)), r(d), r(a0), r(a1)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "w_ult" {
+    return vv(w: emit(w, [op("cmp"), op("ult"), r(d), r(a0), r(a1)]), rg: d, t: con("Bool"), owned: false)
+  }
+  if name == "bits" or name == "fbits" {
+    return vv(w: emit(w, [op("mov"), r(d), r(a0)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "unbits" or name == "ffrom" {
+    let mt = ty(w, e)
+    return vv(w: emit(w, [op("mov"), r(d), r(a0)]), rg: d, t: mt, owned: false)
+  }
+  if name == "tag" {
+    let two = konst(w, 1)
+    w = emit(two.w, [op("bin"), op("shl"), r(d), r(a0), r(two.v)])
+    return vv(w: emit(w, [op("bin"), op("or"), r(d), r(d), r(two.v)]), rg: d, t: con("Int"), owned: false)
+  }
+  if name == "untag" {
+    let one = konst(w, 1)
+    return vv(w: emit(one.w, [op("bin"), op("sar"), r(d), r(a0), r(one.v)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "is_small" {
+    let one = konst(w, 1)
+    return vv(w: emit(one.w, [op("bin"), op("and"), r(d), r(a0), r(one.v)]), rg: d, t: con("Bool"), owned: false)
+  }
+  if name == "w2f" {
+    return vv(w: emit(w, [op("i2f"), r(d), r(a0)]), rg: d, t: con("Float"), owned: false)
+  }
+  if name == "f2w" {
+    return vv(w: emit(w, [op("f2i"), r(d), r(a0)]), rg: d, t: con("Word"), owned: false)
+  }
+  if ["fsqrt", "fsin", "fcos", "fln", "fexp"].contains(name) {
+    return vv(w: emit(w, [op("fun"), op(name.slice(1, name.len())), r(d), r(a0)]), rg: d, t: con("Float"), owned: false)
+  }
+  if name == "fpow" {
+    return vv(w: emit(w, [op("fpow"), r(d), r(a0), r(a1)]), rg: d, t: con("Float"), owned: false)
+  }
+  if name == "static_addr" {
+    let text = match args.get(0).map(fn(a) => a.value) {
+      Some(Expr.StrLit(_, parts)) => match plain_text(parts) {
+        Some(t) => t,
+        None => fail("native: static_addr needs a literal"),
+      },
+      _ => fail("native: static_addr needs a literal"),
+    }
+    return vv(w: emit(w, [op("addr"), r(d), KV.S(s: text)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "call1" or name == "call2" {
+    let fp = reg(w)
+    w = emit(fp.w, [op("load"), r(fp.v), r(a0), r(16)])
+    return vv(w: emit(w, [op("callind"), r(d), r(fp.v), KV.L(regs: regs)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "frame_ptr" {
+    return vv(w: emit(w, [op("fp"), r(d)]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "user_main" {
+    return vv(w: emit(w, [op("call"), r(d), KV.S(s: "__user_main"), KV.L(regs: [])]), rg: d, t: con("Word"), owned: false)
+  }
+  if name == "init_consts" {
+    return vv(w: emit(w, [op("call"), r(d), KV.S(s: "__init_consts"), KV.L(regs: [])]), rg: d, t: unit_t(), owned: false)
+  }
+  if name == "retain_t" or name == "release_t" {
+    let k = rck(vals.get_or(0, V { reg: 0, t: unit_t(), owned: false }).t)
+    if k != "" {
+      let o = match name == "retain_t" {
+        true => "retain",
+        false => "release",
+      }
+      w = emit(w, [op(o), KV.S(s: k), r(a0)])
+    }
+    return vv(w: w, rg: d, t: unit_t(), owned: false)
+  }
+  if name.starts_with("os_") {
+    let ct = ty(w, e)
+    return vv(w: emit(w, [op("call"), r(d), KV.S(s: name), KV.L(regs: regs)]), rg: d, t: ct, owned: false)
+  }
+  return fail("native: intrinsic {name}")
+}
+
+// ---- the program ----------------------------------------------------------------------------------------------
+
+fn empty_img() -> Img {
+  return Img { data: bytes_of([]), syms: Map {}, abs: [], bss_size: 0, bss: Map {} }
+}
+
+fn alias_sym(w: Lw, name: Str, sym: Str) -> Lw {
+  return w with { img: w.img with { syms: w.img.syms.set(name, w.img.syms.get(sym).unwrap_or(0)) } }
+}
+
+const RT_HELPERS: List[Str] = ["free", "int_add", "int_sub", "int_mul", "int_div", "int_mod", "int_neg", "int_cmp", "div_zero",
+  "stack_overflow", "main_entry"]
+
+/// Runtime helper name -> its KIR function (the out-of-line paths of the machine code call these).
+pub fn rt_names(w: Lw) -> Map[Str, Str] {
+  var out: Map[Str, Str] = Map {}
+  for helper in RT_HELPERS.concat(w.soft) {
+    out = out.set(helper, rt_fn(w, helper).v)
+  }
+  return out
+}
+
+/// The software math function a `fun` / `fpow` instruction calls ("" for others, and for sqrt).
+fn soft_name(ins: Ins) -> Str {
+  let o = match ins.get(0) {
+    Some(KV.S(s)) => s,
+    _ => "",
+  }
+  if o == "fpow" {
+    return "soft_pow"
+  }
+  if o != "fun" {
+    return ""
+  }
+  return match ins.get(1) {
+    Some(KV.S("sin")) => "soft_sin",
+    Some(KV.S("cos")) => "soft_cos",
+    Some(KV.S("ln")) => "soft_ln",
+    Some(KV.S("exp")) => "soft_exp",
+    _ => "",
+  }
+}
+
+fn drain(w0: Lw, md: FnDecl) -> Lw {
+  var w = w0
+  // the instances, most recent first (like the Python lowering's stack)
+  while not w.queue.is_empty() {
+    let item = w.queue.last().unwrap_or(QItem { name: "", mod_name: "", decl: md, idx: 0, file: "", env: Map {},
+      kind: "" })
+    w = lower_function(w with { queue: w.queue.take(w.queue.len() - 1) }, item)
+  }
+  return w
+}
+
+fn zero_span() -> Span {
+  return Span { line: 0, col: 0, end_line: 0, end_col: 0 }
+}
+
+/// A `test` block of the main module, lowered as `__test<index>`.
+fn lower_test(w0: Lw, m: Module, name: Str, body: Block, index: Int) -> LR[Str] {
+  let fname = "__test{index}"
+  let label_text = "test \"" + name + "\""
+  let f = KFn { name: fname, klar_name: label_text, nparams: 0, nregs: 0, code: [], labels: 0 }
+  var w = begin_fn(w0 with { m: m, file: m.display, env: Map {}, is_rt: false }, f) with { in_test: true, ret_t: unit_t(),
+    decl: None, posts: [] }
+  w = push_scope(w)
+  w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of([], Body.BlockBody(block:
+    body)), no_move: [], b: body) }
+  let s = str_obj(w, label_text)
+  w = block_body(emit(s.w, [op("enter"), KV.S(s: s.v)]), body)
+  if not w.dead {
+    let u = unit_v(w)
+    w = do_return(u.w, u.v)
+  }
+  return lr(finish_fn(w), fname)
+}
+
+/// A property: its body as a function of its inputs (named `property "..."` in call stacks), a trampoline that takes
+/// the inputs as an array, and the test entry, which hands both to the runtime's generator (prop_run).
+fn lower_property(w0: Lw, m: Module, name: Str, params: List[Param], body: Block, sp: Span, index: Int) -> LR[Str] {
+  let label_text = "property \"" + name + "\""
+  let body_name = "__prop{index}"
+  let n = params.len()
+  let f = KFn { name: body_name, klar_name: label_text, nparams: n, nregs: n, code: [], labels: 0 }
+  var w = begin_fn(w0 with { m: m, file: m.display, env: Map {}, is_rt: false }, f) with { in_test: true, ret_t: unit_t(),
+    decl: None, posts: [] }
+  w = push_scope(w)
+  let types = checker_of(m).prop_types.get(name).unwrap_or([])
+  var i = 0
+  for p in params {
+    w = declare(w: w, name: p.name, rg: i, t: types.get_or(i, unit_t()), owned: false)
+    i = i + 1
+  }
+  w = w with { cand: liveness_block(cx: Cx { ck: ck_of(w), file: w.file }, locals: locals_of(params.map(fn(p) => p.name),
+    Body.BlockBody(block: body)), no_move: [], b: body) }
+  let s = str_obj(w, label_text)
+  w = block_body(emit(s.w, [op("enter"), KV.S(s: s.v)]), body)
+  if not w.dead {
+    let u = unit_v(w)
+    w = do_return(u.w, u.v)
+  }
+  w = finish_fn(w)
+  // the trampoline: (closure, inputs) -> body(inputs[0], ...)
+  let tname_ = body_name + "__tramp"
+  w = begin_fn(w, KFn { name: tname_, klar_name: tname_, nparams: 2, nregs: 2, code: [], labels: 0 })
+  var regs: List[Int] = []
+  i = 0
+  while i < n {
+    let rg = reg(w)
+    w = emit_always(rg.w, [op("load"), r(rg.v), r(1), r(8 * i)])
+    regs = regs.push(rg.v)
+    i = i + 1
+  }
+  let res = reg(w)
+  w = emit_always(res.w, [op("call"), r(res.v), KV.S(s: body_name), KV.L(regs: regs)])
+  w = finish_fn(emit_always(w, [op("ret"), r(res.v)]))
+  let ctd = closure_td(w, [])
+  w = words(w: ctd.w, name: body_name + "_clo", ws: [W.N(v: -1), W.A(sym: ctd.v, add: 0), W.A(sym: tname_, add: 0)])
+  var tdws: List[W] = []
+  for t in types {
+    let x = td_word(w, t)
+    w = x.w
+    tdws = tdws.push(x.v)
+  }
+  w = words(w: w, name: body_name + "_tds", ws: or_zero(tdws))
+  var nws: List[W] = []
+  for p in params {
+    let x = str_word(w, p.name)
+    w = x.w
+    nws = nws.push(x.v)
+  }
+  w = words(w: w, name: body_name + "_names", ws: or_zero(nws))
+  // the test entry
+  let entry = "__test{index}"
+  w = begin_fn(w, KFn { name: entry, klar_name: entry, nparams: 0, nregs: 0, code: [], labels: 0 })
+  let a0 = reg(w)
+  w = emit_always(a0.w, [op("addr"), r(a0.v), KV.S(s: body_name + "_clo")])
+  let a1 = reg(w)
+  w = emit_always(a1.w, [op("addr"), r(a1.v), KV.S(s: body_name + "_tds")])
+  let a2 = reg(w)
+  w = emit_always(a2.w, [op("const"), r(a2.v), r(n)])
+  let pname = str_obj(w, name)
+  let psp = span_sym(pname.w, sp)
+  w = psp.w
+  let a3 = reg(w)
+  w = emit_always(a3.w, [op("addr"), r(a3.v), KV.S(s: body_name + "_names")])
+  let a4 = reg(w)
+  w = emit_always(a4.w, [op("addr"), r(a4.v), KV.S(s: pname.v)])
+  let a5 = reg(w)
+  w = emit_always(a5.w, [op("addr"), r(a5.v), KV.S(s: psp.v)])
+  let target = rt_fn(w, "prop_run")
+  let out = reg(target.w)
+  w = emit_always(out.w, [op("call"), r(out.v), KV.S(s: target.v), KV.L(regs: [a0.v, a1.v, a2.v, a3.v, a4.v, a5.v])])
+  w = finish_fn(emit_always(w, [op("ret"), r(out.v)]))
+  return lr(w, entry)
+}
+
+/// Lowers a whole program (loaded with its runtime) to KIR functions and the data image. With `tests`, the
+/// executable runs the main module's test block number argv[last] instead of `main`.
+pub fn lower_program(ld: Ld, main_path: Str, tests: Bool) -> Lw {
+  return lower_program_cov(ld: ld, main_path: main_path, tests: tests, coverage: false)
+}
+
+/// `lower_program`; with `coverage`, every statement of the main file reports its line the first time it runs
+/// (klar/rt/cov.klar).
+pub fn lower_program_cov(ld: Ld, main_path: Str, tests: Bool, coverage: Bool) -> Lw {
+  return lower_program_mode(ld: ld, main_path: main_path, tests: tests, coverage: coverage, profile: false)
+}
+
+/// `lower_program` with coverage marks and/or profiling calls (klar/rt/cov.klar, klar/rt/profile.klar).
+pub fn lower_program_mode(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool) -> Lw {
+  return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: coverage, profile: profile, allow: None,
+    trace: TraceSpec { mode: 0, events: "", result: "" }, limit: 0)
+}
+
+/// `lower_program` of a program that runs with the rights of `--allow` (klar/rt/sandbox.klar).
+pub fn lower_program_allow(ld: Ld, main_path: Str, tests: Bool, allow: Option[List[Str]]) -> Lw {
+  return lower_program_traced(ld: ld, main_path: main_path, allow: allow, trace: TraceSpec { mode: 0, events: "",
+    result: "" }, tests: tests)
+}
+
+/// How a run is traced (klar/rt/trace.klar): `mode` 0 (no), 1 (record) or 2 (replay), the events to replay and the
+/// file for the result.
+pub type TraceSpec { mode: Int, events: Str, result: Str }
+
+/// `lower_program` with rights and a trace (`klarc run --record`, `klarc replay`).
+pub fn lower_program_traced(ld: Ld, main_path: Str, allow: Option[List[Str]], trace: TraceSpec, tests: Bool) -> Lw {
+  return lower_program_limited(ld: ld, main_path: main_path, allow: allow, trace: trace, tests: tests, limit: 0)
+}
+
+/// `lower_program_traced` with the time limit of `--timeout` (seconds, 0: none; klar/rt/limit.klar).
+pub fn lower_program_limited(ld: Ld, main_path: Str, allow: Option[List[Str]], trace: TraceSpec, tests: Bool,
+  limit: Int) -> Lw {
+    return lower_program_all(ld: ld, main_path: main_path, tests: tests, coverage: false, profile: false, allow: allow,
+      trace: trace, limit: limit)
+  }
+
+/// `g_allow`: the rights of `--allow` for klar/rt/sandbox.klar — [0] without them, else [1, shown, fs, proc, time,
+/// rand, net, #dirs, dirs, #programs, programs, env, #variables, variables] (as `sandbox_data` in
+/// klar/native/lower.py).
+fn sandbox_data(w0: Lw, allow: Option[List[Str]]) -> Lw {
+  let rights = match allow {
+    Some(given) => given,
+    None => {
+      return words(w: w0, name: "g_allow", ws: [W.N(v: 0)])
+    },
+  }
+  var w = w0
+  let dirs = rights.filter(fn(x) => x.starts_with("fs:")).map(fn(x) => x.slice(3, x.len()))
+  let progs = rights.filter(fn(x) => x.starts_with("proc:")).map(fn(x) => x.slice(5, x.len()))
+  var dws: List[W] = []
+  for d in dirs {
+    let s = str_word(w, d)
+    w = s.w
+    dws = dws.push(s.v)
+  }
+  if dws.is_empty() {
+    dws = [W.N(v: 0)]
+  }
+  w = words(w: w, name: "g_allow_dirs", ws: dws)
+  var pws: List[W] = []
+  for pr in progs {
+    let s = str_word(w, pr)
+    w = s.w
+    pws = pws.push(s.v)
+  }
+  if pws.is_empty() {
+    pws = [W.N(v: 0)]
+  }
+  w = words(w: w, name: "g_allow_progs", ws: pws)
+  let envs = rights.filter(fn(x) => x.starts_with("env:")).map(fn(x) => x.slice(4, x.len()))
+  var ews: List[W] = []
+  for ev in envs {
+    let s = str_word(w, ev)
+    w = s.w
+    ews = ews.push(s.v)
+  }
+  if ews.is_empty() {
+    ews = [W.N(v: 0)]
+  }
+  w = words(w: w, name: "g_allow_envs", ws: ews)
+  let shown = str_word(w, match rights.is_empty() {
+    true => "nothing",
+    false => rights.join(", "),
+  })
+  w = shown.w
+  var ws = [W.N(v: 1), shown.v]
+  for right in ["fs", "proc", "time", "rand", "net"] {
+    ws = ws.push(W.N(v: match rights.contains(right) {
+      true => 1,
+      false => 0,
+    }))
+  }
+  ws = ws.concat([W.N(v: dirs.len()), W.A(sym: "g_allow_dirs", add: 0), W.N(v: progs.len()), W.A(sym: "g_allow_progs",
+    add: 0)])
+  ws = ws.concat([W.N(v: match rights.contains("env") {
+    true => 1,
+    false => 0,
+  }), W.N(v: envs.len()), W.A(sym: "g_allow_envs", add: 0)])
+  return words(w: w, name: "g_allow", ws: ws)
+}
+
+/// `g_trace` for klar/rt/trace.klar (as `trace_data` in klar/native/lower.py).
+fn trace_data(w0: Lw, t: TraceSpec) -> Lw {
+  if t.mode == 0 {
+    return words(w: w0, name: "g_trace", ws: [W.N(v: 0)])
+  }
+  var w = w0
+  var src = W.N(v: 0)
+  if t.events != "" {
+    let s = str_word(w, t.events)
+    w = s.w
+    src = s.v
+  }
+  let out = str_word(w, t.result)
+  return words(w: out.w, name: "g_trace", ws: [W.N(v: t.mode), src, out.v])
+}
+
+fn lower_program_all(ld: Ld, main_path: Str, tests: Bool, coverage: Bool, profile: Bool, allow: Option[List[Str]],
+  trace: TraceSpec, limit: Int) -> Lw {
+    let rt_mod = match ld.runtime {
+      Some(m) => m,
+      None => fail("native: the runtime is not loaded"),
+    }
+    let main_mod = match ld.by_path.get(main_path) {
+      Some(m) => m,
+      None => fail("native: no main module"),
+    }
+    var modules: Map[Str, Module] = Map {}
+    var ordered: List[Module] = [rt_mod]
+    for p in ld.order {
+      match ld.by_path.get(p) {
+        Some(m) => {
+          modules = modules.set(m.name, m)
+          ordered = ordered.push(m)
+        },
+        None => {},
+      }
+    }
+    modules = modules.set(rt_mod.name, rt_mod)
+    var rt: Map[Str, Int] = Map {}
+    var k = 0
+    for d in checker_of(rt_mod).decls {
+      match d {
+        Decl.Fn(f) => {
+          rt = rt.set(f.name, k)
+        },
+        _ => {},
+      }
+      k = k + 1
+    }
+    let um0 = KFn { name: "__user_main", klar_name: "__user_main", nparams: 0, nregs: 0, code: [], labels: 0 }
+    var w = Lw {
+      b: ld.b,
+      uni: ld.uni,
+      modules: modules,
+      sources: split_sources(ld.sources),
+      fns: [],
+      soft: [],
+      instances: Map {},
+      names_used: Map {},
+      queue: [],
+      strings: Map {},
+      spans: Map {},
+      tds: Map {},
+      static_objs: Map {},
+      const_slots: Map {},
+      counter: 0,
+      rt: rt,
+      rt_ck: checker_of(rt_mod),
+      rt_checked: Map {},
+      img: empty_img(),
+      cur: um0,
+      cur_index: 0,
+      m: main_mod,
+      file: main_mod.display,
+      env: Map {},
+      is_rt: false,
+      scopes: [],
+      loops: [],
+      ret_t: unit_t(),
+      dead: false,
+      closure_self: None,
+      captures: Map {},
+      decl: None,
+      posts: [],
+      in_test: false,
+      owned: Map {},
+      cand: Map {},
+      bound: Map {},
+      takeable: Map {},
+      cov_file: "",
+      cov_count: 0,
+      prof_on: false,
+      prof_keys: Map {},
+      prof_lines: Map {},
+      limit: limit,
+    }
+    if coverage {
+      w = w with { cov_file: main_mod.display }
+    }
+    if profile {
+      w = w with { prof_on: true }
+    }
+    // the parameters each function consumes (own.klar)
+    var ofns: List[OwnFn] = []
+    for m in ordered {
+      if not m.is_sys {
+        var di = 0
+        for d in checker_of(m).decls {
+          match d {
+            Decl.Fn(f) => {
+              if f.body != None {
+                ofns = ofns.push(OwnFn { key: "{m.name}#{di}", decl: f, cx: Cx { ck: checker_of(m), file: decl_file(m, di)
+                } })
+              }
+            },
+            _ => {},
+          }
+          di = di + 1
+        }
+      }
+    }
+    w = w with { owned: infer_owned(ofns) }
+    // __user_main calls main (or the test the command line selects)
+    w = begin_fn(w, um0)
+    let rr = reg(w)
+    w = rr.w
+    var main_idx = -1
+    var main_decl: Option[FnDecl] = None
+    var test_blocks: List[Decl] = []
+    k = 0
+    for d in checker_of(main_mod).decls {
+      match d {
+        Decl.Fn(f) => {
+          if f.name == "main" and main_decl == None {
+            main_decl = Some(f)
+            main_idx = k
+          }
+        },
+        Decl.Test(_, _, _, _) => {
+          test_blocks = test_blocks.push(d)
+        },
+        Decl.Property(_, _, _, _, _) => {
+          test_blocks = test_blocks.push(d)
+        },
+        _ => {},
+      }
+      k = k + 1
+    }
+    var md = FnDecl { span: zero_span(), name: "", name_span: zero_span(), type_params: [], params: [], ret: None,
+      effects: [], effects_span: None, sig_end: zero_span(), pre: [], post: [], body: None, doc: None, bounds: [],
+      owner_kind: None, owner: None, trait_name: None, method_name: None, public: false, constructs: None }
+    var main_span = zero_span()
+    if tests {
+      w = finish_fn(w)
+      var names: List[Str] = []
+      var test_spans: List[Span] = []
+      var ti = 0
+      for d in test_blocks {
+        match d {
+          Decl.Test(sp, test_name, body, _) => {
+            if ti == 0 {
+              main_span = sp
+            }
+            test_spans = test_spans.push(sp)
+            let t = lower_test(w0: w, m: main_mod, name: test_name, body: body, index: ti)
+            w = t.w
+            names = names.push(t.v)
+            ti = ti + 1
+          },
+          Decl.Property(sp, pname, params, body, _) => {
+            if ti == 0 {
+              main_span = sp
+            }
+            test_spans = test_spans.push(sp)
+            let t = lower_property(w0: w, m: main_mod, name: pname, params: params, body: body, sp: sp, index: ti)
+            w = t.w
+            names = names.push(t.v)
+            ti = ti + 1
+          },
+          _ => {},
+        }
+      }
+      if names.is_empty() {
+        return fail("native: no tests")
+      }
+      w = w with { cur: w.fns.get_or(0, um0), cur_index: 0, dead: false, m: main_mod, file: main_mod.display, scopes: [],
+        in_test: false }
+      let sel = reg(w)
+      w = emit_always(sel.w, [op("call"), r(sel.v), KV.S(s: "test_index_arg"), KV.L(regs: [])])
+      // tests run on fake files, clock and random numbers
+      let fake = rt_fn(w, "fake_begin")
+      let fr = reg(fake.w)
+      w = emit_always(fr.w, [op("call"), r(fr.v), KV.S(s: fake.v), KV.L(regs: [])])
+      ti = 0
+      for nm in names {
+        let c = reg(w)
+        let kr = reg(c.w)
+        let yes = label(kr.w, "t")
+        let no = label(yes.w, "n")
+        w = emit_always(no.w, [op("const"), r(kr.v), r(ti)])
+        w = emit_always(w, [op("cmp"), op("eq"), r(c.v), r(sel.v), r(kr.v)])
+        w = emit_always(w, [op("br"), r(c.v), KV.S(s: yes.v), KV.S(s: no.v)])
+        w = emit_always(w, [op("label"), KV.S(s: yes.v)])
+        // the test's own place, for its call stack
+        let gf = reg(w)
+        let at = reg(gf.w)
+        let ss = span_sym(at.w, test_spans.get_or(ti, main_span))
+        w = emit_always(ss.w, [op("addr"), r(gf.v), KV.S(s: "g_frames")])
+        w = emit_always(w, [op("addr"), r(at.v), KV.S(s: ss.v)])
+        w = emit_always(w, [op("store"), r(gf.v), r(8), r(at.v)])
+        w = emit_always(w, [op("call"), r(rr.v), KV.S(s: nm), KV.L(regs: [])])
+        w = emit_always(w, [op("ret"), r(rr.v)])
+        w = emit_always(w, [op("label"), KV.S(s: no.v)])
+        ti = ti + 1
+      }
+      w = emit_always(emit_always(w, [op("const"), r(rr.v), r(0)]), [op("ret"), r(rr.v)])
+      w = finish_fn(w)
+    } else {
+      md = match main_decl {
+        Some(f) => f,
+        None => fail("native: no main"),
+      }
+      main_span = md.name_span
+      let main_name = instance(w: w, md: main_mod, decl: md, idx: main_idx, type_args: [], kind: "user")
+      w = main_name.w
+      if profile {
+        let pk = addr(w, "prof_keys")
+        let pl = addr(pk.w, "prof_lines_tab")
+        w = call_rt(w: pl.w, name: "prof_start", args: [pk.v, pl.v]).w
+      }
+      w = emit_always(w, [op("call"), r(rr.v), KV.S(s: main_name.v), KV.L(regs: [])])
+      w = finish_fn(emit_always(w, [op("ret"), r(rr.v)]))
+    }
+    // constants initialiser: the runtime's own constants first, then the program's modules in dependency order
+    w = begin_fn(w, KFn { name: "__init_consts", klar_name: "__init_consts", nparams: 0, nregs: 0, code: [], labels: 0 })
+    for m in ordered {
+      var di = 0
+      for d in checker_of(m).decls {
+        match d {
+          Decl.Const(_, cname, _, _, value, _, _) => {
+            w = push_scope(w with { m: m, file: decl_file(m, di), env: Map {}, is_rt: m.is_sys, scopes: [], loops: [],
+              dead: false, closure_self: None, captures: Map {} })
+            let v = expr(w, value)
+            let slot = const_slot(w: v.w, module_name: m.name, cname: cname)
+            let a = addr(slot.w, slot.v)
+            let o = own(a.w, v.v)
+            w = emit_always(o.w, [op("store"), r(a.v), r(0), r(o.v)])
+          },
+          _ => {},
+        }
+        di = di + 1
+      }
+    }
+    let z = reg(w)
+    w = emit_always(emit_always(z.w, [op("const"), r(z.v), r(0)]), [op("ret"), r(z.v)])
+    w = finish_fn(w)
+    for helper in RT_HELPERS {
+      w = rt_fn(w, helper).w
+    }
+    w = drain(w, md)
+    // the software math functions the program's `fun` / `fpow` instructions call (rt/softmath.klar)
+    var soft: List[Str] = []
+    for f in w.fns {
+      for ins in f.code {
+        let name = soft_name(ins)
+        if name != "" and not soft.contains(name) {
+          soft = soft.push(name)
+        }
+      }
+    }
+    soft = soft.sort()
+    for name in soft {
+      w = rt_fn(w, name).w
+    }
+    w = drain(w with { soft: soft }, md)
+    // static descriptors the runtime refers to by name
+    w = w with { m: main_mod, file: main_mod.display }
+    for nt in [Pair { first: "td_Str", second: con("Str") }, Pair { first: "td_Int", second: con("Int") }, Pair {
+      first: "td_Float", second: con("Float") }, Pair { first: "td_Bool", second: con("Bool") }, Pair { first: "td_Unit",
+        second: unit_t() }, Pair { first: "td_Bytes", second: con("Bytes") }] {
+          let s = td(w, nt.second)
+          w = alias_sym(w: s.w, name: nt.first, sym: s.v)
+        }
+    let si = str_word(w, "Int")
+    w = words(w: si.w, name: "td_Big", ws: [W.N(v: K_BIG), si.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)])
+    let tn = td_word(w, Type.Con(name: "Option", args: [unit_t()]))
+    w = words(w: tn.w, name: "obj_None", ws: [W.N(v: -1), tn.v, W.N(v: 0)])
+    let sb = str_word(w, "Buf")
+    w = words(w: sb.w, name: "td_Buf", ws: [W.N(v: K_BUF), sb.v, W.N(v: 0), W.N(v: 0), W.N(v: 0), W.N(v: 0)])
+    let sl = str_word(w, "List")
+    w = words(w: sl.w, name: "td_ListStr", ws: [W.N(v: K_LIST), sl.v, W.A(sym: "td_Str", add: 0), W.N(v: 0), W.N(v: 0),
+      W.N(v: 0)])
+    var kind = 0
+    if not tests and tname(zonk(sig_of(main_mod, md).ret, Map {})) == "Result" {
+      kind = 1
+    }
+    w = trace_data(sandbox_data(words(w: w, name: "main_kind", ws: [W.N(v: kind)]), allow), trace)
+    w = words(w: w, name: "g_limit", ws: [W.N(v: limit)])
+    let ms = span_sym(w, main_span)
+    w = alias_sym(w: ms.w, name: "main_span", sym: ms.v)
+    var img = add_bss(img: add_bss(img: add_bss(img: w.img, name: "g_rt", size: 8 * 4096), name: "g_outbuf", size: 65536),
+      name: "g_inbuf", size: 65536)
+    if coverage {
+      img = add_bss(img: img, name: "g_cov", size: 8 * w.cov_count.max(1))
+    }
+    w = w with { img: img }
+    if profile {
+      var kws = [W.N(v: w.prof_keys.len())]
+      for key in w.prof_keys.keys() {
+        let s = str_word(w, key)
+        w = s.w
+        kws = kws.push(s.v)
+      }
+      w = words(w: w, name: "prof_keys", ws: kws)
+      var lws = [W.N(v: w.prof_lines.len())]
+      for key in w.prof_lines.keys() {
+        let parts = key.split("\0")
+        let s = str_word(w, parts.get_or(0, ""))
+        w = s.w
+        lws = lws.concat([s.v, W.N(v: parts.get_or(1, "0").to_int().unwrap_or(0))])
+      }
+      w = words(w: w, name: "prof_lines_tab", ws: lws)
+    }
+    return w
+  }
