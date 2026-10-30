@@ -6,6 +6,12 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 
 ## [Unreleased]
 
+### Added
+- `bench/ai/refactor_big`: a large change in a program of about 3 000 lines, in Klar and Python with `mypy`, with
+  hypotheses written before the runs and held-out checks that never answer the agent. First result: quality is equal
+  and at the ceiling (0 of 40 held-out checks failed in all 6 runs); Python took less time (211 s against 304 s) and
+  fewer output tokens (`bench/ai/README.md`).
+
 ### Fixed
 - The benchmarks ran Klar under the default 10 s per test while the other languages had only the 120 s of the whole
   run, so on a busy machine a correct but slow answer failed with R0018 (seen with a reference solution of 1 000 000
