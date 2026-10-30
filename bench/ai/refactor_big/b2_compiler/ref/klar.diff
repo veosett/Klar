@@ -1,0 +1,623 @@
+diff --git a/compiler/ast.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/ast.klar
+index 44c95e0..832f9fc 100644
+--- a/compiler/ast.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/ast.klar
+@@ -70,6 +70,8 @@ pub enum Expr {
+   WithExpr(span: Span, base: Expr, fields: List[FieldInit]),
+   Match(span: Span, subject: Expr, arms: List[MatchArm]),
+   Lambda(span: Span, params: List[Param], ret: Option[TypeExpr], body: Body),
++  /// `value |> f(args)`: `call` is the right side as written (a `Call` of a plain name when valid), without the value.
++  Pipe(span: Span, value: Expr, call: Expr),
+ }
+ 
+ pub type Block { span: Span, stmts: List[Stmt] }
+@@ -171,6 +173,25 @@ pub fn expr_span(e: Expr) -> Span {
+     Expr.WithExpr(s, _, _) => s,
+     Expr.Match(s, _, _) => s,
+     Expr.Lambda(s, _, _, _) => s,
++    Expr.Pipe(s, _, _) => s,
++  }
++}
++
++/// The call that `value |> call` means, `f(value, args)`: None if the right side is not a call of a plain name.
++/// The call keeps the span of the whole pipe, so that everything the checker records about it is found again.
++pub fn pipe_call(span: Span, value: Expr, call: Expr) -> Option[Expr] {
++  return match call {
++    Expr.Call(_, Expr.Name(ns, name), args) => Some(Expr.Call(span: span, callee: Expr.Name(span: ns, name: name),
++      args: [Arg { span: expr_span(value), name: None, value: value }].concat(args))),
++    _ => None,
++  }
++}
++
++/// A pipe as the call it means (`f(value, args)`); any other expression as it is.
++pub fn unpipe(e: Expr) -> Expr {
++  return match e {
++    Expr.Pipe(span, value, call) => pipe_call(span, value, call).unwrap_or(e),
++    _ => e,
+   }
+ }
+ 
+diff --git a/compiler/astjson.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/astjson.klar
+index 1697b1e..5810976 100644
+--- a/compiler/astjson.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/astjson.klar
+@@ -147,6 +147,8 @@ fn expr_json(e: Expr) -> Json {
+     Expr.Lambda(s, ps, ret, b) => node(kind: "Lambda", span: s, fields: [field(name: "params",
+       value: Json.Arr(items: ps.map(param_json))), field(name: "ret", value: opt_type(ret)), field(name: "body",
+         value: body_json(b))]),
++    Expr.Pipe(s, v, c) => node(kind: "Pipe", span: s, fields: [field(name: "value", value: expr_json(v)),
++      field(name: "call", value: expr_json(c))]),
+   }
+ }
+ 
+diff --git a/compiler/builtin_sigs.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/builtin_sigs.klar
+index 6a06b2a..7a6f91e 100644
+--- a/compiler/builtin_sigs.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/builtin_sigs.klar
+@@ -383,6 +383,7 @@ pub fn diag_codes() -> List[List[Str]] {
+     ["E0222", "impl in the wrong place or twice", "There is at most one `impl Trait for Type` per program, written in the trait's module or in the type's module (impls for Int/Float/Bool/Str live with the trait). Every module then sees the same methods."],
+     ["E0223", "cannot infer the type of a bounded parameter", "The type must be known to choose the implementation: annotate the value (`let xs: List[Circle] = []`)."],
+     ["E0224", "a trait is not a type", "Klar has no trait objects: write a generic function `fn f[T: Shape](x: T)` for one kind of value at a time; for a list of different kinds, declare an `enum` with one variant per kind and implement the trait for the enum (each method is one `match`)."],
++    ["E0225", "the right side of `|>` must be a call", "`a |> f(b)` means `f(a, b)`: the right side is a call of a function by its plain name, `f(args)`, and the left side becomes its first argument. A method call (`x.f()`), a bare name or a literal cannot be piped into; write a function of your own that makes the call, and pipe into that."],
+     ["E0301", "non-exhaustive match", "Cover every variant or add a catch-all `_ => ...` arm."],
+     ["E0302", "invalid pattern", "The pattern does not fit the matched type, or the variant does not exist."],
+     ["W0303", "unreachable match arm", "An earlier catch-all arm already matches everything."],
+diff --git a/compiler/checker.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/checker.klar
+index ca4d9f8..1f79279 100644
+--- a/compiler/checker.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/checker.klar
+@@ -5,7 +5,7 @@
+ // Klar values are immutable, so the checker state (`Ck`: diagnostics, scopes, the type substitution, the
+ // universe of declared types, ...) is passed to every function and returned updated with the result (`Res`).
+ use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span}
+-use ast.{Stmt, StrPiece, TestUses, TypeExpr, expr_span, no_uses, pattern_span}
++use ast.{Stmt, StrPiece, TestUses, TypeExpr, expr_span, no_uses, pattern_span, pipe_call, unpipe}
+ use builtin_sigs.{foreign_methods, foreign_notes, global_sigs, method_sigs, sys_sigs}
+ use parser.{parse_signature}
+ use similar.{closest}
+@@ -2536,7 +2536,9 @@ fn stmt(ck: Ck, st: Stmt) -> Ck {
+   return c
+ }
+ 
+-fn expr_stmt(ck: Ck, e: Expr) -> Ck {
++fn expr_stmt(ck: Ck, stmt_expr: Expr) -> Ck {
++  // a pipe is the call it means
++  let e = unpipe(stmt_expr)
+   let r = expr(ck: ck, e: e, exp: None)
+   var c = r.c
+   let t = pr(c, r.v)
+@@ -2603,7 +2605,7 @@ fn stmt_returns(s: Stmt) -> Bool {
+ }
+ 
+ fn diverges(e: Expr) -> Bool {
+-  return match e {
++  return match unpipe(e) {
+     Expr.Call(_, Expr.Name(_, name), _) => name == "fail" or name == "todo" or name == "exit",
+     Expr.Match(_, _, arms) => arms.all(fn(a) => match a.body {
+       Body.BlockBody(b) => returns(b),
+@@ -2667,6 +2669,7 @@ fn has_break_expr(e: Expr) -> Bool {
+     Expr.Match(_, subj, arms) => has_break_expr(subj) or arms.any(fn(a) => a.guard.map(has_break_expr).unwrap_or(false) or
+         has_break_body(a.body)),
+     Expr.Lambda(_, _, _, body) => has_break_body(body),
++    Expr.Pipe(_, v, c) => has_break_expr(v) or has_break_expr(c),
+     _ => false,
+   }
+ }
+@@ -2899,7 +2902,30 @@ fn expr_kind(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
+     Expr.WithExpr(sp, base, fields) => e_with(ck: c, e_span: sp, base: base, fields: fields),
+     Expr.Lambda(_, _, _, _) => e_lambda(ck: c, e: e, exp: exp),
+     Expr.Match(_, _, _) => e_match(ck: c, e: e, exp: exp),
++    Expr.Pipe(_, _, _) => e_pipe(ck: c, e: e, exp: exp),
++  }
++}
++
++/// `value |> f(args)` is checked as the call `f(value, args)`; a right side that is not a call of a plain name is E0225.
++fn e_pipe(ck: Ck, e: Expr, exp: Option[Type]) -> Res[Type] {
++  var c = ck
++  match e {
++    Expr.Pipe(span, value, call) => {
++      match pipe_call(span, value, call) {
++        Some(d) => {
++          return e_call(ck: c, e: d, exp: exp)
++        },
++        None => {
++          c = error(c: c, code: "E0225", msg: "the right side of `|>` must be a call", span: expr_span(call),
++            hint: Some("write `value |> f(args)`, which means `f(value, args)`"))
++          c = expr_any(c, value)
++          c = expr_any(c, call)
++        },
++      }
++    },
++    _ => {},
+   }
++  return ok(c, Type.Any)
+ }
+ 
+ fn visible_names(c: Ck) -> List[Str] {
+@@ -4950,6 +4976,7 @@ pub fn walk_names(e: Expr) -> List[Str] {
+     Expr.Match(_, subj, arms) => walk_names(subj).concat(arms.flat_map(fn(a) => opt_names(a.guard)
+         .concat(walk_names_body(a.body)))),
+     Expr.Lambda(_, _, _, body) => walk_names_body(body),
++    Expr.Pipe(_, v, c) => walk_names(v).concat(walk_names(c)),
+     _ => [],
+   }
+ }
+diff --git a/compiler/coverage.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/coverage.klar
+index e38aecf..12e0d8d 100644
+--- a/compiler/coverage.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/coverage.klar
+@@ -107,6 +107,7 @@ fn c_expr(acc: List[Int], e: Expr) -> List[Int] {
+       return out
+     },
+     Expr.Lambda(_, _, _, body) => c_body(acc, body),
++    Expr.Pipe(_, value, call) => c_expr(c_expr(acc, value), call),
+     _ => acc,
+   }
+ }
+diff --git a/compiler/fmt.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/fmt.klar
+index cc9134b..3c22f6b 100644
+--- a/compiler/fmt.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/fmt.klar
+@@ -3,6 +3,7 @@
+ //
+ // The formatter keeps the author's line structure and comments; it only normalizes
+ //   * indentation: 2 spaces per open `{` / `(` / `[`, +1 for `.method` chain lines and `requires`/`ensures`;
++//   * a line that starts with `|>` is joined to the line before it (`a |> f()` is written on one line);
+ //   * spacing between tokens (binary operators, `,`, `:`, braces, unary minus);
+ //   * blank lines: at most one in a row, none right after `{` or before `}`, one between top-level declarations;
+ //   * trailing whitespace and the final newline.
+@@ -12,16 +13,16 @@ use lexer.{KEYWORDS, StrPart, TokKind, tokenize}
+ /// A token of one line: kind is "word", "num", "str", "op" or "comment".
+ type FTok { kind: Str, text: Str }
+ 
+-const TWO: List[Str] = ["->", "=>", "==", "!=", "<=", ">="]
++const TWO: List[Str] = ["->", "=>", "==", "!=", "<=", ">=", "|>"]
+ 
+-const BINARY: List[Str] = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "=", "->", "=>", "and", "or"]
++const BINARY: List[Str] = ["+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "=", "->", "=>", "and", "or", "|>"]
+ 
+ const OPEN: List[Str] = ["(", "[", "\{"]
+ 
+ const CLOSE: List[Str] = [")", "]", "\}"]
+ 
+ const UNARY_BEFORE: List[Str] = ["(", "[", "\{", ",", ":", "=", "=>", "->", "+", "-", "*", "/", "%", "==", "!=", "<",
+-  ">", "<=", ">=", "and", "or", "not", "return", "if", "while", "in", "match", "assert", "requires", "ensures"]
++  ">", "<=", ">=", "|>", "and", "or", "not", "return", "if", "while", "in", "match", "assert", "requires", "ensures"]
+ 
+ const TOP_LEVEL: List[Str] = ["fn ", "type ", "enum ", "test ", "property ", "const ", "///", "use ", "module ", "pub ",
+   "trait ", "impl "]
+@@ -234,6 +235,10 @@ pub fn format_source(src: Str) -> Str {
+   var pending_blank = false
+   // the previous code line ended with a binary operator
+   var continued = false
++  // the indentation of the last line written, and whether a line starting with `|>` can join it (it is code that does
++  // not end with a comment)
++  var last_indent = 0
++  var joinable = false
+   for raw in lines {
+     let stripped = raw.trim()
+     if stripped.is_empty() {
+@@ -259,6 +264,10 @@ pub fn format_source(src: Str) -> Str {
+       }
+       let top_level = stack.is_empty() and indent == -1
+       var base = -1
++      let joins = k == 0 and joinable and code.get(0).map(fn(t) => t.kind == "op" and t.text == "|>").unwrap_or(false)
++      if joins {
++        indent = last_indent
++      }
+       if indent == -1 {
+         indent = 0
+         if not stack.is_empty() {
+@@ -269,7 +278,7 @@ pub fn format_source(src: Str) -> Str {
+           // `{` at the end of a wrapped condition belongs to the statement
+           base = indent
+           indent = indent + 1
+-        } else if first == "." or first == "requires" or first == "ensures" {
++        } else if first == "." or first == "|>" or first == "requires" or first == "ensures" {
+           indent = indent + 1
+         }
+       }
+@@ -289,13 +298,19 @@ pub fn format_source(src: Str) -> Str {
+         text = render(toks)
+       }
+       let prev = out.last().map(fn(l) => l.trim()).unwrap_or("")
+-      if pending_blank and prev != "" and not prev.ends_with("\{") and k == 0 {
+-        out = out.push("")
+-      } else if top_level and indent == 0 and not out.is_empty() and prev == "\}" and starts_top_level(stripped) {
+-        out = out.push("")
++      if joins {
++        out = out.take(out.len() - 1).push(out.last().unwrap_or("") + " " + text)
++      } else {
++        if pending_blank and prev != "" and not prev.ends_with("\{") and k == 0 {
++          out = out.push("")
++        } else if top_level and indent == 0 and not out.is_empty() and prev == "\}" and starts_top_level(stripped) {
++          out = out.push("")
++        }
++        out = out.push("  ".repeat(indent) + text)
++        last_indent = indent
+       }
+       pending_blank = false
+-      out = out.push("  ".repeat(indent) + text)
++      joinable = not code.is_empty() and toks.all(fn(t) => t.kind != "comment") and not stripped.starts_with("//")
+       continued = match code.last() {
+         Some(t) => is_binary(t) and t.text != "=>" and t.text != "->",
+         None => false,
+@@ -360,3 +375,10 @@ pub fn format_checked(src: Str) -> Result[Str, Str] {
+   }
+   return Ok(result)
+ }
++
++test "a pipe is written on one line" {
++  assert format_source("fn main() \{\n  let v = 3|>f(4)\n    |> g()\n  print(v)\n\}\n") ==
++    "fn main() \{\n  let v = 3 |> f(4) |> g()\n  print(v)\n\}\n"
++  assert format_source("fn main() \{\n  let v = 3 // three\n    |> g()\n\}\n") ==
++    "fn main() \{\n  let v = 3 // three\n    |> g()\n\}\n"
++}
+diff --git a/compiler/inspect.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/inspect.klar
+index 021a65b..07c7470 100644
+--- a/compiler/inspect.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/inspect.klar
+@@ -317,6 +317,7 @@ fn w_expr(st0: RS, e: Expr) -> RS {
+       return w_expr(st, subject)
+     },
+     Expr.Lambda(_, params, ret, body) => w_params(w_opt_type(w_body(st, body), ret), params),
++    Expr.Pipe(_, value, call) => w_expr(w_expr(st, call), value),
+     _ => st,
+   }
+ }
+diff --git a/compiler/lexer.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/lexer.klar
+index df9ae03..c225e5d 100644
+--- a/compiler/lexer.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/lexer.klar
+@@ -42,7 +42,7 @@ pub const KEYWORDS: List[Str] = [
+   "with", "const", "property", "trait", "impl", "pub",
+ ]
+ 
+-const TWO_CHAR: List[Str] = ["->", "=>", "==", "!=", "<=", ">="]
++const TWO_CHAR: List[Str] = ["->", "=>", "==", "!=", "<=", ">=", "|>"]
+ 
+ const ONE_CHAR: Str = "+-*/%<>=()[]\{\},:.?"
+ 
+@@ -202,7 +202,7 @@ fn line_end(b: Bytes, start: Int) -> Int {
+   return i
+ }
+ 
+-/// True if the next significant character after `start` is a `.` (a method chain continues the line).
++/// True if the next significant character after `start` is a `.` or a `|>` (a method chain or a pipe continues the line).
+ fn next_line_continues(b: Bytes, start: Int) -> Bool {
+   var i = start
+   while i < b.len() {
+@@ -212,7 +212,7 @@ fn next_line_continues(b: Bytes, start: Int) -> Bool {
+     } else if c == 47 and at(b, i + 1) == 47 {
+       i = line_end(b, i)
+     } else {
+-      return c == 46 and at(b, i + 1) != 46
++      return (c == 46 and at(b, i + 1) != 46) or (c == 124 and at(b, i + 1) == 62)
+     }
+   }
+   return false
+@@ -644,3 +644,9 @@ test "the printable characters" {
+     k = k + 1
+   }
+ }
++
++test "the pipe operator" {
++  let toks = tokenize("a |> f()\n  |> g()\n").unwrap_or([])
++  assert toks.map(fn(t) => t.text).take(10) == ["a", "|>", "f", "(", ")", "|>", "g", "(", ")", "\n"]
++  assert tokenize("a || b").is_err()
++}
+diff --git a/compiler/lower.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/lower.klar
+index 5716e0e..03d26fa 100644
+--- a/compiler/lower.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/lower.klar
+@@ -11,7 +11,7 @@
+ // KIR instructions are lists of `KV` (the Python tuples): the opcode first, then registers, immediates, labels,
+ // symbols, argument lists or nothing.
+ use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MatchArm, Param, Pattern, Program, Span, Stmt}
+-use ast.{StrPiece, TypeExpr, expr_span, pattern_span}
++use ast.{StrPiece, TypeExpr, expr_span, pattern_span, pipe_call, unpipe}
+ use checker.{Builtins, CallInfo, Ck, Resolution, Sig, Universe, check_body, span_key}
+ use own.{Cx, OwnFn, REUSE, all_exprs, body_exprs, infer_owned, liveness_block, liveness_expr, node_key, path_of}
+ use own.{root_of, sub_exprs}
+@@ -988,6 +988,7 @@ fn is_call(e: Expr) -> Bool {
+   return match e {
+     Expr.Call(_, _, _) => true,
+     Expr.MethodCall(_, _, _, _, _) => true,
++    Expr.Pipe(_, _, _) => true,
+     _ => false,
+   }
+ }
+@@ -1324,6 +1325,7 @@ fn walk_expr(e: Expr) -> List[Item] {
+     Expr.Match(_, subj, arms) => walk_expr(subj).concat(arms.flat_map(fn(a) => walk_pattern(a.pattern).concat(walk_opt(
+       a.guard)).concat(walk_body(a.body)))),
+     Expr.Lambda(_, _, _, body) => walk_body(body),
++    Expr.Pipe(_, v, c) => walk_expr(v).concat(walk_expr(c)),
+     _ => [],
+   }
+ }
+@@ -1796,7 +1798,7 @@ fn for_stmt(w0: Lw, span: Span, var_name: Str, iter: Expr, body: Block) -> Lw {
+   let step = label(bod.w, "fstep")
+   let end = label(step.w, "fend")
+   w = end.w
+-  let range_args = match iter {
++  let range_args = match unpipe(iter) {
+     Expr.Call(_, Expr.Name(_, "range"), args) => match lookup(w, "range") == None and args.len() == 2 and args.all(fn(a) =>
+       a.name == None) {
+         true => Some(args),
+@@ -1966,6 +1968,10 @@ fn expr(w: Lw, e: Expr) -> LR[V] {
+     Expr.Binary(_, _, _, _) => x_binary(w, e),
+     Expr.Call(_, _, _) => call_expr(w, e),
+     Expr.MethodCall(_, _, _, _, _) => call_expr(w, e),
++    Expr.Pipe(sp, pv, pc) => match pipe_call(span: sp, value: pv, call: pc) {
++      Some(d) => expr(w, d),
++      None => fail("native: the right side of a pipe is not a call"),
++    },
+     Expr.FieldAccess(_, _, _, _) => x_field_access(w, e),
+     Expr.Try(span, x) => x_try(w0: w, span: span, x: x),
+     Expr.RecordLit(_, _, fields) => x_record(w0: w, e: e, fields: fields),
+diff --git a/compiler/lsp.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/lsp.klar
+index 8094249..7a353a6 100644
+--- a/compiler/lsp.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/lsp.klar
+@@ -456,6 +456,7 @@ fn w_expr(acc: List[LspNode], e: Expr) -> List[LspNode] {
+       return out
+     },
+     Expr.Lambda(_, params, ret, body) => w_body(w_opt_type(w_params(acc, params), ret), body),
++    Expr.Pipe(_, value, call) => w_expr(w_expr(acc, value), call),
+     _ => acc,
+   }
+ }
+diff --git a/compiler/own.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/own.klar
+index 415e159..d747d64 100644
+--- a/compiler/own.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/own.klar
+@@ -6,7 +6,7 @@
+ //   place across function calls.
+ //
+ // Nodes are identified by their source span (`node_key`); live sets are sets of "path!excluded,fields" strings.
+-use ast.{Arg, Block, Body, Else, Expr, FieldInit, FnDecl, MatchArm, Pattern, Span, Stmt, StrPiece}
++use ast.{Arg, Block, Body, Else, Expr, FieldInit, FnDecl, MatchArm, Pattern, Span, Stmt, StrPiece, unpipe}
+ use checker.{CallInfo, Ck, Resolution, span_key}
+ use types.{Type}
+ 
+@@ -113,7 +113,7 @@ fn callee_of(info: Option[CallInfo], recv: Bool) -> Option[Callee] {
+ }
+ 
+ fn user_callee(cx: Cx, e: Expr) -> Option[Callee] {
+-  return match e {
++  return match unpipe(e) {
+     Expr.Call(sp, Expr.Name(_, _), _) => callee_of(info_at(cx, sp), false),
+     Expr.MethodCall(sp, _, _, _, _) => match method_kind(cx, sp) == "ufcs" {
+       true => callee_of(info_at(cx, sp), true),
+@@ -160,6 +160,10 @@ pub fn sub_exprs(e: Expr) -> List[Expr] {
+     Expr.WithExpr(_, b, fs) => [b].concat(fs.map(fn(f) => f.value)),
+     Expr.Match(_, subj, arms) => [subj].concat(arms.flat_map(fn(a) => arm_exprs(a))),
+     Expr.Lambda(_, _, _, body) => body_exprs(body),
++    Expr.Pipe(_, v, c) => match unpipe(e) {
++      Expr.Call(_, f, args) => [f].concat(args.map(fn(a) => a.value)),
++      _ => [v, c],
++    },
+     _ => [],
+   }
+ }
+@@ -213,7 +217,8 @@ pub fn all_exprs(roots: List[Expr]) -> List[Expr] {
+   var out: List[Expr] = []
+   var stack = roots.reverse()
+   while not stack.is_empty() {
+-    let e = stack.last().unwrap_or(Expr.UnitLit(span: Span { line: 0, col: 0, end_line: 0, end_col: 0 }))
++    // a pipe is the call it means
++    let e = unpipe(stack.last().unwrap_or(Expr.UnitLit(span: Span { line: 0, col: 0, end_line: 0, end_col: 0 })))
+     stack = stack.take(stack.len() - 1)
+     out = out.push(e)
+     stack = stack.concat(sub_exprs(e).reverse())
+@@ -582,6 +587,7 @@ fn expr_span_of(e: Expr) -> Span {
+     Expr.WithExpr(sp, _, _) => sp,
+     Expr.Match(sp, _, _) => sp,
+     Expr.Lambda(sp, _, _, _) => sp,
++    Expr.Pipe(sp, _, _) => sp,
+   }
+ }
+ 
+@@ -717,7 +723,12 @@ fn passes_through(cx: Cx, e: Expr) -> Bool {
+   }
+ }
+ 
++/// A pipe is walked as the call it means.
+ fn ex(s: Lv, e: Expr, live: Map[Str, Bool], parent: Str, check: Option[Map[Str, Bool]], excl: List[Str]) -> LS {
++  return ex_node(s: s, e: unpipe(e), live: live, parent: parent, check: check, excl: excl)
++}
++
++fn ex_node(s: Lv, e: Expr, live: Map[Str, Bool], parent: Str, check: Option[Map[Str, Bool]], excl: List[Str]) -> LS {
+   match local_path(s, e) {
+     Some(lp) => {
+       var par = parent
+diff --git a/compiler/parser.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/parser.klar
+index 2a6edd1..6e0f954 100644
+--- a/compiler/parser.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/parser.klar
+@@ -350,7 +350,7 @@ fn parse_expr(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+   if p.depth >= MAX_NESTING {
+     return too_deep(p, i)
+   }
+-  return parse_or(p with { depth: p.depth + 1 }, i)
++  return parse_pipe(p with { depth: p.depth + 1 }, i)
+ }
+ 
+ fn too_deep(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+@@ -377,6 +377,20 @@ fn binary(op: Str, left: Expr, right: Expr) -> Expr {
+   return Expr.Binary(span: merge(expr_span(left), expr_span(right)), op: op, left: left, right: right)
+ }
+ 
++/// `a |> f(b) |> g()`: the loosest operator, left associative. The right side is parsed as any expression above it, and
++/// the checker reports (E0225) one that is not a call of a plain name.
++fn parse_pipe(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
++  var left = parse_or(p, i)?
++  var q = p
++  while is_op(tk(p, left.pos), "|>") {
++    q = link(q, left.pos)?
++    let right = parse_or(q, skip_nl(p, next(p, left.pos)))?
++    let sp = merge(expr_span(left.value), expr_span(right.value))
++    left = Got { value: Expr.Pipe(span: sp, value: left.value, call: right.value), pos: right.pos }
++  }
++  return Ok(left)
++}
++
+ fn parse_or(p: Ps, i: Int) -> Result[Got[Expr], ParseError] {
+   var left = parse_and(p, i)?
+   var q = p
+diff --git a/compiler/safety.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/safety.klar
+index 7660572..880184c 100644
+--- a/compiler/safety.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/safety.klar
+@@ -14,6 +14,7 @@
+ // threads its state (`Sf`) through every function, because Klar values are immutable.
+ use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, LitValue, MapEntry, MatchArm, Pattern, Span, Stmt}
+ use ast.{StrPiece, expr_span}
++use ast.{unpipe}
+ use checker.{Ck, Diag, DiagFix, Resolution, fix_at, span_key, walk_names}
+ use types.{Type, show}
+ 
+@@ -249,7 +250,7 @@ fn children(n: Nd) -> List[Nd] {
+ }
+ 
+ fn expr_children(e: Expr) -> List[Nd] {
+-  return match e {
++  return match unpipe(e) {
+     Expr.StrLit(_, parts) => parts.flat_map(fn(p) => match p {
+       StrPiece.Code(x) => [Nd.E(e: x)],
+       _ => [],
+@@ -270,12 +271,20 @@ fn expr_children(e: Expr) -> List[Nd] {
+   }
+ }
+ 
++/// A pipe is the call it means.
++fn nd_norm(n: Nd) -> Nd {
++  return match n {
++    Nd.E(e) => Nd.E(e: unpipe(e)),
++    _ => n,
++  }
++}
++
+ /// Every node under `root`, in the order of klar/safety.py `iter_nodes` (a stack: the last child first).
+ fn iter_nodes(root: Nd) -> List[Nd] {
+   var out: List[Nd] = []
+   var stack = [root]
+   while not stack.is_empty() {
+-    let x = stack.last().unwrap_or(root)
++    let x = nd_norm(stack.last().unwrap_or(root))
+     stack = stack.take(stack.len() - 1)
+     out = out.push(x)
+     stack = stack.concat(children(x))
+@@ -369,6 +378,7 @@ fn source_text(e: Expr) -> Str {
+       .join(", ") + ")",
+     Expr.Call(_, Expr.Name(_, f), args) => f + "(" + args.map(fn(a) => source_text(a.value)).join(", ") + ")",
+     Expr.Binary(_, op, l, r) => source_text(l) + " " + op + " " + source_text(r),
++    Expr.Pipe(_, v, c) => source_text(v) + " |> " + source_text(c),
+     Expr.Unary(_, op, x) => match op == "not" {
+       true => "not " + source_text(x),
+       false => op + source_text(x),
+@@ -1020,7 +1030,7 @@ fn stmt(sf: Sf, st: Stmt, facts: Facts) -> SR[Flow] {
+     },
+     Stmt.ExprStmt(_, e) => {
+       s = expr(sf: s, e: e, facts: facts)
+-      let never = match e {
++      let never = match unpipe(e) {
+         Expr.Call(_, Expr.Name(_, n), _) => n == "fail" or n == "todo",
+         _ => false,
+       }
+@@ -1059,7 +1069,7 @@ fn stmt(sf: Sf, st: Stmt, facts: Facts) -> SR[Flow] {
+     Stmt.For(_, var_name, _, iter, body) => {
+       s = expr(sf: s, e: iter, facts: facts)
+       var sign = ANY_SIGN
+-      match iter {
++      match unpipe(iter) {
+         Expr.Call(_, Expr.Name(_, "range"), args) => {
+           match args.get(0) {
+             Some(a) => {
+@@ -1106,6 +1116,10 @@ fn expr_nd(sf: Sf, n: Nd, facts: Facts) -> Sf {
+ }
+ 
+ fn expr(sf: Sf, e: Expr, facts: Facts) -> Sf {
++  return expr_node(sf: sf, e: unpipe(e), facts: facts)
++}
++
++fn expr_node(sf: Sf, e: Expr, facts: Facts) -> Sf {
+   var s = sf
+   match e {
+     Expr.Binary(_, op, l, r) => {
+@@ -1469,7 +1483,7 @@ fn check_builtin_call(sf: Sf, e: Expr) -> Sf {
+ 
+ /// The function called by `f(a, b)` or `a.f(b)` (through UFCS or an impl), with its positional arguments.
+ fn callee_of(sf: Sf, e: Expr) -> Option[Pair[FnDecl, List[Expr]]] {
+-  return match e {
++  return match unpipe(e) {
+     Expr.Call(_, Expr.Name(_, f), args) => sf.fn_decls.get(f).map(fn(d) => Pair { first: d, second: args.filter(fn(a) =>
+       a.name == None).map(fn(a) => a.value) }),
+     Expr.MethodCall(span, obj, _, _, args) => match resolution(sf, span) {
+@@ -1488,7 +1502,7 @@ fn callee_of(sf: Sf, e: Expr) -> Option[Pair[FnDecl, List[Expr]]] {
+ }
+ 
+ fn call_args(e: Expr) -> List[Arg] {
+-  return match e {
++  return match unpipe(e) {
+     Expr.Call(_, _, args) => args,
+     Expr.MethodCall(_, _, _, _, args) => args,
+     _ => [],
+@@ -1781,7 +1795,7 @@ fn required_signs(c: Expr, names: List[Str], truth: Bool) -> List[Pair[Str, Int]
+ 
+ /// The call of `name` that evaluating `e` certainly makes (ignoring lambdas and lazy branches), if any.
+ fn calls_self(sf: Sf, e: Expr, name: Str) -> Option[Span] {
+-  return match e {
++  return match unpipe(e) {
+     Expr.Call(span, callee, args) => match callee {
+       Expr.Name(_, n) => match n == name {
+         true => Some(span),
+diff --git a/compiler/view.klar b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/view.klar
+index f1fdbca..190dbf4 100644
+--- a/compiler/view.klar
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/klar/compiler/view.klar
+@@ -4,7 +4,7 @@
+ // and the data types. With `--run` the program runs natively; its output and error are shown (call counts and times
+ // need the interpreter: `klar view --run`).
+ use ast.{Arg, Block, Body, Decl, Else, Expr, FieldInit, FnDecl, MatchArm, Pattern, Span, Stmt, StrPiece, TypeExpr}
+-use ast.{expr_span, pattern_span}
++use ast.{expr_span, pattern_span, unpipe}
+ use checker.{CallInfo, Resolution, Sig, span_key}
+ use commands.{absolute}
+ use dev.{host_target, native_image, parse_rt, save_exe, temp_path}
+@@ -329,6 +329,10 @@ fn v_expr(acc: List[Ev], e: Expr) -> List[Ev] {
+       return v_expr(out, subject)
+     },
+     Expr.Lambda(_, _, _, body) => v_body(acc, body),
++    Expr.Pipe(_, value, call) => match unpipe(e) {
++      Expr.Call(_, _, _) => v_expr(acc, unpipe(e)),
++      _ => v_expr(v_expr(acc, call), value),
++    },
+     _ => acc,
+   }
+ }
+@@ -412,7 +416,7 @@ fn errors_returned(evs: List[Ev], lines: List[Str]) -> List[Str] {
+   for ev in evs {
+     match ev {
+       Ev.EReturn(value) => {
+-        match value {
++        match value.map(unpipe) {
+           Some(Expr.Call(_, Expr.Name(_, "Err"), args)) => {
+             match args.get(0) {
+               Some(a) => {
+@@ -447,8 +451,13 @@ fn tried_calls(evs: List[Ev]) -> List[Str] {
+   var out: List[Str] = []
+   for ev in evs {
+     match ev {
+-      Ev.ETry(Expr.Call(_, Expr.Name(_, n), _)) => {
+-        out = out.push(n)
++      Ev.ETry(x) => {
++        match unpipe(x) {
++          Expr.Call(_, Expr.Name(_, n), _) => {
++            out = out.push(n)
++          },
++          _ => {},
++        }
+       },
+       _ => {},
+     }

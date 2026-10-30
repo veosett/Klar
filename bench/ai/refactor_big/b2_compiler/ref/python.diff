@@ -1,0 +1,335 @@
+diff --git a/klar/ai_reference.md b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/ai_reference.md
+index c99a5dc..1a7e9b1 100644
+--- a/klar/ai_reference.md
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/ai_reference.md
+@@ -33,7 +33,7 @@ exactly; the compiler rejects everything else with a coded error (`klar explain
+ 
+ ## Lexical
+ - One statement per line. NO semicolons. Blocks use `{ }`. Comments: `// ...`, doc comments: `/// ...`.
+-- Inside `( )` and `[ ]` newlines are ignored. A line starting with `.` continues a method chain.
++- Inside `( )` and `[ ]` newlines are ignored. A line starting with `.` continues a method chain; a line starting with `|>` continues a pipe.
+   To break a long expression elsewhere, end the line with the operator (`a +` newline `b`), or wrap it in `( )`.
+ - Logic: `and`, `or`, `not` (never `&&`, `||`, `!`). No `++`, `+=`.
+ - Strings: double quotes, interpolation `"sum = {a + b}"`, literal brace `\{`. No string literals inside `{...}`.
+@@ -111,6 +111,10 @@ assert x > 0, "message"
+ - Calls: `f(a, b)`. With 3+ parameters, name the arguments (`f(a: 1, b: 2, c: 3)`) unless they cannot be swapped:
+   parameters of different types, or same-typed arguments named like their parameters (`cell(grid, r, c)`,
+   `cell(grid, nr, c - 1)`); `cell(grid, 0, 1)` and `cell(grid, i, j)` must be named (E0208).
++- Pipe: `a |> f(b)` means `f(a, b)` (`a` is the first argument, evaluated first; named arguments name the other
++  parameters: `a |> f(b: 1)`). The right side must be a call of a function by its plain name (E0225 otherwise: not
++  `x.f()`, not `f`). It is left associative and binds looser than every other operator, `or` included:
++  `1 + 2 |> f()` is `(1 + 2) |> f()`; parenthesize for anything else: `(a |> f()) + 1`, `(a |> f())?`.
+ - Method syntax works for any function on its first parameter: `acc.deposit(10)` == `deposit(acc, 10)`.
+ - `match` is an expression and must be exhaustive:
+ ```klar
+diff --git a/klar/checker.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/checker.py
+index 031223a..ab4c7db 100644
+--- a/klar/checker.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/checker.py
+@@ -321,6 +321,7 @@ class Checker:
+                            sig.decl.name_span)
+         self.unused_private_functions()
+         self.diags.sort(key=lambda d: (d.span.file != self.file, d.span.line, d.span.col))
++        N.lower_pipes(self.program)     # from here on a pipe is the call it means
+         return self.diags
+ 
+     def unused_private_functions(self):
+@@ -1141,6 +1142,7 @@ class Checker:
+             self.error("E0402", f"this `{show(t)}` is ignored; errors must be handled", e.span,
+                        hint="propagate with `?`, handle with `match`, or discard explicitly with `let _ = ...`")
+             return
++        e = N.desugar(e) if isinstance(e, N.Pipe) else e
+         if isinstance(e, N.Call) and isinstance(e.callee, N.Name) and e.callee.name == "dbg":
+             return
+         self.warn("W0401", f"unused value of type `{show(t)}`", e.span,
+@@ -1165,6 +1167,8 @@ class Checker:
+         return False
+ 
+     def diverges(self, e) -> bool:
++        if isinstance(e, N.Pipe):
++            e = N.desugar(e)
+         if isinstance(e, N.Call) and isinstance(e.callee, N.Name) and e.callee.name in ("fail", "todo", "exit"):
+             return True
+         if isinstance(e, N.Match):
+@@ -1497,17 +1501,21 @@ class Checker:
+             verdict = positional_verdict([n for n, _ in params], [show(prune(t)) for _, t in params],
+                                          [a.value for a in positional])
+             names = [n for n, _ in params]
+-            example = ", ".join(f"{n}: ..." for n in names)
++            piped = bool(node is not None and getattr(node, "piped", False))   # `a |> f(...)`: `a` stays as it is
++            example = ", ".join(f"{n}: ..." for n in names[1 if piped else 0:])
+             if verdict[0] == "swapped":
+                 self.error("E0208", f"the arguments of `{display}` look swapped: `{verdict[1]}` is passed as "
+                                     f"`{verdict[2]}`", span,
+-                           hint=f"check the order, or name them: `{display}({example})`")
++                           hint=f"check the order, or name them: `{display}({example})`" if not piped else
++                           f"check the order, or name them: `value |> {display}({example})`")
+             elif verdict[0] == "ambiguous":
+                 edits = [{"span": Span(a.span.file, a.span.line, a.span.col, a.span.line, a.span.col),
+-                          "text": f"{names[i]}: "} for i, a in enumerate(positional) if i < len(names)]
++                          "text": f"{names[i]}: "} for i, a in enumerate(positional)
++                         if i < len(names) and not (piped and i == 0)]
+                 self.error("E0208", f"`{display}` has {len(sig.params)} parameters and `{verdict[1]}` share the type "
+                                     f"`{verdict[2]}`, so the arguments must be named", span,
+-                           hint=f"write `{display}({example})`", fix={"edits": edits} if edits else None)
++                           hint=f"write `{display}({example})`" if not piped else
++                           f"write `value |> {display}({example})`", fix={"edits": edits} if edits else None)
+         assigned = {}
+         names = [n for n, _ in params]
+         for i, a in enumerate(positional):
+@@ -1577,6 +1585,10 @@ class Checker:
+         self.need_effects(what, eff_names(ft), span)
+         return ft.ret
+ 
++    def e_Pipe(self, e, exp):
++        """`a |> f(b)` is checked as the call `f(a, b)`: the same errors, the same effects, the same uses."""
++        return self.expr(N.desugar(e), exp)
++
+     def e_Call(self, e, exp):
+         c = e.callee
+         if isinstance(c, N.Name):
+diff --git a/klar/cli.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/cli.py
+index de30e68..fc3e46d 100644
+--- a/klar/cli.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/cli.py
+@@ -585,7 +585,8 @@ def cmd_ast(args):
+     if loaded.program is None:
+         emit_json({"ok": False, "diagnostics": [d.to_dict() for d in user_diags(loaded)]})
+         return 1
+-    from .nodes import number
++    from .nodes import number, restore_pipes
++    restore_pipes(loaded.program)       # the checker has put the calls that pipes mean in their place
+     number(loaded.program)
+     print(json.dumps(to_json(loaded.program), ensure_ascii=False, indent=1 if args.pretty else None))
+     return 0
+diff --git a/klar/diagnostics.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/diagnostics.py
+index 17b9516..964510e 100644
+--- a/klar/diagnostics.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/diagnostics.py
+@@ -172,6 +172,12 @@ CODES = {
+               "Klar has no trait objects: write a generic function `fn f[T: Shape](x: T)` for one kind of value at a "
+               "time; for a list of different kinds, declare an `enum` with one variant per kind and implement the "
+               "trait for the enum (each method is one `match`)."),
++    "E0225": ("the right side of `|>` must be a call",
++              "`value |> f(args)` means `f(value, args)`: the value becomes the first argument. The right side must be "
++              "a call of a function by its plain name (generic functions and named arguments work as in any call), "
++              "not a method call (`x.f()`), a name without parentheses (`f`) or another expression. `|>` binds "
++              "looser than every other operator, `or` included: `1 + 2 |> f()` is `(1 + 2) |> f()`; use parentheses "
++              "for anything else: `(a |> f()) + 1`."),
+     # match
+     "E0301": ("non-exhaustive match", "Cover every variant or add a catch-all `_ => ...` arm."),
+     "E0302": ("invalid pattern", "The pattern does not fit the matched type, or the variant does not exist."),
+diff --git a/klar/lexer.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/lexer.py
+index 6984949..f508f9b 100644
+--- a/klar/lexer.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/lexer.py
+@@ -27,7 +27,7 @@ def is_digit(c):
+     return "0" <= c <= "9" and len(c) == 1
+ 
+ 
+-TWO_CHAR = {"->", "=>", "==", "!=", "<=", ">="}
++TWO_CHAR = {"->", "=>", "==", "!=", "<=", ">=", "|>"}
+ ONE_CHAR = set("+-*/%<>=()[]{},:.?")
+ 
+ FOREIGN = {
+@@ -115,7 +115,7 @@ class Lexer:
+         return not self.stack or self.stack[-1] == "{"
+ 
+     def next_line_continues(self) -> bool:
+-        """True if the next significant character is a `.` (method chain)."""
++        """True if the next significant character is a `.` (method chain) or the next token is `|>` (pipe)."""
+         j = self.i
+         src = self.src
+         while j < len(src):
+@@ -127,6 +127,8 @@ class Lexer:
+                     j += 1
+             else:
+                 break
++        if src.startswith("|>", j):
++            return True
+         return j < len(src) and src[j] == "." and not (j + 1 < len(src) and src[j + 1] == ".")
+ 
+     # -- main loop --------------------------------------------------------
+diff --git a/klar/nodes.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/nodes.py
+index f205d9c..e60f759 100644
+--- a/klar/nodes.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/nodes.py
+@@ -321,6 +321,15 @@ class MethodCall(Node):
+     args: List[Arg]
+ 
+ 
++@dataclass(eq=False)
++class Pipe(Node):
++    """`value |> f(args)`: `call` is the call as written (without `value`). The checker treats the pipe as the
++    call `f(value, args)` (`desugar`) and, when it is done, puts that call in the pipe's place (`lower_pipes`), so
++    everything after the checker only ever sees calls."""
++    value: Any
++    call: Any
++
++
+ @dataclass(eq=False)
+ class FieldAccess(Node):
+     obj: Any
+@@ -394,6 +403,70 @@ class PVariant(Node):
+     args: list
+ 
+ 
++# ---- pipes --------------------------------------------------------------------
++def desugar(p):
++    """The call that the pipe `value |> f(args)` means: `f(value, args)` (the same nodes, one new Call and Arg)."""
++    d = getattr(p, "desugared", None)
++    if d is None:
++        first = Arg(span=p.value.span, name=None, value=p.value)
++        d = p.desugared = Call(span=p.span, callee=p.call.callee, args=[first] + list(p.call.args))
++        d.piped = True          # its first argument is the piped value, not written in the call
++        d.pipe = p
++    return d
++
++
++def lower_pipes(root):
++    """Replaces every pipe below `root` (and `root` itself, if it is one; the result is returned) by its call."""
++    if isinstance(root, Pipe):
++        root = desugar(root)
++    stack = [root]
++    while stack:
++        n = stack.pop()
++        if isinstance(n, list):
++            for i, x in enumerate(n):
++                if isinstance(x, Pipe):
++                    x = n[i] = desugar(x)
++                if isinstance(x, (Node, list)):
++                    stack.append(x)
++            continue
++        for f in fields(n):
++            v = getattr(n, f.name)
++            if isinstance(v, Pipe):
++                v = desugar(v)
++                setattr(n, f.name, v)
++            if isinstance(v, (Node, list)):
++                stack.append(v)
++    return root
++
++
++def restore_pipes(root):
++    """The reverse of `lower_pipes`: every call that stands for a pipe is the pipe again (for `klar ast`)."""
++    def back(x):
++        return x.pipe if isinstance(x, Call) and getattr(x, "pipe", None) is not None else x
++
++    root = back(root)
++    seen = set()
++    stack = [root]
++    while stack:
++        n = stack.pop()
++        if id(n) in seen:
++            continue
++        seen.add(id(n))
++        if isinstance(n, list):
++            for i, x in enumerate(n):
++                x = n[i] = back(x)
++                if isinstance(x, (Node, list)):
++                    stack.append(x)
++            continue
++        for f in fields(n):
++            v = back(getattr(n, f.name))
++            if v is not getattr(n, f.name):
++                setattr(n, f.name, v)
++            if isinstance(v, (Node, list)):
++                stack.append(v)
++    return root
++
++
+ # ---- JSON export ------------------------------------------------------------
+ def to_json(n):
+     if isinstance(n, Node):
+diff --git a/klar/parser.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/parser.py
+index fe6f150..dea5e18 100644
+--- a/klar/parser.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/parser.py
+@@ -729,10 +729,27 @@ class Parser:
+             if self.depth > MAX_NESTING:
+                 self.fail("the code is nested too deeply to parse", tok=self.cur,
+                           hint="split deeply nested expressions into named parts; for a long `else if` chain use `match`")
+-            return self.parse_or()
++            return self.parse_pipe()
+         finally:
+             self.depth = base
+ 
++    def parse_pipe(self):
++        """`a |> f(b) |> g()`: the loosest operator, left associative; the right side must be a call by name."""
++        left = self.parse_or()
++        base = self.depth
++        while self.at_op("|>"):
++            self.link()
++            self.advance()
++            self.skip_nl()
++            right = self.parse_or()
++            if not (isinstance(right, N.Call) and isinstance(right.callee, N.Name)):
++                raise KlarSyntaxError(Diagnostic(
++                    "E0225", "error", "the right side of `|>` must be a call", right.span,
++                    "write a call of a function by its name: `value |> f(args)` means `f(value, args)`"))
++            left = N.Pipe(span=left.span.merge(right.span), value=left, call=right)
++        self.depth = base
++        return left
++
+     def parse_or(self):
+         left = self.parse_and()
+         base = self.depth
+diff --git a/klar/tools/fmt.py b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/tools/fmt.py
+index 98d9acc..f927017 100644
+--- a/klar/tools/fmt.py
++++ b/C:/Users/vld20/AppData/Local/Temp/claude/D--Games-AI-Code-Klar/b58478b5-c9e3-47e8-87c5-0e06c49b1894/scratchpad/refb/python/klar/tools/fmt.py
+@@ -13,8 +13,8 @@ import re
+ from ..diagnostics import KlarSyntaxError
+ from ..lexer import KEYWORDS, Lexer
+ 
+-TWO = ("->", "=>", "==", "!=", "<=", ">=")
+-BINARY = {"+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "=", "->", "=>", "and", "or"}
++TWO = ("->", "=>", "==", "!=", "<=", ">=", "|>")
++BINARY = {"+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "=", "->", "=>", "and", "or", "|>"}
+ OPEN, CLOSE = "([{", ")]}"
+ UNARY_BEFORE = {"(", "[", "{", ",", ":", "=", "=>", "->", "+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=",
+                 ">=", "and", "or", "not", "return", "if", "while", "in", "match", "assert", "requires", "ensures"}
+@@ -141,8 +141,33 @@ def space_between(p, t, after_unary):
+     return " "
+ 
+ 
++def join_pipes(lines):
++    """A pipe is written on one line: a line that starts with `|>` (or follows a line that ends with `|>`) joins the
++    code line before (after) it, unless a comment is in the way."""
++    out = []
++    glue = False              # the last line ends with `|>`: the next code line joins it
++    for raw in lines:
++        stripped = raw.strip()
++        if not stripped:
++            out.append(raw)
++            glue = False
++            continue
++        toks = tokenize_line(stripped)
++        has_comment = any(t.kind == "comment" for t in toks)
++        code = [t for t in toks if t.kind != "comment"]
++        starts = bool(code) and code[0].kind == "op" and code[0].text == "|>"
++        prev = out[-1].strip() if out else ""
++        prev_ok = bool(prev) and not any(t.kind == "comment" for t in tokenize_line(prev))
++        if code and prev_ok and (starts or glue):
++            out[-1] = out[-1].rstrip() + " " + stripped
++        else:
++            out.append(raw)
++        glue = bool(code) and not has_comment and code[-1].kind == "op" and code[-1].text == "|>"
++    return out
++
++
+ def format_source(src):
+-    lines = src.replace("\r\n", "\n").split("\n")
++    lines = join_pipes(src.replace("\r\n", "\n").split("\n"))
+     out = []
+     stack = []                # indentation of the line that opened each unclosed bracket
+     pending_blank = False
+@@ -169,7 +194,7 @@ def format_source(src):
+             if continued:
+                 base = indent          # `{` at the end of a wrapped condition belongs to the statement
+                 indent += 1
+-            elif first == "." or first in ("requires", "ensures"):
++            elif first in (".", "|>") or first in ("requires", "ensures"):
+                 indent += 1
+         for t in code[k:]:
+             if t.kind == "op" and t.text in OPEN:
