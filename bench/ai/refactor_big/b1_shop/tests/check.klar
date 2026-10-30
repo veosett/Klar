@@ -1,0 +1,268 @@
+use model.{Product, Customer, Line, Order, Status, Tier, Category}
+use analytics.{average_order, revenue, revenue_by_city, spend_by_customer}
+use audit.{valid_step}
+use catalog.{average_price, catalog_value, price_band, price_label, sale_price}
+use commission.{commission, commission_rate, commission_total, earned_bonus}
+use crm.{customer_row, display_name, initials, mailing_line, parse_customer, sorted_customers, validate_customer}
+use dashboard.{headline, open_value, status_counts}
+use discount.{discount_for, net_amount}
+use export.{order_row, product_row, status_code}
+use fraud.{risk_score}
+use invoice.{due_note}
+use loyalty.{points_for, redeem_value}
+use money.{avg, fmt, pct, plain}
+use notify.{message_for}
+use orders.{grand_total, is_open, is_revenue, line_total, next_status, release, status_label, subtotal}
+use picking.{can_pack}
+use refunds.{refund_amount, refund_share}
+use sample.{sample_products}
+use shipping.{shipping_cost, surcharge}
+use tax.{order_tax}
+
+fn prodc(price: Int, category: Category) -> Product {
+  return Product { sku: "S", name: "item", price: price, weight: 1.0, category: category, stock: 2, supplier: 1 }
+}
+
+fn prod(price: Int) -> Product {
+  return Product { sku: "P", name: "item", price: price, weight: 1.0, category: Category.Book, stock: 2, supplier: 1 }
+}
+
+fn ln(price: Int, qty: Int) -> Line {
+  return Line { sku: "S", qty: qty, unit_price: price }
+}
+
+fn ord(status: Status, items: List[Line], sent: Int) -> Order {
+  return Order { id: 1, customer: 1, lines: items, status: status, shipping: sent, day: 1 }
+}
+
+fn cust(first: Str, last: Str) -> Customer {
+  return Customer { id: 1, first_name: first, last_name: last, email: "a@b.org", tier: Tier.Basic, city: "Harbour" }
+}
+
+fn custt(tier: Tier) -> Customer {
+  return Customer { id: 1, first_name: "Ada", last_name: "Lovelace", email: "a@b.org", tier: tier, city: "Harbour" }
+}
+
+fn size[T](xs: List[T]) -> Int {
+  return xs.len()
+}
+
+fn mget(m: Map[Str, Int], key: Str) -> Int {
+  return m.get(key).unwrap_or(-1)
+}
+
+fn names(cs: List[Customer]) -> List[Str] {
+  return cs.map(fn(c) => "{c.first_name} {c.last_name}")
+}
+
+test "money: fmt and plain" {
+  assert fmt(1250) == "$12.50"
+  assert plain(1205) == "12.05"
+  assert plain(7) == "0.07"
+}
+
+test "money: pct and avg" {
+  assert pct(125, 0.1) == 13
+  assert avg(5, 2) == 3
+  assert avg(0, 0) == 0
+}
+
+test "catalog: price_band" {
+  assert price_band(prod(999)) == "cheap"
+  assert price_band(prod(1000)) == "regular"
+  assert price_band(prod(9999)) == "regular"
+  assert price_band(prod(10000)) == "premium"
+}
+
+test "catalog: sale_price" {
+  assert sale_price(prod(2000), 0.25) == 1500
+}
+
+test "catalog: average_price" {
+  assert average_price([prod(100), prod(101)]) == 101
+}
+
+test "catalog: price_label" {
+  assert price_label(prod(1250)) == "item: $12.50"
+}
+
+test "orders: totals" {
+  assert line_total(ln(1250, 3)) == 3750
+  assert subtotal(ord(Status.Paid, [ln(1000, 2)], 499)) == 2000
+  assert grand_total(ord(Status.Paid, [ln(1000, 2)], 499)) == 2499
+}
+
+test "tax: order_tax" {
+  assert order_tax(ord(Status.Paid, [ln(1000, 1)], 0), [prodc(1000, Category.Toy)]) == 200
+  assert order_tax(ord(Status.Draft, [ln(1000, 1)], 0), [prodc(1000, Category.Toy)]) == 0
+}
+
+test "discount: discount_for" {
+  assert discount_for(10000, Tier.Gold) == 1000
+  assert discount_for(50, Tier.Silver) == 3
+}
+
+test "discount: net_amount" {
+  assert net_amount(10000, Tier.Basic, "FIVE") == 9500
+}
+
+test "shipping: shipping_cost" {
+  assert shipping_cost(5000, 1.0) == 0
+  assert shipping_cost(4999, 2.0) == 799
+}
+
+test "shipping: surcharge" {
+  assert surcharge("Harbour") == 750
+  assert surcharge("Summit") == 1200
+  assert surcharge("Plain") == 0
+}
+
+test "loyalty: points_for" {
+  assert points_for(2599) == 2
+  assert points_for(999) == 0
+}
+
+test "loyalty: redeem_value" {
+  assert redeem_value(5) == 50
+}
+
+test "fraud: risk_score" {
+  assert risk_score(ord(Status.Paid, [ln(100000, 1)], 0), cust("Ada", "Lovelace")) == 4
+  assert risk_score(ord(Status.Paid, [ln(30000, 1)], 0), custt(Tier.Gold)) == 1
+  assert risk_score(ord(Status.Paid, [ln(29999, 1)], 0), custt(Tier.Gold)) == 0
+}
+
+test "refunds: refund_amount" {
+  assert refund_amount(ord(Status.Paid, [ln(1000, 1)], 0)) == 1000
+  assert refund_amount(ord(Status.Shipped, [ln(1000, 1)], 0)) == 950
+  assert refund_amount(ord(Status.Delivered, [ln(1000, 1)], 0)) == 900
+}
+
+test "invoice: due_note" {
+  assert due_note(10000) == "payable in 14 days"
+  assert due_note(10001) == "payable in 30 days"
+}
+
+test "analytics: revenue and average" {
+  assert revenue([ord(Status.Paid, [ln(100, 1)], 0), ord(Status.Draft, [ln(100, 1)], 0)]) == 100
+  assert average_order([ord(Status.Paid, [ln(100, 1)], 0), ord(Status.Paid, [ln(101, 1)], 0)]) == 101
+}
+
+test "analytics: revenue_by_city" {
+  assert mget(revenue_by_city([ord(Status.Paid, [ln(500, 1)], 0)], [cust("Ada", "Lovelace")]), "Harbour") == 500
+}
+
+test "commission: rate and amount" {
+  assert commission_rate(9999) == 0.02
+  assert commission_rate(10000) == 0.05
+  assert commission(10000) == 500
+}
+
+test "commission: earned_bonus and total" {
+  assert earned_bonus(25000) == true
+  assert earned_bonus(24999) == false
+  assert commission_total([ord(Status.Paid, [ln(10000, 1)], 0)]) == 500
+}
+
+test "dashboard: open_value and headline" {
+  assert open_value([ord(Status.Paid, [ln(500, 1)], 0)]) == 500
+  assert headline([ord(Status.Paid, [ln(500, 1)], 0)]) == "1 orders, $5.00 received, $5.00 open"
+}
+
+test "export: rows" {
+  assert product_row(prod(1250)) == "P,item,12.50,1.00"
+  assert order_row(ord(Status.Paid, [ln(1250, 1)], 0)) == "1,P,Paid,12.50"
+}
+
+test "sample: products" {
+  assert catalog_value(sample_products()) == 67850
+}
+
+test "status: label" {
+  assert status_label(Status.OnHold) == "On hold"
+}
+
+test "status: is_open" {
+  assert is_open(Status.OnHold) == true
+}
+
+test "status: next_status" {
+  assert next_status(Status.OnHold) == Status.OnHold
+}
+
+test "status: release" {
+  assert release(ord(Status.OnHold, [ln(1, 1)], 0)) == ord(Status.Paid, [ln(1, 1)], 0)
+  assert release(ord(Status.Packed, [ln(1, 1)], 0)) == ord(Status.Packed, [ln(1, 1)], 0)
+}
+
+test "status: is_revenue" {
+  assert is_revenue(Status.OnHold) == true
+}
+
+test "status: order_tax" {
+  assert order_tax(ord(Status.OnHold, [ln(1000, 1)], 0), [prodc(1000, Category.Toy)]) == 200
+}
+
+test "status: refund_share" {
+  assert refund_share(Status.OnHold) == 1.0
+}
+
+test "status: message_for" {
+  assert message_for(ord(Status.OnHold, [ln(1, 1)], 0), cust("Ada", "Lovelace")) == "Ada Lovelace, your order 1 is on hold"
+}
+
+test "status: status_code" {
+  assert status_code(Status.OnHold) == "H"
+}
+
+test "status: status_counts" {
+  assert status_counts([ord(Status.OnHold, [ln(1, 1)], 0)]) == ["Draft: 0", "Paid: 0", "On hold: 1", "Packed: 0", "Shipped: 0", "Delivered: 0", "Cancelled: 0"]
+}
+
+test "status: can_pack" {
+  assert can_pack(Status.OnHold) == false
+}
+
+test "status: valid_step in and out" {
+  assert valid_step(Status.Paid, Status.OnHold) == true
+  assert valid_step(Status.OnHold, Status.Paid) == true
+}
+
+test "names: display_name" {
+  assert display_name(cust("Ada", "Lovelace")) == "Ada Lovelace"
+}
+
+test "names: sorted_customers" {
+  assert names(sorted_customers([cust("Zoe", "Adams"), cust("Ada", "Lovelace"), cust("Abe", "Adams")])) == ["Abe Adams", "Zoe Adams", "Ada Lovelace"]
+}
+
+test "names: initials" {
+  assert initials(cust("Ada", "Lovelace")) == "AL"
+  assert initials(cust("mary jane", "watson")) == "MW"
+}
+
+test "names: mailing_line" {
+  assert mailing_line(cust("Ada", "Lovelace")) == "Ada Lovelace <a@b.org>"
+}
+
+test "names: parse_customer" {
+  assert parse_customer("1,Ada,Lovelace,a@b.org,basic,Harbour") == Some(cust("Ada", "Lovelace"))
+  assert parse_customer("1,Ada Lovelace,a@b.org,basic,Harbour") == None
+}
+
+test "names: customer_row" {
+  assert customer_row(cust("Ada", "Lovelace")) == "1,Ada,Lovelace,a@b.org,basic,Harbour"
+}
+
+test "names: validate_customer" {
+  assert validate_customer(cust("", "Lovelace")) == ["first name is empty"]
+  assert validate_customer(cust("Ada", "")) == ["last name is empty"]
+}
+
+test "names: message_for" {
+  assert message_for(ord(Status.Packed, [ln(1, 1)], 0), cust("Ada", "Lovelace")) == "Ada Lovelace, your order 1 is packed"
+}
+
+test "names: spend_by_customer" {
+  assert mget(spend_by_customer([ord(Status.Paid, [ln(500, 1)], 0)], [cust("Ada", "Lovelace")]), "Ada Lovelace") == 500
+}

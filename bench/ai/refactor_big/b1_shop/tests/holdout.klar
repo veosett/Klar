@@ -1,0 +1,236 @@
+use model.{Product, Customer, Line, Order, Status, Tier, Category}
+use analytics.{big_orders, daily_revenue, orders_over, revenue, top_customers}
+use audit.{check_order, valid_step}
+use catalog.{catalog_value, is_gift, stock_value, within_budget}
+use commission.{commission_rate}
+use crm.{customer_header, find_by_name, greeting, same_person}
+use dashboard.{status_color, value_alert}
+use discount.{coupon_value, volume_rate}
+use export.{order_row}
+use fraud.{is_reviewable, needs_review}
+use invoice.{header, line_text}
+use loyalty.{tier_after, to_next_point}
+use notify.{reminder}
+use orders.{advance, can_cancel, hold}
+use picking.{packing_queue}
+use refunds.{refund_amount, refund_note, return_fee}
+use sample.{sample_customers, sample_orders}
+use shipping.{member_cost, shipping_label}
+use tax.{line_tax, tax_note, taxable}
+
+fn prodc(price: Int, category: Category) -> Product {
+  return Product { sku: "S", name: "item", price: price, weight: 1.0, category: category, stock: 2, supplier: 1 }
+}
+
+fn prod(price: Int) -> Product {
+  return Product { sku: "P", name: "item", price: price, weight: 1.0, category: Category.Book, stock: 2, supplier: 1 }
+}
+
+fn ln(price: Int, qty: Int) -> Line {
+  return Line { sku: "S", qty: qty, unit_price: price }
+}
+
+fn ord(status: Status, items: List[Line], sent: Int) -> Order {
+  return Order { id: 1, customer: 1, lines: items, status: status, shipping: sent, day: 1 }
+}
+
+fn cust(first: Str, last: Str) -> Customer {
+  return Customer { id: 1, first_name: first, last_name: last, email: "a@b.org", tier: Tier.Basic, city: "Harbour" }
+}
+
+fn custt(tier: Tier) -> Customer {
+  return Customer { id: 1, first_name: "Ada", last_name: "Lovelace", email: "a@b.org", tier: tier, city: "Harbour" }
+}
+
+fn size[T](xs: List[T]) -> Int {
+  return xs.len()
+}
+
+fn mget(m: Map[Str, Int], key: Str) -> Int {
+  return m.get(key).unwrap_or(-1)
+}
+
+fn names(cs: List[Customer]) -> List[Str] {
+  return cs.map(fn(c) => "{c.first_name} {c.last_name}")
+}
+
+test "catalog: is_gift" {
+  assert is_gift(prod(2499)) == true
+  assert is_gift(prod(2500)) == false
+}
+
+test "catalog: stock values" {
+  assert stock_value(prod(1250)) == 2500
+  assert catalog_value([prod(100), prod(200)]) == 600
+}
+
+test "catalog: within_budget" {
+  assert size(within_budget([prod(100), prod(200)], 150)) == 1
+}
+
+test "tax: line_tax rounds half up" {
+  assert line_tax(ln(125, 1), [prodc(125, Category.Garden)]) == 13
+}
+
+test "tax: tax_note" {
+  assert tax_note(0) == "tax free"
+  assert tax_note(1250) == "tax $12.50"
+}
+
+test "discount: volume_rate" {
+  assert volume_rate(19999) == 0.0
+  assert volume_rate(20000) == 0.05
+  assert volume_rate(49999) == 0.05
+  assert volume_rate(50000) == 0.1
+}
+
+test "discount: coupon_value" {
+  assert coupon_value("TEN", 5000) == 1000
+  assert coupon_value("FIVE", 300) == 300
+  assert coupon_value("NONE", 300) == 0
+}
+
+test "shipping: member_cost" {
+  assert member_cost(501, Tier.Gold) == 251
+  assert member_cost(501, Tier.Basic) == 501
+}
+
+test "shipping: shipping_label" {
+  assert shipping_label(0) == "free shipping"
+  assert shipping_label(499) == "shipping $4.99"
+}
+
+test "loyalty: tier_after" {
+  assert tier_after(29999) == Tier.Basic
+  assert tier_after(30000) == Tier.Silver
+  assert tier_after(100000) == Tier.Gold
+}
+
+test "loyalty: to_next_point" {
+  assert to_next_point(2599) == 401
+}
+
+test "fraud: needs_review" {
+  assert needs_review(ord(Status.Paid, [ln(100000, 1)], 0), custt(Tier.Gold)) == true
+  assert needs_review(ord(Status.Paid, [ln(99999, 1)], 0), custt(Tier.Gold)) == false
+}
+
+test "refunds: refund_note" {
+  assert refund_note(ord(Status.Shipped, [ln(1000, 1)], 0)) == "Refund $9.50 for order 1"
+}
+
+test "refunds: return_fee" {
+  assert return_fee(1999) == 350
+  assert return_fee(2000) == 0
+}
+
+test "invoice: line_text" {
+  assert line_text(ln(1250, 2)) == "  2 x S @ $12.50 = $25.00"
+}
+
+test "analytics: big_orders" {
+  assert big_orders([ord(Status.Paid, [ln(100000, 1)], 0), ord(Status.Paid, [ln(99999, 1)], 0)]) == 1
+}
+
+test "analytics: orders_over and daily_revenue" {
+  assert size(orders_over([ord(Status.Paid, [ln(500, 1)], 0)], 500)) == 1
+  assert daily_revenue([ord(Status.Paid, [ln(500, 1)], 0)], 1) == 500
+}
+
+test "commission: top rate" {
+  assert commission_rate(99999) == 0.05
+  assert commission_rate(100000) == 0.08
+}
+
+test "dashboard: value_alert" {
+  assert value_alert([ord(Status.Paid, [ln(500001, 1)], 0)]) == true
+  assert value_alert([ord(Status.Paid, [ln(500000, 1)], 0)]) == false
+}
+
+test "audit: check_order" {
+  assert check_order(ord(Status.Paid, [ln(0, 1)], 0)) == ["bad price"]
+  assert size(check_order(ord(Status.Paid, [ln(1, 1)], 0))) == 0
+}
+
+test "sample: orders" {
+  assert revenue(sample_orders()) == 21599
+}
+
+test "status: can_cancel" {
+  assert can_cancel(Status.OnHold) == true
+}
+
+test "status: hold" {
+  assert hold(ord(Status.Paid, [ln(1, 1)], 0)) == ord(Status.OnHold, [ln(1, 1)], 0)
+  assert hold(ord(Status.Draft, [ln(1, 1)], 0)) == ord(Status.Draft, [ln(1, 1)], 0)
+}
+
+test "status: advance" {
+  assert advance(ord(Status.OnHold, [ln(1, 1)], 0)) == ord(Status.OnHold, [ln(1, 1)], 0)
+}
+
+test "status: taxable" {
+  assert taxable(Status.OnHold) == true
+}
+
+test "status: is_reviewable" {
+  assert is_reviewable(Status.OnHold) == true
+}
+
+test "status: refund_amount" {
+  assert refund_amount(ord(Status.OnHold, [ln(1000, 1)], 0)) == 1000
+}
+
+test "status: status_color" {
+  assert status_color(Status.OnHold) == "amber"
+}
+
+test "status: order_row" {
+  assert order_row(ord(Status.OnHold, [ln(1250, 1)], 0)) == "1,H,On hold,12.50"
+}
+
+test "status: packing_queue" {
+  assert size(packing_queue([ord(Status.OnHold, [ln(1, 1)], 0)])) == 0
+}
+
+test "status: valid_step onwards" {
+  assert valid_step(Status.OnHold, Status.Packed) == false
+  assert valid_step(Status.OnHold, Status.Cancelled) == true
+}
+
+test "status: revenue" {
+  assert revenue([ord(Status.OnHold, [ln(500, 1)], 0)]) == 500
+}
+
+test "names: find_by_name" {
+  assert names(find_by_name([cust("Ada", "Lovelace"), cust("Lovelace", "Byron"), cust("Alan", "Turing")], "LOVE")) == ["Ada Lovelace", "Lovelace Byron"]
+}
+
+test "names: greeting" {
+  assert greeting(cust("Ada", "Lovelace")) == "Dear Ada Lovelace"
+}
+
+test "names: customer_header" {
+  assert customer_header() == "id,first_name,last_name,email,tier,city"
+}
+
+test "names: same_person" {
+  assert same_person(cust("ADA", "Lovelace"), cust("ada", "LOVELACE")) == true
+  assert same_person(cust("Ada", "Lovelace"), cust("Ada", "Byron")) == false
+}
+
+test "names: invoice header" {
+  assert header(ord(Status.Paid, [ln(1, 1)], 0), cust("Ada", "Lovelace")) == "Invoice 1 for Ada Lovelace, Harbour"
+}
+
+test "names: reminder" {
+  assert reminder(cust("Ada", "Lovelace"), 500) == "Ada Lovelace: please pay $5.00"
+}
+
+test "names: top_customers" {
+  assert top_customers([ord(Status.Paid, [ln(500, 1)], 0)], [cust("Ada", "Lovelace")], 1) == ["Ada Lovelace"]
+}
+
+test "names: sample customers" {
+  assert names(sample_customers()) == ["Ada Lovelace", "Alan Turing"]
+}

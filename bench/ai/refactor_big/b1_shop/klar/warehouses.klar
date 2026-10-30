@@ -1,0 +1,144 @@
+/// The kinds of warehouse records.
+pub enum WarehouseKind {
+  Central
+  Regional
+  Overflow
+}
+
+pub type Warehouse {
+  id: Int
+  name: Str
+  city: Str
+  kind: WarehouseKind
+  bays: Int
+  rent: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn warehouses_find(xs: List[Warehouse], id: Int) -> Option[Warehouse] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn warehouses_in_city(xs: List[Warehouse], city: Str) -> List[Warehouse] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn warehouses_active(xs: List[Warehouse]) -> List[Warehouse] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn warehouses_names(xs: List[Warehouse]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of bays.
+pub fn warehouses_total_bays(xs: List[Warehouse]) -> Int {
+  return xs.map(fn(x) => x.bays).sum()
+}
+
+/// The sum of rent.
+pub fn warehouses_total_rent(xs: List[Warehouse]) -> Float {
+  return xs.map(fn(x) => x.rent).sum_float()
+}
+
+/// The mean of rent, 0 for no records.
+pub fn warehouses_average_rent(xs: List[Warehouse]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return warehouses_total_rent(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn warehouses_kind_label(k: WarehouseKind) -> Str {
+  return match k {
+    WarehouseKind.Central => "Central",
+    WarehouseKind.Regional => "Regional",
+    WarehouseKind.Overflow => "Overflow",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn warehouses_kind_weight(k: WarehouseKind) -> Float {
+  return match k {
+    WarehouseKind.Central => 1.0,
+    WarehouseKind.Regional => 1.5,
+    WarehouseKind.Overflow => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn warehouses_describe(x: Warehouse) -> Str {
+  return "{x.name} ({x.city}), {warehouses_kind_label(x.kind)}: {x.bays} bays, {x.rent.fixed(2)} rent"
+}
+
+/// The records of one kind.
+pub fn warehouses_by_kind(xs: List[Warehouse], k: WarehouseKind) -> List[Warehouse] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most bays first.
+pub fn warehouses_ranked(xs: List[Warehouse]) -> List[Warehouse] {
+  return xs.sort_by(fn(x) => 0 - x.bays)
+}
+
+/// The first few of the ranking.
+pub fn warehouses_top(xs: List[Warehouse], n: Int) -> List[Warehouse] {
+  return warehouses_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn warehouses_validate(x: Warehouse) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.bays < 0 {
+    errors = errors.push("negative bays")
+  }
+  if x.rent < 0.0 {
+    errors = errors.push("negative rent")
+  }
+  return errors
+}
+
+/// The record with rent and bays weighed together.
+pub fn warehouses_score(x: Warehouse) -> Float {
+  return x.rent * warehouses_kind_weight(x.kind) + x.bays.to_float()
+}
+
+/// A row of the export file.
+pub fn warehouses_row(x: Warehouse) -> Str {
+  return "{x.id},{x.name},{x.city},{warehouses_kind_label(x.kind)},{x.bays},{x.rent.fixed(2)}"
+}
+
+/// The export file.
+pub fn warehouses_file(xs: List[Warehouse]) -> Str {
+  return ["id,name,city,kind,bays,rent"].concat(xs.map(fn(x) => warehouses_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn warehouses_per_city(xs: List[Warehouse]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of rent.
+pub fn warehouses_over(xs: List[Warehouse], limit: Float) -> List[Warehouse] {
+  return xs.filter(fn(x) => x.rent > limit)
+}
+
+/// A line for the dashboard.
+pub fn warehouses_summary(xs: List[Warehouse]) -> Str {
+  return "{xs.len()} warehouse records, {warehouses_active(xs).len()} active, {warehouses_total_rent(xs).fixed(2)} rent"
+}

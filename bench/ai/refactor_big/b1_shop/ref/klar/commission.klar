@@ -1,0 +1,29 @@
+use model.{Order}
+use money.{pct}
+use orders.{grand_total}
+
+/// The share an agent earns on a sale.
+pub fn commission_rate(total: Int) -> Float {
+  if total >= 100000 {
+    return 0.08
+  }
+  if total >= 10000 {
+    return 0.05
+  }
+  return 0.02
+}
+
+/// The agent's money for a sale.
+pub fn commission(total: Int) -> Int {
+  return pct(total, commission_rate(total))
+}
+
+/// The agent's money over several orders.
+pub fn commission_total(os: List[Order]) -> Int {
+  return os.map(fn(o) => commission(grand_total(o))).sum()
+}
+
+/// True when an agent earned the monthly bonus: 250.00 in commission.
+pub fn earned_bonus(amount: Int) -> Bool {
+  return amount >= 25000
+}

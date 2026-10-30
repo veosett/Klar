@@ -1,0 +1,27 @@
+use model.{Tier}
+
+/// One point for every whole 10.00.
+pub fn points_for(total: Float) -> Int {
+  return (total / 10.0).floor()
+}
+
+/// The tier that a year of spending earns.
+pub fn tier_after(spent: Float) -> Tier {
+  if spent >= 1000.0 {
+    return Tier.Gold
+  }
+  if spent >= 300.0 {
+    return Tier.Silver
+  }
+  return Tier.Basic
+}
+
+/// The money that points are worth: 0.10 each.
+pub fn redeem_value(points: Int) -> Float {
+  return points.to_float() * 0.1
+}
+
+/// Points still missing for the next whole 10.00.
+pub fn to_next_point(total: Float) -> Float {
+  return 10.0 - (total - (total / 10.0).floor().to_float() * 10.0)
+}

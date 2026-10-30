@@ -1,0 +1,144 @@
+/// The kinds of ticket records.
+pub enum TicketKind {
+  Question
+  Complaint
+  Request
+}
+
+pub type Ticket {
+  id: Int
+  name: Str
+  city: Str
+  kind: TicketKind
+  replies: Int
+  hours: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn tickets_find(xs: List[Ticket], id: Int) -> Option[Ticket] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn tickets_in_city(xs: List[Ticket], city: Str) -> List[Ticket] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn tickets_active(xs: List[Ticket]) -> List[Ticket] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn tickets_names(xs: List[Ticket]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of replies.
+pub fn tickets_total_replies(xs: List[Ticket]) -> Int {
+  return xs.map(fn(x) => x.replies).sum()
+}
+
+/// The sum of hours.
+pub fn tickets_total_hours(xs: List[Ticket]) -> Float {
+  return xs.map(fn(x) => x.hours).sum_float()
+}
+
+/// The mean of hours, 0 for no records.
+pub fn tickets_average_hours(xs: List[Ticket]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return tickets_total_hours(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn tickets_kind_label(k: TicketKind) -> Str {
+  return match k {
+    TicketKind.Question => "Question",
+    TicketKind.Complaint => "Complaint",
+    TicketKind.Request => "Request",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn tickets_kind_weight(k: TicketKind) -> Float {
+  return match k {
+    TicketKind.Question => 1.0,
+    TicketKind.Complaint => 1.5,
+    TicketKind.Request => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn tickets_describe(x: Ticket) -> Str {
+  return "{x.name} ({x.city}), {tickets_kind_label(x.kind)}: {x.replies} replies, {x.hours.fixed(2)} hours"
+}
+
+/// The records of one kind.
+pub fn tickets_by_kind(xs: List[Ticket], k: TicketKind) -> List[Ticket] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most replies first.
+pub fn tickets_ranked(xs: List[Ticket]) -> List[Ticket] {
+  return xs.sort_by(fn(x) => 0 - x.replies)
+}
+
+/// The first few of the ranking.
+pub fn tickets_top(xs: List[Ticket], n: Int) -> List[Ticket] {
+  return tickets_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn tickets_validate(x: Ticket) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.replies < 0 {
+    errors = errors.push("negative replies")
+  }
+  if x.hours < 0.0 {
+    errors = errors.push("negative hours")
+  }
+  return errors
+}
+
+/// The record with hours and replies weighed together.
+pub fn tickets_score(x: Ticket) -> Float {
+  return x.hours * tickets_kind_weight(x.kind) + x.replies.to_float()
+}
+
+/// A row of the export file.
+pub fn tickets_row(x: Ticket) -> Str {
+  return "{x.id},{x.name},{x.city},{tickets_kind_label(x.kind)},{x.replies},{x.hours.fixed(2)}"
+}
+
+/// The export file.
+pub fn tickets_file(xs: List[Ticket]) -> Str {
+  return ["id,name,city,kind,replies,hours"].concat(xs.map(fn(x) => tickets_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn tickets_per_city(xs: List[Ticket]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of hours.
+pub fn tickets_over(xs: List[Ticket], limit: Float) -> List[Ticket] {
+  return xs.filter(fn(x) => x.hours > limit)
+}
+
+/// A line for the dashboard.
+pub fn tickets_summary(xs: List[Ticket]) -> Str {
+  return "{xs.len()} ticket records, {tickets_active(xs).len()} active, {tickets_total_hours(xs).fixed(2)} hours"
+}

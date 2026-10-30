@@ -1,0 +1,144 @@
+/// The kinds of shelf records.
+pub enum ShelfKind {
+  Open
+  Cold
+  Locked
+}
+
+pub type Shelf {
+  id: Int
+  name: Str
+  city: Str
+  kind: ShelfKind
+  slots: Int
+  height: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn shelves_find(xs: List[Shelf], id: Int) -> Option[Shelf] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn shelves_in_city(xs: List[Shelf], city: Str) -> List[Shelf] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn shelves_active(xs: List[Shelf]) -> List[Shelf] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn shelves_names(xs: List[Shelf]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of slots.
+pub fn shelves_total_slots(xs: List[Shelf]) -> Int {
+  return xs.map(fn(x) => x.slots).sum()
+}
+
+/// The sum of height.
+pub fn shelves_total_height(xs: List[Shelf]) -> Float {
+  return xs.map(fn(x) => x.height).sum_float()
+}
+
+/// The mean of height, 0 for no records.
+pub fn shelves_average_height(xs: List[Shelf]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return shelves_total_height(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn shelves_kind_label(k: ShelfKind) -> Str {
+  return match k {
+    ShelfKind.Open => "Open",
+    ShelfKind.Cold => "Cold",
+    ShelfKind.Locked => "Locked",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn shelves_kind_weight(k: ShelfKind) -> Float {
+  return match k {
+    ShelfKind.Open => 1.0,
+    ShelfKind.Cold => 1.5,
+    ShelfKind.Locked => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn shelves_describe(x: Shelf) -> Str {
+  return "{x.name} ({x.city}), {shelves_kind_label(x.kind)}: {x.slots} slots, {x.height.fixed(2)} height"
+}
+
+/// The records of one kind.
+pub fn shelves_by_kind(xs: List[Shelf], k: ShelfKind) -> List[Shelf] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most slots first.
+pub fn shelves_ranked(xs: List[Shelf]) -> List[Shelf] {
+  return xs.sort_by(fn(x) => 0 - x.slots)
+}
+
+/// The first few of the ranking.
+pub fn shelves_top(xs: List[Shelf], n: Int) -> List[Shelf] {
+  return shelves_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn shelves_validate(x: Shelf) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.slots < 0 {
+    errors = errors.push("negative slots")
+  }
+  if x.height < 0.0 {
+    errors = errors.push("negative height")
+  }
+  return errors
+}
+
+/// The record with height and slots weighed together.
+pub fn shelves_score(x: Shelf) -> Float {
+  return x.height * shelves_kind_weight(x.kind) + x.slots.to_float()
+}
+
+/// A row of the export file.
+pub fn shelves_row(x: Shelf) -> Str {
+  return "{x.id},{x.name},{x.city},{shelves_kind_label(x.kind)},{x.slots},{x.height.fixed(2)}"
+}
+
+/// The export file.
+pub fn shelves_file(xs: List[Shelf]) -> Str {
+  return ["id,name,city,kind,slots,height"].concat(xs.map(fn(x) => shelves_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn shelves_per_city(xs: List[Shelf]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of height.
+pub fn shelves_over(xs: List[Shelf], limit: Float) -> List[Shelf] {
+  return xs.filter(fn(x) => x.height > limit)
+}
+
+/// A line for the dashboard.
+pub fn shelves_summary(xs: List[Shelf]) -> Str {
+  return "{xs.len()} shelf records, {shelves_active(xs).len()} active, {shelves_total_height(xs).fixed(2)} height"
+}

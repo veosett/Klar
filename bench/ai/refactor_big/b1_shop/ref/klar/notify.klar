@@ -1,0 +1,30 @@
+use model.{Order, Customer, Status}
+use money.{fmt}
+use orders.{grand_total}
+
+/// What the customer is told about an order.
+pub fn message_for(o: Order, c: Customer) -> Str {
+  let who = "{c.first_name} {c.last_name}"
+  return match o.status {
+    Status.Draft => "{who}, your order {o.id} is not paid yet",
+    Status.Paid => "{who}, we received {fmt(grand_total(o))} for order {o.id}",
+    Status.OnHold => "{who}, your order {o.id} is on hold",
+    Status.Packed => "{who}, your order {o.id} is packed",
+    Status.Shipped => "{who}, your order {o.id} is on its way",
+    Status.Delivered => "{who}, your order {o.id} arrived",
+    Status.Cancelled => "{who}, your order {o.id} was cancelled",
+  }
+}
+
+/// A reminder to pay.
+pub fn reminder(c: Customer, amount: Int) -> Str {
+  return "{c.first_name} {c.last_name}: please pay {fmt(amount)}"
+}
+
+/// True when the customer should get a message.
+pub fn should_notify(s: Status) -> Bool {
+  return match s {
+    Status.Draft => false,
+    _ => true,
+  }
+}

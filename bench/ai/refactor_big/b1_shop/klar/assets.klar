@@ -1,0 +1,144 @@
+/// The kinds of asset records.
+pub enum AssetKind {
+  Vehicle
+  Fixture
+  Device
+}
+
+pub type Asset {
+  id: Int
+  name: Str
+  city: Str
+  kind: AssetKind
+  age_years: Int
+  book_value: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn assets_find(xs: List[Asset], id: Int) -> Option[Asset] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn assets_in_city(xs: List[Asset], city: Str) -> List[Asset] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn assets_active(xs: List[Asset]) -> List[Asset] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn assets_names(xs: List[Asset]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of age_years.
+pub fn assets_total_age_years(xs: List[Asset]) -> Int {
+  return xs.map(fn(x) => x.age_years).sum()
+}
+
+/// The sum of book_value.
+pub fn assets_total_book_value(xs: List[Asset]) -> Float {
+  return xs.map(fn(x) => x.book_value).sum_float()
+}
+
+/// The mean of book_value, 0 for no records.
+pub fn assets_average_book_value(xs: List[Asset]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return assets_total_book_value(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn assets_kind_label(k: AssetKind) -> Str {
+  return match k {
+    AssetKind.Vehicle => "Vehicle",
+    AssetKind.Fixture => "Fixture",
+    AssetKind.Device => "Device",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn assets_kind_weight(k: AssetKind) -> Float {
+  return match k {
+    AssetKind.Vehicle => 1.0,
+    AssetKind.Fixture => 1.5,
+    AssetKind.Device => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn assets_describe(x: Asset) -> Str {
+  return "{x.name} ({x.city}), {assets_kind_label(x.kind)}: {x.age_years} age_years, {x.book_value.fixed(2)} book_value"
+}
+
+/// The records of one kind.
+pub fn assets_by_kind(xs: List[Asset], k: AssetKind) -> List[Asset] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most age_years first.
+pub fn assets_ranked(xs: List[Asset]) -> List[Asset] {
+  return xs.sort_by(fn(x) => 0 - x.age_years)
+}
+
+/// The first few of the ranking.
+pub fn assets_top(xs: List[Asset], n: Int) -> List[Asset] {
+  return assets_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn assets_validate(x: Asset) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.age_years < 0 {
+    errors = errors.push("negative age_years")
+  }
+  if x.book_value < 0.0 {
+    errors = errors.push("negative book_value")
+  }
+  return errors
+}
+
+/// The record with book_value and age_years weighed together.
+pub fn assets_score(x: Asset) -> Float {
+  return x.book_value * assets_kind_weight(x.kind) + x.age_years.to_float()
+}
+
+/// A row of the export file.
+pub fn assets_row(x: Asset) -> Str {
+  return "{x.id},{x.name},{x.city},{assets_kind_label(x.kind)},{x.age_years},{x.book_value.fixed(2)}"
+}
+
+/// The export file.
+pub fn assets_file(xs: List[Asset]) -> Str {
+  return ["id,name,city,kind,age_years,book_value"].concat(xs.map(fn(x) => assets_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn assets_per_city(xs: List[Asset]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of book_value.
+pub fn assets_over(xs: List[Asset], limit: Float) -> List[Asset] {
+  return xs.filter(fn(x) => x.book_value > limit)
+}
+
+/// A line for the dashboard.
+pub fn assets_summary(xs: List[Asset]) -> Str {
+  return "{xs.len()} asset records, {assets_active(xs).len()} active, {assets_total_book_value(xs).fixed(2)} book_value"
+}

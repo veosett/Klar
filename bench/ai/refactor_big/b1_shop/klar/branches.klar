@@ -1,0 +1,144 @@
+/// The kinds of branch records.
+pub enum BranchKind {
+  Shop
+  Office
+  Depot
+}
+
+pub type Branch {
+  id: Int
+  name: Str
+  city: Str
+  kind: BranchKind
+  desks: Int
+  floor_area: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn branches_find(xs: List[Branch], id: Int) -> Option[Branch] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn branches_in_city(xs: List[Branch], city: Str) -> List[Branch] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn branches_active(xs: List[Branch]) -> List[Branch] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn branches_names(xs: List[Branch]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of desks.
+pub fn branches_total_desks(xs: List[Branch]) -> Int {
+  return xs.map(fn(x) => x.desks).sum()
+}
+
+/// The sum of floor_area.
+pub fn branches_total_floor_area(xs: List[Branch]) -> Float {
+  return xs.map(fn(x) => x.floor_area).sum_float()
+}
+
+/// The mean of floor_area, 0 for no records.
+pub fn branches_average_floor_area(xs: List[Branch]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return branches_total_floor_area(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn branches_kind_label(k: BranchKind) -> Str {
+  return match k {
+    BranchKind.Shop => "Shop",
+    BranchKind.Office => "Office",
+    BranchKind.Depot => "Depot",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn branches_kind_weight(k: BranchKind) -> Float {
+  return match k {
+    BranchKind.Shop => 1.0,
+    BranchKind.Office => 1.5,
+    BranchKind.Depot => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn branches_describe(x: Branch) -> Str {
+  return "{x.name} ({x.city}), {branches_kind_label(x.kind)}: {x.desks} desks, {x.floor_area.fixed(2)} floor_area"
+}
+
+/// The records of one kind.
+pub fn branches_by_kind(xs: List[Branch], k: BranchKind) -> List[Branch] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most desks first.
+pub fn branches_ranked(xs: List[Branch]) -> List[Branch] {
+  return xs.sort_by(fn(x) => 0 - x.desks)
+}
+
+/// The first few of the ranking.
+pub fn branches_top(xs: List[Branch], n: Int) -> List[Branch] {
+  return branches_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn branches_validate(x: Branch) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.desks < 0 {
+    errors = errors.push("negative desks")
+  }
+  if x.floor_area < 0.0 {
+    errors = errors.push("negative floor_area")
+  }
+  return errors
+}
+
+/// The record with floor_area and desks weighed together.
+pub fn branches_score(x: Branch) -> Float {
+  return x.floor_area * branches_kind_weight(x.kind) + x.desks.to_float()
+}
+
+/// A row of the export file.
+pub fn branches_row(x: Branch) -> Str {
+  return "{x.id},{x.name},{x.city},{branches_kind_label(x.kind)},{x.desks},{x.floor_area.fixed(2)}"
+}
+
+/// The export file.
+pub fn branches_file(xs: List[Branch]) -> Str {
+  return ["id,name,city,kind,desks,floor_area"].concat(xs.map(fn(x) => branches_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn branches_per_city(xs: List[Branch]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of floor_area.
+pub fn branches_over(xs: List[Branch], limit: Float) -> List[Branch] {
+  return xs.filter(fn(x) => x.floor_area > limit)
+}
+
+/// A line for the dashboard.
+pub fn branches_summary(xs: List[Branch]) -> Str {
+  return "{xs.len()} branch records, {branches_active(xs).len()} active, {branches_total_floor_area(xs).fixed(2)} floor_area"
+}

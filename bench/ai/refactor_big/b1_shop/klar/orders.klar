@@ -1,0 +1,92 @@
+use model.{Order, Line, Status}
+
+/// The price of one line.
+pub fn line_total(l: Line) -> Float {
+  return l.unit_price * l.qty.to_float()
+}
+
+/// The goods of an order, without shipping.
+pub fn subtotal(o: Order) -> Float {
+  return o.lines.map(fn(l) => line_total(l)).sum_float()
+}
+
+/// What the customer pays.
+pub fn grand_total(o: Order) -> Float {
+  return subtotal(o) + o.shipping
+}
+
+/// The number of items in an order.
+pub fn item_count(o: Order) -> Int {
+  return o.lines.map(fn(l) => l.qty).sum()
+}
+
+/// The status as people read it.
+pub fn status_label(s: Status) -> Str {
+  return match s {
+    Status.Draft => "Draft",
+    Status.Paid => "Paid",
+    Status.Packed => "Packed",
+    Status.Shipped => "Shipped",
+    Status.Delivered => "Delivered",
+    Status.Cancelled => "Cancelled",
+  }
+}
+
+/// True while there is still work to do on the order.
+pub fn is_open(s: Status) -> Bool {
+  return match s {
+    Status.Draft => true,
+    Status.Paid => true,
+    Status.Packed => true,
+    Status.Shipped => true,
+    _ => false,
+  }
+}
+
+/// The next step of an order.
+pub fn next_status(s: Status) -> Status {
+  return match s {
+    Status.Draft => Status.Paid,
+    Status.Paid => Status.Packed,
+    Status.Packed => Status.Shipped,
+    Status.Shipped => Status.Delivered,
+    Status.Delivered => Status.Delivered,
+    Status.Cancelled => Status.Cancelled,
+  }
+}
+
+/// True while the customer can still cancel.
+pub fn can_cancel(s: Status) -> Bool {
+  return match s {
+    Status.Draft => true,
+    Status.Paid => true,
+    Status.Packed => false,
+    Status.Shipped => false,
+    Status.Delivered => false,
+    Status.Cancelled => false,
+  }
+}
+
+/// True when money was received for the order.
+pub fn is_revenue(s: Status) -> Bool {
+  return match s {
+    Status.Paid => true,
+    Status.Packed => true,
+    Status.Shipped => true,
+    Status.Delivered => true,
+    _ => false,
+  }
+}
+
+/// The order one step further.
+pub fn advance(o: Order) -> Order {
+  return o with { status: next_status(o.status) }
+}
+
+/// The order cancelled, if that is still possible.
+pub fn cancel(o: Order) -> Order {
+  return match can_cancel(o.status) {
+    true => o with { status: Status.Cancelled },
+    false => o,
+  }
+}

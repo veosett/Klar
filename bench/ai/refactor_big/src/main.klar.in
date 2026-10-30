@@ -1,0 +1,58 @@
+use money.{fmt}
+use orders.{grand_total, status_label}
+use catalog.{catalog_value, price_label}
+use tax.{order_tax}
+use discount.{net_amount}
+use shipping.{shipping_label}
+use loyalty.{points_for}
+use fraud.{needs_review}
+use refunds.{refund_note}
+use notify.{message_for}
+use analytics.{revenue, top_customers}
+use invoice.{invoice_text}
+use crm.{display_name, sorted_customers}
+use export.{orders_file}
+use dashboard.{headline, status_counts}
+use picking.{items_to_pack}
+use commission.{commission_total}
+use audit.{check_order}
+use sample.{sample_products, sample_customers, sample_orders}
+use model.{Tier}
+@USES@
+
+/// A tour of the back office with the sample data.
+fn main() uses io {
+  let ps = sample_products()
+  let cs = sample_customers()
+  let os = sample_orders()
+  print(headline(os))
+  for line in status_counts(os) {
+    print(line)
+  }
+  print("stock: {fmt(catalog_value(ps))}")
+  for p in ps {
+    print(price_label(p))
+  }
+  for o in os {
+    print("{o.id} {status_label(o.status)} {fmt(grand_total(o))} tax {fmt(order_tax(o, ps))}")
+    print("points: {points_for(grand_total(o))}")
+    print(refund_note(o))
+    print(check_order(o).join("; "))
+    for c in cs.filter(fn(x) => x.id == o.customer) {
+      print(message_for(o, c))
+      print(invoice_text(o, c))
+      print(needs_review(o, c))
+    }
+  }
+  print(sorted_customers(cs).map(fn(c) => display_name(c)).join(", "))
+  print(top_customers(os, cs, 1).join(", "))
+  print(fmt(revenue(os)))
+  for o in os.take(1) {
+    print(fmt(net_amount(grand_total(o), Tier.Gold, "TEN")))
+  }
+  print(shipping_label(net_amount(«0.0¦0», Tier.Basic, "")))
+  print(orders_file(os))
+  print(items_to_pack(os))
+  print(fmt(commission_total(os)))
+@CALLS@
+}

@@ -1,0 +1,144 @@
+/// The kinds of machine records.
+pub enum MachineKind {
+  Press
+  Scanner
+  Lift
+}
+
+pub type Machine {
+  id: Int
+  name: Str
+  city: Str
+  kind: MachineKind
+  cycles: Int
+  power: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn machines_find(xs: List[Machine], id: Int) -> Option[Machine] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn machines_in_city(xs: List[Machine], city: Str) -> List[Machine] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn machines_active(xs: List[Machine]) -> List[Machine] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn machines_names(xs: List[Machine]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of cycles.
+pub fn machines_total_cycles(xs: List[Machine]) -> Int {
+  return xs.map(fn(x) => x.cycles).sum()
+}
+
+/// The sum of power.
+pub fn machines_total_power(xs: List[Machine]) -> Float {
+  return xs.map(fn(x) => x.power).sum_float()
+}
+
+/// The mean of power, 0 for no records.
+pub fn machines_average_power(xs: List[Machine]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return machines_total_power(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn machines_kind_label(k: MachineKind) -> Str {
+  return match k {
+    MachineKind.Press => "Press",
+    MachineKind.Scanner => "Scanner",
+    MachineKind.Lift => "Lift",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn machines_kind_weight(k: MachineKind) -> Float {
+  return match k {
+    MachineKind.Press => 1.0,
+    MachineKind.Scanner => 1.5,
+    MachineKind.Lift => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn machines_describe(x: Machine) -> Str {
+  return "{x.name} ({x.city}), {machines_kind_label(x.kind)}: {x.cycles} cycles, {x.power.fixed(2)} power"
+}
+
+/// The records of one kind.
+pub fn machines_by_kind(xs: List[Machine], k: MachineKind) -> List[Machine] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most cycles first.
+pub fn machines_ranked(xs: List[Machine]) -> List[Machine] {
+  return xs.sort_by(fn(x) => 0 - x.cycles)
+}
+
+/// The first few of the ranking.
+pub fn machines_top(xs: List[Machine], n: Int) -> List[Machine] {
+  return machines_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn machines_validate(x: Machine) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.cycles < 0 {
+    errors = errors.push("negative cycles")
+  }
+  if x.power < 0.0 {
+    errors = errors.push("negative power")
+  }
+  return errors
+}
+
+/// The record with power and cycles weighed together.
+pub fn machines_score(x: Machine) -> Float {
+  return x.power * machines_kind_weight(x.kind) + x.cycles.to_float()
+}
+
+/// A row of the export file.
+pub fn machines_row(x: Machine) -> Str {
+  return "{x.id},{x.name},{x.city},{machines_kind_label(x.kind)},{x.cycles},{x.power.fixed(2)}"
+}
+
+/// The export file.
+pub fn machines_file(xs: List[Machine]) -> Str {
+  return ["id,name,city,kind,cycles,power"].concat(xs.map(fn(x) => machines_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn machines_per_city(xs: List[Machine]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of power.
+pub fn machines_over(xs: List[Machine], limit: Float) -> List[Machine] {
+  return xs.filter(fn(x) => x.power > limit)
+}
+
+/// A line for the dashboard.
+pub fn machines_summary(xs: List[Machine]) -> Str {
+  return "{xs.len()} machine records, {machines_active(xs).len()} active, {machines_total_power(xs).fixed(2)} power"
+}

@@ -1,0 +1,144 @@
+/// The kinds of inspection records.
+pub enum InspectionKind {
+  Safety
+  Stock
+  Tax
+}
+
+pub type Inspection {
+  id: Int
+  name: Str
+  city: Str
+  kind: InspectionKind
+  findings: Int
+  duration: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn audits_find(xs: List[Inspection], id: Int) -> Option[Inspection] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn audits_in_city(xs: List[Inspection], city: Str) -> List[Inspection] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn audits_active(xs: List[Inspection]) -> List[Inspection] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn audits_names(xs: List[Inspection]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of findings.
+pub fn audits_total_findings(xs: List[Inspection]) -> Int {
+  return xs.map(fn(x) => x.findings).sum()
+}
+
+/// The sum of duration.
+pub fn audits_total_duration(xs: List[Inspection]) -> Float {
+  return xs.map(fn(x) => x.duration).sum_float()
+}
+
+/// The mean of duration, 0 for no records.
+pub fn audits_average_duration(xs: List[Inspection]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return audits_total_duration(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn audits_kind_label(k: InspectionKind) -> Str {
+  return match k {
+    InspectionKind.Safety => "Safety",
+    InspectionKind.Stock => "Stock",
+    InspectionKind.Tax => "Tax",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn audits_kind_weight(k: InspectionKind) -> Float {
+  return match k {
+    InspectionKind.Safety => 1.0,
+    InspectionKind.Stock => 1.5,
+    InspectionKind.Tax => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn audits_describe(x: Inspection) -> Str {
+  return "{x.name} ({x.city}), {audits_kind_label(x.kind)}: {x.findings} findings, {x.duration.fixed(2)} duration"
+}
+
+/// The records of one kind.
+pub fn audits_by_kind(xs: List[Inspection], k: InspectionKind) -> List[Inspection] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most findings first.
+pub fn audits_ranked(xs: List[Inspection]) -> List[Inspection] {
+  return xs.sort_by(fn(x) => 0 - x.findings)
+}
+
+/// The first few of the ranking.
+pub fn audits_top(xs: List[Inspection], n: Int) -> List[Inspection] {
+  return audits_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn audits_validate(x: Inspection) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.findings < 0 {
+    errors = errors.push("negative findings")
+  }
+  if x.duration < 0.0 {
+    errors = errors.push("negative duration")
+  }
+  return errors
+}
+
+/// The record with duration and findings weighed together.
+pub fn audits_score(x: Inspection) -> Float {
+  return x.duration * audits_kind_weight(x.kind) + x.findings.to_float()
+}
+
+/// A row of the export file.
+pub fn audits_row(x: Inspection) -> Str {
+  return "{x.id},{x.name},{x.city},{audits_kind_label(x.kind)},{x.findings},{x.duration.fixed(2)}"
+}
+
+/// The export file.
+pub fn audits_file(xs: List[Inspection]) -> Str {
+  return ["id,name,city,kind,findings,duration"].concat(xs.map(fn(x) => audits_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn audits_per_city(xs: List[Inspection]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of duration.
+pub fn audits_over(xs: List[Inspection], limit: Float) -> List[Inspection] {
+  return xs.filter(fn(x) => x.duration > limit)
+}
+
+/// A line for the dashboard.
+pub fn audits_summary(xs: List[Inspection]) -> Str {
+  return "{xs.len()} inspection records, {audits_active(xs).len()} active, {audits_total_duration(xs).fixed(2)} duration"
+}

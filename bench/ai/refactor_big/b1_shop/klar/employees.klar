@@ -1,0 +1,144 @@
+/// The kinds of employee records.
+pub enum EmployeeKind {
+  Picker
+  Driver
+  Clerk
+}
+
+pub type Employee {
+  id: Int
+  name: Str
+  city: Str
+  kind: EmployeeKind
+  shifts: Int
+  wage: Float
+  active: Bool
+}
+
+/// The record with this id.
+pub fn employees_find(xs: List[Employee], id: Int) -> Option[Employee] {
+  return xs.find(fn(x) => x.id == id)
+}
+
+/// The records of one city.
+pub fn employees_in_city(xs: List[Employee], city: Str) -> List[Employee] {
+  return xs.filter(fn(x) => x.city == city)
+}
+
+/// The records in use.
+pub fn employees_active(xs: List[Employee]) -> List[Employee] {
+  return xs.filter(fn(x) => x.active)
+}
+
+/// The names, in order.
+pub fn employees_names(xs: List[Employee]) -> List[Str] {
+  return xs.map(fn(x) => x.name).sort()
+}
+
+/// The sum of shifts.
+pub fn employees_total_shifts(xs: List[Employee]) -> Int {
+  return xs.map(fn(x) => x.shifts).sum()
+}
+
+/// The sum of wage.
+pub fn employees_total_wage(xs: List[Employee]) -> Float {
+  return xs.map(fn(x) => x.wage).sum_float()
+}
+
+/// The mean of wage, 0 for no records.
+pub fn employees_average_wage(xs: List[Employee]) -> Float {
+  if xs.is_empty() {
+    return 0.0
+  }
+  return employees_total_wage(xs) / xs.len().to_float()
+}
+
+/// The kind as people read it.
+pub fn employees_kind_label(k: EmployeeKind) -> Str {
+  return match k {
+    EmployeeKind.Picker => "Picker",
+    EmployeeKind.Driver => "Driver",
+    EmployeeKind.Clerk => "Clerk",
+  }
+}
+
+/// How much a kind counts in a score.
+pub fn employees_kind_weight(k: EmployeeKind) -> Float {
+  return match k {
+    EmployeeKind.Picker => 1.0,
+    EmployeeKind.Driver => 1.5,
+    EmployeeKind.Clerk => 2.0,
+  }
+}
+
+/// One record as text.
+pub fn employees_describe(x: Employee) -> Str {
+  return "{x.name} ({x.city}), {employees_kind_label(x.kind)}: {x.shifts} shifts, {x.wage.fixed(2)} wage"
+}
+
+/// The records of one kind.
+pub fn employees_by_kind(xs: List[Employee], k: EmployeeKind) -> List[Employee] {
+  return xs.filter(fn(x) => x.kind == k)
+}
+
+/// The records with the most shifts first.
+pub fn employees_ranked(xs: List[Employee]) -> List[Employee] {
+  return xs.sort_by(fn(x) => 0 - x.shifts)
+}
+
+/// The first few of the ranking.
+pub fn employees_top(xs: List[Employee], n: Int) -> List[Employee] {
+  return employees_ranked(xs).take(n)
+}
+
+/// What is wrong with a record.
+pub fn employees_validate(x: Employee) -> List[Str] {
+  var errors: List[Str] = []
+  if x.name.is_empty() {
+    errors = errors.push("no name")
+  }
+  if x.city.is_empty() {
+    errors = errors.push("no city")
+  }
+  if x.shifts < 0 {
+    errors = errors.push("negative shifts")
+  }
+  if x.wage < 0.0 {
+    errors = errors.push("negative wage")
+  }
+  return errors
+}
+
+/// The record with wage and shifts weighed together.
+pub fn employees_score(x: Employee) -> Float {
+  return x.wage * employees_kind_weight(x.kind) + x.shifts.to_float()
+}
+
+/// A row of the export file.
+pub fn employees_row(x: Employee) -> Str {
+  return "{x.id},{x.name},{x.city},{employees_kind_label(x.kind)},{x.shifts},{x.wage.fixed(2)}"
+}
+
+/// The export file.
+pub fn employees_file(xs: List[Employee]) -> Str {
+  return ["id,name,city,kind,shifts,wage"].concat(xs.map(fn(x) => employees_row(x))).join("\n")
+}
+
+/// The number of records per city.
+pub fn employees_per_city(xs: List[Employee]) -> Map[Str, Int] {
+  var m: Map[Str, Int] = Map {}
+  for x in xs {
+    m = m.update(x.city, 0, fn(v) => v + 1)
+  }
+  return m
+}
+
+/// The records above a limit of wage.
+pub fn employees_over(xs: List[Employee], limit: Float) -> List[Employee] {
+  return xs.filter(fn(x) => x.wage > limit)
+}
+
+/// A line for the dashboard.
+pub fn employees_summary(xs: List[Employee]) -> Str {
+  return "{xs.len()} employee records, {employees_active(xs).len()} active, {employees_total_wage(xs).fixed(2)} wage"
+}

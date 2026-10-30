@@ -1,0 +1,30 @@
+use model.{Order, Product, Status}
+use money.{plain}
+use orders.{grand_total, status_label}
+
+/// A one-letter code for the warehouse system.
+pub fn status_code(s: Status) -> Str {
+  return match s {
+    Status.Draft => "D",
+    Status.Paid => "P",
+    Status.Packed => "K",
+    Status.Shipped => "S",
+    Status.Delivered => "V",
+    Status.Cancelled => "X",
+  }
+}
+
+/// A row of the orders file.
+pub fn order_row(o: Order) -> Str {
+  return "{o.id},{status_code(o.status)},{status_label(o.status)},{plain(grand_total(o))}"
+}
+
+/// A row of the products file.
+pub fn product_row(p: Product) -> Str {
+  return "{p.sku},{p.name},{plain(p.price)},{p.weight.fixed(2)}"
+}
+
+/// The orders file.
+pub fn orders_file(os: List[Order]) -> Str {
+  return ["id,code,status,total"].concat(os.map(fn(o) => order_row(o))).join("\n")
+}

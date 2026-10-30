@@ -1,0 +1,99 @@
+use model.{Customer, Tier}
+
+/// The customer's name as people read it.
+pub fn display_name(c: Customer) -> Str {
+  return "{c.first_name} {c.last_name}"
+}
+
+/// Customers in alphabetical order.
+pub fn sorted_customers(cs: List[Customer]) -> List[Customer] {
+  return cs.sort_by(fn(c) => "{c.last_name}\t{c.first_name}")
+}
+
+/// Customers whose name contains the text, in any case.
+pub fn find_by_name(cs: List[Customer], text: Str) -> List[Customer] {
+  let q = text.lower()
+  return cs.filter(fn(c) => c.first_name.lower().contains(q) or c.last_name.lower().contains(q))
+}
+
+fn initial(word: Str) -> Str {
+  return word.slice(0, 1).upper()
+}
+
+/// The initials of a customer: "AL" for "Ada Lovelace".
+pub fn initials(c: Customer) -> Str {
+  return "{initial(c.first_name)}{initial(c.last_name)}"
+}
+
+/// The opening of a letter.
+pub fn greeting(c: Customer) -> Str {
+  return "Dear {c.first_name} {c.last_name}"
+}
+
+/// An address line.
+pub fn mailing_line(c: Customer) -> Str {
+  return "{c.first_name} {c.last_name} <{c.email}>"
+}
+
+fn tier_of(text: Str) -> Tier {
+  return match text {
+    "gold" => Tier.Gold,
+    "silver" => Tier.Silver,
+    _ => Tier.Basic,
+  }
+}
+
+fn tier_text(t: Tier) -> Str {
+  return match t {
+    Tier.Gold => "gold",
+    Tier.Silver => "silver",
+    Tier.Basic => "basic",
+  }
+}
+
+/// A customer from a row of the customer file.
+pub fn parse_customer(row: Str) -> Option[Customer] {
+  let cells = row.split(",")
+  if cells.len() != 6 {
+    return None
+  }
+  let id = cells.get_or(0, "").to_int()?
+  return Some(Customer {
+    id: id,
+    first_name: cells.get_or(1, ""),
+    last_name: cells.get_or(2, ""),
+    email: cells.get_or(3, ""),
+    tier: tier_of(cells.get_or(4, "")),
+    city: cells.get_or(5, ""),
+  })
+}
+
+/// The first row of the customer file.
+pub fn customer_header() -> Str {
+  return "id,first_name,last_name,email,tier,city"
+}
+
+/// A row of the customer file.
+pub fn customer_row(c: Customer) -> Str {
+  return "{c.id},{c.first_name},{c.last_name},{c.email},{tier_text(c.tier)},{c.city}"
+}
+
+/// What is wrong with a customer.
+pub fn validate_customer(c: Customer) -> List[Str] {
+  var errors: List[Str] = []
+  if c.first_name.is_empty() {
+    errors = errors.push("first name is empty")
+  }
+  if c.last_name.is_empty() {
+    errors = errors.push("last name is empty")
+  }
+  if not c.email.contains("@") {
+    errors = errors.push("bad email")
+  }
+  return errors
+}
+
+/// True for two records of the same person.
+pub fn same_person(a: Customer, b: Customer) -> Bool {
+  return a.first_name.lower() == b.first_name.lower() and a.last_name.lower() == b.last_name.lower() and a.email == b.email
+}
