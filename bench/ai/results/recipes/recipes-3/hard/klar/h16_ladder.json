@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn one_off(a: Str, b: Str) -> Bool {\n  let ca = a.chars()\n  let cb = b.chars()\n  if ca.len() != cb.len() {\n    return false\n  }\n  var diff = 0\n  for i in range(0, ca.len()) {\n    if ca.get_or(i, \"\") != cb.get_or(i, \"\") {\n      diff = diff + 1\n    }\n  }\n  return diff == 1\n}\n\npub fn ladder(start: Str, goal: Str, words: List[Str]) -> Int {\n  if start == goal {\n    return 1\n  }\n  let nodes = [start].concat(words.unique())\n  let n = nodes.len()\n  var dist: List[Int] = []\n  for _i in range(0, n) {\n    dist = dist.push(-1)\n  }\n  dist = dist.set(0, 1)\n  var queue: List[Int] = [0]\n  var qh = 0\n  while qh < queue.len() {\n    let u = queue.get_or(qh, 0)\n    qh = qh + 1\n    let un = nodes.get_or(u, \"\")\n    for v in range(0, n) {\n      if dist.get_or(v, -1) < 0 and one_off(un, nodes.get_or(v, \"\")) {\n        dist = dist.set(v, dist.get_or(u, 0) + 1)\n        queue = queue.push(v)\n        if nodes.get_or(v, \"\") == goal {\n          return dist.get_or(v, 0)\n        }\n      }\n    }\n  }\n  return 0\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

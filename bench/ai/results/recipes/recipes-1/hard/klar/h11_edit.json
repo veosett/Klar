@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn edit(a: Str, b: Str) -> Int {\n  let ca = a.chars()\n  let cb = b.chars()\n  let m = cb.len()\n  var prev: List[Int] = range(0, m + 1)\n  for i in range(0, ca.len()) {\n    let ai = ca.get_or(i, \"\")\n    var cur: List[Int] = [i + 1]\n    for j in range(0, m) {\n      let cost = match ai == cb.get_or(j, \"\") {\n        true => 0,\n        false => 1,\n      }\n      let delete_cost = prev.get_or(j + 1, 0) + 1\n      let insert_cost = cur.get_or(j, 0) + 1\n      let replace_cost = prev.get_or(j, 0) + cost\n      cur = cur.push(delete_cost.min(insert_cost).min(replace_cost))\n    }\n    prev = cur\n  }\n  return prev.get_or(m, 0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn all_digits(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  for c in s.codes() {\n    if c < 48 or c > 57 {\n      return false\n    }\n  }\n  return true\n}\n\nfn is_lower_name(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  for c in s.codes() {\n    if c < 97 or c > 122 {\n      return false\n    }\n  }\n  return true\n}\n\nfn is_int_text(s: Str) -> Bool {\n  var body = s\n  if s.starts_with(\"-\") {\n    body = s.slice(1, s.len())\n  }\n  return all_digits(body)\n}\n\nfn is_term(s: Str) -> Bool {\n  return is_int_text(s) or is_lower_name(s)\n}\n\nfn line_ok(parts: List[Str]) -> Bool {\n  let n = parts.len()\n  if n < 3 or (n - 3) % 2 != 0 {\n    return false\n  }\n  if is_lower_name(parts.get_or(0, \"\")) == false {\n    return false\n  }\n  if parts.get_or(1, \"\") != \"=\" {\n    return false\n  }\n  var k = 2\n  while k < n {\n    if is_term(parts.get_or(k, \"\")) == false {\n      return false\n    }\n    if k + 1 < n {\n      let op = parts.get_or(k + 1, \"\")\n      if op != \"+\" and op != \"-\" {\n        return false\n      }\n    }\n    k = k + 2\n  }\n  return true\n}\n\nfn value_of(vars: Map[Str, Int], t: Str) -> Int {\n  if is_lower_name(t) {\n    return vars.get(t).unwrap_or(0)\n  }\n  return t.to_int().unwrap_or(0)\n}\n\npub fn run_vars(lines: List[Str]) -> Result[Map[Str, Int], Str] {\n  var vars: Map[Str, Int] = Map {}\n  for line in lines {\n    let parts = line.split(\" \")\n    if line_ok(parts) == false {\n      return Err(\"syntax error\")\n    }\n    var acc = 0\n    var op = \"+\"\n    var k = 2\n    while k < parts.len() {\n      let t = parts.get_or(k, \"\")\n      if is_lower_name(t) and vars.has(t) == false {\n        return Err(\"undefined \" + t)\n      }\n      let v = value_of(vars, t)\n      if op == \"+\" {\n        acc = acc + v\n      } else {\n        acc = acc - v\n      }\n      op = parts.get_or(k + 1, \"+\")\n      k = k + 2\n    }\n    vars = vars.set(parts.get_or(0, \"\"), acc)\n  }\n  return Ok(vars)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

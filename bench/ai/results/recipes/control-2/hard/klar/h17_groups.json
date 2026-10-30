@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn add_pair(gs: List[List[Str]], a: Str, b: Str) -> List[List[Str]] {\n  let empty: List[Str] = []\n  let ha = gs.any(fn(g) => g.contains(a))\n  let hb = gs.any(fn(g) => g.contains(b))\n  let ga = gs.find(fn(g) => g.contains(a)).unwrap_or(empty)\n  let gb = gs.find(fn(g) => g.contains(b)).unwrap_or(empty)\n  if ha and hb {\n    if ga == gb {\n      return gs\n    }\n    let rest = gs.filter(fn(g) => (g != ga) and (g != gb))\n    return rest.push(ga.concat(gb))\n  }\n  if ha {\n    return gs.filter(fn(g) => g != ga).push(ga.push(b))\n  }\n  if hb {\n    return gs.filter(fn(g) => g != gb).push(gb.push(a))\n  }\n  return gs.push([a, b].unique())\n}\n\npub fn groups(pairs: List[List[Str]]) -> List[List[Str]] {\n  let none: List[List[Str]] = []\n  let merged = pairs.fold(none, fn(gs, p) => add_pair(gs: gs, a: p.get_or(0, \"\"), b: p.get_or(1, \"\")))\n  let normal = merged.map(fn(g) => g.unique().sort())\n  return normal.sort_by(fn(g) => g.get_or(0, \"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

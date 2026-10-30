@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn groups(pairs: List[List[Str]]) -> List[List[Str]] {\n  let empty: List[List[Str]] = []\n  var gs: List[List[Str]] = empty\n  for p in pairs {\n    let a = p.get_or(0, \"\")\n    let b = p.get_or(1, \"\")\n    let touched = gs.filter(fn(g) => g.contains(a) or g.contains(b))\n    let others = gs.filter(fn(g) => not (g.contains(a) or g.contains(b)))\n    let merged = touched.flatten().push(a).push(b)\n    gs = others.push(merged)\n  }\n  let normalized = gs.map(fn(g) => g.unique().sort())\n  return normalized.sort_by(fn(g) => g.get_or(0, \"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

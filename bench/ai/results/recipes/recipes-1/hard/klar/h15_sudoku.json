@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn valid_char(c: Str) -> Bool {\n  return c == \".\" or c == \"1\" or c == \"2\" or c == \"3\" or c == \"4\" or c == \"5\" or c == \"6\" or c == \"7\" or c == \"8\" or c == \"9\"\n}\n\nfn cell(rows: List[Str], r: Int, c: Int) -> Str {\n  return rows.get_or(r, \"\").chars().get_or(c, \".\")\n}\n\nfn column(rows: List[Str], c: Int) -> List[Str] {\n  return range(0, 9).map(fn(r) => cell(rows: rows, r: r, c: c))\n}\n\nfn box_cells(rows: List[Str], b: Int) -> List[Str] {\n  let r0 = (b / 3) * 3\n  let c0 = (b % 3) * 3\n  return range(0, 9).map(fn(k) => cell(rows: rows, r: r0 + k / 3, c: c0 + k % 3))\n}\n\nfn unit_ok(vals: List[Str]) -> Bool {\n  let filled = vals.filter(fn(x) => x != \".\")\n  return filled.unique().len() == filled.len()\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n  if rows.len() != 9 {\n    return false\n  }\n  for row in rows {\n    if row.len() != 9 {\n      return false\n    }\n    for ch in row.chars() {\n      if not (valid_char(ch)) {\n        return false\n      }\n    }\n  }\n  for i in range(0, 9) {\n    if not (unit_ok(rows.get_or(i, \"\").chars())) {\n      return false\n    }\n    if not (unit_ok(column(rows: rows, c: i))) {\n      return false\n    }\n    if not (unit_ok(box_cells(rows: rows, b: i))) {\n      return false\n    }\n  }\n  return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

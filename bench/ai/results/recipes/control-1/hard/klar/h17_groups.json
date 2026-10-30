@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "// Index of the group that contains x, or -1.\nfn find_group(gs: List[List[Str]], x: Str) -> Int {\n  for i in range(0, gs.len()) {\n    if gs.get_or(i, []).contains(x) {\n      return i\n    }\n  }\n  return -1\n}\n\npub fn groups(pairs: List[List[Str]]) -> List[List[Str]] {\n  var gs: List[List[Str]] = []\n  for p in pairs {\n    let a = p.get_or(0, \"\")\n    let b = p.get_or(1, \"\")\n    let ia = find_group(gs, a)\n    let ib = find_group(gs, b)\n    if ia < 0 and ib < 0 {\n      gs = gs.push([a, b])\n    } else if ia < 0 {\n      gs = gs.set(ib, gs.get_or(ib, []).push(a))\n    } else if ib < 0 {\n      gs = gs.set(ia, gs.get_or(ia, []).push(b))\n    } else if ia != ib {\n      let merged = gs.get_or(ia, []).concat(gs.get_or(ib, []))\n      var rest: List[List[Str]] = []\n      for i in range(0, gs.len()) {\n        if i != ia and i != ib {\n          rest = rest.push(gs.get_or(i, []))\n        }\n      }\n      gs = rest.push(merged)\n    }\n  }\n  var out: List[List[Str]] = []\n  for g in gs {\n    out = out.push(g.unique().sort())\n  }\n  return out.sort_by(fn(g) => g.get_or(0, \"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

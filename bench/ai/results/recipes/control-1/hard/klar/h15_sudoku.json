@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn no_repeat(cells: List[Str]) -> Bool {\n  let filled = cells.filter(fn(c) => c != \".\")\n  return filled.unique().len() == filled.len()\n}\n\npub fn sudoku(rows: List[Str]) -> Bool {\n  if rows.len() != 9 {\n    return false\n  }\n  var grid: List[List[Str]] = []\n  for r in rows {\n    if r.len() != 9 {\n      return false\n    }\n    for ch in r.chars() {\n      if ch != \".\" and \"123456789\".contains(ch) == false {\n        return false\n      }\n    }\n    grid = grid.push(r.chars())\n  }\n  let g = grid\n  for k in range(0, 9) {\n    if no_repeat(g.get_or(k, [])) == false {\n      return false\n    }\n    let column = g.map(fn(row) => row.get_or(k, \".\"))\n    if no_repeat(column) == false {\n      return false\n    }\n  }\n  for b in range(0, 9) {\n    let r0 = (b / 3) * 3\n    let c0 = (b % 3) * 3\n    let box = range(0, 9).map(fn(q) => g.get_or(r0 + q / 3, []).get_or(c0 + q % 3, \".\"))\n    if no_repeat(box) == false {\n      return false\n    }\n  }\n  return true\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

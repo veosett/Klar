@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type Cache {\n  order: List[Str],\n  vals: Map[Str, Str],\n}\n\nfn touch(order: List[Str], key: Str) -> List[Str] {\n  return order.filter(fn(x) => x != key).push(key)\n}\n\nfn put_key(c: Cache, capacity: Int, key: Str, value: Str) -> Cache {\n  if capacity == 0 {\n    return c\n  }\n  if c.vals.has(key) {\n    return Cache { order: touch(c.order, key), vals: c.vals.set(key, value) }\n  }\n  var order: List[Str] = c.order\n  var vals: Map[Str, Str] = c.vals\n  if order.len() >= capacity {\n    let oldest = order.get_or(0, \"\")\n    order = order.drop(1)\n    vals = vals.remove(oldest)\n  }\n  return Cache { order: order.push(key), vals: vals.set(key, value) }\n}\n\npub fn lru(capacity: Int, ops: List[Str]) -> List[Str] {\n  let empty_order: List[Str] = []\n  let empty_vals: Map[Str, Str] = Map {}\n  var cache: Cache = Cache { order: empty_order, vals: empty_vals }\n  var out: List[Str] = []\n  for op in ops {\n    let parts = op.split(\" \")\n    let kind = parts.get_or(0, \"\")\n    let key = parts.get_or(1, \"\")\n    if kind == \"put\" {\n      cache = put_key(cache, capacity, key, parts.drop(2).join(\" \"))\n    } else {\n      match cache.vals.get(key) {\n        Some(v) => {\n          out = out.push(v)\n          cache = Cache { order: touch(cache.order, key), vals: cache.vals }\n        },\n        None => {\n          out = out.push(\"-\")\n        },\n      }\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

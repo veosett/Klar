@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn groups(pairs: List[List[Str]]) -> List[List[Str]] {\n  var gs: List[List[Str]] = []\n  for p in pairs {\n    let a = p.get_or(0, \"\")\n    let b = p.get_or(1, \"\")\n    var merged: List[Str] = [a, b]\n    var rest: List[List[Str]] = []\n    for g in gs {\n      if g.contains(a) or g.contains(b) {\n        merged = merged.concat(g)\n      } else {\n        rest = rest.push(g)\n      }\n    }\n    gs = rest.push(merged.unique())\n  }\n  let sorted_groups = gs.map(fn(grp) => grp.sort())\n  return sorted_groups.sort_by(fn(grp) => grp.first().unwrap_or(\"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

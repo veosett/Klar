@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn wrap(text: Str, width: Int) -> List[Str] {\n  var pieces: List[Str] = []\n  for raw in text.split(\" \") {\n    if raw.len() > width {\n      var start = 0\n      while start < raw.len() {\n        var stop = start + width\n        if stop > raw.len() {\n          stop = raw.len()\n        }\n        pieces = pieces.push(raw.slice(start, stop))\n        start = stop\n      }\n    } else {\n      if raw.len() > 0 {\n        pieces = pieces.push(raw)\n      }\n    }\n  }\n  var lines: List[Str] = []\n  var line = \"\"\n  for w in pieces {\n    if line.len() == 0 {\n      line = w\n    } else {\n      if line.len() + 1 + w.len() <= width {\n        line = line + \" \" + w\n      } else {\n        lines = lines.push(line)\n        line = w\n      }\n    }\n  }\n  if line.len() > 0 {\n    lines = lines.push(line)\n  }\n  return lines\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

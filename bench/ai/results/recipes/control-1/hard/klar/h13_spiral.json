@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn spiral(m: List[List[Int]]) -> List[Int] {\n  var out: List[Int] = []\n  if m.is_empty() {\n    return out\n  }\n  var top = 0\n  var bottom = m.len() - 1\n  var left = 0\n  var right = m.get_or(0, []).len() - 1\n  while top <= bottom and left <= right {\n    var j = left\n    while j <= right {\n      out = out.push(m.get_or(top, []).get_or(j, 0))\n      j = j + 1\n    }\n    top = top + 1\n    var i = top\n    while i <= bottom {\n      out = out.push(m.get_or(i, []).get_or(right, 0))\n      i = i + 1\n    }\n    right = right - 1\n    if top <= bottom {\n      var k = right\n      while k >= left {\n        out = out.push(m.get_or(bottom, []).get_or(k, 0))\n        k = k - 1\n      }\n      bottom = bottom - 1\n    }\n    if left <= right {\n      var r = bottom\n      while r >= top {\n        out = out.push(m.get_or(r, []).get_or(left, 0))\n        r = r - 1\n      }\n      left = left + 1\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

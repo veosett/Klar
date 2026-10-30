@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn cut_word(w: Str, width: Int) -> List[Str] {\n  var pieces: List[Str] = []\n  var i = 0\n  while i < w.len() {\n    let stop = (i + width).min(w.len())\n    pieces = pieces.push(w.slice(i, stop))\n    i = i + width\n  }\n  return pieces\n}\n\npub fn wrap(text: Str, width: Int) -> List[Str] {\n  var lines: List[Str] = []\n  var cur = \"\"\n  for word in text.split(\" \") {\n    if word != \"\" {\n      for piece in cut_word(word, width) {\n        if cur == \"\" {\n          cur = piece\n        } else if cur.len() + 1 + piece.len() <= width {\n          cur = cur + \" \" + piece\n        } else {\n          lines = lines.push(cur)\n          cur = piece\n        }\n      }\n    }\n  }\n  if cur != \"\" {\n    lines = lines.push(cur)\n  }\n  return lines\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

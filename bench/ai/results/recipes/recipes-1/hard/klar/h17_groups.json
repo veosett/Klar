@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn find_root(parent: Map[Str, Str], x: Str) -> Str {\n  let p = parent.get(x).unwrap_or(x)\n  if p == x {\n    return x\n  }\n  return find_root(parent, p)\n}\n\npub fn groups(pairs: List[List[Str]]) -> List[List[Str]] {\n  var parent: Map[Str, Str] = Map {}\n  for pair in pairs {\n    let ra = find_root(parent, pair.get_or(0, \"\"))\n    let rb = find_root(parent, pair.get_or(1, \"\"))\n    if ra != rb {\n      parent = parent.set(ra, rb)\n    }\n  }\n  let final_parent = parent\n  let nodes = pairs.flatten().unique().sort()\n  let by_root = nodes.group_by(fn(n) => find_root(final_parent, n))\n  let members = by_root.values().map(fn(g) => g.sort())\n  return members.sort_by(fn(g) => g.get_or(0, \"\"))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

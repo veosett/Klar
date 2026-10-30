@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type Need {\n  item: Str,\n  qty: Int,\n}\n\nfn is_positive(s: Str) -> Bool {\n  if s.is_empty() {\n    return false\n  }\n  if not s.chars().all(fn(c) => \"0123456789\".contains(c)) {\n    return false\n  }\n  return s.to_int().unwrap_or(0) > 0\n}\n\nfn parse_need(part: Str) -> Option[Need] {\n  let kv = part.split(\":\")\n  if kv.len() != 2 {\n    return None\n  }\n  let item = kv.get_or(0, \"\")\n  let qty_text = kv.get_or(1, \"\")\n  if item.is_empty() or not is_positive(qty_text) {\n    return None\n  }\n  return Some(Need { item: item, qty: qty_text.to_int().unwrap_or(0) })\n}\n\nfn parse_needs(order: Str) -> Option[List[Need]] {\n  let parts = order.split(\" \")\n  if parts.len() != 2 {\n    return None\n  }\n  if parts.get_or(0, \"\").is_empty() {\n    return None\n  }\n  var needs: List[Need] = []\n  for item_text in parts.get_or(1, \"\").split(\",\") {\n    let parsed = parse_need(item_text)\n    if parsed.is_none() {\n      return None\n    }\n    needs = needs.push(parsed.unwrap_or(Need { item: \"\", qty: 0 }))\n  }\n  return Some(needs)\n}\n\npub fn inventory(orders: List[Str], stock: Map[Str, Int]) -> Result[List[Str], Str] {\n  let empty_ids: List[Str] = []\n  let empty_needs: List[Need] = []\n  var filled: List[Str] = empty_ids\n  var left: Map[Str, Int] = stock\n  for order in orders {\n    let id = order.split(\" \").get_or(0, \"\")\n    let parsed = parse_needs(order)\n    if parsed.is_none() {\n      return Err(\"bad order {id}\")\n    }\n    let needs = parsed.unwrap_or(empty_needs)\n    var fits = true\n    var trial: Map[Str, Int] = left\n    for nd in needs {\n      if not left.has(nd.item) {\n        return Err(\"bad order {id}\")\n      }\n      let have = trial.get(nd.item).unwrap_or(0)\n      if have < nd.qty {\n        fits = false\n      } else {\n        trial = trial.set(nd.item, have - nd.qty)\n      }\n    }\n    if fits {\n      left = trial\n      filled = filled.push(id)\n    }\n  }\n  return Ok(filled)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

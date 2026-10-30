@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn all_names(deps: Map[Str, List[Str]]) -> List[Str] {\n  let from_keys = deps.keys()\n  let from_lists = deps.values().flatten()\n  return from_keys.concat(from_lists).unique().sort()\n}\n\nfn ready_next(deps: Map[Str, List[Str]], done: List[Str], names: List[Str]) -> Option[Str] {\n  return names.find(fn(n) => (not (done.contains(n))) and deps.get(n).unwrap_or([]).all(fn(d) => done.contains(d)))\n}\n\npub fn topo(deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n  let names = all_names(deps)\n  var done: List[Str] = []\n  while done.len() < names.len() {\n    match ready_next(deps, done, names) {\n      Some(n) => { done = done.push(n) },\n      None => { return Err(\"cycle\") },\n    }\n  }\n  return Ok(done)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

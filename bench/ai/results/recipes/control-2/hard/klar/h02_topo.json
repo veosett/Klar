@@ -1,0 +1,15 @@
+{
+ "attempts": [
+  {
+   "code": "fn ready(name: Str, finished: List[Str], deps: Map[Str, List[Str]]) -> Bool {\n  let needs: List[Str] = deps.get(name).unwrap_or([])\n  return needs.all(fn(d) => finished.contains(d))\n}\n\nfn topo_loop(remaining: List[Str], finished: List[Str], deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n  if remaining.is_empty() {\n    return Ok(finished)\n  }\n  let pick = remaining.find(fn(n) => ready(n, finished, deps))\n  if pick.is_none() {\n    return Err(\"cycle\")\n  }\n  let chosen = pick.unwrap_or(\"\")\n  return topo_loop(remaining.filter(fn(m) => m != chosen), finished.push(chosen), deps)\n}\n\npub fn topo(deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n  let names = deps.keys().concat(deps.values().flatten()).unique().sort()\n  let empty: List[Str] = []\n  return topo_loop(names, empty, deps)\n}\n",
+   "stage": "compile",
+   "ok": false
+  },
+  {
+   "code": "fn ready(name: Str, finished: List[Str], deps: Map[Str, List[Str]]) -> Bool {\n  let needs: List[Str] = deps.get(name).unwrap_or([])\n  return needs.all(fn(d) => finished.contains(d))\n}\n\nfn topo_loop(remaining: List[Str], finished: List[Str], deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n  if remaining.is_empty() {\n    return Ok(finished)\n  }\n  let pick = remaining.find(fn(n) => ready(n, finished, deps))\n  if pick.is_none() {\n    return Err(\"cycle\")\n  }\n  let chosen = pick.unwrap_or(\"\")\n  return topo_loop(remaining: remaining.filter(fn(m) => m != chosen), finished: finished.push(chosen), deps: deps)\n}\n\npub fn topo(deps: Map[Str, List[Str]]) -> Result[List[Str], Str] {\n  let names = deps.keys().concat(deps.values().flatten()).unique().sort()\n  let empty: List[Str] = []\n  return topo_loop(remaining: names, finished: empty, deps: deps)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

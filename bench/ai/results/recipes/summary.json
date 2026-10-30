@@ -1,0 +1,10 @@
+{
+ "note": "Klar, Haiku, the rebuilt hard suite; the agents' workspaces were assigned at random. `tokens`: as the agent runner reported them. The third control run is results/agents/haiku-v3 (146030).",
+ "runs": {
+  "control-1": 144613,
+  "recipes-1": 156754,
+  "control-2": 166809,
+  "recipes-2": 150581,
+  "recipes-3": 146216
+ }
+}

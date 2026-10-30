@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn cell(m: List[List[Int]], r: Int, c: Int) -> Int {\n  return m.get_or(r, []).get_or(c, 0)\n}\n\npub fn spiral(m: List[List[Int]]) -> List[Int] {\n  var out: List[Int] = []\n  var top = 0\n  var bottom = m.len() - 1\n  var left = 0\n  var right = m.get_or(0, []).len() - 1\n  while top <= bottom and left <= right {\n    for c in range(left, right + 1) {\n      out = out.push(cell(m: m, r: top, c: c))\n    }\n    top = top + 1\n    for r in range(top, bottom + 1) {\n      out = out.push(cell(m: m, r: r, c: right))\n    }\n    right = right - 1\n    if top <= bottom {\n      for c in range(left, right + 1).reverse() {\n        out = out.push(cell(m: m, r: bottom, c: c))\n      }\n      bottom = bottom - 1\n    }\n    if left <= right {\n      for r in range(top, bottom + 1).reverse() {\n        out = out.push(cell(m: m, r: r, c: left))\n      }\n      left = left + 1\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

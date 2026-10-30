@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn one_off(a: Str, b: Str) -> Bool {\n  if a.len() != b.len() {\n    return false\n  }\n  let diffs = a.chars().zip(b.chars()).count(fn(p) => p.first != p.second)\n  return diffs == 1\n}\n\nfn bfs(goal: Str, pool: List[Str], frontier: List[Str], visited: List[Str], level: Int) -> Int {\n  if frontier.is_empty() {\n    return 0\n  }\n  if frontier.contains(goal) {\n    return level\n  }\n  let nxt = pool.filter(fn(w) => (not visited.contains(w)) and frontier.any(fn(f) => one_off(f, w)))\n  return bfs(goal: goal, pool: pool, frontier: nxt, visited: visited.concat(nxt), level: level + 1)\n}\n\npub fn ladder(start: Str, goal: Str, words: List[Str]) -> Int {\n  if start == goal {\n    return 1\n  }\n  let pool = words.unique()\n  let first: List[Str] = [start]\n  return bfs(goal: goal, pool: pool, frontier: first, visited: first, level: 1)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn median_of(vals: List[Int]) -> Float {\n  let sorted = vals.sort()\n  let m = sorted.len()\n  let mid = m / 2\n  if m % 2 == 1 {\n    return sorted.get_or(mid, 0).to_float()\n  }\n  return (sorted.get_or(mid - 1, 0).to_float() + sorted.get_or(mid, 0).to_float()) / 2.0\n}\n\npub fn medians(xs: List[Int], k: Int) -> List[Float] {\n  let n = xs.len()\n  if k < 1 or k > n {\n    return []\n  }\n  let starts = range(0, n - k + 1)\n  return starts.map(fn(i) => median_of(xs.slice(i, i + k)))\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

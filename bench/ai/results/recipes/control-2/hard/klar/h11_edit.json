@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn min3(a: Int, b: Int, c: Int) -> Int {\n  return a.min(b).min(c)\n}\n\nfn cell_value(prev: List[Int], cur: List[Int], ca: Str, cb: List[Str], j: Int) -> Int {\n  let same = ca == cb.get_or(j - 1, \"\")\n  let sub = match same {\n    true => 0,\n    false => 1,\n  }\n  let up = prev.get_or(j, 0) + 1\n  let left = cur.last().unwrap_or(0) + 1\n  let diag = prev.get_or(j - 1, 0) + sub\n  return min3(a: up, b: left, c: diag)\n}\n\nfn next_row(prev: List[Int], ca: Str, cb: List[Str], i: Int) -> List[Int] {\n  let start: List[Int] = [i]\n  let cols = range(1, cb.len() + 1)\n  return cols.fold(start, fn(cur, j) => cur.push(cell_value(prev: prev, cur: cur, ca: ca, cb: cb, j: j)))\n}\n\npub fn edit(a: Str, b: Str) -> Int {\n  let bs = b.chars()\n  let as_chars = a.chars()\n  let first_row = range(0, bs.len() + 1)\n  let final_row = range(1, as_chars.len() + 1).fold(first_row, fn(row, i) => next_row(prev: row, ca: as_chars.get_or(i - 1, \"\"), cb: bs, i: i))\n  return final_row.last().unwrap_or(0)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

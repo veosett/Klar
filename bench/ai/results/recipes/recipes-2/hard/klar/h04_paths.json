@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn relax_edge(dist: List[Int], e: List[Int]) -> List[Int] {\n  let u = e.get_or(0, 0)\n  let v = e.get_or(1, 0)\n  let w = e.get_or(2, 0)\n  let du = dist.get_or(u, -1)\n  if du == -1 {\n    return dist\n  }\n  let dv = dist.get_or(v, -1)\n  if dv == -1 or du + w < dv {\n    return dist.set(v, du + w)\n  }\n  return dist\n}\n\npub fn paths(n: Int, edges: List[List[Int]], src: Int) -> List[Int] {\n  var dist: List[Int] = range(0, n).map(fn(_i) => -1).set(src, 0)\n  var changed = true\n  while changed {\n    let updated: List[Int] = edges.fold(dist, fn(d, e) => relax_edge(d, e))\n    changed = updated != dist\n    dist = updated\n  }\n  return dist\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

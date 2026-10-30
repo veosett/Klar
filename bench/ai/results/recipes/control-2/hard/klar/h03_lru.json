@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type State { values: Map[Str, Str], order: List[Str], out: List[Str] }\n\nfn touch(order: List[Str], key: Str) -> List[Str] {\n  return order.filter(fn(k) => k != key).push(key)\n}\n\nfn put_op(st: State, capacity: Int, key: Str, value: Str) -> State {\n  if capacity <= 0 {\n    return st\n  }\n  let is_new = not st.values.has(key)\n  let needs_room = is_new and (st.values.len() >= capacity)\n  let victim = st.order.first().unwrap_or(\"\")\n  let kept_values = match needs_room {\n    true => st.values.remove(victim),\n    false => st.values,\n  }\n  let kept_order = match needs_room {\n    true => st.order.filter(fn(k) => k != victim),\n    false => st.order,\n  }\n  return State { values: kept_values.set(key, value), order: touch(kept_order, key), out: st.out }\n}\n\nfn get_op(st: State, key: Str) -> State {\n  let hit = st.values.has(key)\n  let shown = st.values.get(key).unwrap_or(\"-\")\n  let order2 = match hit {\n    true => touch(st.order, key),\n    false => st.order,\n  }\n  return State { values: st.values, order: order2, out: st.out.push(shown) }\n}\n\nfn step(st: State, op: Str, capacity: Int) -> State {\n  let parts = op.split(\" \")\n  let cmd = parts.get_or(0, \"\")\n  let key = parts.get_or(1, \"\")\n  if cmd == \"put\" {\n    return put_op(st: st, capacity: capacity, key: key, value: parts.get_or(2, \"\"))\n  }\n  return get_op(st: st, key: key)\n}\n\npub fn lru(capacity: Int, ops: List[Str]) -> List[Str] {\n  let no_values: Map[Str, Str] = Map {}\n  let no_keys: List[Str] = []\n  let no_out: List[Str] = []\n  let start = State { values: no_values, order: no_keys, out: no_out }\n  let end_state = ops.fold(start, fn(st, op) => step(st, op, capacity))\n  return end_state.out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

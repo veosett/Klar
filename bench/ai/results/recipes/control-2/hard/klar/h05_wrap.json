@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "type Line { done: List[Str], current: Str }\n\nfn pieces(word: Str, width: Int) -> List[Str] {\n  if word.len() <= width {\n    return [word]\n  }\n  let rest = pieces(word.slice(width, word.len()), width)\n  return rest.insert(0, word.slice(0, width))\n}\n\nfn add_word(st: Line, word: Str, width: Int) -> Line {\n  if st.current.is_empty() {\n    return Line { done: st.done, current: word }\n  }\n  if st.current.len() + 1 + word.len() <= width {\n    return Line { done: st.done, current: st.current + \" \" + word }\n  }\n  return Line { done: st.done.push(st.current), current: word }\n}\n\nfn finish(st: Line) -> List[Str] {\n  if st.current.is_empty() {\n    return st.done\n  }\n  return st.done.push(st.current)\n}\n\npub fn wrap(text: Str, width: Int) -> List[Str] {\n  let words = text.split(\" \").filter(fn(w) => not w.is_empty()).flat_map(fn(w) => pieces(w, width))\n  let no_lines: List[Str] = []\n  let start = Line { done: no_lines, current: \"\" }\n  let end_state = words.fold(start, fn(st, w) => add_word(st, w, width))\n  return finish(end_state)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}
