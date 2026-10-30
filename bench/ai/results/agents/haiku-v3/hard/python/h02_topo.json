@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import heapq\n\n\ndef topo(deps: dict[str, list[str]]) -> list[str]:\n    nodes = set(deps.keys())\n    for prereqs in deps.values():\n        nodes.update(prereqs)\n\n    indegree = {node: 0 for node in nodes}\n    dependents = {node: [] for node in nodes}\n    for task, prereqs in deps.items():\n        for pre in set(prereqs):\n            indegree[task] += 1\n            dependents[pre].append(task)\n\n    heap = [node for node in nodes if indegree[node] == 0]\n    heapq.heapify(heap)\n    order = []\n    while heap:\n        node = heapq.heappop(heap)\n        order.append(node)\n        for nxt in dependents[node]:\n            indegree[nxt] -= 1\n            if indegree[nxt] == 0:\n                heapq.heappush(heap, nxt)\n\n    if len(order) != len(nodes):\n        raise ValueError(\"cycle\")\n    return order\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

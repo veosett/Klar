@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn lis(xs: List[Int]) -> List[Int] {\n  let n = xs.len()\n  var lens: List[Int] = []\n  for _i in range(0, n) {\n    lens = lens.push(0)\n  }\n  for i in range(0, n).reverse() {\n    var best = 1\n    for j in range(i + 1, n) {\n      if xs.get_or(j, 0) > xs.get_or(i, 0) and lens.get_or(j, 0) + 1 > best {\n        best = lens.get_or(j, 0) + 1\n      }\n    }\n    lens = lens.set(i, best)\n  }\n  let max_len = lens.max().unwrap_or(0)\n  var out: List[Int] = []\n  var need = max_len\n  var prev_idx = -1\n  var prev_val = 0\n  while need > 0 {\n    var best_idx = -1\n    var best_val = 0\n    for k in range(prev_idx + 1, n) {\n      let v = xs.get_or(k, 0)\n      let ok_val = out.is_empty() or v > prev_val\n      if ok_val and lens.get_or(k, 0) == need {\n        if best_idx < 0 or v < best_val {\n          best_idx = k\n          best_val = v\n        }\n      }\n    }\n    out = out.push(best_val)\n    prev_idx = best_idx\n    prev_val = best_val\n    need = need - 1\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

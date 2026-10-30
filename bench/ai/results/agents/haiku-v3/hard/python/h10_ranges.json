@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def ranges(xs: list[int]) -> str:\n    values = sorted(set(xs))\n    if not values:\n        return \"\"\n\n    parts = []\n    start = prev = values[0]\n    for v in values[1:] + [None]:\n        if v is not None and v == prev + 1:\n            prev = v\n            continue\n        length = prev - start + 1\n        if length >= 3:\n            parts.append(f\"{start}-{prev}\")\n        elif length == 2:\n            parts.append(f\"{start},{prev}\")\n        else:\n            parts.append(str(start))\n        if v is not None:\n            start = prev = v\n    return \",\".join(parts)\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

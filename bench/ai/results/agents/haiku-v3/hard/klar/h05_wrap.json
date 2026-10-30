@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "pub fn wrap(text: Str, width: Int) -> List[Str] {\n  let words = text.split(\" \").filter(fn(x) => x != \"\")\n  var pieces: List[Str] = []\n  for w in words {\n    var rest = w\n    while rest.len() > width {\n      pieces = pieces.push(rest.slice(0, width))\n      rest = rest.slice(width, rest.len())\n    }\n    pieces = pieces.push(rest)\n  }\n  var lines: List[Str] = []\n  var cur = \"\"\n  for p in pieces {\n    if cur == \"\" {\n      cur = p\n    } else if cur.len() + 1 + p.len() <= width {\n      cur = cur + \" \" + p\n    } else {\n      lines = lines.push(cur)\n      cur = p\n    }\n  }\n  if cur != \"\" {\n    lines = lines.push(cur)\n  }\n  return lines\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "TWO_CHAR = {\"==\", \"!=\", \"<=\", \">=\", \"->\"}\nONE_CHAR = set(\"+-*/<>=(){},;\")\nLETTERS = set(\"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_\")\nDIGITS = set(\"0123456789\")\nSPACES = set(\" \\t\\r\\n\")\n\n\ndef tokens(src: str) -> list[str]:\n    result = []\n    i = 0\n    n = len(src)\n    while i < n:\n        c = src[i]\n        if c in SPACES:\n            i += 1\n        elif c in LETTERS:\n            j = i + 1\n            while j < n and (src[j] in LETTERS or src[j] in DIGITS):\n                j += 1\n            result.append(src[i:j])\n            i = j\n        elif c in DIGITS:\n            j = i + 1\n            while j < n and src[j] in DIGITS:\n                j += 1\n            result.append(src[i:j])\n            i = j\n        elif c == '\"':\n            j = i + 1\n            while True:\n                if j >= n:\n                    raise ValueError(\"unterminated string\")\n                if src[j] == \"\\\\\":\n                    j += 2\n                    continue\n                if src[j] == '\"':\n                    break\n                j += 1\n            result.append(src[i:j + 1])\n            i = j + 1\n        elif i + 1 < n and src[i:i + 2] in TWO_CHAR:\n            result.append(src[i:i + 2])\n            i += 2\n        elif c in ONE_CHAR:\n            result.append(c)\n            i += 1\n        else:\n            raise ValueError(\"unexpected \" + c)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

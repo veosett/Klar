@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def sudoku(rows: list[str]) -> bool:\n    if len(rows) != 9:\n        return False\n    for row in rows:\n        if len(row) != 9:\n            return False\n        for ch in row:\n            if ch != \".\" and ch not in \"123456789\":\n                return False\n\n    rows_seen = [set() for _ in range(9)]\n    cols_seen = [set() for _ in range(9)]\n    boxes_seen = [set() for _ in range(9)]\n    for r in range(9):\n        for c in range(9):\n            ch = rows[r][c]\n            if ch == \".\":\n                continue\n            box = (r // 3) * 3 + (c // 3)\n            if ch in rows_seen[r] or ch in cols_seen[c] or ch in boxes_seen[box]:\n                return False\n            rows_seen[r].add(ch)\n            cols_seen[c].add(ch)\n            boxes_seen[box].add(ch)\n    return True\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

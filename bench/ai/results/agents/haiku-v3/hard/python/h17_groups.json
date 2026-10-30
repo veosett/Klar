@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def groups(pairs: list[list[str]]) -> list[list[str]]:\n    parent: dict[str, str] = {}\n\n    def find(x: str) -> str:\n        parent.setdefault(x, x)\n        root = x\n        while parent[root] != root:\n            root = parent[root]\n        while parent[x] != root:\n            parent[x], x = root, parent[x]\n        return root\n\n    for a, b in pairs:\n        ra, rb = find(a), find(b)\n        if ra != rb:\n            if ra < rb:\n                parent[rb] = ra\n            else:\n                parent[ra] = rb\n\n    members: dict[str, list[str]] = {}\n    for x in list(parent):\n        members.setdefault(find(x), []).append(x)\n\n    result = [sorted(group) for group in members.values()]\n    result.sort(key=lambda g: g[0])\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

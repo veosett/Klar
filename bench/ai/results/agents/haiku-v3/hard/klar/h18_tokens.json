@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn is_letter(c: Str) -> Bool {\n  return \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\".contains(c)\n}\n\nfn is_digit(c: Str) -> Bool {\n  return \"0123456789\".contains(c)\n}\n\nfn is_space(c: Str) -> Bool {\n  return \" \\t\\n\\r\".contains(c)\n}\n\nfn is_two_op(s: Str) -> Bool {\n  return [\"==\", \"!=\", \"<=\", \">=\", \"->\"].contains(s)\n}\n\nfn is_single_op(c: Str) -> Bool {\n  return \"+-*/<>=(){},;\".contains(c)\n}\n\npub fn tokens(src: Str) -> Result[List[Str], Str] {\n  let cs = src.chars()\n  let n = cs.len()\n  var out: List[Str] = []\n  var i = 0\n  while i < n {\n    let c = cs.get_or(i, \"\")\n    if is_space(c) {\n      i = i + 1\n    } else if is_letter(c) or c == \"_\" {\n      var j = i + 1\n      while j < n and (is_letter(cs.get_or(j, \"\")) or is_digit(cs.get_or(j, \"\")) or cs.get_or(j, \"\") == \"_\") {\n        j = j + 1\n      }\n      out = out.push(cs.slice(i, j).join(\"\"))\n      i = j\n    } else if is_digit(c) {\n      var j = i + 1\n      while j < n and is_digit(cs.get_or(j, \"\")) {\n        j = j + 1\n      }\n      out = out.push(cs.slice(i, j).join(\"\"))\n      i = j\n    } else if c == \"\\\"\" {\n      var j = i + 1\n      var stop_at = -1\n      while j < n and stop_at < 0 {\n        let d = cs.get_or(j, \"\")\n        if d == \"\\\\\" {\n          j = j + 2\n        } else if d == \"\\\"\" {\n          stop_at = j + 1\n        } else {\n          j = j + 1\n        }\n      }\n      if stop_at < 0 {\n        return Err(\"unterminated string\")\n      }\n      out = out.push(cs.slice(i, stop_at).join(\"\"))\n      i = stop_at\n    } else if i + 1 < n and is_two_op(c + cs.get_or(i + 1, \"\")) {\n      out = out.push(c + cs.get_or(i + 1, \"\"))\n      i = i + 2\n    } else if is_single_op(c) {\n      out = out.push(c)\n      i = i + 1\n    } else {\n      return Err(\"unexpected \" + c)\n    }\n  }\n  return Ok(out)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "import bisect\n\n\ndef medians(xs: list[int], k: int) -> list[float]:\n    n = len(xs)\n    if k < 1 or k > n:\n        return []\n\n    window = sorted(xs[:k])\n    result = []\n    for i in range(n - k + 1):\n        if i > 0:\n            outgoing = xs[i - 1]\n            del window[bisect.bisect_left(window, outgoing)]\n            bisect.insort(window, xs[i + k - 1])\n        if k % 2 == 1:\n            result.append(float(window[k // 2]))\n        else:\n            result.append((window[k // 2 - 1] + window[k // 2]) / 2)\n    return result\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

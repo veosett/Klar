@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn adj_of(adj: Map[Str, List[Str]], key: Str) -> List[Str] {\n  let none_list: List[Str] = []\n  return adj.get(key).unwrap_or(none_list)\n}\n\npub fn groups(pairs: List[List[Str]]) -> List[List[Str]] {\n  var names: List[Str] = []\n  var adj: Map[Str, List[Str]] = Map {}\n  for p in pairs {\n    let a = p.get_or(0, \"\")\n    let b = p.get_or(1, \"\")\n    names = names.push(a).push(b)\n    adj = adj.set(a, adj_of(adj, a).push(b))\n    adj = adj.set(b, adj_of(adj, b).push(a))\n  }\n  let sorted_names = names.unique().sort()\n  var seen: Map[Str, Bool] = Map {}\n  var out: List[List[Str]] = []\n  for start in sorted_names {\n    if not seen.has(start) {\n      seen = seen.set(start, true)\n      var comp: List[Str] = [start]\n      var qi = 0\n      while qi < comp.len() {\n        let cur = comp.get_or(qi, \"\")\n        qi = qi + 1\n        for nb in adj_of(adj, cur) {\n          if not seen.has(nb) {\n            seen = seen.set(nb, true)\n            comp = comp.push(nb)\n          }\n        }\n      }\n      out = out.push(comp.sort())\n    }\n  }\n  return out\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

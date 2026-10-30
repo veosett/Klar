@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def rooms(meetings: list[list[int]]) -> int:\n    events = []\n    for start, end in meetings:\n        events.append((start, 1))\n        events.append((end, -1))\n    # At equal times, ends (-1) come before starts (+1): a meeting ending at t\n    # does not overlap one starting at t.\n    events.sort(key=lambda e: (e[0], e[1]))\n    best = 0\n    current = 0\n    for _, delta in events:\n        current += delta\n        if current > best:\n            best = current\n    return best\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

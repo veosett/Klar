@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def ledger(ops: list[str]) -> dict[str, int]:\n    balances: dict[str, int] = {}\n\n    def amount_of(text: str) -> int:\n        if not text or not all(\"0\" <= c <= \"9\" for c in text):\n            raise ValueError(\"bad op\")\n        value = int(text)\n        if value <= 0:\n            raise ValueError(\"bad op\")\n        return value\n\n    def known(name: str) -> None:\n        if name not in balances:\n            raise ValueError(\"unknown \" + name)\n\n    for op in ops:\n        parts = op.split(\" \")\n        verb = parts[0]\n        if verb == \"open\" and len(parts) == 2:\n            name = parts[1]\n            if name in balances:\n                raise ValueError(\"exists \" + name)\n            balances[name] = 0\n        elif verb == \"dep\" and len(parts) == 3:\n            name = parts[1]\n            n = amount_of(parts[2])\n            known(name)\n            balances[name] += n\n        elif verb == \"wd\" and len(parts) == 3:\n            name = parts[1]\n            n = amount_of(parts[2])\n            known(name)\n            if balances[name] < n:\n                raise ValueError(\"insufficient \" + name)\n            balances[name] -= n\n        elif verb == \"move\" and len(parts) == 4:\n            src, dst = parts[1], parts[2]\n            n = amount_of(parts[3])\n            known(src)\n            known(dst)\n            if balances[src] < n:\n                raise ValueError(\"insufficient \" + src)\n            balances[src] -= n\n            balances[dst] += n\n        else:\n            raise ValueError(\"bad op\")\n    return balances\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

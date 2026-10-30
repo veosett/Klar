@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "def inventory(orders: list[str], stock: dict[str, int]) -> list[str]:\n    stock = dict(stock)\n    filled = []\n\n    def qty_of(text: str) -> int:\n        if not text or not all(\"0\" <= c <= \"9\" for c in text):\n            return 0\n        return int(text)\n\n    for order in orders:\n        parts = order.split(\" \")\n        bad = False\n        needs: dict[str, int] = {}\n        if len(parts) != 2 or not parts[0]:\n            bad = True\n            order_id = parts[0] if parts else \"\"\n        else:\n            order_id = parts[0]\n            for entry in parts[1].split(\",\"):\n                pieces = entry.split(\":\")\n                if len(pieces) != 2 or not pieces[0]:\n                    bad = True\n                    break\n                item, qty_text = pieces\n                qty = qty_of(qty_text)\n                if qty <= 0 or item not in stock:\n                    bad = True\n                    break\n                needs[item] = needs.get(item, 0) + qty\n        if bad:\n            raise ValueError(\"bad order \" + order_id)\n\n        if all(stock[item] >= q for item, q in needs.items()):\n            for item, q in needs.items():\n                stock[item] -= q\n            filled.append(order_id)\n    return filled\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}

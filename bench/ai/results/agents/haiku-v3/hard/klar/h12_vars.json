@@ -1,0 +1,10 @@
+{
+ "attempts": [
+  {
+   "code": "fn all_in(text: Str, alphabet: Str) -> Bool {\n  if text.is_empty() {\n    return false\n  }\n  for c in text.chars() {\n    if not alphabet.contains(c) {\n      return false\n    }\n  }\n  return true\n}\n\nfn is_number(t: Str) -> Bool {\n  if t.starts_with(\"-\") {\n    return all_in(t.slice(1, t.len()), \"0123456789\")\n  }\n  return all_in(t, \"0123456789\")\n}\n\nfn is_name(t: Str) -> Bool {\n  return all_in(t, \"abcdefghijklmnopqrstuvwxyz\")\n}\n\nfn is_term(t: Str) -> Bool {\n  return is_number(t) or is_name(t)\n}\n\nfn line_ok(tokens: List[Str]) -> Bool {\n  let count = tokens.len()\n  if count < 3 or count % 2 == 0 {\n    return false\n  }\n  if not is_name(tokens.get_or(0, \"\")) {\n    return false\n  }\n  if tokens.get_or(1, \"\") != \"=\" {\n    return false\n  }\n  if not is_term(tokens.get_or(2, \"\")) {\n    return false\n  }\n  var k = 3\n  while k < count {\n    let op = tokens.get_or(k, \"\")\n    if op != \"+\" and op != \"-\" {\n      return false\n    }\n    if not is_term(tokens.get_or(k + 1, \"\")) {\n      return false\n    }\n    k = k + 2\n  }\n  return true\n}\n\nfn term_value(t: Str, vars: Map[Str, Int]) -> Result[Int, Str] {\n  if is_number(t) {\n    return Ok(t.to_int().unwrap_or(0))\n  }\n  return vars.get(t).ok_or(\"undefined \" + t)\n}\n\nfn eval_line(tokens: List[Str], vars: Map[Str, Int]) -> Result[Int, Str] {\n  var acc = term_value(tokens.get_or(2, \"\"), vars)?\n  var k = 3\n  while k < tokens.len() {\n    let v = term_value(tokens.get_or(k + 1, \"\"), vars)?\n    if tokens.get_or(k, \"\") == \"+\" {\n      acc = acc + v\n    } else {\n      acc = acc - v\n    }\n    k = k + 2\n  }\n  return Ok(acc)\n}\n\npub fn run_vars(lines: List[Str]) -> Result[Map[Str, Int], Str] {\n  var vars: Map[Str, Int] = Map {}\n  for line in lines {\n    let tokens = line.split(\" \")\n    if not line_ok(tokens) {\n      return Err(\"syntax error\")\n    }\n    let result = eval_line(tokens, vars)?\n    vars = vars.set(tokens.get_or(0, \"\"), result)\n  }\n  return Ok(vars)\n}\n",
+   "stage": "pass",
+   "ok": true
+  }
+ ],
+ "solved": true
+}
