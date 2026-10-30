@@ -265,6 +265,11 @@ def tests_typescript(task):
         "process.exit(failed ? 1 : 0);", ""])
 
 
+# `klar test --timeout`: the other languages have only the 120 s of `run`, so the default 10 s per test would fail a
+# correct but slow answer on a busy machine; still below 120 s, so an endless loop is reported with its place
+KLAR_TEST_LIMIT = "100"
+
+
 def run(cmd, cwd, timeout=120):
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
@@ -282,7 +287,7 @@ def evaluate(task, lang, code):
         if lang == "klar":
             with open(os.path.join(d, "check.klar"), "w", encoding="utf-8") as f:
                 f.write(tests_klar(task))
-            code_, out = run([sys.executable, "-m", "klar", "test", "--json", "check.klar"], d)
+            code_, out = run([sys.executable, "-m", "klar", "test", "--json", "--timeout", KLAR_TEST_LIMIT, "check.klar"], d)
             try:
                 data = json.loads(out[out.index("{"):])
             except ValueError:
@@ -296,7 +301,7 @@ def evaluate(task, lang, code):
             if data.get("ok"):
                 return {"ok": True, "stage": "pass", "feedback": ""}
             failed = [t for t in data.get("tests", []) if t.get("status") != "passed"]
-            _, text = run([sys.executable, "-m", "klar", "test", "check.klar"], d)
+            _, text = run([sys.executable, "-m", "klar", "test", "--timeout", KLAR_TEST_LIMIT, "check.klar"], d)
             return {"ok": False, "stage": "test", "feedback": text[-3000:], "failed": len(failed)}
         if lang == "python":
             with open(os.path.join(d, "check.py"), "w", encoding="utf-8") as f:

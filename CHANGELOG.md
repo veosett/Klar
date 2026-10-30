@@ -7,6 +7,9 @@ versions follow [Semantic Versioning](https://semver.org/); what 1.x keeps compa
 ## [Unreleased]
 
 ### Fixed
+- The benchmarks ran Klar under the default 10 s per test while the other languages had only the 120 s of the whole
+  run, so on a busy machine a correct but slow answer failed with R0018 (seen with a reference solution of 1 000 000
+  iterations). They now pass `--timeout 100`.
 - `klarc eval` ran the expression as a test block: effects other than `io` failed with E0000, and `cli_args()` showed the
   arguments of the test runner. It now starts at the expression, like `klar eval`, with the real files and clock.
 - A long chain (`a + a + ...`, `a.b().c()...`, `- - a`, `not not a`, `else if`) of some hundreds of links crashed `klar`

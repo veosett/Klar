@@ -42,6 +42,9 @@ def sources(d, lang):
     return sorted(f for f in os.listdir(d) if f.endswith(EXT[lang]) and f != CHECK[lang])
 
 
+KLAR_TEST_LIMIT = "100"     # `klar test --timeout`: as in llm_bench.py
+
+
 def run(cmd, cwd, timeout=120):
     try:
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
@@ -66,7 +69,7 @@ def evaluate(tid, lang, src_dir, with_tests=True):
                     return {"ok": False, "stage": "compile", "feedback": out[-3000:]}
             if not with_tests:
                 return {"ok": True, "stage": "pass", "feedback": ""}
-            code, out = run([sys.executable, "-m", "klar", "test", CHECK[lang]], d)
+            code, out = run([sys.executable, "-m", "klar", "test", "--timeout", KLAR_TEST_LIMIT, CHECK[lang]], d)
             return {"ok": code == 0, "stage": "pass" if code == 0 else "test", "feedback": "" if code == 0 else
                     out[-3000:]}
         if lang == "python":
